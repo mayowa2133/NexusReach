@@ -101,3 +101,38 @@ export interface PeopleSearchResult {
   hiring_managers: Person[];
   peers: Person[];
 }
+
+// Message Drafting types
+export type MessageChannel = 'linkedin_note' | 'linkedin_message' | 'email' | 'follow_up' | 'thank_you';
+export type MessageGoal = 'intro' | 'coffee_chat' | 'referral' | 'informational' | 'follow_up' | 'thank_you';
+export type MessageStatus = 'draft' | 'edited' | 'copied' | 'sent';
+
+export interface Message {
+  id: string;
+  person_id: string;
+  channel: MessageChannel;
+  goal: MessageGoal;
+  subject: string | null;
+  body: string;
+  reasoning: string | null;
+  ai_model: string | null;
+  status: MessageStatus;
+  version: number;
+  parent_id: string | null;
+  person_name: string | null;
+  person_title: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DraftRequest {
+  person_id: string;
+  channel: MessageChannel;
+  goal: MessageGoal;
+}
+
+export interface DraftResponse {
+  message: Message;
+  reasoning: string;
+  token_usage: { input_tokens: number; output_tokens: number } | null;
+}

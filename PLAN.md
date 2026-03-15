@@ -62,16 +62,16 @@ Ship a working core loop first, then layer features on top. At every phase, the 
 ## Phase 4: Message Drafting
 **Goal:** The core value — AI drafts personalized messages grounded in real context.
 
-- [ ] Claude API client
-- [ ] Message drafting service (assembles context, calls Claude, returns draft + reasoning)
-- [ ] Prompt engineering — system prompt with user profile, person profile, job context, goal
-- [ ] Message database model + API endpoints
-- [ ] Message drafting UI — select person, choose goal, choose channel (LinkedIn/email), see draft
-- [ ] Draft editing interface — user can modify before approving
-- [ ] AI reasoning display — show why the AI wrote what it wrote
-- [ ] Copy to clipboard functionality
-- [ ] Re-engagement awareness — detect prior outreach history, adjust draft accordingly
-- [ ] All message types: LinkedIn note, LinkedIn message, email, follow-up, thank-you
+- [x] Claude API client
+- [x] Message drafting service (assembles context, calls Claude, returns draft + reasoning)
+- [x] Prompt engineering — system prompt with user profile, person profile, job context, goal
+- [x] Message database model + API endpoints
+- [x] Message drafting UI — select person, choose goal, choose channel (LinkedIn/email), see draft
+- [x] Draft editing interface — user can modify before approving
+- [x] AI reasoning display — show why the AI wrote what it wrote
+- [x] Copy to clipboard functionality
+- [x] Re-engagement awareness — detect prior outreach history, adjust draft accordingly
+- [x] All message types: LinkedIn note, LinkedIn message, email, follow-up, thank-you
 
 **Deliverable:** User can draft and copy personalized messages for any contact.
 
@@ -181,8 +181,8 @@ Ship a working core loop first, then layer features on top. At every phase, the 
 
 ## Current Status
 
-**Phase:** Phase 3 complete
+**Phase:** Phase 4 complete
 
-**Completed:** Phase 1 (Skeleton + Auth), Phase 2 (Profile Setup + Resume Parsing), Phase 3 (People Finder)
+**Completed:** Phase 1 (Skeleton + Auth), Phase 2 (Profile Setup + Resume Parsing), Phase 3 (People Finder), Phase 4 (Message Drafting)
 
-**Next step:** Phase 4 — Message Drafting
+**Next step:** Phase 5 — Email Layer
