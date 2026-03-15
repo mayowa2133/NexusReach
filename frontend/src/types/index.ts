@@ -52,3 +52,52 @@ export interface Project {
   technologies: string[];
   url: string | null;
 }
+
+// People Finder types
+export interface Company {
+  id: string;
+  name: string;
+  domain: string | null;
+  size: string | null;
+  industry: string | null;
+  description: string | null;
+  careers_url: string | null;
+}
+
+export interface Person {
+  id: string;
+  full_name: string | null;
+  title: string | null;
+  department: string | null;
+  seniority: string | null;
+  linkedin_url: string | null;
+  github_url: string | null;
+  work_email: string | null;
+  email_verified: boolean;
+  person_type: string | null;
+  profile_data: Record<string, unknown> | null;
+  github_data: GitHubData | null;
+  source: string | null;
+  company: Company | null;
+}
+
+export interface GitHubData {
+  repos: GitHubRepo[];
+  languages: string[];
+}
+
+export interface GitHubRepo {
+  name: string;
+  description: string;
+  language: string;
+  stars: number;
+  url: string;
+  updated_at: string;
+}
+
+export interface PeopleSearchResult {
+  company: Company | null;
+  recruiters: Person[];
+  hiring_managers: Person[];
+  peers: Person[];
+}

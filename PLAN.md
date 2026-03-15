@@ -9,17 +9,17 @@ Ship a working core loop first, then layer features on top. At every phase, the 
 ## Phase 1: Project Skeleton + Auth
 **Goal:** Working frontend + backend with authentication. User can sign up, log in, and see a dashboard shell.
 
-- [ ] Initialize Vite + React + TypeScript frontend
-- [ ] Install and configure Shadcn/ui + Tailwind CSS
-- [ ] Set up React Router with page shells (Dashboard, Profile, Jobs, People, Messages, Outreach, Settings)
-- [ ] Initialize FastAPI backend with project structure
-- [ ] Set up SQLAlchemy + Alembic + PostgreSQL connection
-- [ ] Implement Supabase Auth integration (signup, login, JWT validation)
-- [ ] Create base database models (users, profiles, user_settings)
-- [ ] Set up environment variable management (pydantic-settings)
-- [ ] Create API client utility on frontend (TanStack Query + auth headers)
-- [ ] Zustand store for auth state
-- [ ] Protected route wrapper on frontend
+- [x] Initialize Vite + React + TypeScript frontend
+- [x] Install and configure Shadcn/ui + Tailwind CSS
+- [x] Set up React Router with page shells (Dashboard, Profile, Jobs, People, Messages, Outreach, Settings)
+- [x] Initialize FastAPI backend with project structure
+- [x] Set up SQLAlchemy + Alembic + PostgreSQL connection
+- [x] Implement Supabase Auth integration (signup, login, JWT validation)
+- [x] Create base database models (users, profiles, user_settings)
+- [x] Set up environment variable management (pydantic-settings)
+- [x] Create API client utility on frontend (TanStack Query + auth headers)
+- [x] Zustand store for auth state
+- [x] Protected route wrapper on frontend
 
 **Deliverable:** User can sign up, log in, and see the empty dashboard.
 
@@ -44,16 +44,16 @@ Ship a working core loop first, then layer features on top. At every phase, the 
 ## Phase 3: People Finder
 **Goal:** User enters a company or job URL and gets relevant people to network with.
 
-- [ ] Apollo.io API client (search by company + title + seniority)
-- [ ] Proxycurl API client (enrich by LinkedIn URL)
-- [ ] GitHub API client (find engineers by org, get repos/activity)
+- [x] Apollo.io API client (search by company + title + seniority)
+- [x] Proxycurl API client (enrich by LinkedIn URL)
+- [x] GitHub API client (find engineers by org, get repos/activity)
 - [ ] Company website scraper (team pages, blog authors)
-- [ ] People finder service (orchestrates all sources)
-- [ ] Person database model + API endpoints
-- [ ] Company database model + API endpoints
-- [ ] People search UI — enter company name, see results categorized (recruiter / manager / peer)
-- [ ] Manual LinkedIn URL input — paste URL, get enriched profile
-- [ ] Person detail card (role, background, GitHub activity if available)
+- [x] People finder service (orchestrates all sources)
+- [x] Person database model + API endpoints
+- [x] Company database model + API endpoints
+- [x] People search UI — enter company name, see results categorized (recruiter / manager / peer)
+- [x] Manual LinkedIn URL input — paste URL, get enriched profile
+- [x] Person detail card (role, background, GitHub activity if available)
 
 **Deliverable:** User can find relevant people at any company.
 
@@ -181,8 +181,8 @@ Ship a working core loop first, then layer features on top. At every phase, the 
 
 ## Current Status
 
-**Phase:** Phase 2 complete
+**Phase:** Phase 3 complete
 
-**Completed:** Phase 1 (Skeleton + Auth), Phase 2 (Profile Setup + Resume Parsing)
+**Completed:** Phase 1 (Skeleton + Auth), Phase 2 (Profile Setup + Resume Parsing), Phase 3 (People Finder)
 
-**Next step:** Phase 3 — People Finder
+**Next step:** Phase 4 — Message Drafting

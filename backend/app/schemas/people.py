@@ -1,0 +1,49 @@
+from pydantic import BaseModel
+
+
+class CompanyResponse(BaseModel):
+    id: str
+    name: str
+    domain: str | None
+    size: str | None
+    industry: str | None
+    description: str | None
+    careers_url: str | None
+
+    model_config = {"from_attributes": True}
+
+
+class PersonResponse(BaseModel):
+    id: str
+    full_name: str | None
+    title: str | None
+    department: str | None
+    seniority: str | None
+    linkedin_url: str | None
+    github_url: str | None
+    work_email: str | None
+    email_verified: bool
+    person_type: str | None
+    profile_data: dict | None
+    github_data: dict | None
+    source: str | None
+    company: CompanyResponse | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class PeopleSearchRequest(BaseModel):
+    company_name: str
+    roles: list[str] | None = None
+    github_org: str | None = None
+
+
+class ManualPersonRequest(BaseModel):
+    linkedin_url: str
+
+
+class PeopleSearchResponse(BaseModel):
+    company: CompanyResponse | None
+    recruiters: list[PersonResponse]
+    hiring_managers: list[PersonResponse]
+    peers: list[PersonResponse]
