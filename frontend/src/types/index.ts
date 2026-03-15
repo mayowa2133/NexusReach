@@ -155,3 +155,39 @@ export interface StageDraftResult {
   provider: string;
   message_id: string | null;
 }
+
+// Job Intelligence types
+export type JobStage = 'discovered' | 'interested' | 'researching' | 'networking' | 'applied' | 'interviewing' | 'offer';
+
+export interface Job {
+  id: string;
+  title: string;
+  company_name: string;
+  company_logo: string | null;
+  location: string | null;
+  remote: boolean;
+  url: string | null;
+  description: string | null;
+  employment_type: string | null;
+  salary_min: number | null;
+  salary_max: number | null;
+  salary_currency: string | null;
+  source: string;
+  ats: string | null;
+  posted_at: string | null;
+  match_score: number | null;
+  score_breakdown: Record<string, number> | null;
+  stage: JobStage;
+  tags: string[] | null;
+  department: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface JobSearchRequest {
+  query: string;
+  location?: string;
+  remote_only?: boolean;
+  sources?: string[];
+}

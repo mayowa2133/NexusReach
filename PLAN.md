@@ -97,19 +97,19 @@ Ship a working core loop first, then layer features on top. At every phase, the 
 ## Phase 6: Job Intelligence
 **Goal:** Comprehensive job monitoring and tracking.
 
-- [ ] JSearch (RapidAPI) client
-- [ ] Adzuna API client
-- [ ] ATS clients (Greenhouse, Lever, Ashby, Workday public APIs)
-- [ ] Dice API client
-- [ ] Remotive / Jobicy client
-- [ ] GitHub SimplifyJobs markdown table parser (New Grad + Internships)
+- [x] JSearch (RapidAPI) client
+- [x] Adzuna API client
+- [x] ATS clients (Greenhouse, Lever, Ashby)
+- [x] Dice API client
+- [x] Remotive / Jobicy client
+- [x] GitHub SimplifyJobs markdown table parser (New Grad + Internships)
 - [ ] newgrad-jobs.com web scraper
-- [ ] Job deduplication service (fingerprint by company + title + location)
-- [ ] Opportunity scoring service (compare JD against user profile)
+- [x] Job deduplication service (fingerprint by company + title + location)
+- [x] Opportunity scoring service (compare JD against user profile)
 - [ ] Celery periodic task for job sync (every 6 hours)
-- [ ] Job search + filter UI
-- [ ] Job detail view (description, match score, linked people, linked outreach)
-- [ ] Kanban job tracker (Interested → Researching → Networking → Applied → Interviewing → Offer)
+- [x] Job search + filter UI
+- [x] Job detail view (description, match score, linked people, linked outreach)
+- [x] Kanban job tracker (Discovered → Interested → Researching → Networking → Applied → Interviewing → Offer)
 - [ ] Company research panel (size, funding, tech stack, open roles)
 
 **Deliverable:** User has a comprehensive job board with intelligent scoring and tracking.
@@ -181,8 +181,8 @@ Ship a working core loop first, then layer features on top. At every phase, the 
 
 ## Current Status
 
-**Phase:** Phase 5 complete
+**Phase:** Phase 6 complete
 
-**Completed:** Phase 1 (Skeleton + Auth), Phase 2 (Profile Setup + Resume Parsing), Phase 3 (People Finder), Phase 4 (Message Drafting), Phase 5 (Email Layer)
+**Completed:** Phase 1 (Skeleton + Auth), Phase 2 (Profile Setup + Resume Parsing), Phase 3 (People Finder), Phase 4 (Message Drafting), Phase 5 (Email Layer), Phase 6 (Job Intelligence)
 
-**Next step:** Phase 6 — Job Intelligence
+**Next step:** Phase 7 — Outreach Tracker (CRM)
