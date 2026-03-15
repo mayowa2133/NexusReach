@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import auth, profile, people, messages
+from app.routers import auth, profile, people, messages, email
 
 app = FastAPI(
     title="NexusReach API",
@@ -22,6 +22,7 @@ app.include_router(auth.router, prefix="/api")
 app.include_router(profile.router, prefix="/api")
 app.include_router(people.router, prefix="/api")
 app.include_router(messages.router, prefix="/api")
+app.include_router(email.router, prefix="/api")
 
 
 @app.get("/api/health")

@@ -136,3 +136,22 @@ export interface DraftResponse {
   reasoning: string;
   token_usage: { input_tokens: number; output_tokens: number } | null;
 }
+
+// Email Layer types
+export interface EmailFindResult {
+  email: string | null;
+  source: string;
+  verified: boolean;
+  tried: string[];
+}
+
+export interface EmailConnectionStatus {
+  gmail_connected: boolean;
+  outlook_connected: boolean;
+}
+
+export interface StageDraftResult {
+  draft_id: string;
+  provider: string;
+  message_id: string | null;
+}

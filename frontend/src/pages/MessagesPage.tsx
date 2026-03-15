@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { useDraftMessage, useEditMessage, useMarkCopied, useMessages } from '@/hooks/useMessages';
 import { useSavedPeople } from '@/hooks/usePeople';
+import { useFindEmail, useEmailConnectionStatus, useStageDraft } from '@/hooks/useEmail';
 import { toast } from 'sonner';
 import type { Message, MessageChannel, MessageGoal } from '@/types';
 
@@ -47,8 +48,11 @@ export function MessagesPage() {
   const draft = useDraftMessage();
   const edit = useEditMessage();
   const markCopied = useMarkCopied();
+  const findEmail = useFindEmail();
+  const stageDraft = useStageDraft();
   const { data: savedPeople } = useSavedPeople();
   const { data: messages } = useMessages();
+  const { data: emailStatus } = useEmailConnectionStatus();
 
   const handleDraft = async () => {
     if (!selectedPersonId) {
@@ -107,6 +111,33 @@ export function MessagesPage() {
     }
   };
 
+  const handleFindEmail = async () => {
+    if (!selectedPersonId) return;
+    try {
+      const result = await findEmail.mutateAsync(selectedPersonId);
+      if (result.email) {
+        toast.success(`Found email: ${result.email} (via ${result.source})`);
+      } else {
+        toast.error(`No email found. Tried: ${result.tried.join(', ')}`);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Email search failed');
+    }
+  };
+
+  const handleStageDraft = async (provider: 'gmail' | 'outlook') => {
+    if (!activeDraft) return;
+    try {
+      await stageDraft.mutateAsync({
+        message_id: activeDraft.id,
+        provider,
+      });
+      toast.success(`Draft staged in ${provider === 'gmail' ? 'Gmail' : 'Outlook'}. Open your inbox to review and send.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to stage draft');
+    }
+  };
+
   const selectedPerson = savedPeople?.find((p) => p.id === selectedPersonId);
 
   return (
@@ -146,7 +177,7 @@ export function MessagesPage() {
               </div>
 
               {selectedPerson && (
-                <div className="rounded-md bg-muted/50 p-3 text-sm space-y-1">
+                <div className="rounded-md bg-muted/50 p-3 text-sm space-y-2">
                   <div className="font-medium">{selectedPerson.full_name}</div>
                   <div className="text-muted-foreground">{selectedPerson.title}</div>
                   {selectedPerson.person_type && (
@@ -156,6 +187,25 @@ export function MessagesPage() {
                         : selectedPerson.person_type.charAt(0).toUpperCase() +
                           selectedPerson.person_type.slice(1)}
                     </Badge>
+                  )}
+                  {selectedPerson.work_email ? (
+                    <div className="flex items-center gap-1">
+                      <span className="text-muted-foreground">Email:</span>
+                      <span>{selectedPerson.work_email}</span>
+                      {selectedPerson.email_verified && (
+                        <Badge variant="outline" className="text-xs">Verified</Badge>
+                      )}
+                    </div>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleFindEmail}
+                      disabled={findEmail.isPending}
+                      className="w-full"
+                    >
+                      {findEmail.isPending ? 'Searching...' : 'Find Email Address'}
+                    </Button>
                   )}
                 </div>
               )}
@@ -302,6 +352,51 @@ export function MessagesPage() {
                       </>
                     )}
                   </div>
+
+                  {/* Email staging buttons */}
+                  {activeDraft.channel === 'email' && (
+                    <div className="space-y-2">
+                      <Separator />
+                      <p className="text-xs text-muted-foreground">
+                        Stage this email as a draft in your inbox — you review and send it manually.
+                      </p>
+                      <div className="flex gap-2">
+                        {emailStatus?.gmail_connected && (
+                          <Button
+                            variant="outline"
+                            onClick={() => handleStageDraft('gmail')}
+                            disabled={stageDraft.isPending}
+                          >
+                            {stageDraft.isPending ? 'Staging...' : 'Stage in Gmail'}
+                          </Button>
+                        )}
+                        {emailStatus?.outlook_connected && (
+                          <Button
+                            variant="outline"
+                            onClick={() => handleStageDraft('outlook')}
+                            disabled={stageDraft.isPending}
+                          >
+                            {stageDraft.isPending ? 'Staging...' : 'Stage in Outlook'}
+                          </Button>
+                        )}
+                        {!emailStatus?.gmail_connected && !emailStatus?.outlook_connected && (
+                          <p className="text-xs text-muted-foreground">
+                            Connect Gmail or Outlook in Settings to stage drafts in your inbox.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Fallback: no email → suggest LinkedIn */}
+                  {activeDraft.channel === 'email' && selectedPerson && !selectedPerson.work_email && (
+                    <div className="rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 p-3 text-sm">
+                      <p className="font-medium text-amber-900 dark:text-amber-200">No email found for this person</p>
+                      <p className="text-amber-700 dark:text-amber-300 text-xs mt-1">
+                        Try finding their email with the button above, or switch to LinkedIn message instead.
+                      </p>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 

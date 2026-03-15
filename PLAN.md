@@ -80,15 +80,15 @@ Ship a working core loop first, then layer features on top. At every phase, the 
 ## Phase 5: Email Layer
 **Goal:** Find work emails and stage drafts in the user's inbox.
 
-- [ ] Hunter.io API client (email finder + verification)
-- [ ] Email finding waterfall service (Apollo → Hunter → Proxycurl → fallback)
-- [ ] Gmail OAuth integration (consent flow, token storage)
-- [ ] Outlook OAuth integration (consent flow, token storage)
-- [ ] Gmail draft staging (create draft via API)
-- [ ] Outlook draft staging (create draft via Graph API)
-- [ ] Email-specific message formatting (subject line, signature, professional tone)
-- [ ] Settings page: connect/disconnect Gmail and Outlook
-- [ ] Fallback UI — when no email found, show LinkedIn option instead
+- [x] Hunter.io API client (email finder + verification)
+- [x] Email finding waterfall service (Apollo → Hunter → Proxycurl → fallback)
+- [x] Gmail OAuth integration (consent flow, token storage)
+- [x] Outlook OAuth integration (consent flow, token storage)
+- [x] Gmail draft staging (create draft via API)
+- [x] Outlook draft staging (create draft via Graph API)
+- [x] Email-specific message formatting (subject line, signature, professional tone)
+- [x] Settings page: connect/disconnect Gmail and Outlook
+- [x] Fallback UI — when no email found, show LinkedIn option instead
 
 **Deliverable:** User can find work emails and stage personalized drafts in their inbox.
 
@@ -181,8 +181,8 @@ Ship a working core loop first, then layer features on top. At every phase, the 
 
 ## Current Status
 
-**Phase:** Phase 4 complete
+**Phase:** Phase 5 complete
 
-**Completed:** Phase 1 (Skeleton + Auth), Phase 2 (Profile Setup + Resume Parsing), Phase 3 (People Finder), Phase 4 (Message Drafting)
+**Completed:** Phase 1 (Skeleton + Auth), Phase 2 (Profile Setup + Resume Parsing), Phase 3 (People Finder), Phase 4 (Message Drafting), Phase 5 (Email Layer)
 
-**Next step:** Phase 5 — Email Layer
+**Next step:** Phase 6 — Job Intelligence
