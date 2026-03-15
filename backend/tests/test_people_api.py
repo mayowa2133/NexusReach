@@ -1,0 +1,99 @@
+"""API tests for people endpoints — Phase 3."""
+
+import uuid
+import pytest
+from unittest.mock import patch, AsyncMock, MagicMock
+
+pytestmark = pytest.mark.asyncio
+
+
+def _mock_person(user_id, **overrides):
+    p = MagicMock()
+    p.id = str(uuid.uuid4())
+    p.user_id = user_id
+    p.company_id = None
+    p.full_name = overrides.get("full_name", "Jane Doe")
+    p.title = overrides.get("title", "Software Engineer")
+    p.department = overrides.get("department", "Engineering")
+    p.seniority = overrides.get("seniority", "mid")
+    p.linkedin_url = overrides.get("linkedin_url", "https://linkedin.com/in/janedoe")
+    p.github_url = overrides.get("github_url", None)
+    p.work_email = overrides.get("work_email", None)
+    p.email_source = None
+    p.email_verified = False
+    p.person_type = overrides.get("person_type", "peer")
+    p.profile_data = overrides.get("profile_data", {})
+    p.github_data = overrides.get("github_data", None)
+    p.source = overrides.get("source", "apollo")
+    p.company = overrides.get("company", None)
+    return p
+
+
+def _mock_company(user_id):
+    c = MagicMock()
+    c.id = str(uuid.uuid4())
+    c.user_id = user_id
+    c.name = "TechCorp"
+    c.domain = "techcorp.com"
+    c.size = "500"
+    c.industry = "Technology"
+    c.description = "A tech company"
+    c.careers_url = None
+    return c
+
+
+async def test_search_people(client, mock_user_id):
+    """POST /api/people/search returns categorized results."""
+    company = _mock_company(mock_user_id)
+    recruiter = _mock_person(mock_user_id, full_name="Recruiter Bob", person_type="recruiter")
+    peer = _mock_person(mock_user_id, full_name="Peer Alice", person_type="peer")
+
+    mock_result = {
+        "company": company,
+        "recruiters": [recruiter],
+        "hiring_managers": [],
+        "peers": [peer],
+    }
+
+    with patch("app.routers.people.search_people_at_company", new_callable=AsyncMock) as mock_search:
+        mock_search.return_value = mock_result
+        resp = await client.post(
+            "/api/people/search",
+            json={"company_name": "TechCorp"},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["recruiters"]) == 1
+    assert len(data["peers"]) == 1
+    assert data["company"]["name"] == "TechCorp"
+
+
+async def test_enrich_person(client, mock_user_id):
+    """POST /api/people/enrich returns enriched person."""
+    person = _mock_person(mock_user_id, full_name="Enriched User")
+
+    with patch("app.routers.people.enrich_person_from_linkedin", new_callable=AsyncMock) as mock_enrich:
+        mock_enrich.return_value = person
+        resp = await client.post(
+            "/api/people/enrich",
+            json={"linkedin_url": "https://linkedin.com/in/someone"},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["full_name"] == "Enriched User"
+
+
+async def test_list_people(client, mock_user_id):
+    """GET /api/people returns saved people."""
+    person = _mock_person(mock_user_id)
+
+    with patch("app.routers.people.get_saved_people", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = [person]
+        resp = await client.get("/api/people")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["full_name"] == "Jane Doe"
