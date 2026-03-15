@@ -28,14 +28,14 @@ Ship a working core loop first, then layer features on top. At every phase, the 
 ## Phase 2: Profile Setup + Resume Parsing
 **Goal:** User creates their profile — the foundation that feeds every AI-generated message.
 
-- [ ] Build profile setup page (multi-step form)
-- [ ] Resume upload component (PDF/DOCX)
-- [ ] Backend resume parsing service (extract skills, experience, education, projects)
-- [ ] Profile API endpoints (CRUD)
-- [ ] Store parsed resume as structured JSONB
-- [ ] Bio, goals, tone, target preferences form fields
-- [ ] Portfolio links (GitHub, LinkedIn, personal site)
-- [ ] Profile completion indicator on dashboard
+- [x] Build profile setup page (multi-step form)
+- [x] Resume upload component (PDF/DOCX)
+- [x] Backend resume parsing service (extract skills, experience, education, projects)
+- [x] Profile API endpoints (CRUD)
+- [x] Store parsed resume as structured JSONB
+- [x] Bio, goals, tone, target preferences form fields
+- [x] Portfolio links (GitHub, LinkedIn, personal site)
+- [x] Profile completion indicator on dashboard
 
 **Deliverable:** User has a complete profile that the AI can reference.
 
@@ -181,6 +181,8 @@ Ship a working core loop first, then layer features on top. At every phase, the 
 
 ## Current Status
 
-**Phase:** Not started — foundation documents complete (PRD, Architecture, CLAUDE.md, PLAN.md)
+**Phase:** Phase 2 complete
 
-**Next step:** Begin Phase 1 — Project Skeleton + Auth
+**Completed:** Phase 1 (Skeleton + Auth), Phase 2 (Profile Setup + Resume Parsing)
+
+**Next step:** Phase 3 — People Finder

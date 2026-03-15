@@ -1,12 +1,42 @@
+import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Progress } from '@/components/ui/progress';
+import { Button } from '@/components/ui/button';
+import { useProfile, getProfileCompletion } from '@/hooks/useProfile';
 
 export function DashboardPage() {
+  const { data: profile, isLoading } = useProfile();
+  const { percentage, missing } = getProfileCompletion(profile);
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Dashboard</h1>
         <p className="text-muted-foreground">Your networking overview at a glance.</p>
       </div>
+
+      {/* Profile completion banner */}
+      {!isLoading && percentage < 100 && (
+        <Card className="border-dashed">
+          <CardContent className="flex items-center gap-4 py-4">
+            <div className="flex-1">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="font-medium">Complete your profile</h3>
+                <span className="text-sm text-muted-foreground">{percentage}%</span>
+              </div>
+              <Progress value={percentage} className="mb-2" />
+              {missing.length > 0 && (
+                <p className="text-sm text-muted-foreground">
+                  Missing: {missing.join(', ')}
+                </p>
+              )}
+            </div>
+            <Link to="/profile">
+              <Button size="sm">Set up profile</Button>
+            </Link>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card>
