@@ -1,0 +1,173 @@
+# NexusReach — Claude Context
+
+## What is this project?
+
+NexusReach is a smart personal networking assistant for job seekers. It helps users find relevant people at target companies, draft personalized outreach messages, and track their networking efforts. The human is always in the loop — nothing is ever sent automatically.
+
+See `PRD.md` for full product requirements and `architecture.md` for system design.
+
+---
+
+## Tech Stack
+
+### Frontend
+- **React 18** + **TypeScript**
+- **Vite** for build tooling
+- **React Router** for routing
+- **Shadcn/ui** for component library
+- **Zustand** for client state management
+- **TanStack Query** for server state (API caching, refetching)
+- **Tailwind CSS** for styling
+
+### Backend
+- **Python 3.12+** + **FastAPI**
+- **SQLAlchemy** ORM with **Alembic** migrations
+- **PostgreSQL** (Supabase hosted)
+- **Celery** + **Redis** for background jobs
+- **Pydantic** for request/response validation
+
+### External Services
+- **Supabase** — Auth + PostgreSQL hosting
+- **Apollo.io** — People finding + work emails
+- **Proxycurl** — LinkedIn profile enrichment
+- **Hunter.io** — Email finding + verification
+- **GitHub API** — Engineer profiles + repos
+- **JSearch (RapidAPI)** — Job aggregation
+- **Adzuna** — Job aggregation
+- **Claude API (Anthropic)** — Message drafting
+- **Gmail API** — Email draft staging
+- **Microsoft Graph API** — Outlook draft staging
+
+### Hosting
+- **Vercel** — Frontend
+- **Railway** — Backend + Redis + Celery workers
+
+---
+
+## Project Structure
+
+```
+NexusReach/
+├── frontend/               # React + Vite app
+│   ├── src/
+│   │   ├── components/     # UI components by module
+│   │   ├── hooks/          # Custom hooks
+│   │   ├── lib/            # API client, utils
+│   │   ├── stores/         # Zustand stores
+│   │   ├── types/          # TypeScript types
+│   │   └── pages/          # Route pages
+│   └── package.json
+│
+├── backend/                # FastAPI application
+│   ├── app/
+│   │   ├── routers/        # API route handlers
+│   │   ├── services/       # Business logic
+│   │   ├── clients/        # External API wrappers
+│   │   ├── models/         # SQLAlchemy models
+│   │   ├── schemas/        # Pydantic schemas
+│   │   ├── tasks/          # Celery tasks
+│   │   └── utils/          # Helpers (dedup, scoring, parsing)
+│   ├── alembic/            # DB migrations
+│   ├── tests/
+│   └── requirements.txt
+│
+├── PRD.md                  # Product requirements
+├── architecture.md         # System design + data models
+├── PLAN.md                 # Build roadmap + progress
+└── CLAUDE.md               # This file
+```
+
+---
+
+## Coding Conventions
+
+### Python (Backend)
+- Use `async` endpoints in FastAPI
+- Type hints on all function signatures
+- Pydantic models for all API request/response bodies
+- Services contain business logic, routers are thin
+- External API calls isolated in `clients/` — never called directly from routers
+- Environment variables via `pydantic-settings` (never hardcoded)
+- Tests use `pytest` + `httpx.AsyncClient`
+
+### TypeScript (Frontend)
+- Functional components only
+- Custom hooks for shared logic
+- TanStack Query for all API calls (no raw fetch in components)
+- Zustand stores for client-only state
+- Types co-located or in `types/` directory
+- Shadcn/ui components imported from `@/components/ui`
+
+### General
+- No `any` types in TypeScript
+- No bare `except` in Python — always catch specific exceptions
+- Environment variables prefixed: `NEXUSREACH_` for backend, `VITE_` for frontend
+- All database queries scoped to `user_id` — never leak data across users
+
+---
+
+## Key Commands
+
+```bash
+# Frontend
+cd frontend && npm install        # Install dependencies
+cd frontend && npm run dev        # Dev server (port 5173)
+cd frontend && npm run build      # Production build
+cd frontend && npm run lint       # Lint check
+
+# Backend
+cd backend && pip install -r requirements.txt  # Install dependencies
+cd backend && uvicorn app.main:app --reload    # Dev server (port 8000)
+cd backend && alembic upgrade head             # Run migrations
+cd backend && alembic revision --autogenerate -m "description"  # New migration
+cd backend && pytest                           # Run tests
+cd backend && celery -A app.tasks worker --loglevel=info  # Start Celery worker
+cd backend && celery -A app.tasks beat --loglevel=info     # Start Celery beat
+```
+
+---
+
+## Environment Variables
+
+### Backend (.env)
+```
+NEXUSREACH_DATABASE_URL=postgresql+asyncpg://...
+NEXUSREACH_REDIS_URL=redis://...
+NEXUSREACH_SUPABASE_URL=https://...
+NEXUSREACH_SUPABASE_KEY=...
+NEXUSREACH_APOLLO_API_KEY=...
+NEXUSREACH_PROXYCURL_API_KEY=...
+NEXUSREACH_HUNTER_API_KEY=...
+NEXUSREACH_GITHUB_TOKEN=...
+NEXUSREACH_JSEARCH_API_KEY=...
+NEXUSREACH_ADZUNA_APP_ID=...
+NEXUSREACH_ADZUNA_API_KEY=...
+NEXUSREACH_ANTHROPIC_API_KEY=...
+NEXUSREACH_GOOGLE_CLIENT_ID=...
+NEXUSREACH_GOOGLE_CLIENT_SECRET=...
+NEXUSREACH_MICROSOFT_CLIENT_ID=...
+NEXUSREACH_MICROSOFT_CLIENT_SECRET=...
+```
+
+### Frontend (.env)
+```
+VITE_API_URL=http://localhost:8000
+VITE_SUPABASE_URL=https://...
+VITE_SUPABASE_ANON_KEY=...
+```
+
+---
+
+## Important Design Decisions
+
+1. **Modular monolith, not microservices** — All backend modules in one FastAPI app. Simpler to develop and deploy. Can split later if needed.
+
+2. **Human always in the loop** — No message is ever sent automatically. The tool drafts; the user approves.
+
+3. **Email waterfall stops early** — Apollo → Hunter → Proxycurl. First verified email wins. Falls back to LinkedIn if nothing found.
+
+4. **Cache external API results** — Apollo/Proxycurl data stored in DB. Never re-fetch the same profile twice.
+
+5. **Guardrails are defaults, not locks** — 7-day message gap is toggleable with a warning. Contact history is always shown (non-toggleable).
+
+6. **All data scoped to user_id** — Every query includes user_id. No data leaks between accounts.

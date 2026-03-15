@@ -1,0 +1,37 @@
+import uuid
+from datetime import datetime
+
+from sqlalchemy import String, Boolean, Integer, Text, DateTime, ForeignKey, func
+from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.database import Base
+
+
+class UserSettings(Base):
+    __tablename__ = "user_settings"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), unique=True
+    )
+    min_message_gap_days: Mapped[int] = mapped_column(Integer, default=7)
+    min_message_gap_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    follow_up_suggestion_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    response_rate_warnings_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    guardrails_acknowledged: Mapped[bool] = mapped_column(Boolean, default=False)
+    gmail_connected: Mapped[bool] = mapped_column(Boolean, default=False)
+    outlook_connected: Mapped[bool] = mapped_column(Boolean, default=False)
+    gmail_refresh_token: Mapped[str | None] = mapped_column(Text)
+    outlook_refresh_token: Mapped[str | None] = mapped_column(Text)
+    api_keys: Mapped[dict | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    user: Mapped["User"] = relationship(back_populates="settings")
