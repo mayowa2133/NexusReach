@@ -5,5 +5,6 @@ from app.models.company import Company
 from app.models.person import Person
 from app.models.message import Message
 from app.models.job import Job
+from app.models.outreach import OutreachLog
 
-__all__ = ["User", "Profile", "UserSettings", "Company", "Person", "Message", "Job"]
+__all__ = ["User", "Profile", "UserSettings", "Company", "Person", "Message", "Job", "OutreachLog"]

@@ -119,14 +119,14 @@ Ship a working core loop first, then layer features on top. At every phase, the 
 ## Phase 7: Outreach Tracker (CRM)
 **Goal:** Nothing falls through the cracks.
 
-- [ ] Outreach log database model + API endpoints
-- [ ] CRM UI — list view + timeline view of all contacts
-- [ ] Status tracking per contact (Draft → Sent → Connected → Responded → Met → Following Up → Closed)
-- [ ] Notes field per contact
+- [x] Outreach log database model + API endpoints
+- [x] CRM UI — list view + timeline view of all contacts
+- [x] Status tracking per contact (Draft → Sent → Connected → Responded → Met → Following Up → Closed)
+- [x] Notes field per contact
 - [ ] Reminder system — Celery task for follow-up notifications
-- [ ] Link outreach records to jobs and companies
-- [ ] Response rate tracking per contact
-- [ ] Contact history view (always visible before re-engagement, non-toggleable)
+- [x] Link outreach records to jobs and companies
+- [x] Response rate tracking per contact
+- [x] Contact history view (always visible before re-engagement, non-toggleable)
 
 **Deliverable:** User has a full personal CRM tracking every networking interaction.
 
@@ -181,8 +181,8 @@ Ship a working core loop first, then layer features on top. At every phase, the 
 
 ## Current Status
 
-**Phase:** Phase 6 complete
+**Phase:** Phase 7 complete
 
-**Completed:** Phase 1 (Skeleton + Auth), Phase 2 (Profile Setup + Resume Parsing), Phase 3 (People Finder), Phase 4 (Message Drafting), Phase 5 (Email Layer), Phase 6 (Job Intelligence)
+**Completed:** Phase 1 (Skeleton + Auth), Phase 2 (Profile Setup + Resume Parsing), Phase 3 (People Finder), Phase 4 (Message Drafting), Phase 5 (Email Layer), Phase 6 (Job Intelligence), Phase 7 (Outreach Tracker CRM)
 
-**Next step:** Phase 7 — Outreach Tracker (CRM)
+**Next step:** Phase 8 — Insights Dashboard
