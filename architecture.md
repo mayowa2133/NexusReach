@@ -145,6 +145,7 @@ backend/
 │   │
 │   └── utils/
 │       ├── dedup.py            # Job deduplication logic
+│       ├── job_context.py      # Job context extraction (department, team, seniority)
 │       ├── markdown_parser.py  # Parse SimplifyJobs GitHub tables
 │       └── scoring.py          # Opportunity scoring algorithm
 │
@@ -319,8 +320,24 @@ CREATE TABLE user_settings (
 ```
 User targets a company/job
         │
-        ▼
-Apollo.io API ──→ Find people by company + title + seniority
+        ├── Generic search (company name only)
+        │         │
+        │         ▼
+        │   Apollo.io API ──→ Find people by company + title + seniority
+        │
+        └── Job-aware search (from saved job)
+                  │
+                  ▼
+          extract_job_context(title, description)
+                  │  → department, team_keywords, seniority
+                  ▼
+          Apollo.io API ──→ 3 targeted searches (department-filtered)
+                  │         Recruiters: dept recruiter titles
+                  │         Managers: team manager titles + seniority
+                  │         Peers: team peer titles
+                  │
+                  ▼
+          Fallback: If < 2 results, re-search without department filter
         │
         ▼
 Proxycurl API ──→ Enrich selected profiles (full LinkedIn data)

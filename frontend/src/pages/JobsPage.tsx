@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -52,6 +53,7 @@ export function JobsPage() {
   const [sortBy, setSortBy] = useState('score');
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
 
+  const navigate = useNavigate();
   const search = useJobSearch();
   const atsSearch = useATSSearch();
   const { data: savedJobs } = useJobs(stageFilter || undefined, sortBy);
@@ -255,6 +257,14 @@ export function JobsPage() {
             <JobDetail
               job={selectedJob}
               onStageChange={handleStageChange}
+              onFindPeople={(job) => {
+                const params = new URLSearchParams({
+                  job_id: job.id,
+                  company: job.company_name,
+                  title: job.title,
+                });
+                navigate(`/people?${params.toString()}`);
+              }}
             />
           ) : (
             <div className="rounded-lg border border-dashed p-12 text-center">
@@ -318,9 +328,11 @@ function JobListCard({
 function JobDetail({
   job,
   onStageChange,
+  onFindPeople,
 }: {
   job: Job;
   onStageChange: (jobId: string, stage: JobStage) => void;
+  onFindPeople: (job: Job) => void;
 }) {
   return (
     <Card>
@@ -402,6 +414,13 @@ function JobDetail({
 
         {/* Actions */}
         <div className="flex gap-2">
+          <Button
+            variant="default"
+            size="sm"
+            onClick={() => onFindPeople(job)}
+          >
+            Find People
+          </Button>
           {job.url && (
             <a
               href={job.url}

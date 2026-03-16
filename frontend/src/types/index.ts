@@ -95,11 +95,18 @@ export interface GitHubRepo {
   updated_at: string;
 }
 
+export interface JobContext {
+  department: string;
+  team_keywords: string[];
+  seniority: string;
+}
+
 export interface PeopleSearchResult {
   company: Company | null;
   recruiters: Person[];
   hiring_managers: Person[];
   peers: Person[];
+  job_context: JobContext | null;
 }
 
 // Message Drafting types

@@ -10,6 +10,7 @@ export function usePeopleSearch() {
       company_name: string;
       roles?: string[];
       github_org?: string;
+      job_id?: string;
     }) => api.post<PeopleSearchResult>('/api/people/search', params),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['people'] });

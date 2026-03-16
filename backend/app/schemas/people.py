@@ -36,10 +36,17 @@ class PeopleSearchRequest(BaseModel):
     company_name: str
     roles: list[str] | None = None
     github_org: str | None = None
+    job_id: str | None = None
 
 
 class ManualPersonRequest(BaseModel):
     linkedin_url: str
+
+
+class JobContextResponse(BaseModel):
+    department: str
+    team_keywords: list[str]
+    seniority: str
 
 
 class PeopleSearchResponse(BaseModel):
@@ -47,3 +54,4 @@ class PeopleSearchResponse(BaseModel):
     recruiters: list[PersonResponse]
     hiring_managers: list[PersonResponse]
     peers: list[PersonResponse]
+    job_context: JobContextResponse | None = None

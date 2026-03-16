@@ -1,7 +1,7 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -15,6 +15,7 @@ from app.schemas.people import (
 )
 from app.services.people_service import (
     search_people_at_company,
+    search_people_for_job,
     enrich_person_from_linkedin,
     get_saved_people,
 )
@@ -30,7 +31,26 @@ async def search_people(
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Search for people at a company using Apollo + GitHub."""
+    """Search for people at a company using Apollo + GitHub.
+
+    If job_id is provided, runs a job-aware targeted search using
+    department/team context extracted from the job posting.
+    """
+    if body.job_id:
+        try:
+            job_uuid = uuid.UUID(body.job_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid job_id format") from exc
+        try:
+            result = await search_people_for_job(
+                db=db,
+                user_id=user_id,
+                job_id=job_uuid,
+            )
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return result
+
     result = await search_people_at_company(
         db=db,
         user_id=user_id,

@@ -179,8 +179,23 @@ Ship a working core loop first, then layer features on top. At every phase, the 
 
 ---
 
+## Phase 11: Job-Aware People Discovery
+**Goal:** Connect job search and people finder — clicking "Find People" from a saved job automatically searches for people on the same team/department as that role.
+
+- [x] Job context extraction utility (`backend/app/utils/job_context.py`) — pure function that derives department, team keywords, seniority, and targeted search titles from job title + description
+- [x] Apollo client enhancement — add `departments` param to `search_people()` for department-filtered searches
+- [x] Job-aware people service (`search_people_for_job()`) — loads job from DB, extracts context, runs 3 targeted Apollo searches (recruiters, managers, peers) with department filtering and fallback
+- [x] Schema + router updates — `job_id` param on `PeopleSearchRequest`, `JobContextResponse` in response, router dispatches to job-aware search when `job_id` present
+- [x] "Find People" button on job cards — navigates to people page with job context in URL params
+- [x] Job-aware people page — auto-fills company, auto-triggers search, shows job context banner with department/team badges
+- [x] Unit tests for job context extraction + API tests for job-aware search endpoint
+
+**Deliverable:** User can click "Find People" on any saved job and get team-relevant recruiters, managers, and peers — not generic results.
+
+---
+
 ## Current Status
 
-**Phase:** Phase 10 complete — all phases done!
+**Phase:** Phase 11 complete — Job-Aware People Discovery shipped!
 
-**Completed:** Phase 1 (Skeleton + Auth), Phase 2 (Profile Setup + Resume Parsing), Phase 3 (People Finder), Phase 4 (Message Drafting), Phase 5 (Email Layer), Phase 6 (Job Intelligence), Phase 7 (Outreach Tracker CRM), Phase 8 (Insights Dashboard), Phase 9 (Settings + Guardrails), Phase 10 (Polish + Production)
+**Completed:** Phase 1 (Skeleton + Auth), Phase 2 (Profile Setup + Resume Parsing), Phase 3 (People Finder), Phase 4 (Message Drafting), Phase 5 (Email Layer), Phase 6 (Job Intelligence), Phase 7 (Outreach Tracker CRM), Phase 8 (Insights Dashboard), Phase 9 (Settings + Guardrails), Phase 10 (Polish + Production), Phase 11 (Job-Aware People Discovery)

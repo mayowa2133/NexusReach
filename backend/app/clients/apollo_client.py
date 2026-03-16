@@ -11,6 +11,7 @@ async def search_people(
     company_name: str,
     titles: list[str] | None = None,
     seniority: list[str] | None = None,
+    departments: list[str] | None = None,
     limit: int = 10,
 ) -> list[dict]:
     """Search for people at a company by title and seniority.
@@ -19,6 +20,7 @@ async def search_people(
         company_name: Company name to search within.
         titles: Job title keywords (e.g. ["recruiter", "software engineer"]).
         seniority: Seniority levels (e.g. ["senior", "manager", "director"]).
+        departments: Apollo department slugs (e.g. ["engineering_technical"]).
         limit: Max results to return.
 
     Returns:
@@ -37,6 +39,8 @@ async def search_people(
         params["person_titles"] = titles
     if seniority:
         params["person_seniorities"] = seniority
+    if departments:
+        params["person_departments"] = departments
 
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.post(

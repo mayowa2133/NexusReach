@@ -9,7 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients import apollo_client, proxycurl_client, github_client
 from app.models.company import Company
+from app.models.job import Job
 from app.models.person import Person
+from app.utils.job_context import extract_job_context
 
 # Title patterns for categorizing people
 RECRUITER_TITLES = {"recruiter", "talent", "hiring", "people operations", "hr ", "human resources"}
@@ -184,6 +186,122 @@ async def search_people_at_company(
         "recruiters": recruiters,
         "hiring_managers": hiring_managers,
         "peers": peers,
+    }
+
+
+async def search_people_for_job(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    job_id: uuid.UUID,
+) -> dict:
+    """Find people at a company using job context for targeted search.
+
+    Extracts department, team, and seniority from the job posting, then
+    runs targeted Apollo searches for recruiters, managers, and peers
+    on the same team.
+
+    Returns:
+        {
+            "company": Company,
+            "recruiters": [Person, ...],
+            "hiring_managers": [Person, ...],
+            "peers": [Person, ...],
+            "job_context": JobContext,
+        }
+    """
+    # Load the job (scoped to user)
+    result = await db.execute(
+        select(Job).where(Job.id == job_id, Job.user_id == user_id)
+    )
+    job = result.scalar_one_or_none()
+    if not job:
+        raise ValueError(f"Job not found: {job_id}")
+
+    # Extract context from job title + description
+    context = extract_job_context(job.title, job.description)
+
+    company = await get_or_create_company(db, user_id, job.company_name)
+
+    # --- Targeted searches using extracted context ---
+    min_results = 2  # fallback threshold
+
+    # Recruiters
+    recruiter_results = await apollo_client.search_people(
+        job.company_name,
+        titles=context.recruiter_titles,
+        departments=context.apollo_departments,
+        limit=3,
+    )
+    if len(recruiter_results) < min_results:
+        recruiter_results = await apollo_client.search_people(
+            job.company_name,
+            titles=context.recruiter_titles,
+            limit=3,
+        )
+
+    # Managers
+    manager_results = await apollo_client.search_people(
+        job.company_name,
+        titles=context.manager_titles,
+        seniority=["manager", "director", "vp"],
+        departments=context.apollo_departments,
+        limit=3,
+    )
+    if len(manager_results) < min_results:
+        manager_results = await apollo_client.search_people(
+            job.company_name,
+            titles=context.manager_titles,
+            seniority=["manager", "director", "vp"],
+            limit=3,
+        )
+
+    # Peers
+    peer_results = await apollo_client.search_people(
+        job.company_name,
+        titles=context.peer_titles,
+        departments=context.apollo_departments,
+        limit=3,
+    )
+    if len(peer_results) < min_results:
+        peer_results = await apollo_client.search_people(
+            job.company_name,
+            titles=context.peer_titles,
+            limit=3,
+        )
+
+    # Store and categorize (reuse existing helpers)
+    recruiters: list[Person] = []
+    hiring_managers: list[Person] = []
+    peers: list[Person] = []
+
+    for data in recruiter_results:
+        person = await _store_person(db, user_id, company.id, data, "recruiter")
+        recruiters.append(person)
+
+    for data in manager_results:
+        ptype = _classify_person(data.get("title", ""))
+        person = await _store_person(db, user_id, company.id, data, ptype)
+        if ptype == "recruiter":
+            recruiters.append(person)
+        else:
+            hiring_managers.append(person)
+
+    for data in peer_results:
+        person = await _store_person(db, user_id, company.id, data, "peer")
+        peers.append(person)
+
+    await db.commit()
+
+    return {
+        "company": company,
+        "recruiters": recruiters,
+        "hiring_managers": hiring_managers,
+        "peers": peers,
+        "job_context": {
+            "department": context.department,
+            "team_keywords": context.team_keywords,
+            "seniority": context.seniority,
+        },
     }
 
 

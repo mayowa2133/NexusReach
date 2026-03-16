@@ -1,4 +1,5 @@
-import { useState, type FormEvent } from 'react';
+import { useState, useEffect, useRef, type FormEvent } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -10,7 +11,12 @@ import { toast } from 'sonner';
 import type { Person, PeopleSearchResult } from '@/types';
 
 export function PeoplePage() {
-  const [companyName, setCompanyName] = useState('');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const jobId = searchParams.get('job_id');
+  const jobCompany = searchParams.get('company');
+  const jobTitle = searchParams.get('title');
+
+  const [companyName, setCompanyName] = useState(jobCompany || '');
   const [githubOrg, setGithubOrg] = useState('');
   const [linkedinUrl, setLinkedinUrl] = useState('');
   const [searchResults, setSearchResults] = useState<PeopleSearchResult | null>(null);
@@ -18,6 +24,27 @@ export function PeoplePage() {
   const search = usePeopleSearch();
   const enrich = useEnrichPerson();
   const { data: savedPeople } = useSavedPeople();
+
+  // Auto-trigger job-aware search when arriving from a job card
+  const autoSearchTriggered = useRef(false);
+  useEffect(() => {
+    if (jobId && jobCompany && !autoSearchTriggered.current) {
+      autoSearchTriggered.current = true;
+      search
+        .mutateAsync({
+          company_name: jobCompany,
+          job_id: jobId,
+        })
+        .then((result) => {
+          setSearchResults(result);
+          // Clear job params from URL after search completes
+          setSearchParams({}, { replace: true });
+        })
+        .catch((err) => {
+          toast.error(err instanceof Error ? err.message : 'Job-aware search failed');
+        });
+    }
+  }, [jobId, jobCompany, search, setSearchParams]);
 
   const handleSearch = async (e: FormEvent) => {
     e.preventDefault();
@@ -58,6 +85,39 @@ export function PeoplePage() {
         <h1 className="text-3xl font-semibold tracking-tight">People</h1>
         <p className="text-muted-foreground">Find the right people at your target companies.</p>
       </div>
+
+      {/* Job context banner — shown when auto-searching from a job */}
+      {jobId && jobTitle && jobCompany && (
+        <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 space-y-2">
+          <div className="text-sm font-medium">
+            Finding people for: <span className="text-primary">{jobTitle}</span> at{' '}
+            <span className="text-primary">{jobCompany}</span>
+          </div>
+          {search.isPending && (
+            <p className="text-xs text-muted-foreground">
+              Searching for team-relevant recruiters, managers, and peers…
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Job context results banner */}
+      {searchResults?.job_context && (
+        <div className="rounded-lg border bg-muted/30 p-3">
+          <div className="text-sm font-medium mb-2">Job-Aware Search Context</div>
+          <div className="flex flex-wrap gap-2">
+            <Badge variant="secondary">
+              {searchResults.job_context.department.replace(/_/g, ' ')}
+            </Badge>
+            <Badge variant="outline">{searchResults.job_context.seniority} level</Badge>
+            {searchResults.job_context.team_keywords.map((kw) => (
+              <Badge key={kw} variant="outline">
+                {kw}
+              </Badge>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid gap-4 md:grid-cols-2">
         {/* Company search */}

@@ -89,6 +89,20 @@ For each target job/company, surface three types of people:
 
 User always chooses who to reach out to. The tool never contacts anyone automatically.
 
+### Job-Aware Search
+
+When a user clicks "Find People" from a saved job, the system runs a **targeted search** instead of a generic one:
+
+1. **Context extraction** — The job title and description are analyzed to extract department (engineering, product, design, etc.), team keywords (backend, ML, mobile, etc.), and seniority level.
+2. **Targeted Apollo searches** — Three searches are run using the extracted context:
+   - **Recruiters**: Titles like "Engineering Recruiter" filtered to the job's department
+   - **Managers**: Titles like "Backend Engineering Manager" filtered to the job's department + seniority
+   - **Peers**: Titles like "Backend Engineer" filtered to the job's department
+3. **Department filtering** — Apollo's `person_departments` filter ensures results come from the same part of the company as the target role.
+4. **Graceful fallback** — If a department-filtered search yields fewer than 2 results, the system re-runs without the department filter to ensure the user always gets useful contacts.
+
+This means searching for people at Stripe after saving a "Backend Engineer" role returns backend engineering managers, engineering recruiters, and backend engineers — not generic HR or marketing contacts.
+
 ---
 
 ## Module 4: Message Drafting Engine
