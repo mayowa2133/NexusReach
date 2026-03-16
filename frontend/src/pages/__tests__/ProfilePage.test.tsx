@@ -86,7 +86,7 @@ function renderProfile() {
 describe('ProfilePage', () => {
   it('renders the page heading', () => {
     renderProfile();
-    expect(screen.getByText(/profile/i)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /profile/i })).toBeInTheDocument();
   });
 
   it('renders the full name input', () => {
@@ -96,6 +96,6 @@ describe('ProfilePage', () => {
 
   it('renders the save button', () => {
     renderProfile();
-    expect(screen.getByRole('button', { name: /save/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^save$/i })).toBeInTheDocument();
   });
 });
