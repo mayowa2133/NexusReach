@@ -143,3 +143,66 @@ A living document of patterns, gotchas, and decisions encountered while building
 - ProfilePage (or components importing large libraries like Supabase) can OOM during vitest runs.
 - **Workaround:** `NODE_OPTIONS="--max-old-space-size=4096"` or run heavy test files separately.
 - Consider using `--pool=forks` to isolate worker memory.
+
+---
+
+## CI/CD & Linting (Phase 10)
+
+### Always run linters locally before committing
+- The CI pipeline runs `ruff check .` (backend) and `eslint .` + `tsc -b` + `vitest run` (frontend).
+- **Lesson:** Running lint + build + tests locally before every push prevents CI failures. Added a `.githooks/pre-commit` hook to automate this.
+- **Setup:** `git config core.hooksPath .githooks` to activate the shared hooks.
+
+### ruff catches unused imports that Python silently ignores
+- Python doesn't error on unused imports, but ruff (and CI) will.
+- **Common offenders:** `uuid`, `AsyncMock`, `patch` — imported "just in case" during development.
+- **Fix:** Run `ruff check --fix` to auto-remove unused imports before committing.
+- **Also:** `conftest.py` is checked too — don't forget it's outside the `tests/` directory.
+
+### SQLAlchemy forward references need `# noqa: F821`
+- SQLAlchemy `relationship()` uses string forward references like `Mapped["Person"]` to avoid circular imports.
+- ruff flags these as `F821 Undefined name` since the class isn't imported in that file.
+- **Fix:** Add `# noqa: F821` to each relationship line. Don't use `from __future__ import annotations` — it can break SQLAlchemy's runtime type resolution.
+
+### shadcn/ui v2 uses `@base-ui/react`, NOT Radix — different API
+- The latest shadcn CLI generates components using `@base-ui/react` instead of `@radix-ui`.
+- **Key API differences:**
+  - **No `asChild` prop.** Use `render={<Component />}` instead. E.g., `<SheetTrigger render={<Button />}>` not `<SheetTrigger asChild>`.
+  - **No `onInteractOutside` or `onEscapeKeyDown`** on DialogContent/Popup. Control dismissal via `onOpenChange` on the Dialog root, or use `showCloseButton` prop.
+  - **No `onPointerDownOutside`** either. These are all Radix-specific props.
+- **Lesson:** Always check the actual component types in `src/components/ui/*.tsx` before using props from Radix documentation or examples.
+
+### shadcn/ui components legitimately export non-components
+- Files like `badge.tsx`, `button.tsx`, `tabs.tsx` export both components and variant functions (e.g., `buttonVariants`).
+- This triggers `react-refresh/only-export-components` lint errors.
+- **Fix:** Add an eslint config override for `src/components/ui/**/*.{ts,tsx}` to disable this rule. These are generated files with an intentional pattern.
+
+### TypeScript's `tsc -b` (build mode) catches errors that `eslint` and `vitest` don't
+- The CI runs `tsc -b && vite build` as a separate step from lint and test.
+- Type errors in component props (wrong prop names, missing types) only surface during `tsc` build, not during test runs (vitest uses esbuild which skips type checking).
+- **Lesson:** Always run `npx tsc -b` locally before pushing, not just lint + test.
+
+### Recharts Tooltip `formatter` type is strict
+- `Tooltip formatter` expects `(value: ValueType | undefined) => ...`, not `(value: number) => ...`.
+- **Fix:** Remove the explicit type annotation: `formatter={(value) => \`${value}%\`}` — let TypeScript infer the correct type.
+
+### `getByText` and `getByRole` fail on multiple matches
+- `screen.getByText(/profile/i)` fails if "Profile" appears in both `<h1>` and `<p>` text.
+- `screen.getByRole('button', { name: /save/i })` fails if both "Save" and "Save & Continue" buttons exist.
+- **Fixes:**
+  - Use `getByRole('heading', { name: /profile/i })` to target specific element types.
+  - Use exact regex `/^save$/i` to avoid partial matches like "Save & Continue".
+  - Use `getAllByText(...)` with `.length` checks when duplicates are expected.
+
+### Vitest `beforeEach` must be imported when `globals: true` isn't set
+- If vitest config has `globals: true`, test globals are auto-available.
+- If not (or in CI with strict TS), `beforeEach` must be explicitly imported: `import { beforeEach } from 'vitest'`.
+- **Lesson:** Always import all vitest utilities explicitly for portability.
+
+### Ambiguous variable names fail E741
+- Single-letter variables like `l` in list comprehensions trigger ruff's `E741` (ambiguous variable name).
+- **Fix:** Use descriptive names: `[line.strip() for line in text.split("\n")]` instead of `[l.strip() for l in ...]`.
+
+### Global error handler changes response format for ALL endpoints
+- Adding a global `HTTPException` handler that returns `{"error": {"code", "message"}}` instead of FastAPI's default `{"detail": "..."}` breaks existing tests.
+- **Lesson:** After adding middleware that changes response format, grep all tests for the old format (e.g., `resp.json()["detail"]`) and update them.

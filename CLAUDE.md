@@ -171,3 +171,33 @@ VITE_SUPABASE_ANON_KEY=...
 5. **Guardrails are defaults, not locks** — 7-day message gap is toggleable with a warning. Contact history is always shown (non-toggleable).
 
 6. **All data scoped to user_id** — Every query includes user_id. No data leaks between accounts.
+
+---
+
+## CI/CD Pre-commit Checklist
+
+Before every commit, the `.githooks/pre-commit` hook runs automatically. You can also run manually:
+
+```bash
+# Backend lint (must pass with zero errors)
+cd backend && ruff check app/ tests/ conftest.py
+
+# Frontend lint + type check + tests + build (all must pass)
+cd frontend && npx eslint .
+cd frontend && npx tsc -b
+cd frontend && npm run test
+cd frontend && npm run build
+```
+
+---
+
+## Critical Gotchas
+
+1. **shadcn/ui uses `@base-ui/react`, NOT Radix** — No `asChild` prop (use `render={<Component />}`), no `onInteractOutside`/`onEscapeKeyDown` on DialogContent.
+2. **Always check `src/components/ui/*.tsx`** for actual prop types before using any shadcn component prop.
+3. **Run `ruff check` on the full backend** including `conftest.py` — it's outside `tests/`.
+4. **SQLAlchemy forward references** (`Mapped["Person"]`) need `# noqa: F821` — ruff flags them as undefined names.
+5. **Global error handler** returns `{"error": {"code", "message"}}` not `{"detail": "..."}` — all tests must use the new format.
+6. **Recharts Tooltip `formatter`** — Don't annotate the value type; let TS infer `ValueType | undefined`.
+7. **Testing-library queries** — Use `getByRole('heading', ...)` or exact regex `/^save$/i` to avoid multiple-match failures.
+8. **Vitest globals** — Always import `beforeEach`, `afterEach` etc. explicitly from `vitest` for CI compatibility.
