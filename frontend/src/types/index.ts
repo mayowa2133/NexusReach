@@ -243,3 +243,68 @@ export interface UpdateOutreachRequest {
   next_follow_up_at?: string;
   response_received?: boolean;
 }
+
+// Insights Dashboard types (Phase 8)
+export interface DashboardSummary {
+  total_contacts: number;
+  total_messages_sent: number;
+  total_jobs_tracked: number;
+  overall_response_rate: number;
+  upcoming_follow_ups: number;
+  active_conversations: number;
+}
+
+export interface ResponseRateBreakdown {
+  label: string;
+  sent: number;
+  responded: number;
+  rate: number;
+}
+
+export interface AngleEffectiveness {
+  goal: string;
+  sent: number;
+  responded: number;
+  rate: number;
+}
+
+export interface NetworkGrowthPoint {
+  date: string;
+  cumulative_contacts: number;
+}
+
+export interface NetworkGap {
+  category: string;
+  label: string;
+  count: number;
+}
+
+export interface WarmPathPerson {
+  name: string;
+  title: string | null;
+  status: string;
+}
+
+export interface WarmPath {
+  company_name: string;
+  connected_persons: WarmPathPerson[];
+}
+
+export interface CompanyOpenness {
+  company_name: string;
+  total_outreach: number;
+  responses: number;
+  rate: number;
+}
+
+export interface InsightsDashboard {
+  summary: DashboardSummary;
+  response_by_channel: ResponseRateBreakdown[];
+  response_by_role: ResponseRateBreakdown[];
+  response_by_company: ResponseRateBreakdown[];
+  angle_effectiveness: AngleEffectiveness[];
+  network_growth: NetworkGrowthPoint[];
+  network_gaps: NetworkGap[];
+  warm_paths: WarmPath[];
+  company_openness: CompanyOpenness[];
+}

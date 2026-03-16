@@ -1,12 +1,39 @@
 import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Button } from '@/components/ui/button';
 import { useProfile, getProfileCompletion } from '@/hooks/useProfile';
+import { useInsightsDashboard } from '@/hooks/useInsights';
+import { useOutreachLogs } from '@/hooks/useOutreach';
+import { useJobs } from '@/hooks/useJobs';
+import { MetricCards } from '@/components/dashboard/MetricCards';
+import { ResponseRateChart } from '@/components/dashboard/ResponseRateChart';
+import { AngleEffectivenessChart } from '@/components/dashboard/AngleEffectivenessChart';
+import { NetworkGrowthChart } from '@/components/dashboard/NetworkGrowthChart';
+import { NetworkGapsCard } from '@/components/dashboard/NetworkGapsCard';
+import { WarmPathsCard } from '@/components/dashboard/WarmPathsCard';
+import { CompanyOpennessTable } from '@/components/dashboard/CompanyOpennessTable';
+
+const STATUS_COLORS: Record<string, 'default' | 'secondary' | 'outline' | 'destructive'> = {
+  draft: 'outline',
+  sent: 'default',
+  connected: 'default',
+  responded: 'default',
+  met: 'secondary',
+  following_up: 'destructive',
+  closed: 'secondary',
+};
 
 export function DashboardPage() {
-  const { data: profile, isLoading } = useProfile();
+  const { data: profile, isLoading: profileLoading } = useProfile();
   const { percentage, missing } = getProfileCompletion(profile);
+  const { data: insights, isLoading: insightsLoading } = useInsightsDashboard();
+  const { data: recentLogs } = useOutreachLogs();
+  const { data: allJobs } = useJobs(undefined, 'match_score');
+
+  const topJobs = allJobs?.slice(0, 5) ?? [];
+  const recentOutreach = recentLogs?.slice(0, 5) ?? [];
 
   return (
     <div className="space-y-6">
@@ -16,7 +43,7 @@ export function DashboardPage() {
       </div>
 
       {/* Profile completion banner */}
-      {!isLoading && percentage < 100 && (
+      {!profileLoading && percentage < 100 && (
         <Card className="border-dashed">
           <CardContent className="flex items-center gap-4 py-4">
             <div className="flex-1">
@@ -38,61 +65,75 @@ export function DashboardPage() {
         </Card>
       )}
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Jobs Tracked
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">0</div>
-          </CardContent>
-        </Card>
+      {/* KPI cards */}
+      <MetricCards summary={insights?.summary} isLoading={insightsLoading} />
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              People Found
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">0</div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Messages Sent
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">0</div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Response Rate
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">--</div>
-          </CardContent>
-        </Card>
+      {/* Row 1: Network Growth + Response Rate */}
+      <div className="grid gap-4 md:grid-cols-2">
+        <NetworkGrowthChart data={insights?.network_growth ?? []} />
+        <ResponseRateChart
+          byChannel={insights?.response_by_channel ?? []}
+          byRole={insights?.response_by_role ?? []}
+          byCompany={insights?.response_by_company ?? []}
+        />
       </div>
 
+      {/* Row 2: Angle Effectiveness + Company Openness */}
+      <div className="grid gap-4 md:grid-cols-2">
+        <AngleEffectivenessChart data={insights?.angle_effectiveness ?? []} />
+        <CompanyOpennessTable data={insights?.company_openness ?? []} />
+      </div>
+
+      {/* Row 3: Warm Paths + Network Gaps */}
+      <div className="grid gap-4 md:grid-cols-2">
+        <WarmPathsCard paths={insights?.warm_paths ?? []} />
+        <NetworkGapsCard gaps={insights?.network_gaps ?? []} />
+      </div>
+
+      {/* Row 4: Recent Outreach + Top Opportunities */}
       <div className="grid gap-4 md:grid-cols-2">
         <Card>
           <CardHeader>
             <CardTitle>Recent Outreach</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-sm text-muted-foreground">
-              No outreach yet. Find people at your target companies to get started.
-            </p>
+            {recentOutreach.length > 0 ? (
+              <div className="space-y-3">
+                {recentOutreach.map((log) => (
+                  <div
+                    key={log.id}
+                    className="flex items-center justify-between text-sm"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium truncate">
+                        {log.person_name || 'Unknown'}
+                      </div>
+                      {log.company_name && (
+                        <div className="text-xs text-muted-foreground">
+                          at {log.company_name}
+                        </div>
+                      )}
+                    </div>
+                    <Badge
+                      variant={STATUS_COLORS[log.status] || 'outline'}
+                      className="text-xs ml-2"
+                    >
+                      {log.status}
+                    </Badge>
+                  </div>
+                ))}
+                <Link
+                  to="/outreach"
+                  className="text-sm text-primary hover:underline inline-block mt-2"
+                >
+                  View all outreach
+                </Link>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                No outreach yet. Find people at your target companies to get started.
+              </p>
+            )}
           </CardContent>
         </Card>
 
@@ -101,9 +142,42 @@ export function DashboardPage() {
             <CardTitle>Top Opportunities</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-sm text-muted-foreground">
-              No jobs tracked yet. Add companies or search for jobs to see matches.
-            </p>
+            {topJobs.length > 0 ? (
+              <div className="space-y-3">
+                {topJobs.map((job) => (
+                  <div
+                    key={job.id}
+                    className="flex items-center justify-between text-sm"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium truncate">{job.title}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {job.company_name}
+                        {job.location && ` — ${job.location}`}
+                      </div>
+                    </div>
+                    {job.match_score != null && (
+                      <Badge
+                        variant={job.match_score >= 60 ? 'default' : 'outline'}
+                        className="text-xs ml-2"
+                      >
+                        {Math.round(job.match_score)}%
+                      </Badge>
+                    )}
+                  </div>
+                ))}
+                <Link
+                  to="/jobs"
+                  className="text-sm text-primary hover:underline inline-block mt-2"
+                >
+                  View all jobs
+                </Link>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                No jobs tracked yet. Add companies or search for jobs to see matches.
+              </p>
+            )}
           </CardContent>
         </Card>
       </div>

@@ -111,3 +111,35 @@ A living document of patterns, gotchas, and decisions encountered while building
 ### Fingerprint-based deduplication is simple and effective
 - MD5 hash of `company|title|location` (lowercased, stripped) catches duplicates across sources.
 - Fast, deterministic, and handles the 90% case without fuzzy matching overhead.
+
+---
+
+## Phase 7 Testing Insights
+
+### `getByText` collisions in component pages with dropdowns + cards
+- When a page renders both a dropdown (e.g., status filter, channel selector) and cards/badges with the same text values (e.g., "Sent", "Email", "LinkedIn Message"), `screen.getByText('Sent')` will fail with "multiple elements found."
+- **Fix:** Use `screen.getAllByText('Sent').length` with `toBeGreaterThanOrEqual()` instead of `getByText`.
+- **Alternative:** Use `within(container).getByText(...)` to scope queries to a specific DOM subtree.
+
+### Test data values must be unique across the rendered page
+- Stats card values like "12" can collide with computed totals (sum of `by_status` values). If `total_contacts = 12` and `sum(by_status) = 12`, `getByText('12')` finds two elements.
+- **Fix:** Use distinct values (e.g., 42) that won't accidentally match other computed outputs.
+
+### Mock state variables must be resettable between tests
+- Module-level `let` variables for mock hook return values (e.g., `mockLogs`, `mockStats`) allow per-test overrides.
+- **Pattern:** `beforeEach(() => { mockLogs = { data: undefined, isLoading: false }; })` resets to clean state.
+- This avoids test coupling where one test's mock data leaks into the next.
+
+### Response enrichment (_to_response) needs dedicated tests
+- Router helpers that enrich API responses by joining related data (person name, company, job title) are easy to miss in tests.
+- **Lesson:** Test with and without relationships (nulls, full data) to catch `getattr` / `None` access patterns.
+
+### Partial update testing with `exclude_unset=True`
+- When using `body.model_dump(exclude_unset=True)`, only fields the client sent are included.
+- Test that sending `{"channel": "email"}` only passes `channel` to the service — no `status`, `notes`, etc.
+- This prevents accidental overwriting of existing values with `None`.
+
+### Node.js heap limits with heavy component tests
+- ProfilePage (or components importing large libraries like Supabase) can OOM during vitest runs.
+- **Workaround:** `NODE_OPTIONS="--max-old-space-size=4096"` or run heavy test files separately.
+- Consider using `--pool=forks` to isolate worker memory.

@@ -135,13 +135,13 @@ Ship a working core loop first, then layer features on top. At every phase, the 
 ## Phase 8: Insights Dashboard
 **Goal:** Help users network smarter over time.
 
-- [ ] Response rate analytics (by message type, role type, company)
-- [ ] Message angle effectiveness (GitHub reference vs shared background vs direct inquiry)
-- [ ] Network growth chart over time
-- [ ] Network gap analysis (industries/roles not yet reached)
-- [ ] Warm path finder (existing connections at target companies)
-- [ ] Company openness ranking (based on response rates)
-- [ ] Dashboard home page with key metrics summary
+- [x] Response rate analytics (by message type, role type, company)
+- [x] Message angle effectiveness (GitHub reference vs shared background vs direct inquiry)
+- [x] Network growth chart over time
+- [x] Network gap analysis (industries/roles not yet reached)
+- [x] Warm path finder (existing connections at target companies)
+- [x] Company openness ranking (based on response rates)
+- [x] Dashboard home page with key metrics summary
 
 **Deliverable:** User sees actionable insights about what's working.
 
@@ -181,8 +181,8 @@ Ship a working core loop first, then layer features on top. At every phase, the 
 
 ## Current Status
 
-**Phase:** Phase 7 complete
+**Phase:** Phase 8 complete
 
-**Completed:** Phase 1 (Skeleton + Auth), Phase 2 (Profile Setup + Resume Parsing), Phase 3 (People Finder), Phase 4 (Message Drafting), Phase 5 (Email Layer), Phase 6 (Job Intelligence), Phase 7 (Outreach Tracker CRM)
+**Completed:** Phase 1 (Skeleton + Auth), Phase 2 (Profile Setup + Resume Parsing), Phase 3 (People Finder), Phase 4 (Message Drafting), Phase 5 (Email Layer), Phase 6 (Job Intelligence), Phase 7 (Outreach Tracker CRM), Phase 8 (Insights Dashboard)
 
-**Next step:** Phase 8 — Insights Dashboard
+**Next step:** Phase 9 — Settings + Guardrails
