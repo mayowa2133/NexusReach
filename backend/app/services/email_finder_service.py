@@ -5,7 +5,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.clients import hunter_client, proxycurl_client
+from app.clients import apollo_client, hunter_client, proxycurl_client
 from app.models.person import Person
 
 
@@ -26,10 +26,11 @@ async def find_email_for_person(
 ) -> dict:
     """Try to find a work email for a person using the waterfall:
     1. Check if we already have one
-    2. Apollo (already may have it from people search)
+    2. Apollo Enrichment (1 credit — best when we have apollo_id)
     3. Hunter.io (email finder by domain + name)
     4. Proxycurl (LinkedIn profile enrichment)
-    5. Fallback — no email found
+    5. Hunter domain search (fallback — search entire domain)
+    6. Exhausted — no email found
 
     Returns:
         {"email": str | None, "source": str, "verified": bool, "tried": list[str]}
@@ -59,7 +60,30 @@ async def find_email_for_person(
     if person.company and person.company.domain:
         company_domain = person.company.domain
 
-    # 2. Hunter.io — best for email finding by name + domain
+    # 2. Apollo Enrichment (1 credit) — best when we have an apollo_id
+    if person.apollo_id or person.linkedin_url:
+        tried.append("apollo_enrichment")
+        enrichment = await apollo_client.enrich_person(
+            apollo_id=person.apollo_id,
+            linkedin_url=person.linkedin_url,
+            full_name=person.full_name,
+            domain=company_domain,
+        )
+        if enrichment and enrichment.get("work_email"):
+            person.work_email = enrichment["work_email"]
+            person.email_source = "apollo"
+            person.email_verified = enrichment.get("email_verified", False)
+            if enrichment.get("apollo_id") and not person.apollo_id:
+                person.apollo_id = enrichment["apollo_id"]
+            await db.commit()
+            return {
+                "email": enrichment["work_email"],
+                "source": "apollo",
+                "verified": enrichment.get("email_verified", False),
+                "tried": tried,
+            }
+
+    # 3. Hunter.io — best for email finding by name + domain
     if company_domain and first_name and last_name:
         tried.append("hunter")
         hunter_result = await hunter_client.find_email(
@@ -79,7 +103,7 @@ async def find_email_for_person(
                 "tried": tried,
             }
 
-    # 3. Proxycurl — LinkedIn enrichment may reveal email
+    # 4. Proxycurl — LinkedIn enrichment may reveal email
     if person.linkedin_url:
         tried.append("proxycurl")
         profile = await proxycurl_client.enrich_profile(person.linkedin_url)
@@ -97,7 +121,7 @@ async def find_email_for_person(
                 "tried": tried,
             }
 
-    # 4. Hunter domain search fallback — search entire domain
+    # 5. Hunter domain search fallback — search entire domain
     if company_domain:
         tried.append("hunter_domain")
         domain_results = await hunter_client.domain_search(company_domain, limit=20)
@@ -116,7 +140,7 @@ async def find_email_for_person(
                     "tried": tried,
                 }
 
-    # 5. No email found
+    # 6. No email found
     tried.append("exhausted")
     return {
         "email": None,

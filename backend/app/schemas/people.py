@@ -27,6 +27,7 @@ class PersonResponse(BaseModel):
     profile_data: dict | None
     github_data: dict | None
     source: str | None
+    apollo_id: str | None = None
     company: CompanyResponse | None = None
 
     model_config = {"from_attributes": True}

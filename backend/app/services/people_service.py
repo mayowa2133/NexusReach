@@ -70,15 +70,30 @@ async def _store_person(
     data: dict,
     person_type: str,
 ) -> Person:
-    """Create a Person record from API data, deduplicating by linkedin_url."""
+    """Create a Person record from API data, deduplicating by linkedin_url or apollo_id."""
     linkedin = data.get("linkedin_url", "")
+    apollo_id = data.get("apollo_id", "")
 
-    # Check if person already exists for this user
+    # Check if person already exists for this user (by linkedin_url or apollo_id)
     if linkedin:
         result = await db.execute(
             select(Person).where(
                 Person.user_id == user_id,
                 Person.linkedin_url == linkedin,
+            )
+        )
+        existing = result.scalar_one_or_none()
+        if existing:
+            # Backfill apollo_id if we didn't have it before
+            if apollo_id and not existing.apollo_id:
+                existing.apollo_id = apollo_id
+            return existing
+
+    if not linkedin and apollo_id:
+        result = await db.execute(
+            select(Person).where(
+                Person.user_id == user_id,
+                Person.apollo_id == apollo_id,
             )
         )
         existing = result.scalar_one_or_none()
@@ -101,6 +116,7 @@ async def _store_person(
         profile_data=data.get("profile_data") or {k: v for k, v in data.items() if k != "source"},
         github_data=data.get("github_data"),
         source=data.get("source", "unknown"),
+        apollo_id=apollo_id or None,
     )
     db.add(person)
     return person

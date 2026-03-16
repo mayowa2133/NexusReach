@@ -71,7 +71,8 @@ For any company or job posting, finds the right humans to connect with.
 
 | Source | What it gets you |
 |--------|-----------------|
-| Apollo.io API | Primary source. 275M+ profiles. Search by company, title, department, seniority. Returns work email where available |
+| Apollo.io API (Discovery) | Primary source. 275M+ profiles. Free `/api_search` endpoint — search by company, title, department, seniority. Returns names, titles, LinkedIn URLs (no emails). Zero credit cost |
+| Apollo.io API (Enrichment) | On-demand email finding via `/people/match`. 1 credit per lookup. Triggered by user clicking "Get Email" on a person card. Works on Free tier (100 credits/month) |
 | Proxycurl API | LinkedIn profile enrichment by URL or search. Current role, past experience, education |
 | GitHub API | Engineers at a company by org membership or email domain. Repos, languages, recent commits |
 | Company website scraper | Team pages, blog authors, speaker bios |
@@ -144,12 +145,15 @@ Every draft shows the user why the AI wrote what it wrote — which part of thei
 
 ### Email Finding Waterfall
 
-Tries each source in order, stops when it finds a verified work email:
+Triggered on-demand when user clicks "Get Email" on a person card. Tries each source in order, stops at first success:
 
-1. **Apollo.io** — checked first, has work emails for ~60% of profiles
-2. **Hunter.io** — fills the gap, strong on company domain pattern verification
-3. **Proxycurl** — final check
-4. **Fallback** — if no verified email found, silently switches to LinkedIn message mode
+1. **Apollo Enrichment** — `/v1/people/match`, 1 credit per call. Best when we have an `apollo_id` from discovery
+2. **Hunter.io** — Email finder by company domain + name. Strong on pattern verification
+3. **Proxycurl** — LinkedIn enrichment may reveal personal emails
+4. **Hunter.io domain search** — Broader fallback, searches entire domain
+5. **Exhausted** — No email found, silently switches to LinkedIn message mode
+
+Note: People discovery itself (finding names, titles, LinkedIn URLs) is **free** — uses Apollo's `/api_search` endpoint with zero credit cost. Email enrichment only happens when the user explicitly requests it.
 
 ### Email Sending
 

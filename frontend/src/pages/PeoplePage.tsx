@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { usePeopleSearch, useEnrichPerson, useSavedPeople } from '@/hooks/usePeople';
+import { useFindEmail } from '@/hooks/useEmail';
 import { toast } from 'sonner';
 import type { Person, PeopleSearchResult } from '@/types';
 
@@ -280,6 +281,23 @@ function PersonSection({
 function PersonCard({ person }: { person: Person }) {
   const githubRepos = person.github_data?.repos ?? [];
   const githubLangs = person.github_data?.languages ?? [];
+  const findEmail = useFindEmail();
+  const [emailStatus, setEmailStatus] = useState<'idle' | 'loading' | 'not_found'>('idle');
+
+  const handleGetEmail = async () => {
+    setEmailStatus('loading');
+    try {
+      const result = await findEmail.mutateAsync(person.id);
+      if (!result.email) {
+        setEmailStatus('not_found');
+      }
+    } catch {
+      toast.error('Failed to find email');
+      setEmailStatus('idle');
+    }
+  };
+
+  const canEnrich = !!(person.apollo_id || person.linkedin_url);
 
   return (
     <Card>
@@ -299,7 +317,8 @@ function PersonCard({ person }: { person: Person }) {
           </Badge>
         )}
 
-        {person.work_email && (
+        {/* Email display with three states */}
+        {person.work_email ? (
           <div className="text-sm">
             <span className="text-muted-foreground">Email: </span>
             {person.work_email}
@@ -307,6 +326,19 @@ function PersonCard({ person }: { person: Person }) {
               <Badge variant="outline" className="ml-1 text-xs">Verified</Badge>
             )}
           </div>
+        ) : emailStatus === 'not_found' ? (
+          <div className="text-sm text-muted-foreground">No email found</div>
+        ) : canEnrich ? (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleGetEmail}
+            disabled={emailStatus === 'loading'}
+          >
+            {emailStatus === 'loading' ? 'Finding email...' : 'Get Email'}
+          </Button>
+        ) : (
+          <div className="text-sm text-muted-foreground">No email available</div>
         )}
 
         {githubLangs.length > 0 && (

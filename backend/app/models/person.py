@@ -33,6 +33,7 @@ class Person(Base):
     profile_data: Mapped[dict | None] = mapped_column(JSONB)
     github_data: Mapped[dict | None] = mapped_column(JSONB)
     source: Mapped[str | None] = mapped_column(String(50))
+    apollo_id: Mapped[str | None] = mapped_column(String(100))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

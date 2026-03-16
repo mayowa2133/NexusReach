@@ -78,6 +78,7 @@ export interface Person {
   profile_data: Record<string, unknown> | null;
   github_data: GitHubData | null;
   source: string | null;
+  apollo_id: string | null;
   company: Company | null;
 }
 

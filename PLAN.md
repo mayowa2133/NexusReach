@@ -194,8 +194,26 @@ Ship a working core loop first, then layer features on top. At every phase, the 
 
 ---
 
+## Phase 12: Apollo Free Discovery + On-Demand Enrichment
+**Goal:** Switch from credit-consuming people search to Apollo's free discovery endpoint, and add on-demand email enrichment so the app works on Apollo's Free tier (100 emails/month) instead of requiring the $79/month Professional plan.
+
+- [x] Add `apollo_master_api_key` config setting — free endpoint authenticates via header, not JSON body
+- [x] Add `apollo_id` column to Person model + Alembic migration — stores Apollo's person ID for efficient enrichment
+- [x] Refactor Apollo client — switch `search_people()` from `/v1/mixed_people/search` (credits) to `/api/v1/mixed_people/api_search` (free, no emails)
+- [x] Add `enrich_person()` to Apollo client — calls `/v1/people/match` (1 credit) for on-demand email enrichment
+- [x] Update `_store_person()` — handle `apollo_id`, dedup by `apollo_id` when no LinkedIn URL
+- [x] Add Apollo enrichment step to email waterfall — now: Existing → Apollo Enrichment → Hunter → Proxycurl → Hunter Domain → Exhausted
+- [x] Update schemas + types — `apollo_id` field on `PersonResponse` and frontend `Person` type
+- [x] "Get Email" button on person cards — three states: email found, enrichment possible (button), no email available
+- [x] Apollo client unit tests — verify free endpoint, header auth, no emails in search, enrichment flow
+- [x] Updated existing test mocks with `apollo_id`
+
+**Deliverable:** People discovery costs zero Apollo credits. Email enrichment happens on-demand (1 credit per "Get Email" click). App works on Apollo Free tier.
+
+---
+
 ## Current Status
 
-**Phase:** Phase 11 complete — Job-Aware People Discovery shipped!
+**Phase:** Phase 12 complete — Apollo Free Discovery + On-Demand Enrichment shipped!
 
-**Completed:** Phase 1 (Skeleton + Auth), Phase 2 (Profile Setup + Resume Parsing), Phase 3 (People Finder), Phase 4 (Message Drafting), Phase 5 (Email Layer), Phase 6 (Job Intelligence), Phase 7 (Outreach Tracker CRM), Phase 8 (Insights Dashboard), Phase 9 (Settings + Guardrails), Phase 10 (Polish + Production), Phase 11 (Job-Aware People Discovery)
+**Completed:** Phase 1 (Skeleton + Auth), Phase 2 (Profile Setup + Resume Parsing), Phase 3 (People Finder), Phase 4 (Message Drafting), Phase 5 (Email Layer), Phase 6 (Job Intelligence), Phase 7 (Outreach Tracker CRM), Phase 8 (Insights Dashboard), Phase 9 (Settings + Guardrails), Phase 10 (Polish + Production), Phase 11 (Job-Aware People Discovery), Phase 12 (Apollo Free Discovery + On-Demand Enrichment)

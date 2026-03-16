@@ -25,6 +25,7 @@ def _mock_person(user_id, **overrides):
     p.profile_data = overrides.get("profile_data", {})
     p.github_data = overrides.get("github_data", None)
     p.source = overrides.get("source", "apollo")
+    p.apollo_id = overrides.get("apollo_id", None)
     p.company = overrides.get("company", None)
     return p
 

@@ -251,6 +251,7 @@ CREATE TABLE persons (
     profile_data JSONB,                 -- Full enriched profile from Proxycurl/Apollo
     github_data JSONB,                  -- Repos, languages, recent activity
     source VARCHAR(50),                 -- apollo | proxycurl | github | manual
+    apollo_id VARCHAR(100),              -- Apollo person ID for on-demand enrichment
     created_at TIMESTAMP DEFAULT NOW()
 );
 ```
@@ -351,20 +352,26 @@ Person records stored in DB
 
 ### Email Finding Waterfall
 ```
-Person identified, need work email
+User clicks "Get Email" on a person card
         │
         ▼
-Apollo.io ──→ Has email? ──→ Yes ──→ Verify ──→ Done
-        │                     No
+Apollo Enrichment (/v1/people/match, 1 credit) ──→ Has email? ──→ Yes ──→ Done
+        │                                              No
         ▼
-Hunter.io ──→ Has email? ──→ Yes ──→ Verify ──→ Done
-        │                     No
+Hunter.io (name + domain) ──→ Has email? ──→ Yes ──→ Done
+        │                          No
         ▼
-Proxycurl ──→ Has email? ──→ Yes ──→ Verify ──→ Done
-        │                     No
+Proxycurl (LinkedIn enrichment) ──→ Has email? ──→ Yes ──→ Done
+        │                               No
+        ▼
+Hunter.io (domain search fallback) ──→ Has email? ──→ Yes ──→ Done
+        │                                   No
         ▼
 Fallback to LinkedIn message only
 ```
+
+Note: People discovery uses `/api/v1/mixed_people/api_search` (free, no credits, no emails).
+Email enrichment is on-demand only — triggered by user clicking "Get Email".
 
 ### Job Sync Flow
 ```
