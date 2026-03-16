@@ -36,10 +36,7 @@ export function OnboardingDialog({ open }: OnboardingDialogProps) {
     <Dialog open={isOpen} onOpenChange={() => {}}>
       <DialogContent
         className="sm:max-w-md"
-        onInteractOutside={(e) => e.preventDefault()}
-        onEscapeKeyDown={(e) => {
-          if (step === 'welcome') e.preventDefault();
-        }}
+        showCloseButton={step !== 'welcome'}
       >
         <DialogTitle className="sr-only">Onboarding</DialogTitle>
         {step === 'welcome' && (

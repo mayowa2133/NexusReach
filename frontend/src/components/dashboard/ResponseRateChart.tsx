@@ -53,7 +53,7 @@ function RateBar({ data, type }: { data: ResponseRateBreakdown[]; type: string }
         <CartesianGrid strokeDasharray="3 3" horizontal={false} />
         <XAxis type="number" domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
         <YAxis type="category" dataKey="name" width={80} tick={{ fontSize: 12 }} />
-        <Tooltip formatter={(value: number) => `${value}%`} />
+        <Tooltip formatter={(value) => `${value}%`} />
         <Bar dataKey="rate" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} />
       </BarChart>
     </ResponsiveContainer>

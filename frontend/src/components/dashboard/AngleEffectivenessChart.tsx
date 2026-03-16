@@ -55,7 +55,7 @@ export function AngleEffectivenessChart({ data }: AngleEffectivenessChartProps) 
             <CartesianGrid strokeDasharray="3 3" vertical={false} />
             <XAxis dataKey="name" tick={{ fontSize: 11 }} />
             <YAxis domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
-            <Tooltip formatter={(value: number) => `${value}%`} />
+            <Tooltip formatter={(value) => `${value}%`} />
             <Bar dataKey="rate" fill="hsl(var(--chart-2, 142 71% 45%))" radius={[4, 4, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>

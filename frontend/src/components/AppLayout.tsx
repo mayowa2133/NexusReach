@@ -36,11 +36,11 @@ export function AppLayout() {
         <div className="mx-auto flex h-14 max-w-7xl items-center px-4">
           {/* Mobile hamburger menu */}
           <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-            <SheetTrigger asChild>
-              <Button variant="ghost" size="icon" className="mr-2 md:hidden">
-                <Menu className="h-5 w-5" />
-                <span className="sr-only">Toggle menu</span>
-              </Button>
+            <SheetTrigger
+              render={<Button variant="ghost" size="icon" className="mr-2 md:hidden" />}
+            >
+              <Menu className="h-5 w-5" />
+              <span className="sr-only">Toggle menu</span>
             </SheetTrigger>
             <SheetContent side="left" className="w-64">
               <div className="mb-6 text-lg font-semibold tracking-tight">
