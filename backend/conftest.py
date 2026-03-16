@@ -6,7 +6,6 @@ in-memory database. Unit tests target pure functions directly.
 """
 
 import uuid
-from unittest.mock import AsyncMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient

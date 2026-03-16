@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -51,12 +51,16 @@ export function ProfilePage() {
   const updateProfile = useUpdateProfile();
   const uploadResume = useUploadResume();
   const [step, setStep] = useState(0);
+  const initialForm = useMemo(() => profileToForm(profile), [profile]);
   const [form, setForm] = useState<FormData>(profileToForm(undefined));
+  const [formSynced, setFormSynced] = useState(false);
   const [tagInput, setTagInput] = useState({ industries: '', roles: '', locations: '', sizes: '' });
 
-  useEffect(() => {
-    if (profile) setForm(profileToForm(profile));
-  }, [profile]);
+  // Sync form with profile data when it first loads (avoids setState in useEffect)
+  if (profile && !formSynced) {
+    setForm(initialForm);
+    setFormSynced(true);
+  }
 
   const { percentage, missing } = getProfileCompletion(profile);
 

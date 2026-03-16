@@ -20,4 +20,12 @@ export default defineConfig([
       globals: globals.browser,
     },
   },
+  // shadcn/ui components export both components and variant helpers (e.g. buttonVariants).
+  // This is intentional and safe — disable the react-refresh warning for these files.
+  {
+    files: ['src/components/ui/**/*.{ts,tsx}'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
+    },
+  },
 ])

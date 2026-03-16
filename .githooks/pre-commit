@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Pre-commit hook: run linters on staged files to catch errors before CI.
+# Setup: git config core.hooksPath .githooks
+
+set -e
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+NC='\033[0m'
+
+echo "🔍 Running pre-commit lint checks..."
+
+# --- Backend: ruff ---
+BACKEND_STAGED=$(git diff --cached --name-only --diff-filter=ACM -- 'backend/*.py' 'backend/**/*.py' | head -1)
+if [ -n "$BACKEND_STAGED" ]; then
+    echo "  Checking backend (ruff)..."
+    if command -v ruff &> /dev/null; then
+        cd backend
+        if ! ruff check app/ tests/ conftest.py 2>/dev/null; then
+            echo -e "${RED}❌ Backend lint failed. Fix errors above before committing.${NC}"
+            echo "   Run: cd backend && ruff check --fix app/ tests/ conftest.py"
+            exit 1
+        fi
+        cd ..
+        echo -e "  ${GREEN}✓ Backend lint passed${NC}"
+    else
+        echo "  ⚠ ruff not installed, skipping backend lint"
+    fi
+fi
+
+# --- Frontend: eslint ---
+FRONTEND_STAGED=$(git diff --cached --name-only --diff-filter=ACM -- 'frontend/src/**/*.ts' 'frontend/src/**/*.tsx' | head -1)
+if [ -n "$FRONTEND_STAGED" ]; then
+    echo "  Checking frontend (eslint)..."
+    cd frontend
+    if ! npx eslint . --max-warnings 0 2>/dev/null; then
+        echo -e "${RED}❌ Frontend lint failed. Fix errors above before committing.${NC}"
+        echo "   Run: cd frontend && npx eslint ."
+        exit 1
+    fi
+    cd ..
+    echo -e "  ${GREEN}✓ Frontend lint passed${NC}"
+fi
+
+echo -e "${GREEN}✅ All lint checks passed${NC}"

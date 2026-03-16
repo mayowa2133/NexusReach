@@ -26,7 +26,7 @@ export function OnboardingDialog({ open }: OnboardingDialogProps) {
     setIsOpen(false);
   };
 
-  const handleProfileNext = (_data: { fullName: string; linkedinUrl: string }) => {
+  const handleProfileNext = () => {
     // Profile data would be saved via the profile hook in a full implementation.
     // For onboarding, we just advance the step.
     setStep('goals');
