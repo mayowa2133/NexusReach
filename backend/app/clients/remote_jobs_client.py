@@ -4,7 +4,6 @@ import re
 
 import httpx
 
-from app.config import settings
 
 
 async def search_dice(query: str, location: str | None = None, limit: int = 10) -> list[dict]:

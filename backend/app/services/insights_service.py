@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 
 from sqlalchemy import select, func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.models.outreach import OutreachLog
 from app.models.person import Person

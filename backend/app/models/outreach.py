@@ -54,6 +54,6 @@ class OutreachLog(Base):
     )
 
     # Relationships
-    person: Mapped["Person"] = relationship()
-    job: Mapped["Job"] = relationship()
-    message: Mapped["Message"] = relationship()
+    person: Mapped["Person"] = relationship()  # noqa: F821
+    job: Mapped["Job"] = relationship()  # noqa: F821
+    message: Mapped["Message"] = relationship()  # noqa: F821

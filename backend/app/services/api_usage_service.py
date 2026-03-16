@@ -1,7 +1,7 @@
 """API usage tracking service — records consumption, checks daily limits."""
 
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession

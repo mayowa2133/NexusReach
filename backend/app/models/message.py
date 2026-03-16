@@ -49,4 +49,4 @@ class Message(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    person: Mapped["Person"] = relationship()
+    person: Mapped["Person"] = relationship()  # noqa: F821

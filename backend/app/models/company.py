@@ -30,4 +30,4 @@ class Company(Base):
         DateTime(timezone=True), server_default=func.now()
     )
 
-    persons: Mapped[list["Person"]] = relationship(back_populates="company")
+    persons: Mapped[list["Person"]] = relationship(back_populates="company")  # noqa: F821

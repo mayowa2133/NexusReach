@@ -1,9 +1,8 @@
 """Message drafting service — assembles context, calls Claude, stores drafts."""
 
 import uuid
-from datetime import datetime, timezone, timedelta
 
-from sqlalchemy import select, func
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -11,7 +10,6 @@ from app.clients import claude_client
 from app.models.message import Message
 from app.models.person import Person
 from app.models.profile import Profile
-from app.models.company import Company
 from app.services import api_usage_service
 
 

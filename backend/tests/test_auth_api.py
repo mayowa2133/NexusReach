@@ -1,7 +1,7 @@
 """API tests for auth endpoints — Phase 1."""
 
 import pytest
-from unittest.mock import patch, AsyncMock, MagicMock
+from unittest.mock import patch, MagicMock
 from datetime import datetime, timezone
 
 
@@ -15,7 +15,7 @@ async def test_get_me_returns_user(client, mock_user_id):
     mock_user.email = "test@example.com"
     mock_user.created_at = datetime(2024, 1, 1, tzinfo=timezone.utc)
 
-    with patch("app.routers.auth.get_or_create_user") as mock_dep:
+    with patch("app.routers.auth.get_or_create_user"):
         from app.dependencies import get_or_create_user
         from app.main import app
 

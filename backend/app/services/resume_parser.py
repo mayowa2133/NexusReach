@@ -111,7 +111,7 @@ def _parse_skills(text: str) -> list[str]:
 def _parse_experience(text: str) -> list[dict]:
     """Extract experience entries from experience section text."""
     entries: list[dict] = []
-    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
 
     current: dict | None = None
     for line in lines:
@@ -158,7 +158,7 @@ def _parse_experience(text: str) -> list[dict]:
 def _parse_education(text: str) -> list[dict]:
     """Extract education entries from education section text."""
     entries: list[dict] = []
-    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
 
     current: dict | None = None
     for line in lines:
@@ -195,7 +195,7 @@ def _parse_education(text: str) -> list[dict]:
 def _parse_projects(text: str) -> list[dict]:
     """Extract project entries from projects section text."""
     entries: list[dict] = []
-    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
 
     current: dict | None = None
     for line in lines:

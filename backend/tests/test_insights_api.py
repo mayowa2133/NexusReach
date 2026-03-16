@@ -1,6 +1,5 @@
 """API tests for insights dashboard endpoint — Phase 8."""
 
-import uuid
 import pytest
 from unittest.mock import patch, AsyncMock
 

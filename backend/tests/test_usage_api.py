@@ -1,6 +1,5 @@
 """Tests for API usage tracking endpoints — Phase 10."""
 
-import uuid
 from unittest.mock import AsyncMock, patch
 
 import pytest

@@ -22,5 +22,5 @@ class User(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    profile: Mapped["Profile"] = relationship(back_populates="user", uselist=False)
-    settings: Mapped["UserSettings"] = relationship(back_populates="user", uselist=False)
+    profile: Mapped["Profile"] = relationship(back_populates="user", uselist=False)  # noqa: F821
+    settings: Mapped["UserSettings"] = relationship(back_populates="user", uselist=False)  # noqa: F821

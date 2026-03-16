@@ -37,4 +37,4 @@ class Profile(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    user: Mapped["User"] = relationship(back_populates="profile")
+    user: Mapped["User"] = relationship(back_populates="profile")  # noqa: F821

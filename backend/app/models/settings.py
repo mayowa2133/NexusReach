@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, Boolean, Integer, Text, DateTime, ForeignKey, func
+from sqlalchemy import Boolean, Integer, Text, DateTime, ForeignKey, func
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -35,4 +35,4 @@ class UserSettings(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    user: Mapped["User"] = relationship(back_populates="settings")
+    user: Mapped["User"] = relationship(back_populates="settings")  # noqa: F821

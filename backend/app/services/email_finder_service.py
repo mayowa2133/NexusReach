@@ -5,7 +5,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.clients import apollo_client, hunter_client, proxycurl_client
+from app.clients import hunter_client, proxycurl_client
 from app.models.person import Person
 
 

@@ -9,7 +9,6 @@ from sqlalchemy.orm import selectinload
 
 from app.models.outreach import OutreachLog
 from app.models.person import Person
-from app.models.job import Job
 
 
 VALID_STATUSES = {"draft", "sent", "connected", "responded", "met", "following_up", "closed"}

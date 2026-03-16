@@ -4,7 +4,6 @@ Tests pure functions from job_service.py: _score_job and _fingerprint.
 No database or external API calls needed.
 """
 
-import pytest
 from unittest.mock import MagicMock
 
 from app.services.job_service import _score_job, _fingerprint

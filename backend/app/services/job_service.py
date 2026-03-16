@@ -2,9 +2,8 @@
 
 import hashlib
 import uuid
-from datetime import datetime, timezone
 
-from sqlalchemy import select, or_
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients import jsearch_client, adzuna_client, ats_client, remote_jobs_client

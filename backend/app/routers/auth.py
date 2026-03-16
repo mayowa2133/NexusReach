@@ -1,9 +1,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
 from app.dependencies import get_or_create_user
 from app.models.user import User
 
