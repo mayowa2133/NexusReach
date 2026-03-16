@@ -1,11 +1,12 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_user_id
+from app.middleware.rate_limit import limiter
 from app.schemas.people import (
     PeopleSearchRequest,
     PeopleSearchResponse,
@@ -22,7 +23,9 @@ router = APIRouter(prefix="/people", tags=["people"])
 
 
 @router.post("/search", response_model=PeopleSearchResponse)
+@limiter.limit("10/minute")
 async def search_people(
+    request: Request,
     body: PeopleSearchRequest,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -39,7 +42,9 @@ async def search_people(
 
 
 @router.post("/enrich", response_model=PersonResponse)
+@limiter.limit("10/minute")
 async def enrich_person(
+    request: Request,
     body: ManualPersonRequest,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],

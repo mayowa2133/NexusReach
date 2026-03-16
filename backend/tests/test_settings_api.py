@@ -12,6 +12,7 @@ MOCK_DEFAULTS = {
     "follow_up_suggestion_enabled": True,
     "response_rate_warnings_enabled": True,
     "guardrails_acknowledged": False,
+    "onboarding_completed": False,
 }
 
 MOCK_MODIFIED = {
@@ -78,6 +79,7 @@ async def test_get_guardrails_has_all_fields(client, mock_user_id):
         "follow_up_suggestion_enabled",
         "response_rate_warnings_enabled",
         "guardrails_acknowledged",
+        "onboarding_completed",
     }
     assert set(data.keys()) == expected_keys
 

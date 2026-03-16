@@ -36,7 +36,13 @@ class Settings(BaseSettings):
     microsoft_client_secret: str = ""
 
     # App
+    environment: str = "development"
+    frontend_url: str = "http://localhost:5173"
     cors_origins: list[str] = ["http://localhost:5173"]
+
+    # Usage limits
+    daily_claude_token_limit: int = 100_000
+    daily_api_call_limit: int = 50
 
 
 settings = Settings()

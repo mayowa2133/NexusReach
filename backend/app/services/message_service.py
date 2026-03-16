@@ -12,6 +12,7 @@ from app.models.message import Message
 from app.models.person import Person
 from app.models.profile import Profile
 from app.models.company import Company
+from app.services import api_usage_service
 
 
 # --- Prompt templates ---
@@ -205,10 +206,24 @@ ABOUT THE RECIPIENT:
 {person_context}
 {history_context}"""
 
+    # Check daily usage limits before calling Claude
+    await api_usage_service.check_daily_limit(db, user_id)
+
     # Call Claude
     ai_result = await claude_client.generate_message(
         system_prompt=system,
         user_prompt=user_prompt,
+    )
+
+    # Record API usage
+    usage = ai_result.get("usage", {})
+    await api_usage_service.record_usage(
+        db=db,
+        user_id=user_id,
+        service="claude",
+        endpoint="messages.draft",
+        tokens_in=usage.get("input_tokens"),
+        tokens_out=usage.get("output_tokens"),
     )
 
     # Parse email subject if channel is email

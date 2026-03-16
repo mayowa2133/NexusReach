@@ -1,11 +1,12 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_user_id
+from app.middleware.rate_limit import limiter
 from app.schemas.jobs import (
     JobSearchRequest,
     ATSSearchRequest,
@@ -52,7 +53,9 @@ def _to_response(job) -> JobResponse:
 
 
 @router.post("/search", response_model=list[JobResponse])
+@limiter.limit("10/minute")
 async def search(
+    request: Request,
     body: JobSearchRequest,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],

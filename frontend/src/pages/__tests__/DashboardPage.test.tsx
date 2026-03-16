@@ -154,10 +154,12 @@ describe('DashboardPage — metric cards', () => {
     expect(screen.getByText('Response Rate')).toBeInTheDocument();
   });
 
-  it('shows loading state', () => {
+  it('shows loading state with skeleton placeholders', () => {
     mockInsights = { data: undefined, isLoading: true };
     renderDashboard();
-    expect(screen.getAllByText('...').length).toBe(4);
+    // MetricCards now renders Skeleton components instead of '...'
+    const skeletons = document.querySelectorAll('.animate-pulse');
+    expect(skeletons.length).toBeGreaterThanOrEqual(4);
   });
 
   it('shows real data when loaded', () => {

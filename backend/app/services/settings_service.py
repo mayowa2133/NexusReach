@@ -14,6 +14,7 @@ GUARDRAIL_FIELDS = (
     "follow_up_suggestion_enabled",
     "response_rate_warnings_enabled",
     "guardrails_acknowledged",
+    "onboarding_completed",
 )
 
 TOGGLE_FIELDS = (
@@ -38,9 +39,26 @@ async def get_guardrails(db: AsyncSession, user_id: uuid.UUID) -> dict:
             "follow_up_suggestion_enabled": True,
             "response_rate_warnings_enabled": True,
             "guardrails_acknowledged": False,
+            "onboarding_completed": False,
         }
 
     return {field: getattr(settings, field) for field in GUARDRAIL_FIELDS}
+
+
+async def complete_onboarding(db: AsyncSession, user_id: uuid.UUID) -> None:
+    """Mark onboarding as complete for a user."""
+    result = await db.execute(
+        select(UserSettings).where(UserSettings.user_id == user_id)
+    )
+    settings = result.scalar_one_or_none()
+
+    if not settings:
+        settings = UserSettings(user_id=user_id)
+        db.add(settings)
+        await db.flush()
+
+    settings.onboarding_completed = True
+    await db.commit()
 
 
 async def update_guardrails(

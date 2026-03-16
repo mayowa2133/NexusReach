@@ -1,4 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 import type { DashboardSummary } from '@/types';
 
 interface MetricCardsProps {
@@ -28,7 +29,7 @@ export function MetricCards({ summary, isLoading }: MetricCardsProps) {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {isLoading ? '...' : m.value}
+              {isLoading ? <Skeleton className="h-8 w-16" /> : m.value}
             </div>
           </CardContent>
         </Card>

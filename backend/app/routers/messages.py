@@ -1,11 +1,12 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_user_id
+from app.middleware.rate_limit import limiter
 from app.schemas.messages import (
     DraftRequest,
     EditRequest,
@@ -44,7 +45,9 @@ def _to_response(msg, person=None) -> MessageResponse:
 
 
 @router.post("/draft", response_model=DraftResponse)
+@limiter.limit("10/minute")
 async def create_draft(
+    request: Request,
     body: DraftRequest,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],

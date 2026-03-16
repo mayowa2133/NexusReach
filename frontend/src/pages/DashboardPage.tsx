@@ -8,6 +8,8 @@ import { useInsightsDashboard } from '@/hooks/useInsights';
 import { useOutreachLogs } from '@/hooks/useOutreach';
 import { useJobs } from '@/hooks/useJobs';
 import { useGuardrails } from '@/hooks/useSettings';
+import { useOnboarding } from '@/hooks/useOnboarding';
+import { OnboardingDialog } from '@/components/onboarding/OnboardingDialog';
 import { MetricCards } from '@/components/dashboard/MetricCards';
 import { ResponseRateChart } from '@/components/dashboard/ResponseRateChart';
 import { AngleEffectivenessChart } from '@/components/dashboard/AngleEffectivenessChart';
@@ -33,6 +35,7 @@ export function DashboardPage() {
   const { data: recentLogs } = useOutreachLogs();
   const { data: allJobs } = useJobs(undefined, 'match_score');
   const { data: guardrails } = useGuardrails();
+  const { shouldShow: showOnboarding } = useOnboarding();
 
   const topJobs = allJobs?.slice(0, 5) ?? [];
   const guardrailsModified = guardrails && (
@@ -44,6 +47,7 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6">
+      {showOnboarding && <OnboardingDialog open />}
       <div>
         <div className="flex items-center gap-3">
           <h1 className="text-3xl font-semibold tracking-tight">Dashboard</h1>

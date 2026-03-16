@@ -1,23 +1,58 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 from app.config import settings
-from app.routers import auth, profile, people, messages, email, jobs, outreach, insights, settings as settings_router
+from app.middleware.error_handler import (
+    http_exception_handler,
+    validation_exception_handler,
+    unhandled_exception_handler,
+)
+from app.middleware.rate_limit import limiter
+from app.routers import (
+    auth,
+    profile,
+    people,
+    messages,
+    email,
+    jobs,
+    outreach,
+    insights,
+    settings as settings_router,
+    usage,
+)
 
 app = FastAPI(
     title="NexusReach API",
     description="Smart personal networking assistant",
-    version="0.1.0",
+    version="0.2.0",
 )
 
+# --- Rate limiter ---
+app.state.limiter = limiter
+
+# --- Middleware ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
+    allow_origins=(
+        [settings.frontend_url]
+        if settings.environment == "production"
+        else settings.cors_origins
+    ),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# --- Exception handlers ---
+app.add_exception_handler(HTTPException, http_exception_handler)
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_exception_handler(Exception, unhandled_exception_handler)
+
+# --- Routers ---
 app.include_router(auth.router, prefix="/api")
 app.include_router(profile.router, prefix="/api")
 app.include_router(people.router, prefix="/api")
@@ -27,6 +62,7 @@ app.include_router(jobs.router, prefix="/api")
 app.include_router(outreach.router, prefix="/api")
 app.include_router(insights.router, prefix="/api")
 app.include_router(settings_router.router, prefix="/api")
+app.include_router(usage.router, prefix="/api")
 
 
 @app.get("/api/health")

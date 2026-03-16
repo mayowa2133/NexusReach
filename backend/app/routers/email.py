@@ -1,13 +1,14 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import get_db
 from app.dependencies import get_current_user_id
+from app.middleware.rate_limit import limiter
 from app.models.message import Message
 from app.models.person import Person
 from app.models.settings import UserSettings
@@ -30,7 +31,9 @@ router = APIRouter(prefix="/email", tags=["email"])
 
 
 @router.post("/find/{person_id}", response_model=EmailFindResponse)
+@limiter.limit("10/minute")
 async def find_email(
+    request: Request,
     person_id: str,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -146,7 +149,9 @@ async def outlook_disconnect(
 
 
 @router.post("/stage-draft", response_model=StageDraftResponse)
+@limiter.limit("10/minute")
 async def stage_draft(
+    request: Request,
     body: StageDraftRequest,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],

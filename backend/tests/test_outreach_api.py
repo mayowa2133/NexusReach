@@ -151,7 +151,7 @@ async def test_create_outreach_person_not_found(client, mock_user_id):
         )
 
     assert resp.status_code == 400
-    assert "Person not found" in resp.json()["detail"]
+    assert "Person not found" in resp.json()["error"]["message"]
 
 
 async def test_create_outreach_invalid_status(client, mock_user_id):
@@ -164,7 +164,7 @@ async def test_create_outreach_invalid_status(client, mock_user_id):
         )
 
     assert resp.status_code == 400
-    assert "Invalid status" in resp.json()["detail"]
+    assert "Invalid status" in resp.json()["error"]["message"]
 
 
 async def test_create_outreach_missing_person_id(client, mock_user_id):

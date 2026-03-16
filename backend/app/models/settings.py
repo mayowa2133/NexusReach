@@ -22,6 +22,7 @@ class UserSettings(Base):
     follow_up_suggestion_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     response_rate_warnings_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     guardrails_acknowledged: Mapped[bool] = mapped_column(Boolean, default=False)
+    onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False)
     gmail_connected: Mapped[bool] = mapped_column(Boolean, default=False)
     outlook_connected: Mapped[bool] = mapped_column(Boolean, default=False)
     gmail_refresh_token: Mapped[str | None] = mapped_column(Text)

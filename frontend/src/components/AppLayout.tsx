@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -7,8 +9,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { useAuthStore } from '@/stores/auth';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { cn } from '@/lib/utils';
+import { Menu } from 'lucide-react';
 
 const navItems = [
   { path: '/dashboard', label: 'Dashboard' },
@@ -21,6 +26,7 @@ const navItems = [
 export function AppLayout() {
   const location = useLocation();
   const { user, signOut } = useAuthStore();
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   const initials = user?.email?.slice(0, 2).toUpperCase() ?? '??';
 
@@ -28,11 +34,59 @@ export function AppLayout() {
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="mx-auto flex h-14 max-w-7xl items-center px-4">
+          {/* Mobile hamburger menu */}
+          <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+            <SheetTrigger asChild>
+              <Button variant="ghost" size="icon" className="mr-2 md:hidden">
+                <Menu className="h-5 w-5" />
+                <span className="sr-only">Toggle menu</span>
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="left" className="w-64">
+              <div className="mb-6 text-lg font-semibold tracking-tight">
+                NexusReach
+              </div>
+              <nav className="flex flex-col gap-1">
+                {navItems.map((item) => (
+                  <Link
+                    key={item.path}
+                    to={item.path}
+                    onClick={() => setMobileOpen(false)}
+                    className={cn(
+                      'flex h-10 items-center rounded-lg px-3 text-sm font-medium transition-colors',
+                      location.pathname === item.path
+                        ? 'bg-secondary text-secondary-foreground'
+                        : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                    )}
+                  >
+                    {item.label}
+                  </Link>
+                ))}
+                <div className="my-2 border-t" />
+                <Link
+                  to="/profile"
+                  onClick={() => setMobileOpen(false)}
+                  className="flex h-10 items-center rounded-lg px-3 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  Profile
+                </Link>
+                <Link
+                  to="/settings"
+                  onClick={() => setMobileOpen(false)}
+                  className="flex h-10 items-center rounded-lg px-3 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  Settings
+                </Link>
+              </nav>
+            </SheetContent>
+          </Sheet>
+
           <Link to="/dashboard" className="mr-8 text-lg font-semibold tracking-tight">
             NexusReach
           </Link>
 
-          <nav className="flex items-center gap-1">
+          {/* Desktop nav — hidden on mobile */}
+          <nav className="hidden items-center gap-1 md:flex">
             {navItems.map((item) => (
               <Link
                 key={item.path}
@@ -78,7 +132,9 @@ export function AppLayout() {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-6">
-        <Outlet />
+        <ErrorBoundary>
+          <Outlet />
+        </ErrorBoundary>
       </main>
     </div>
   );

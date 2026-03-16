@@ -304,6 +304,7 @@ export interface GuardrailsSettings {
   follow_up_suggestion_enabled: boolean;
   response_rate_warnings_enabled: boolean;
   guardrails_acknowledged: boolean;
+  onboarding_completed: boolean;
 }
 
 export interface InsightsDashboard {

@@ -87,7 +87,7 @@ async def test_upload_resume_rejects_html(client):
     app.dependency_overrides.pop(get_db, None)
 
     assert resp.status_code == 400
-    assert "Unsupported file type" in resp.json()["detail"]
+    assert "Unsupported file type" in resp.json()["error"]["message"]
 
 
 async def test_update_profile(client, mock_user_id):

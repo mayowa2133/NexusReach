@@ -75,7 +75,7 @@ async def test_draft_message_no_profile(client, mock_user_id):
         )
 
     assert resp.status_code == 400
-    assert "profile" in resp.json()["detail"].lower()
+    assert "profile" in resp.json()["error"]["message"].lower()
 
 
 async def test_edit_message(client, mock_user_id):

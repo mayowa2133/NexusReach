@@ -24,6 +24,10 @@ class GuardrailsResponse(BaseModel):
         default=False,
         description="True if user has acknowledged disabling any guardrail",
     )
+    onboarding_completed: bool = Field(
+        default=False,
+        description="Whether user has completed the onboarding flow",
+    )
 
     model_config = {"from_attributes": True}
 
@@ -37,3 +41,9 @@ class GuardrailsUpdate(BaseModel):
     min_message_gap_enabled: Optional[bool] = None
     follow_up_suggestion_enabled: Optional[bool] = None
     response_rate_warnings_enabled: Optional[bool] = None
+
+
+class OnboardingCompleteResponse(BaseModel):
+    """Response after marking onboarding as complete."""
+
+    onboarding_completed: bool = True
