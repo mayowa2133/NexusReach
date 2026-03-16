@@ -13,6 +13,7 @@ import {
   useGmailAuthUrl,
   useOutlookAuthUrl,
 } from '@/hooks/useEmail';
+import { GuardrailsPanel } from '@/components/settings/GuardrailsPanel';
 import { toast } from 'sonner';
 
 const REDIRECT_URI = `${window.location.origin}/settings`;
@@ -171,22 +172,8 @@ export function SettingsPage() {
 
       <Separator />
 
-      {/* Guardrails — placeholder for Phase 9 */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Outreach Guardrails</CardTitle>
-          <CardDescription>
-            Configure safety settings for your outreach activity.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="rounded-lg border border-dashed p-8 text-center">
-            <p className="text-muted-foreground">
-              Guardrail configuration coming in Phase 9.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
+      {/* Outreach Guardrails */}
+      <GuardrailsPanel />
     </div>
   );
 }

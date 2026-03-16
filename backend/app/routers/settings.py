@@ -1,0 +1,34 @@
+"""Settings API routes — Phase 9."""
+
+import uuid
+from typing import Annotated
+
+from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.database import get_db
+from app.dependencies import get_current_user_id
+from app.schemas.settings import GuardrailsResponse, GuardrailsUpdate
+from app.services import settings_service
+
+router = APIRouter(prefix="/settings", tags=["settings"])
+
+
+@router.get("/guardrails", response_model=GuardrailsResponse)
+async def get_guardrails(
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Return the current guardrails configuration."""
+    return await settings_service.get_guardrails(db, user_id)
+
+
+@router.put("/guardrails", response_model=GuardrailsResponse)
+async def update_guardrails(
+    body: GuardrailsUpdate,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Partially update guardrails settings."""
+    payload = body.model_dump(exclude_none=True)
+    return await settings_service.update_guardrails(db, user_id, payload)

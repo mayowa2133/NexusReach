@@ -7,6 +7,7 @@ import { useProfile, getProfileCompletion } from '@/hooks/useProfile';
 import { useInsightsDashboard } from '@/hooks/useInsights';
 import { useOutreachLogs } from '@/hooks/useOutreach';
 import { useJobs } from '@/hooks/useJobs';
+import { useGuardrails } from '@/hooks/useSettings';
 import { MetricCards } from '@/components/dashboard/MetricCards';
 import { ResponseRateChart } from '@/components/dashboard/ResponseRateChart';
 import { AngleEffectivenessChart } from '@/components/dashboard/AngleEffectivenessChart';
@@ -31,14 +32,29 @@ export function DashboardPage() {
   const { data: insights, isLoading: insightsLoading } = useInsightsDashboard();
   const { data: recentLogs } = useOutreachLogs();
   const { data: allJobs } = useJobs(undefined, 'match_score');
+  const { data: guardrails } = useGuardrails();
 
   const topJobs = allJobs?.slice(0, 5) ?? [];
+  const guardrailsModified = guardrails && (
+    !guardrails.min_message_gap_enabled ||
+    !guardrails.follow_up_suggestion_enabled ||
+    !guardrails.response_rate_warnings_enabled
+  );
   const recentOutreach = recentLogs?.slice(0, 5) ?? [];
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-semibold tracking-tight">Dashboard</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-3xl font-semibold tracking-tight">Dashboard</h1>
+          {guardrailsModified && (
+            <Link to="/settings">
+              <Badge variant="destructive" className="text-xs">
+                Guardrails: Modified
+              </Badge>
+            </Link>
+          )}
+        </div>
         <p className="text-muted-foreground">Your networking overview at a glance.</p>
       </div>
 

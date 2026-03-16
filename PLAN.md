@@ -150,12 +150,12 @@ Ship a working core loop first, then layer features on top. At every phase, the 
 ## Phase 9: Settings + Guardrails
 **Goal:** User control over all configurable behaviours.
 
-- [ ] Settings page UI
-- [ ] Outreach guardrails toggles (7-day gap, follow-up suggestions, response warnings)
-- [ ] Toggle-off modal with risk explanation
-- [ ] Persistent "Guardrails: Modified" indicator
+- [x] Settings page UI
+- [x] Outreach guardrails toggles (7-day gap, follow-up suggestions, response warnings)
+- [x] Toggle-off modal with risk explanation
+- [x] Persistent "Guardrails: Modified" indicator
+- [x] Email integration management (connect/disconnect)
 - [ ] API key management (user-provided keys for personal use)
-- [ ] Email integration management (connect/disconnect)
 - [ ] Profile editing from settings
 
 **Deliverable:** User has full control over tool behaviour with sensible defaults.
@@ -181,8 +181,8 @@ Ship a working core loop first, then layer features on top. At every phase, the 
 
 ## Current Status
 
-**Phase:** Phase 8 complete
+**Phase:** Phase 9 complete
 
-**Completed:** Phase 1 (Skeleton + Auth), Phase 2 (Profile Setup + Resume Parsing), Phase 3 (People Finder), Phase 4 (Message Drafting), Phase 5 (Email Layer), Phase 6 (Job Intelligence), Phase 7 (Outreach Tracker CRM), Phase 8 (Insights Dashboard)
+**Completed:** Phase 1 (Skeleton + Auth), Phase 2 (Profile Setup + Resume Parsing), Phase 3 (People Finder), Phase 4 (Message Drafting), Phase 5 (Email Layer), Phase 6 (Job Intelligence), Phase 7 (Outreach Tracker CRM), Phase 8 (Insights Dashboard), Phase 9 (Settings + Guardrails)
 
-**Next step:** Phase 9 — Settings + Guardrails
+**Next step:** Phase 10 — Polish + Production

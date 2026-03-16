@@ -297,6 +297,15 @@ export interface CompanyOpenness {
   rate: number;
 }
 
+// Settings + Guardrails types (Phase 9)
+export interface GuardrailsSettings {
+  min_message_gap_days: number;
+  min_message_gap_enabled: boolean;
+  follow_up_suggestion_enabled: boolean;
+  response_rate_warnings_enabled: boolean;
+  guardrails_acknowledged: boolean;
+}
+
 export interface InsightsDashboard {
   summary: DashboardSummary;
   response_by_channel: ResponseRateBreakdown[];
