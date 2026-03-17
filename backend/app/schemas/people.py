@@ -28,6 +28,7 @@ class PersonResponse(BaseModel):
     github_data: dict | None
     source: str | None
     apollo_id: str | None = None
+    relevance_score: int | None = None
     company: CompanyResponse | None = None
 
     model_config = {"from_attributes": True}
@@ -38,6 +39,7 @@ class PeopleSearchRequest(BaseModel):
     roles: list[str] | None = None
     github_org: str | None = None
     job_id: str | None = None
+    min_relevance_score: int = 1
 
 
 class ManualPersonRequest(BaseModel):

@@ -66,9 +66,9 @@ async def get_daily_usage(
         "total_tokens_out": row.total_tokens_out,
         "total_cost_cents": row.total_cost_cents,
         "daily_call_limit": settings.daily_api_call_limit,
-        "daily_token_limit": settings.daily_claude_token_limit,
+        "daily_token_limit": settings.daily_llm_token_limit,
         "calls_remaining": max(0, settings.daily_api_call_limit - total_calls),
-        "tokens_remaining": max(0, settings.daily_claude_token_limit - total_tokens),
+        "tokens_remaining": max(0, settings.daily_llm_token_limit - total_tokens),
     }
 
 
@@ -89,9 +89,9 @@ async def check_daily_limit(
         )
 
     total_tokens = usage["total_tokens_in"] + usage["total_tokens_out"]
-    if total_tokens >= settings.daily_claude_token_limit:
+    if total_tokens >= settings.daily_llm_token_limit:
         raise ValueError(
-            f"Daily token limit reached ({settings.daily_claude_token_limit:,} tokens). "
+            f"Daily token limit reached ({settings.daily_llm_token_limit:,} tokens). "
             "Try again tomorrow."
         )
 

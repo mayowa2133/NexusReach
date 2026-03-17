@@ -1,14 +1,25 @@
-"""Apollo.io API client for people discovery (free) and enrichment (credits)."""
+"""Apollo.io API client for people discovery (free) and enrichment (credits).
+
+Free-tier endpoints use /api/v1/ prefix with X-Api-Key header auth.
+Paid endpoints use /v1/ prefix. People search and enrichment require
+a paid plan — they return 403 on free tier but are kept here so upgrading
+Apollo just works without code changes.
+"""
 
 import httpx
 
 from app.config import settings
 
-# Credit-consuming endpoints (enrichment, company search)
+# Free-tier endpoints (company search/enrich, contacts)
+APOLLO_API_URL = "https://api.apollo.io/api/v1"
+
+# Paid-tier endpoints (people search, enrichment)
 APOLLO_BASE_URL = "https://api.apollo.io/v1"
 
-# Free discovery endpoint (no credits, no emails)
-APOLLO_API_SEARCH_URL = "https://api.apollo.io/api/v1"
+
+def _get_api_key() -> str:
+    """Return the best available Apollo API key."""
+    return settings.apollo_master_api_key or settings.apollo_api_key
 
 
 async def search_people(
@@ -18,11 +29,10 @@ async def search_people(
     departments: list[str] | None = None,
     limit: int = 10,
 ) -> list[dict]:
-    """Search for people at a company using the free api_search endpoint.
+    """Search for people at a company using Apollo's discovery endpoint.
 
     Uses /api/v1/mixed_people/api_search which does NOT consume credits
-    but also does NOT return email addresses. Use enrich_person() separately
-    to get emails (1 credit per call).
+    but requires a paid plan. Returns [] gracefully on free-tier 403.
 
     Args:
         company_name: Company name to search within.
@@ -32,10 +42,9 @@ async def search_people(
         limit: Max results to return.
 
     Returns:
-        List of person dicts with name, title, company, linkedin_url, apollo_id, etc.
-        Does NOT include work_email — use enrich_person() for that.
+        List of person dicts, or [] if unavailable/unauthorized.
     """
-    api_key = settings.apollo_master_api_key or settings.apollo_api_key
+    api_key = _get_api_key()
     if not api_key:
         return []
 
@@ -51,14 +60,20 @@ async def search_people(
     if departments:
         params["person_departments"] = departments
 
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.post(
-            f"{APOLLO_API_SEARCH_URL}/mixed_people/api_search",
-            headers={"X-Api-Key": api_key},
-            json=params,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                f"{APOLLO_API_URL}/mixed_people/api_search",
+                headers={"X-Api-Key": api_key},
+                json=params,
+            )
+            if resp.status_code == 403:
+                # Free tier — endpoint not accessible
+                return []
+            resp.raise_for_status()
+            data = resp.json()
+    except httpx.HTTPError:
+        return []
 
     people = data.get("people", [])
     return [
@@ -87,8 +102,8 @@ async def enrich_person(
 ) -> dict | None:
     """Enrich a person to get their email address (costs 1 Apollo credit).
 
-    Uses /v1/people/match which accepts various identifiers.
-    Preferred lookup order: apollo_id > linkedin_url > name+domain.
+    Uses /v1/people/match which requires a paid plan.
+    Returns None gracefully on free-tier 403.
 
     Args:
         apollo_id: Apollo person ID (most reliable).
@@ -97,7 +112,7 @@ async def enrich_person(
         domain: Company domain (used with full_name).
 
     Returns:
-        Dict with work_email, email_verified, apollo_id, or None if no match.
+        Dict with work_email, email_verified, apollo_id, or None if unavailable.
     """
     if not settings.apollo_api_key:
         return None
@@ -119,13 +134,19 @@ async def enrich_person(
     else:
         return None
 
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.post(
-            f"{APOLLO_BASE_URL}/people/match",
-            json=params,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                f"{APOLLO_BASE_URL}/people/match",
+                json=params,
+            )
+            if resp.status_code == 403:
+                # Free tier — endpoint not accessible
+                return None
+            resp.raise_for_status()
+            data = resp.json()
+    except httpx.HTTPError:
+        return None
 
     person = data.get("person")
     if not person:
@@ -143,21 +164,30 @@ async def enrich_person(
 
 
 async def search_company(company_name: str) -> dict | None:
-    """Look up a company by name and return basic info."""
-    if not settings.apollo_api_key:
+    """Look up a company by name and return basic info.
+
+    Uses /api/v1/organizations/search (free tier).
+    """
+    api_key = _get_api_key()
+    if not api_key:
         return None
 
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.post(
-            f"{APOLLO_BASE_URL}/mixed_companies/search",
-            json={
-                "api_key": settings.apollo_api_key,
-                "q_organization_name": company_name,
-                "per_page": 1,
-            },
-        )
-        resp.raise_for_status()
-        data = resp.json()
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                f"{APOLLO_API_URL}/organizations/search",
+                headers={"X-Api-Key": api_key},
+                json={
+                    "q_organization_name": company_name,
+                    "per_page": 1,
+                },
+            )
+            if resp.status_code == 403:
+                return None
+            resp.raise_for_status()
+            data = resp.json()
+    except httpx.HTTPError:
+        return None
 
     orgs = data.get("organizations", [])
     if not orgs:
@@ -167,6 +197,45 @@ async def search_company(company_name: str) -> dict | None:
     return {
         "name": org.get("name", company_name),
         "domain": org.get("primary_domain", ""),
+        "size": org.get("estimated_num_employees", ""),
+        "industry": org.get("industry", ""),
+        "description": org.get("short_description", ""),
+        "linkedin_url": org.get("linkedin_url", ""),
+        "careers_url": org.get("website_url", ""),
+    }
+
+
+async def enrich_company(domain: str) -> dict | None:
+    """Enrich a company by domain for detailed info.
+
+    Uses GET /api/v1/organizations/enrich (free tier).
+    Returns richer data than search_company().
+    """
+    api_key = _get_api_key()
+    if not api_key:
+        return None
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                f"{APOLLO_API_URL}/organizations/enrich",
+                headers={"X-Api-Key": api_key},
+                params={"domain": domain},
+            )
+            if resp.status_code == 403:
+                return None
+            resp.raise_for_status()
+            data = resp.json()
+    except httpx.HTTPError:
+        return None
+
+    org = data.get("organization")
+    if not org:
+        return None
+
+    return {
+        "name": org.get("name", ""),
+        "domain": org.get("primary_domain", domain),
         "size": org.get("estimated_num_employees", ""),
         "industry": org.get("industry", ""),
         "description": org.get("short_description", ""),

@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.clients import claude_client
+from app.clients import llm_client
 from app.models.message import Message
 from app.models.person import Person
 from app.models.profile import Profile
@@ -204,11 +204,11 @@ ABOUT THE RECIPIENT:
 {person_context}
 {history_context}"""
 
-    # Check daily usage limits before calling Claude
+    # Check daily usage limits before calling LLM
     await api_usage_service.check_daily_limit(db, user_id)
 
-    # Call Claude
-    ai_result = await claude_client.generate_message(
+    # Call LLM provider
+    ai_result = await llm_client.generate_message(
         system_prompt=system,
         user_prompt=user_prompt,
     )
@@ -218,7 +218,7 @@ ABOUT THE RECIPIENT:
     await api_usage_service.record_usage(
         db=db,
         user_id=user_id,
-        service="claude",
+        service=ai_result.get("provider", "unknown"),
         endpoint="messages.draft",
         tokens_in=usage.get("input_tokens"),
         tokens_out=usage.get("output_tokens"),

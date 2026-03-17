@@ -46,6 +46,7 @@ async def search_people(
                 db=db,
                 user_id=user_id,
                 job_id=job_uuid,
+                min_relevance_score=body.min_relevance_score,
             )
         except ValueError:
             raise HTTPException(status_code=404, detail="Job not found")

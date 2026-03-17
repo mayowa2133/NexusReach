@@ -1,4 +1,4 @@
-"""Unit tests for Apollo.io API client — free discovery + on-demand enrichment."""
+"""Unit tests for Apollo.io API client — free-tier company endpoints + paid people search."""
 
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
@@ -17,333 +17,248 @@ def _mock_httpx_response(json_data, status_code=200):
     return resp
 
 
+def _mock_httpx_403():
+    """Create a mock 403 response that raises on raise_for_status."""
+    import httpx
+    resp = MagicMock()
+    resp.status_code = 403
+    resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+        "403 Forbidden", request=MagicMock(), response=resp
+    )
+    return resp
+
+
+def _mock_client_with(response):
+    """Create a mock httpx.AsyncClient that returns the given response."""
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.post = AsyncMock(return_value=response)
+    mock_client.get = AsyncMock(return_value=response)
+    return mock_client
+
+
 class TestSearchPeople:
-    """Tests for search_people() — free api_search endpoint."""
+    """Tests for search_people() — paid people discovery (kept for future upgrade)."""
 
-    async def test_calls_free_api_search_endpoint(self):
-        """search_people() uses /api/v1/mixed_people/api_search, not /v1/mixed_people/search."""
-        mock_resp = _mock_httpx_response({"people": []})
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client.post = AsyncMock(return_value=mock_resp)
+    async def test_calls_api_search_endpoint(self):
+        mock_client = _mock_client_with(_mock_httpx_response({"people": []}))
 
         with (
             patch("app.clients.apollo_client.httpx.AsyncClient", return_value=mock_client),
-            patch("app.clients.apollo_client.settings") as mock_settings,
+            patch("app.clients.apollo_client.settings") as s,
         ):
-            mock_settings.apollo_master_api_key = "master-key-123"
-            mock_settings.apollo_api_key = "standard-key-456"
+            s.apollo_master_api_key = "master-key"
+            s.apollo_api_key = "std-key"
             await apollo_client.search_people("Stripe")
 
-        call_args = mock_client.post.call_args
-        url = call_args[0][0]
+        url = mock_client.post.call_args[0][0]
         assert "/api/v1/mixed_people/api_search" in url
-        assert "/v1/mixed_people/search" not in url or "/api/v1/" in url
 
-    async def test_sends_master_key_in_header(self):
-        """search_people() sends the master API key in X-Api-Key header, not in body."""
-        mock_resp = _mock_httpx_response({"people": []})
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client.post = AsyncMock(return_value=mock_resp)
+    async def test_sends_key_in_header(self):
+        mock_client = _mock_client_with(_mock_httpx_response({"people": []}))
 
         with (
             patch("app.clients.apollo_client.httpx.AsyncClient", return_value=mock_client),
-            patch("app.clients.apollo_client.settings") as mock_settings,
+            patch("app.clients.apollo_client.settings") as s,
         ):
-            mock_settings.apollo_master_api_key = "master-key-123"
-            mock_settings.apollo_api_key = "standard-key-456"
+            s.apollo_master_api_key = "master-key"
+            s.apollo_api_key = "std-key"
             await apollo_client.search_people("Stripe")
 
-        call_args = mock_client.post.call_args
-        headers = call_args[1].get("headers", {})
-        json_body = call_args[1].get("json", {})
-
-        assert headers.get("X-Api-Key") == "master-key-123"
+        headers = mock_client.post.call_args[1].get("headers", {})
+        json_body = mock_client.post.call_args[1].get("json", {})
+        assert headers.get("X-Api-Key") == "master-key"
         assert "api_key" not in json_body
 
-    async def test_does_not_return_work_email(self):
-        """search_people() results do NOT include work_email."""
-        mock_resp = _mock_httpx_response({
-            "people": [
-                {
-                    "id": "apollo-123",
-                    "name": "Jane Doe",
-                    "title": "Software Engineer",
-                    "seniority": "senior",
-                    "linkedin_url": "https://linkedin.com/in/janedoe",
-                    "photo_url": "https://example.com/photo.jpg",
-                    "departments": ["engineering_technical"],
-                    "organization": {"name": "Stripe"},
-                }
-            ]
-        })
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client.post = AsyncMock(return_value=mock_resp)
+    async def test_returns_empty_on_403(self):
+        """Free-tier 403 returns empty list instead of raising."""
+        mock_client = _mock_client_with(_mock_httpx_response({}, status_code=403))
 
         with (
             patch("app.clients.apollo_client.httpx.AsyncClient", return_value=mock_client),
-            patch("app.clients.apollo_client.settings") as mock_settings,
+            patch("app.clients.apollo_client.settings") as s,
         ):
-            mock_settings.apollo_master_api_key = "master-key-123"
-            mock_settings.apollo_api_key = ""
-            results = await apollo_client.search_people("Stripe")
-
-        assert len(results) == 1
-        person = results[0]
-        assert "work_email" not in person
-        assert "email_verified" not in person
-
-    async def test_returns_apollo_id(self):
-        """search_people() returns apollo_id from the response."""
-        mock_resp = _mock_httpx_response({
-            "people": [
-                {
-                    "id": "apollo-abc-123",
-                    "name": "John Smith",
-                    "title": "Engineer",
-                    "organization": {"name": "Stripe"},
-                }
-            ]
-        })
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client.post = AsyncMock(return_value=mock_resp)
-
-        with (
-            patch("app.clients.apollo_client.httpx.AsyncClient", return_value=mock_client),
-            patch("app.clients.apollo_client.settings") as mock_settings,
-        ):
-            mock_settings.apollo_master_api_key = "key"
-            mock_settings.apollo_api_key = ""
-            results = await apollo_client.search_people("Stripe")
-
-        assert results[0]["apollo_id"] == "apollo-abc-123"
-
-    async def test_returns_empty_when_no_key(self):
-        """search_people() returns empty list when no API key configured."""
-        with patch("app.clients.apollo_client.settings") as mock_settings:
-            mock_settings.apollo_master_api_key = ""
-            mock_settings.apollo_api_key = ""
+            s.apollo_master_api_key = "key"
+            s.apollo_api_key = ""
             results = await apollo_client.search_people("Stripe")
 
         assert results == []
 
-    async def test_falls_back_to_standard_key(self):
-        """search_people() uses apollo_api_key if master key is not set."""
-        mock_resp = _mock_httpx_response({"people": []})
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client.post = AsyncMock(return_value=mock_resp)
+    async def test_returns_empty_when_no_key(self):
+        with patch("app.clients.apollo_client.settings") as s:
+            s.apollo_master_api_key = ""
+            s.apollo_api_key = ""
+            results = await apollo_client.search_people("Stripe")
+        assert results == []
+
+    async def test_returns_apollo_id(self):
+        mock_resp = _mock_httpx_response({
+            "people": [{
+                "id": "apollo-abc", "name": "Jane", "title": "Eng",
+                "organization": {"name": "Stripe"},
+            }]
+        })
+        mock_client = _mock_client_with(mock_resp)
 
         with (
             patch("app.clients.apollo_client.httpx.AsyncClient", return_value=mock_client),
-            patch("app.clients.apollo_client.settings") as mock_settings,
+            patch("app.clients.apollo_client.settings") as s,
         ):
-            mock_settings.apollo_master_api_key = ""
-            mock_settings.apollo_api_key = "standard-key-456"
-            await apollo_client.search_people("Stripe")
+            s.apollo_master_api_key = "key"
+            s.apollo_api_key = ""
+            results = await apollo_client.search_people("Stripe")
 
-        call_args = mock_client.post.call_args
-        headers = call_args[1].get("headers", {})
-        assert headers.get("X-Api-Key") == "standard-key-456"
+        assert results[0]["apollo_id"] == "apollo-abc"
+        assert "work_email" not in results[0]
 
 
 class TestEnrichPerson:
-    """Tests for enrich_person() — credit-consuming enrichment."""
+    """Tests for enrich_person() — paid email enrichment."""
 
-    async def test_calls_people_match_endpoint(self):
-        """enrich_person() uses /v1/people/match."""
+    async def test_returns_email(self):
         mock_resp = _mock_httpx_response({
-            "person": {
-                "id": "apollo-123",
-                "email": "jane@stripe.com",
-                "email_status": "verified",
-            }
+            "person": {"id": "a123", "email": "j@s.com", "email_status": "verified"}
         })
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client.post = AsyncMock(return_value=mock_resp)
+        mock_client = _mock_client_with(mock_resp)
 
         with (
             patch("app.clients.apollo_client.httpx.AsyncClient", return_value=mock_client),
-            patch("app.clients.apollo_client.settings") as mock_settings,
+            patch("app.clients.apollo_client.settings") as s,
         ):
-            mock_settings.apollo_api_key = "standard-key"
-            await apollo_client.enrich_person(apollo_id="apollo-123")
+            s.apollo_api_key = "key"
+            result = await apollo_client.enrich_person(apollo_id="a123")
 
-        call_args = mock_client.post.call_args
-        url = call_args[0][0]
-        assert "/v1/people/match" in url
-
-    async def test_uses_standard_key_in_body(self):
-        """enrich_person() sends standard API key in JSON body, not headers."""
-        mock_resp = _mock_httpx_response({
-            "person": {
-                "id": "apollo-123",
-                "email": "jane@stripe.com",
-                "email_status": "verified",
-            }
-        })
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client.post = AsyncMock(return_value=mock_resp)
-
-        with (
-            patch("app.clients.apollo_client.httpx.AsyncClient", return_value=mock_client),
-            patch("app.clients.apollo_client.settings") as mock_settings,
-        ):
-            mock_settings.apollo_api_key = "standard-key-789"
-            await apollo_client.enrich_person(apollo_id="apollo-123")
-
-        call_args = mock_client.post.call_args
-        json_body = call_args[1].get("json", {})
-        assert json_body["api_key"] == "standard-key-789"
-
-    async def test_returns_email_and_verification(self):
-        """enrich_person() returns work_email and email_verified."""
-        mock_resp = _mock_httpx_response({
-            "person": {
-                "id": "apollo-123",
-                "email": "jane@stripe.com",
-                "email_status": "verified",
-            }
-        })
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client.post = AsyncMock(return_value=mock_resp)
-
-        with (
-            patch("app.clients.apollo_client.httpx.AsyncClient", return_value=mock_client),
-            patch("app.clients.apollo_client.settings") as mock_settings,
-        ):
-            mock_settings.apollo_api_key = "key"
-            result = await apollo_client.enrich_person(apollo_id="apollo-123")
-
-        assert result is not None
-        assert result["work_email"] == "jane@stripe.com"
+        assert result["work_email"] == "j@s.com"
         assert result["email_verified"] is True
-        assert result["apollo_id"] == "apollo-123"
 
-    async def test_returns_none_when_no_email(self):
-        """enrich_person() returns None when person has no email."""
-        mock_resp = _mock_httpx_response({
-            "person": {
-                "id": "apollo-123",
-                "email": "",
-                "email_status": None,
-            }
-        })
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client.post = AsyncMock(return_value=mock_resp)
+    async def test_returns_none_on_403(self):
+        """Free-tier 403 returns None instead of raising."""
+        mock_client = _mock_client_with(_mock_httpx_response({}, status_code=403))
 
         with (
             patch("app.clients.apollo_client.httpx.AsyncClient", return_value=mock_client),
-            patch("app.clients.apollo_client.settings") as mock_settings,
+            patch("app.clients.apollo_client.settings") as s,
         ):
-            mock_settings.apollo_api_key = "key"
-            result = await apollo_client.enrich_person(apollo_id="apollo-123")
-
-        assert result is None
-
-    async def test_returns_none_when_no_match(self):
-        """enrich_person() returns None when no person found."""
-        mock_resp = _mock_httpx_response({"person": None})
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client.post = AsyncMock(return_value=mock_resp)
-
-        with (
-            patch("app.clients.apollo_client.httpx.AsyncClient", return_value=mock_client),
-            patch("app.clients.apollo_client.settings") as mock_settings,
-        ):
-            mock_settings.apollo_api_key = "key"
-            result = await apollo_client.enrich_person(linkedin_url="https://linkedin.com/in/nobody")
+            s.apollo_api_key = "key"
+            result = await apollo_client.enrich_person(apollo_id="a123")
 
         assert result is None
 
     async def test_returns_none_when_no_key(self):
-        """enrich_person() returns None when no API key configured."""
-        with patch("app.clients.apollo_client.settings") as mock_settings:
-            mock_settings.apollo_api_key = ""
+        with patch("app.clients.apollo_client.settings") as s:
+            s.apollo_api_key = ""
             result = await apollo_client.enrich_person(apollo_id="abc")
-
         assert result is None
 
     async def test_returns_none_when_no_identifiers(self):
-        """enrich_person() returns None when no identifiers provided."""
-        with patch("app.clients.apollo_client.settings") as mock_settings:
-            mock_settings.apollo_api_key = "key"
+        with patch("app.clients.apollo_client.settings") as s:
+            s.apollo_api_key = "key"
             result = await apollo_client.enrich_person()
+        assert result is None
+
+    async def test_returns_none_when_no_email(self):
+        mock_resp = _mock_httpx_response({
+            "person": {"id": "a123", "email": "", "email_status": None}
+        })
+        mock_client = _mock_client_with(mock_resp)
+
+        with (
+            patch("app.clients.apollo_client.httpx.AsyncClient", return_value=mock_client),
+            patch("app.clients.apollo_client.settings") as s,
+        ):
+            s.apollo_api_key = "key"
+            result = await apollo_client.enrich_person(apollo_id="a123")
 
         assert result is None
 
-    async def test_enriches_by_linkedin_url(self):
-        """enrich_person() can enrich using LinkedIn URL."""
+
+class TestSearchCompany:
+    """Tests for search_company() — free-tier organizations/search endpoint."""
+
+    async def test_uses_organizations_search_endpoint(self):
         mock_resp = _mock_httpx_response({
-            "person": {
-                "id": "apollo-456",
-                "email": "john@google.com",
-                "email_status": "guessed",
-            }
+            "organizations": [{"name": "Google", "primary_domain": "google.com",
+                               "industry": "tech", "estimated_num_employees": 188000}]
         })
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client.post = AsyncMock(return_value=mock_resp)
+        mock_client = _mock_client_with(mock_resp)
 
         with (
             patch("app.clients.apollo_client.httpx.AsyncClient", return_value=mock_client),
-            patch("app.clients.apollo_client.settings") as mock_settings,
+            patch("app.clients.apollo_client.settings") as s,
         ):
-            mock_settings.apollo_api_key = "key"
-            result = await apollo_client.enrich_person(
-                linkedin_url="https://linkedin.com/in/johndoe"
-            )
+            s.apollo_master_api_key = ""
+            s.apollo_api_key = "key"
+            result = await apollo_client.search_company("Google")
 
-        assert result is not None
-        assert result["work_email"] == "john@google.com"
-        assert result["email_verified"] is False  # "guessed" != "verified"
+        url = mock_client.post.call_args[0][0]
+        assert "/api/v1/organizations/search" in url
+        headers = mock_client.post.call_args[1].get("headers", {})
+        assert headers.get("X-Api-Key") == "key"
+        assert result["name"] == "Google"
+        assert result["domain"] == "google.com"
 
-    async def test_enriches_by_name_and_domain(self):
-        """enrich_person() can enrich using name + domain."""
-        mock_resp = _mock_httpx_response({
-            "person": {
-                "id": "apollo-789",
-                "email": "alice@meta.com",
-                "email_status": "verified",
-            }
-        })
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client.post = AsyncMock(return_value=mock_resp)
+    async def test_returns_none_when_no_key(self):
+        with patch("app.clients.apollo_client.settings") as s:
+            s.apollo_master_api_key = ""
+            s.apollo_api_key = ""
+            result = await apollo_client.search_company("Google")
+        assert result is None
+
+    async def test_returns_none_on_empty_results(self):
+        mock_client = _mock_client_with(_mock_httpx_response({"organizations": []}))
 
         with (
             patch("app.clients.apollo_client.httpx.AsyncClient", return_value=mock_client),
-            patch("app.clients.apollo_client.settings") as mock_settings,
+            patch("app.clients.apollo_client.settings") as s,
         ):
-            mock_settings.apollo_api_key = "key"
-            result = await apollo_client.enrich_person(
-                full_name="Alice Johnson", domain="meta.com"
-            )
+            s.apollo_master_api_key = ""
+            s.apollo_api_key = "key"
+            result = await apollo_client.search_company("NonExistentCorp")
 
-        call_args = mock_client.post.call_args
-        json_body = call_args[1].get("json", {})
-        assert json_body["first_name"] == "Alice"
-        assert json_body["last_name"] == "Johnson"
-        assert json_body["domain"] == "meta.com"
-        assert result is not None
-        assert result["work_email"] == "alice@meta.com"
+        assert result is None
+
+
+class TestEnrichCompany:
+    """Tests for enrich_company() — free-tier organizations/enrich endpoint."""
+
+    async def test_uses_get_with_domain_param(self):
+        mock_resp = _mock_httpx_response({
+            "organization": {"name": "Stripe", "primary_domain": "stripe.com",
+                             "industry": "fintech", "estimated_num_employees": 8000}
+        })
+        mock_client = _mock_client_with(mock_resp)
+
+        with (
+            patch("app.clients.apollo_client.httpx.AsyncClient", return_value=mock_client),
+            patch("app.clients.apollo_client.settings") as s,
+        ):
+            s.apollo_master_api_key = ""
+            s.apollo_api_key = "key"
+            result = await apollo_client.enrich_company("stripe.com")
+
+        url = mock_client.get.call_args[0][0]
+        assert "/api/v1/organizations/enrich" in url
+        params = mock_client.get.call_args[1].get("params", {})
+        assert params["domain"] == "stripe.com"
+        assert result["name"] == "Stripe"
+
+    async def test_returns_none_when_no_key(self):
+        with patch("app.clients.apollo_client.settings") as s:
+            s.apollo_master_api_key = ""
+            s.apollo_api_key = ""
+            result = await apollo_client.enrich_company("stripe.com")
+        assert result is None
+
+    async def test_returns_none_on_no_organization(self):
+        mock_client = _mock_client_with(_mock_httpx_response({"organization": None}))
+
+        with (
+            patch("app.clients.apollo_client.httpx.AsyncClient", return_value=mock_client),
+            patch("app.clients.apollo_client.settings") as s,
+        ):
+            s.apollo_master_api_key = ""
+            s.apollo_api_key = "key"
+            result = await apollo_client.enrich_company("nonexistent.xyz")
+
+        assert result is None

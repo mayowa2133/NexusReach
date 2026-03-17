@@ -29,6 +29,14 @@ class Settings(BaseSettings):
     adzuna_app_id: str = ""
     adzuna_api_key: str = ""
     anthropic_api_key: str = ""
+    openai_api_key: str = ""
+    google_api_key: str = ""
+    google_cse_id: str = ""
+    groq_api_key: str = ""
+    brave_api_key: str = ""
+
+    # LLM provider selection (anthropic | openai | gemini | groq)
+    llm_provider: str = "anthropic"
 
     # OAuth (Gmail / Outlook)
     google_client_id: str = ""
@@ -42,7 +50,7 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:5173"]
 
     # Usage limits
-    daily_claude_token_limit: int = 100_000
+    daily_llm_token_limit: int = 100_000
     daily_api_call_limit: int = 50
 
 

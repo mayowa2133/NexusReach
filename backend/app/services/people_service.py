@@ -7,11 +7,12 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.clients import apollo_client, proxycurl_client, github_client
+from app.clients import apollo_client, brave_search_client, proxycurl_client, github_client
 from app.models.company import Company
 from app.models.job import Job
 from app.models.person import Person
 from app.utils.job_context import extract_job_context
+from app.utils.relevance_scorer import score_candidate_relevance
 
 # Title patterns for categorizing people
 RECRUITER_TITLES = {"recruiter", "talent", "hiring", "people operations", "hr ", "human resources"}
@@ -117,6 +118,7 @@ async def _store_person(
         github_data=data.get("github_data"),
         source=data.get("source", "unknown"),
         apollo_id=apollo_id or None,
+        relevance_score=data.get("relevance_score"),
     )
     db.add(person)
     return person
@@ -141,23 +143,34 @@ async def search_people_at_company(
     """
     company = await get_or_create_company(db, user_id, company_name)
 
-    # Gather people from Apollo (primary source)
+    # Gather people — try Apollo first, fall back to Google CSE
+    recruiter_titles = ["recruiter", "talent acquisition", "technical recruiter"]
+    manager_titles = roles or ["engineering manager", "team lead", "hiring manager"]
+    peer_titles = roles or ["software engineer", "developer", "swe"]
+
     recruiter_results = await apollo_client.search_people(
-        company_name,
-        titles=["recruiter", "talent acquisition", "technical recruiter"],
-        limit=3,
+        company_name, titles=recruiter_titles, limit=3,
     )
+    if not recruiter_results:
+        recruiter_results = await brave_search_client.search_people(
+            company_name, titles=recruiter_titles, limit=5,
+        )
+
     manager_results = await apollo_client.search_people(
-        company_name,
-        titles=roles or ["engineering manager", "team lead", "hiring manager"],
-        seniority=["manager", "director", "vp"],
-        limit=3,
+        company_name, titles=manager_titles, seniority=["manager", "director", "vp"], limit=3,
     )
+    if not manager_results:
+        manager_results = await brave_search_client.search_people(
+            company_name, titles=manager_titles, limit=5,
+        )
+
     peer_results = await apollo_client.search_people(
-        company_name,
-        titles=roles or ["software engineer", "developer", "swe"],
-        limit=3,
+        company_name, titles=peer_titles, limit=3,
     )
+    if not peer_results:
+        peer_results = await brave_search_client.search_people(
+            company_name, titles=peer_titles, limit=5,
+        )
 
     # GitHub org members (if org name provided)
     github_members: list[dict] = []
@@ -209,6 +222,7 @@ async def search_people_for_job(
     db: AsyncSession,
     user_id: uuid.UUID,
     job_id: uuid.UUID,
+    min_relevance_score: int = 1,
 ) -> dict:
     """Find people at a company using job context for targeted search.
 
@@ -239,6 +253,7 @@ async def search_people_for_job(
     company = await get_or_create_company(db, user_id, job.company_name)
 
     # --- Targeted searches using extracted context ---
+    # Try Apollo first (with department filtering), fall back to Google CSE
     min_results = 2  # fallback threshold
 
     # Recruiters
@@ -250,9 +265,12 @@ async def search_people_for_job(
     )
     if len(recruiter_results) < min_results:
         recruiter_results = await apollo_client.search_people(
-            job.company_name,
-            titles=context.recruiter_titles,
-            limit=3,
+            job.company_name, titles=context.recruiter_titles, limit=3,
+        )
+    if not recruiter_results:
+        recruiter_results = await brave_search_client.search_people(
+            job.company_name, titles=context.recruiter_titles,
+            team_keywords=context.team_keywords, limit=5,
         )
 
     # Managers
@@ -265,11 +283,23 @@ async def search_people_for_job(
     )
     if len(manager_results) < min_results:
         manager_results = await apollo_client.search_people(
-            job.company_name,
-            titles=context.manager_titles,
-            seniority=["manager", "director", "vp"],
-            limit=3,
+            job.company_name, titles=context.manager_titles,
+            seniority=["manager", "director", "vp"], limit=3,
         )
+    if not manager_results:
+        manager_results = await brave_search_client.search_people(
+            job.company_name, titles=context.manager_titles,
+            team_keywords=context.team_keywords, limit=5,
+        )
+        if manager_results:
+            manager_results = await score_candidate_relevance(
+                manager_results,
+                job_title=job.title,
+                company_name=job.company_name,
+                team_keywords=context.team_keywords,
+                department=context.department,
+                min_score=min_relevance_score,
+            )
 
     # Peers
     peer_results = await apollo_client.search_people(
@@ -280,10 +310,30 @@ async def search_people_for_job(
     )
     if len(peer_results) < min_results:
         peer_results = await apollo_client.search_people(
-            job.company_name,
-            titles=context.peer_titles,
-            limit=3,
+            job.company_name, titles=context.peer_titles, limit=3,
         )
+    if not peer_results:
+        peer_results = await brave_search_client.search_people(
+            job.company_name, titles=context.peer_titles,
+            team_keywords=context.team_keywords, limit=5,
+        )
+        if peer_results:
+            peer_results = await score_candidate_relevance(
+                peer_results,
+                job_title=job.title,
+                company_name=job.company_name,
+                team_keywords=context.team_keywords,
+                department=context.department,
+                min_score=min_relevance_score,
+            )
+
+    # Supplementary: try to find hiring team from LinkedIn job posting
+    hiring_team_results = await brave_search_client.search_hiring_team(
+        job.company_name,
+        job.title,
+        team_keywords=context.team_keywords,
+        limit=3,
+    )
 
     # Store and categorize (reuse existing helpers)
     recruiters: list[Person] = []
@@ -305,6 +355,16 @@ async def search_people_for_job(
     for data in peer_results:
         person = await _store_person(db, user_id, company.id, data, "peer")
         peers.append(person)
+
+    for data in hiring_team_results:
+        ptype = _classify_person(data.get("title", ""))
+        person = await _store_person(db, user_id, company.id, data, ptype)
+        if ptype == "recruiter":
+            recruiters.append(person)
+        elif ptype == "hiring_manager":
+            hiring_managers.append(person)
+        else:
+            peers.append(person)
 
     await db.commit()
 

@@ -212,8 +212,41 @@ Ship a working core loop first, then layer features on top. At every phase, the 
 
 ---
 
+## Phase 13: Multi-Provider LLM Support
+**Goal:** Allow message drafting with any major LLM provider — not just Anthropic Claude. Users set `NEXUSREACH_LLM_PROVIDER` env var to switch globally between Anthropic, OpenAI, Google Gemini, and Groq.
+
+- [x] Add `openai`, `google-genai`, `groq` dependencies to `requirements.txt`
+- [x] Add config fields — `llm_provider`, `openai_api_key`, `google_api_key`, `groq_api_key`; rename `daily_claude_token_limit` → `daily_llm_token_limit`
+- [x] Create `backend/app/clients/llm_client.py` — provider abstraction with `_resolve_provider()`, four `_generate_*()` implementations, single `generate_message()` public API
+- [x] Delete `backend/app/clients/claude_client.py` — replaced by `llm_client.py`
+- [x] Update `message_service.py` — import `llm_client`, use `ai_result["provider"]` for usage tracking
+- [x] Update `api_usage_service.py` — use `daily_llm_token_limit`
+- [x] Unit tests for `llm_client.py` — `_parse_reasoning`, `_resolve_provider`, all four provider generators, dispatch logic
+- [x] Documentation updates — env vars in `CLAUDE.md`, phase in `PLAN.md`
+
+**Deliverable:** Message drafting works with Anthropic, OpenAI, Gemini, or Groq — auto-falls back to whichever provider has a key configured.
+
+---
+
+## Phase 14: Apollo Free-Tier Fix + Google CSE Fallback
+**Goal:** Fix people discovery for Apollo free-tier users. Apollo people search returns 403 on the free plan, so add Google Custom Search API as a fallback for LinkedIn X-ray people discovery. Keep Apollo code intact so upgrading restores full functionality automatically.
+
+**Tasks:**
+- [x] Create `backend/app/clients/google_search_client.py` — LinkedIn X-ray search via Google CSE (`site:linkedin.com/in "company" "title"`)
+- [x] Add `google_cse_id` to `backend/app/config.py`
+- [x] Update `backend/app/clients/apollo_client.py` — add 403 graceful handling (return `[]`/`None` instead of raising), migrate `search_company` to `/api/v1/organizations/search` (header auth), add `enrich_company()` for free-tier org enrichment
+- [x] Update `backend/app/services/people_service.py` — cascading discovery: Apollo first → Google CSE fallback for all three categories (recruiters, managers, peers)
+- [x] Verify email waterfall resilience — Apollo `enrich_person()` already handles 403 gracefully, no changes needed
+- [x] Rewrite `backend/tests/test_apollo_client.py` — add 403 tests, update company search for new endpoint/auth, add `enrich_company` tests
+- [x] Create `backend/tests/test_google_search_client.py` — parse LinkedIn results, search query construction, error handling
+- [x] Update `.env.example`, `CLAUDE.md` (gotcha #9 + #10), `PLAN.md`
+
+**Deliverable:** People discovery works on Apollo free tier via Google CSE fallback. Upgrading Apollo auto-enables native people search with no code changes.
+
+---
+
 ## Current Status
 
-**Phase:** Phase 12 complete — Apollo Free Discovery + On-Demand Enrichment shipped!
+**Phase:** Phase 14 complete — Apollo Free-Tier Fix + Google CSE Fallback shipped!
 
-**Completed:** Phase 1 (Skeleton + Auth), Phase 2 (Profile Setup + Resume Parsing), Phase 3 (People Finder), Phase 4 (Message Drafting), Phase 5 (Email Layer), Phase 6 (Job Intelligence), Phase 7 (Outreach Tracker CRM), Phase 8 (Insights Dashboard), Phase 9 (Settings + Guardrails), Phase 10 (Polish + Production), Phase 11 (Job-Aware People Discovery), Phase 12 (Apollo Free Discovery + On-Demand Enrichment)
+**Completed:** Phase 1 (Skeleton + Auth), Phase 2 (Profile Setup + Resume Parsing), Phase 3 (People Finder), Phase 4 (Message Drafting), Phase 5 (Email Layer), Phase 6 (Job Intelligence), Phase 7 (Outreach Tracker CRM), Phase 8 (Insights Dashboard), Phase 9 (Settings + Guardrails), Phase 10 (Polish + Production), Phase 11 (Job-Aware People Discovery), Phase 12 (Apollo Free Discovery + On-Demand Enrichment), Phase 13 (Multi-Provider LLM Support), Phase 14 (Apollo Free-Tier Fix + Google CSE Fallback)
