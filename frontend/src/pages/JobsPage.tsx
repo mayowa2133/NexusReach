@@ -7,9 +7,28 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Checkbox } from '@/components/ui/checkbox';
-import { useJobSearch, useATSSearch, useJobs, useUpdateJobStage } from '@/hooks/useJobs';
+import { useJobSearch, useATSSearch, useJobs, useUpdateJobStage, useToggleJobStar } from '@/hooks/useJobs';
 import { toast } from 'sonner';
 import type { Job, JobStage } from '@/types';
+
+function StarIcon({ filled, className }: { filled: boolean; className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill={filled ? 'currentColor' : 'none'}
+      stroke="currentColor"
+      strokeWidth={filled ? 0 : 1.5}
+      className={className}
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M11.48 3.499a.562.562 0 0 1 1.04 0l2.125 5.111a.563.563 0 0 0 .475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 0 0-.182.557l1.285 5.385a.562.562 0 0 1-.84.61l-4.725-2.885a.562.562 0 0 0-.586 0L6.982 20.54a.562.562 0 0 1-.84-.61l1.285-5.386a.562.562 0 0 0-.182-.557l-4.204-3.602a.562.562 0 0 1 .321-.988l5.518-.442a.563.563 0 0 0 .475-.345L11.48 3.5Z"
+      />
+    </svg>
+  );
+}
 
 const STAGES: { value: JobStage; label: string }[] = [
   { value: 'discovered', label: 'Discovered' },
@@ -50,14 +69,16 @@ export function JobsPage() {
   const [atsSlug, setAtsSlug] = useState('');
   const [atsType, setAtsType] = useState('greenhouse');
   const [stageFilter, setStageFilter] = useState<string>('');
+  const [starredFilter, setStarredFilter] = useState(false);
   const [sortBy, setSortBy] = useState('score');
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
 
   const navigate = useNavigate();
   const search = useJobSearch();
   const atsSearch = useATSSearch();
-  const { data: savedJobs } = useJobs(stageFilter || undefined, sortBy);
+  const { data: savedJobs } = useJobs(stageFilter || undefined, sortBy, starredFilter ? true : undefined);
   const updateStage = useUpdateJobStage();
+  const toggleStar = useToggleJobStar();
 
   const handleSearch = async (e: FormEvent) => {
     e.preventDefault();
@@ -87,6 +108,17 @@ export function JobsPage() {
       toast.success(`Found ${results.length} new jobs from ${atsType}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'ATS search failed');
+    }
+  };
+
+  const handleToggleStar = async (jobId: string, starred: boolean) => {
+    try {
+      const updated = await toggleStar.mutateAsync({ jobId, starred });
+      if (selectedJob?.id === jobId) {
+        setSelectedJob({ ...selectedJob, starred: updated.starred });
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update star');
     }
   };
 
@@ -211,6 +243,15 @@ export function JobsPage() {
                 ))}
               </select>
             </div>
+            <Button
+              variant={starredFilter ? 'default' : 'outline'}
+              size="sm"
+              className="h-8 text-xs gap-1"
+              onClick={() => setStarredFilter(!starredFilter)}
+            >
+              <StarIcon filled={starredFilter} className="h-3.5 w-3.5" />
+              Starred
+            </Button>
             <div className="flex items-center gap-2">
               <Label className="text-sm">Sort:</Label>
               <select
@@ -240,6 +281,7 @@ export function JobsPage() {
                 job={job}
                 isSelected={selectedJob?.id === job.id}
                 onClick={() => setSelectedJob(job)}
+                onToggleStar={(starred) => handleToggleStar(job.id, starred)}
               />
             ))
           ) : (
@@ -257,6 +299,7 @@ export function JobsPage() {
             <JobDetail
               job={selectedJob}
               onStageChange={handleStageChange}
+              onToggleStar={(starred) => handleToggleStar(selectedJob.id, starred)}
               onFindPeople={(job) => {
                 const params = new URLSearchParams({
                   job_id: job.id,
@@ -283,10 +326,12 @@ function JobListCard({
   job,
   isSelected,
   onClick,
+  onToggleStar,
 }: {
   job: Job;
   isSelected: boolean;
   onClick: () => void;
+  onToggleStar: (starred: boolean) => void;
 }) {
   return (
     <Card
@@ -299,15 +344,28 @@ function JobListCard({
             <div className="font-medium text-sm truncate">{job.title}</div>
             <div className="text-xs text-muted-foreground">{job.company_name}</div>
           </div>
-          {job.match_score != null && (
-            <div className={`text-xs font-medium px-1.5 py-0.5 rounded ${
-              job.match_score >= 60 ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' :
-              job.match_score >= 30 ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' :
-              'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
-            }`}>
-              {Math.round(job.match_score)}%
-            </div>
-          )}
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              className={`p-0.5 rounded hover:bg-muted transition-colors ${job.starred ? 'text-yellow-500' : 'text-muted-foreground/40 hover:text-yellow-400'}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleStar(!job.starred);
+              }}
+              aria-label={job.starred ? 'Unstar job' : 'Star job'}
+            >
+              <StarIcon filled={job.starred} className="h-4 w-4" />
+            </button>
+            {job.match_score != null && (
+              <div className={`text-xs font-medium px-1.5 py-0.5 rounded ${
+                job.match_score >= 60 ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' :
+                job.match_score >= 30 ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
+              }`}>
+                {Math.round(job.match_score)}%
+              </div>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-1.5 flex-wrap">
           {job.location && (
@@ -328,19 +386,31 @@ function JobListCard({
 function JobDetail({
   job,
   onStageChange,
+  onToggleStar,
   onFindPeople,
 }: {
   job: Job;
   onStageChange: (jobId: string, stage: JobStage) => void;
+  onToggleStar: (starred: boolean) => void;
   onFindPeople: (job: Job) => void;
 }) {
   return (
     <Card>
       <CardHeader>
         <div className="flex items-start justify-between gap-4">
-          <div>
-            <CardTitle>{job.title}</CardTitle>
-            <CardDescription>{job.company_name}</CardDescription>
+          <div className="flex items-start gap-2">
+            <button
+              type="button"
+              className={`mt-1 p-0.5 rounded hover:bg-muted transition-colors ${job.starred ? 'text-yellow-500' : 'text-muted-foreground/40 hover:text-yellow-400'}`}
+              onClick={() => onToggleStar(!job.starred)}
+              aria-label={job.starred ? 'Unstar job' : 'Star job'}
+            >
+              <StarIcon filled={job.starred} className="h-5 w-5" />
+            </button>
+            <div>
+              <CardTitle>{job.title}</CardTitle>
+              <CardDescription>{job.company_name}</CardDescription>
+            </div>
           </div>
           {job.match_score != null && (
             <div className={`text-lg font-bold px-3 py-1 rounded-lg ${

@@ -12,6 +12,7 @@ import {
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { useAuthStore } from '@/stores/auth';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { NotificationBell } from '@/components/NotificationBell';
 import { cn } from '@/lib/utils';
 import { Menu } from 'lucide-react';
 
@@ -104,6 +105,7 @@ export function AppLayout() {
           </nav>
 
           <div className="ml-auto flex items-center gap-2">
+            <NotificationBell />
             <DropdownMenu>
               <DropdownMenuTrigger className="relative flex h-8 w-8 items-center justify-center rounded-full outline-none">
                 <Avatar className="h-8 w-8">

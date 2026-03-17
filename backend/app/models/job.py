@@ -56,6 +56,7 @@ class Job(Base):
     tags: Mapped[list[str] | None] = mapped_column(ARRAY(String))
     department: Mapped[str | None] = mapped_column(String(255))
     notes: Mapped[str | None] = mapped_column(Text)
+    starred: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Company research
     company_id: Mapped[uuid.UUID | None] = mapped_column(

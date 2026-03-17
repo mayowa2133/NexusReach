@@ -7,5 +7,7 @@ from app.models.message import Message
 from app.models.job import Job
 from app.models.outreach import OutreachLog
 from app.models.api_usage import ApiUsage
+from app.models.notification import Notification
+from app.models.search_preference import SearchPreference
 
-__all__ = ["User", "Profile", "UserSettings", "Company", "Person", "Message", "Job", "OutreachLog", "ApiUsage"]
+__all__ = ["User", "Profile", "UserSettings", "Company", "Person", "Message", "Job", "OutreachLog", "ApiUsage", "Notification", "SearchPreference"]

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.clients import jsearch_client, adzuna_client, ats_client, remote_jobs_client
 from app.models.job import Job
 from app.models.profile import Profile
+from app.models.search_preference import SearchPreference
 
 
 # --- Deduplication ---
@@ -189,6 +190,21 @@ async def search_jobs(
         db.add(job)
         stored_jobs.append(job)
 
+    # Auto-save search preference for Celery auto-refresh
+    pref_stmt = select(SearchPreference).where(
+        SearchPreference.user_id == user_id,
+        SearchPreference.query == query.strip(),
+    )
+    pref_result = await db.execute(pref_stmt)
+    existing_pref = pref_result.scalar_one_or_none()
+    if not existing_pref:
+        db.add(SearchPreference(
+            user_id=user_id,
+            query=query.strip(),
+            location=location,
+            remote_only=remote_only,
+        ))
+
     await db.commit()
     return stored_jobs
 
@@ -252,16 +268,39 @@ async def search_ats_jobs(
     return stored_jobs
 
 
+async def toggle_job_starred(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    job_id: uuid.UUID,
+    starred: bool,
+) -> Job:
+    """Toggle a job's starred status."""
+    result = await db.execute(
+        select(Job).where(Job.id == job_id, Job.user_id == user_id)
+    )
+    job = result.scalar_one_or_none()
+    if not job:
+        raise ValueError("Job not found.")
+
+    job.starred = starred
+    await db.commit()
+    await db.refresh(job)
+    return job
+
+
 async def get_jobs(
     db: AsyncSession,
     user_id: uuid.UUID,
     stage: str | None = None,
     sort_by: str = "score",
+    starred: bool | None = None,
 ) -> list[Job]:
-    """Get all saved jobs for a user, optionally filtered by stage."""
+    """Get all saved jobs for a user, optionally filtered by stage and starred."""
     query = select(Job).where(Job.user_id == user_id)
     if stage:
         query = query.where(Job.stage == stage)
+    if starred is not None:
+        query = query.where(Job.starred == starred)
 
     if sort_by == "score":
         query = query.order_by(Job.match_score.desc().nullslast())

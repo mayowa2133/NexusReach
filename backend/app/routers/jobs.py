@@ -11,7 +11,10 @@ from app.schemas.jobs import (
     JobSearchRequest,
     ATSSearchRequest,
     JobStageUpdate,
+    JobStarToggle,
     JobResponse,
+    SearchPreferenceResponse,
+    SearchPreferenceToggle,
 )
 from app.services.job_service import (
     search_jobs,
@@ -19,6 +22,12 @@ from app.services.job_service import (
     get_jobs,
     get_job,
     update_job_stage,
+    toggle_job_starred,
+)
+from app.services.search_preference_service import (
+    get_search_preferences,
+    toggle_search_preference,
+    delete_search_preference,
 )
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -47,6 +56,7 @@ def _to_response(job) -> JobResponse:
         tags=job.tags,
         department=job.department,
         notes=job.notes,
+        starred=job.starred,
         created_at=job.created_at.isoformat(),
         updated_at=job.updated_at.isoformat(),
     )
@@ -94,9 +104,10 @@ async def list_jobs(
     db: Annotated[AsyncSession, Depends(get_db)],
     stage: str | None = None,
     sort_by: str = "score",
+    starred: bool | None = None,
 ):
-    """List all saved jobs, optionally filtered by kanban stage."""
-    jobs = await get_jobs(db, user_id, stage=stage, sort_by=sort_by)
+    """List all saved jobs, optionally filtered by kanban stage and starred."""
+    jobs = await get_jobs(db, user_id, stage=stage, sort_by=sort_by, starred=starred)
     return [_to_response(j) for j in jobs]
 
 
@@ -132,3 +143,76 @@ async def update_stage(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     return _to_response(job)
+
+
+@router.put("/{job_id}/star", response_model=JobResponse)
+async def star_job(
+    job_id: str,
+    body: JobStarToggle,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Toggle a job's starred status."""
+    try:
+        job = await toggle_job_starred(
+            db=db,
+            user_id=user_id,
+            job_id=uuid.UUID(job_id),
+            starred=body.starred,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return _to_response(job)
+
+
+# --- Saved Searches ---
+
+def _pref_to_response(pref) -> SearchPreferenceResponse:
+    return SearchPreferenceResponse(
+        id=str(pref.id),
+        query=pref.query,
+        location=pref.location,
+        remote_only=pref.remote_only,
+        enabled=pref.enabled,
+        created_at=pref.created_at.isoformat(),
+        updated_at=pref.updated_at.isoformat(),
+    )
+
+
+@router.get("/saved-searches", response_model=list[SearchPreferenceResponse])
+async def list_saved_searches(
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """List all saved search preferences."""
+    prefs = await get_search_preferences(db, user_id)
+    return [_pref_to_response(p) for p in prefs]
+
+
+@router.put("/saved-searches/{pref_id}", response_model=SearchPreferenceResponse)
+async def update_saved_search(
+    pref_id: str,
+    body: SearchPreferenceToggle,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Enable or disable a saved search."""
+    try:
+        pref = await toggle_search_preference(db, user_id, uuid.UUID(pref_id), body.enabled)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return _pref_to_response(pref)
+
+
+@router.delete("/saved-searches/{pref_id}")
+async def remove_saved_search(
+    pref_id: str,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Delete a saved search preference."""
+    try:
+        await delete_search_preference(db, user_id, uuid.UUID(pref_id))
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"ok": True}

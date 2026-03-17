@@ -26,15 +26,28 @@ export function useATSSearch() {
   });
 }
 
-export function useJobs(stage?: string, sortBy?: string) {
+export function useJobs(stage?: string, sortBy?: string, starred?: boolean) {
   const params = new URLSearchParams();
   if (stage) params.set('stage', stage);
   if (sortBy) params.set('sort_by', sortBy);
+  if (starred !== undefined) params.set('starred', String(starred));
   const qs = params.toString();
 
   return useQuery({
-    queryKey: ['jobs', stage, sortBy],
+    queryKey: ['jobs', stage, sortBy, starred],
     queryFn: () => api.get<Job[]>(`/api/jobs${qs ? `?${qs}` : ''}`),
+  });
+}
+
+export function useToggleJobStar() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ jobId, starred }: { jobId: string; starred: boolean }) =>
+      api.put<Job>(`/api/jobs/${jobId}/star`, { starred }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+    },
   });
 }
 

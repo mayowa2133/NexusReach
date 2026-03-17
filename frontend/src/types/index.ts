@@ -62,6 +62,7 @@ export interface Company {
   industry: string | null;
   description: string | null;
   careers_url: string | null;
+  starred: boolean;
 }
 
 export interface Person {
@@ -189,6 +190,7 @@ export interface Job {
   tags: string[] | null;
   department: string | null;
   notes: string | null;
+  starred: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -303,6 +305,20 @@ export interface CompanyOpenness {
   total_outreach: number;
   responses: number;
   rate: number;
+}
+
+// Notification types
+export type NotificationType = 'new_job' | 'starred_company_job';
+
+export interface Notification {
+  id: string;
+  type: NotificationType;
+  title: string;
+  body: string | null;
+  job_id: string | null;
+  company_id: string | null;
+  read: boolean;
+  created_at: string;
 }
 
 // Settings + Guardrails types (Phase 9)

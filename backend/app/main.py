@@ -18,7 +18,9 @@ from app.routers import (
     messages,
     email,
     jobs,
+    companies,
     outreach,
+    notifications,
     insights,
     settings as settings_router,
     usage,
@@ -59,7 +61,9 @@ app.include_router(people.router, prefix="/api")
 app.include_router(messages.router, prefix="/api")
 app.include_router(email.router, prefix="/api")
 app.include_router(jobs.router, prefix="/api")
+app.include_router(companies.router, prefix="/api")
 app.include_router(outreach.router, prefix="/api")
+app.include_router(notifications.router, prefix="/api")
 app.include_router(insights.router, prefix="/api")
 app.include_router(settings_router.router, prefix="/api")
 app.include_router(usage.router, prefix="/api")

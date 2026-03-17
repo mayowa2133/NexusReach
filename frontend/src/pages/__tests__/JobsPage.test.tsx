@@ -52,6 +52,9 @@ vi.mock('@/hooks/useJobs', () => ({
   useUpdateJobStage: () => ({
     mutateAsync: vi.fn(),
   }),
+  useToggleJobStar: () => ({
+    mutateAsync: vi.fn(),
+  }),
 }));
 
 function renderJobs() {

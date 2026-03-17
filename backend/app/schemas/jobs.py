@@ -40,7 +40,28 @@ class JobResponse(BaseModel):
     tags: list[str] | None
     department: str | None
     notes: str | None
+    starred: bool = False
     created_at: str
     updated_at: str
 
     model_config = {"from_attributes": True}
+
+
+class JobStarToggle(BaseModel):
+    starred: bool
+
+
+class SearchPreferenceResponse(BaseModel):
+    id: str
+    query: str
+    location: str | None
+    remote_only: bool
+    enabled: bool
+    created_at: str
+    updated_at: str
+
+    model_config = {"from_attributes": True}
+
+
+class SearchPreferenceToggle(BaseModel):
+    enabled: bool
