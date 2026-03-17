@@ -19,6 +19,10 @@ SMTP_BLOCK_TTL_DAYS = 30
 # Catch-all domains get a shorter block (they might change config)
 SMTP_CATCH_ALL_TTL_DAYS = 14
 
+# Domains behind known SEGs (Proofpoint/Mimecast/Barracuda) are blocked for 6
+# months — corporate email infrastructure changes rarely
+SMTP_INFRASTRUCTURE_BLOCK_TTL_DAYS = 180
+
 
 async def is_domain_blocked(db: AsyncSession, domain: str) -> bool:
     """Check if a domain is currently blocked for SMTP probing.
@@ -81,6 +85,14 @@ async def record_smtp_result(
                 record.blocked_count,
                 record.blocked_until.isoformat(),
             )
+
+    elif result_type == "infrastructure_blocked":
+        # MX resolves to a known SEG provider — block immediately for 6 months.
+        # Only set if not already blocked to avoid resetting a longer existing block.
+        record.blocked_count = SMTP_BLOCK_THRESHOLD
+        record.last_failure_at = now
+        if not record.blocked_until or record.blocked_until < now:
+            record.blocked_until = now + timedelta(days=SMTP_INFRASTRUCTURE_BLOCK_TTL_DAYS)
 
     elif result_type == "greylist":
         record.greylist_count = (record.greylist_count or 0) + 1

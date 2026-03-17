@@ -226,6 +226,57 @@ class TestCheckSmtp:
         assert result is None
 
 
+class TestSegMxDetection:
+    async def test_proofpoint_mx_returns_infrastructure_blocked(self):
+        with patch.object(email_pattern_client, "_resolve_mx", new_callable=AsyncMock) as mock_mx:
+            mock_mx.return_value = "mx0a-001ac.pphosted.com"
+            result = await find_email_by_pattern("John", "Doe", "amazon.com")
+
+        assert result["email"] is None
+        assert result["domain_status"] == "infrastructure_blocked"
+        assert result["infrastructure"] == "proofpoint"
+
+    async def test_mimecast_mx_returns_infrastructure_blocked(self):
+        with patch.object(email_pattern_client, "_resolve_mx", new_callable=AsyncMock) as mock_mx:
+            mock_mx.return_value = "inbound-01.hostedemail.mimecast.com"
+            result = await find_email_by_pattern("Jane", "Smith", "somecompany.com")
+
+        assert result["email"] is None
+        assert result["domain_status"] == "infrastructure_blocked"
+        assert result["infrastructure"] == "mimecast"
+
+    async def test_barracuda_mx_returns_infrastructure_blocked(self):
+        with patch.object(email_pattern_client, "_resolve_mx", new_callable=AsyncMock) as mock_mx:
+            mock_mx.return_value = "mail.barracudanetworks.com"
+            result = await find_email_by_pattern("Jane", "Smith", "somecompany.com")
+
+        assert result["email"] is None
+        assert result["domain_status"] == "infrastructure_blocked"
+        assert result["infrastructure"] == "barracuda"
+
+    async def test_google_workspace_mx_proceeds_to_smtp(self):
+        """Google Workspace MX should NOT be blocked — SMTP proceeds normally."""
+        with patch.object(email_pattern_client, "_resolve_mx", new_callable=AsyncMock) as mock_mx, \
+             patch.object(email_pattern_client, "_is_catch_all", new_callable=AsyncMock) as mock_catch, \
+             patch.object(email_pattern_client, "_check_smtp", new_callable=AsyncMock) as mock_smtp:
+            mock_mx.return_value = "aspmx.l.google.com"
+            mock_catch.return_value = False
+            mock_smtp.return_value = True
+
+            result = await find_email_by_pattern("John", "Doe", "stripe.com")
+
+        assert result["domain_status"] == "success"
+        assert result.get("infrastructure") is None
+
+    async def test_proofpoint_ppe_variant_blocked(self):
+        with patch.object(email_pattern_client, "_resolve_mx", new_callable=AsyncMock) as mock_mx:
+            mock_mx.return_value = "mx.ppe-hosted.com"
+            result = await find_email_by_pattern("John", "Doe", "example.com")
+
+        assert result["domain_status"] == "infrastructure_blocked"
+        assert result["infrastructure"] == "proofpoint"
+
+
 class TestIsCatchAll:
     async def test_catch_all_detected(self):
         """Server accepts random address → catch-all."""

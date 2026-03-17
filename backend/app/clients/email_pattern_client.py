@@ -19,6 +19,17 @@ TOTAL_TIMEOUT_SECONDS = 30
 # Timeout per individual SMTP connection
 SMTP_TIMEOUT_SECONDS = 10
 
+# Known Secure Email Gateway (SEG) MX record suffixes.
+# Domains whose MX resolves to one of these are protected by a gateway that
+# intercepts SMTP probes — RCPT TO results are meaningless. Skip SMTP entirely.
+SEG_MX_PATTERNS: dict[str, str] = {
+    "pphosted.com": "proofpoint",
+    "ppe-hosted.com": "proofpoint",
+    "mimecast.com": "mimecast",
+    "barracudanetworks.com": "barracuda",
+    "hydra.sophos.com": "sophos",
+}
+
 
 def _normalize(name: str) -> str:
     """Normalize a name: lowercase, strip accents, remove non-alpha chars."""
@@ -165,6 +176,15 @@ async def _find_email_inner(
     if not mx_host:
         logger.debug("No MX record found for %s", domain)
         return {"email": None, "domain_status": "no_mx"}
+
+    # Check if MX host belongs to a known Secure Email Gateway (SEG).
+    # These providers intercept all inbound mail — SMTP RCPT TO checks are
+    # meaningless because the gateway always absorbs the probe.
+    mx_lower = mx_host.lower()
+    for pattern, provider in SEG_MX_PATTERNS.items():
+        if mx_lower.endswith(pattern):
+            logger.debug("Domain %s uses %s SEG (MX: %s), skipping SMTP", domain, provider, mx_host)
+            return {"email": None, "domain_status": "infrastructure_blocked", "infrastructure": provider}
 
     # Check for catch-all domain
     if await _is_catch_all(domain, mx_host):

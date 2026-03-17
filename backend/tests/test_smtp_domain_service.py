@@ -107,6 +107,30 @@ class TestRecordSmtpResult:
         diff = record.blocked_until - datetime.now(timezone.utc)
         assert abs(diff.total_seconds() - expected_ttl.total_seconds()) < 5
 
+    async def test_infrastructure_blocked_sets_180_day_block(self):
+        record = SmtpDomainResult(domain="amazon.com", blocked_count=0)
+        db = _make_db(record)
+
+        await record_smtp_result(db, "amazon.com", "infrastructure_blocked")
+
+        assert record.blocked_count == SMTP_BLOCK_THRESHOLD
+        assert record.blocked_until is not None
+        from app.services.smtp_domain_service import SMTP_INFRASTRUCTURE_BLOCK_TTL_DAYS
+        expected_ttl = timedelta(days=SMTP_INFRASTRUCTURE_BLOCK_TTL_DAYS)
+        diff = record.blocked_until - datetime.now(timezone.utc)
+        assert abs(diff.total_seconds() - expected_ttl.total_seconds()) < 5
+
+    async def test_infrastructure_blocked_does_not_override_longer_existing_block(self):
+        """If already blocked until a farther date, don't shorten it."""
+        far_future = datetime.now(timezone.utc) + timedelta(days=300)
+        record = SmtpDomainResult(domain="amazon.com", blocked_count=3, blocked_until=far_future)
+        db = _make_db(record)
+
+        await record_smtp_result(db, "amazon.com", "infrastructure_blocked")
+
+        # blocked_until should remain the far future date, not be reset to 180 days
+        assert record.blocked_until == far_future
+
     async def test_greylist_increments_counter_no_block(self):
         record = SmtpDomainResult(domain="example.com", greylist_count=1)
         db = _make_db(record)

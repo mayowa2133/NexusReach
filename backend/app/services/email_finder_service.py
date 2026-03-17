@@ -135,6 +135,13 @@ async def find_email_for_person(
                 await record_smtp_result(db, company_domain, "catch_all")
             elif domain_status == "timeout":
                 await record_smtp_result(db, company_domain, "blocked")
+            elif domain_status == "infrastructure_blocked":
+                await record_smtp_result(db, company_domain, "infrastructure_blocked")
+                logger.debug(
+                    "Domain %s uses %s SEG — blocked for 180 days",
+                    company_domain,
+                    pattern_result.get("infrastructure", "unknown"),
+                )
             # "no_mx" and "all_rejected" are not SMTP blocking — no recording needed
 
             if pattern_result.get("email"):
