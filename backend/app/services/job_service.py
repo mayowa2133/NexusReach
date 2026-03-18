@@ -212,11 +212,27 @@ async def search_jobs(
 async def search_ats_jobs(
     db: AsyncSession,
     user_id: uuid.UUID,
-    company_slug: str,
-    ats_type: str,
-    limit: int = 20,
+    company_slug: str | None,
+    ats_type: str | None,
+    limit: int | None = None,
+    job_url: str | None = None,
 ) -> list[Job]:
     """Search a specific ATS board for jobs."""
+    target_external_id: str | None = None
+    target_url: str | None = None
+
+    if job_url:
+        parsed_job_url = ats_client.parse_ats_job_url(job_url)
+        if not parsed_job_url:
+            raise ValueError("Unsupported ATS job URL.")
+        company_slug = parsed_job_url.company_slug
+        ats_type = parsed_job_url.ats_type
+        target_external_id = parsed_job_url.external_id
+        target_url = parsed_job_url.canonical_url
+
+    if not company_slug or not ats_type:
+        raise ValueError("ATS search requires either job_url or company_slug plus ats_type.")
+
     result = await db.execute(
         select(Profile).where(Profile.user_id == user_id)
     )
@@ -232,13 +248,21 @@ async def search_ats_jobs(
         return []
 
     stored_jobs: list[Job] = []
+    board_jobs: list[Job] = []
+    seen_fingerprints: set[str] = set()
     for data in raw_jobs:
         fp = _fingerprint(data.get("company_name", ""), data["title"], data.get("location", ""))
+
+        if fp in seen_fingerprints:
+            continue
+        seen_fingerprints.add(fp)
 
         existing = await db.execute(
             select(Job).where(Job.user_id == user_id, Job.fingerprint == fp)
         )
-        if existing.scalar_one_or_none():
+        existing_job = existing.scalar_one_or_none()
+        if existing_job:
+            board_jobs.append(existing_job)
             continue
 
         score, breakdown = _score_job(data, profile)
@@ -263,9 +287,34 @@ async def search_ats_jobs(
         )
         db.add(job)
         stored_jobs.append(job)
+        board_jobs.append(job)
 
     await db.commit()
-    return stored_jobs
+
+    if not job_url:
+        return stored_jobs
+
+    def _normalized(url: str | None) -> str | None:
+        if not url:
+            return None
+        parsed = ats_client.parse_ats_job_url(url)
+        if parsed and parsed.canonical_url:
+            return parsed.canonical_url.rstrip("/")
+        return url.rstrip("/")
+
+    normalized_target = _normalized(target_url or job_url)
+    exact_matches = [
+        job
+        for job in board_jobs
+        if (target_external_id and job.external_id == target_external_id)
+        or (_normalized(job.url) and _normalized(job.url) == normalized_target)
+    ]
+    if not exact_matches:
+        return board_jobs
+
+    exact_ids = {job.id for job in exact_matches}
+    ordered_jobs = exact_matches + [job for job in board_jobs if job.id not in exact_ids]
+    return ordered_jobs
 
 
 async def toggle_job_starred(

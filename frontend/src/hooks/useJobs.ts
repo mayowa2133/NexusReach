@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import type { Job, JobSearchRequest, JobStage } from '@/types';
+import type { ATSSearchRequest, Job, JobSearchRequest, JobStage } from '@/types';
 
 export function useJobSearch() {
   const queryClient = useQueryClient();
@@ -18,7 +18,7 @@ export function useATSSearch() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (params: { company_slug: string; ats_type: string }) =>
+    mutationFn: (params: ATSSearchRequest) =>
       api.post<Job[]>('/api/jobs/search/ats', params),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['jobs'] });

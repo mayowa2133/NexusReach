@@ -24,6 +24,8 @@ class TestClassifyPerson:
         assert _classify_person("Software Engineer") == "peer"
         assert _classify_person("Frontend Developer") == "peer"
         assert _classify_person("Data Analyst") == "peer"
+        assert _classify_person("Staff Software Engineer") == "peer"
+        assert _classify_person("Principal Engineer") == "peer"
 
     def test_empty_title(self):
         assert _classify_person("") == "peer"

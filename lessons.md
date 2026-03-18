@@ -87,10 +87,18 @@ A living document of patterns, gotchas, and decisions encountered while building
 - In Pydantic v2, use `from_attributes = True` instead of the old `orm_mode = True`.
 - Enables direct serialization from SQLAlchemy model instances.
 
+### UUID-backed ORM fields should stay typed as `uuid.UUID` in response models
+- If a SQLAlchemy model exposes `UUID(as_uuid=True)`, typing the Pydantic response field as `str` can trigger FastAPI `ResponseValidationError` when returning ORM objects directly.
+- **Lesson:** Keep the schema field typed as `uuid.UUID` and let FastAPI serialize it to a JSON string on the wire.
+
 ### SQLAlchemy async requires `selectinload` for relationships
 - Lazy loading doesn't work with async sessions.
 - Always use `.options(selectinload(Model.relationship))` when you need related data.
 - Forgetting this causes `greenlet` errors at runtime.
+
+### Async service code should never rely on lazy relationship access
+- In a live email-finding run, `person.company.domain` inside `email_finder_service.py` crashed with `sqlalchemy.exc.MissingGreenlet` because `company` was not eagerly loaded.
+- **Lesson:** If an async service will touch related ORM data, load it in the original query rather than trusting implicit lazy loads.
 
 ### `exclude_unset=True` for partial updates
 - `data.model_dump(exclude_unset=True)` only includes fields the client actually sent.
@@ -111,6 +119,14 @@ A living document of patterns, gotchas, and decisions encountered while building
 ### Fingerprint-based deduplication is simple and effective
 - MD5 hash of `company|title|location` (lowercased, stripped) catches duplicates across sources.
 - Fast, deterministic, and handles the 90% case without fuzzy matching overhead.
+
+### Alembic needs a real base revision for empty-database bootstrap
+- A migration chain cannot start with `ALTER TABLE` operations against tables that have never been created.
+- **Lesson:** Keep an explicit initial-schema revision in version control, and make extension requirements like `pgcrypto` idempotent inside the migration that uses them.
+
+### ATS board clients should not silently truncate results by default
+- Greenhouse, Lever, and Ashby public board endpoints already return full board payloads.
+- **Lesson:** Default client behavior should preserve the full board and only apply limits when a caller asks for them explicitly, otherwise exact job handoff flows can fail before the UI ever sees the posting.
 
 ---
 
@@ -206,3 +222,23 @@ A living document of patterns, gotchas, and decisions encountered while building
 ### Global error handler changes response format for ALL endpoints
 - Adding a global `HTTPException` handler that returns `{"error": {"code", "message"}}` instead of FastAPI's default `{"detail": "..."}` breaks existing tests.
 - **Lesson:** After adding middleware that changes response format, grep all tests for the old format (e.g., `resp.json()["detail"]`) and update them.
+
+### First-login bootstrap must not create duplicate placeholder users
+- `get_or_create_user()` currently inserts new users with `email=""`, which means only the first auto-created user succeeds because `users.email` is unique.
+- **Lesson:** When bootstrapping auth-backed users, populate unique fields from the token payload or make them nullable until real profile data exists.
+
+### Greenhouse embed links should key off `token`, not `jr_id`
+- Greenhouse embed URLs like `.../embed/job_app?...for=affirm&jr_id=<opaque>&token=7550577003` can carry two job identifiers, but the canonical public job ID is the numeric `token`.
+- **Lesson:** Normalize Greenhouse embed links into canonical board URLs using `for` + `token`, then match on the same external ID shape used by stored ATS jobs.
+
+### Best-effort email guesses must not short-circuit verified lookups
+- It is tempting to return a high-confidence pattern suggestion as soon as it is generated, but that prevents later Apollo/Hunter/Proxycurl steps from finding a verified or stronger address.
+- **Lesson:** Collect pattern suggestions as fallback candidates first, exhaust the verified waterfall, and only then surface the best guess. Persist low-confidence guesses only if you explicitly want them to become durable contact data.
+
+### Weighted job-context scoring should not double-count the lead section
+- If the first paragraph is scored once as the lead and again as part of the full body, weak mentions like “not frontend” can outrank the real domain keywords in a role such as backend credit decisioning.
+- **Lesson:** Split description scoring into non-overlapping sections so title and lead signals stay strong without inflating stray body mentions.
+
+### Optional response fields break mocked API tests unless mocks set them explicitly
+- Adding `match_quality` and `match_reason` to `PersonResponse` caused FastAPI response validation failures because `MagicMock` auto-creates nested mocks for missing attributes.
+- **Lesson:** When extending Pydantic response models, update API test doubles to set new optional attributes to concrete values like `None`, not leave them implicit on `MagicMock`.

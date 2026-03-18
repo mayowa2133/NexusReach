@@ -1,8 +1,10 @@
+import uuid
+
 from pydantic import BaseModel
 
 
 class CompanyResponse(BaseModel):
-    id: str
+    id: uuid.UUID
     name: str
     domain: str | None
     size: str | None
@@ -14,7 +16,7 @@ class CompanyResponse(BaseModel):
 
 
 class PersonResponse(BaseModel):
-    id: str
+    id: uuid.UUID
     full_name: str | None
     title: str | None
     department: str | None
@@ -23,12 +25,15 @@ class PersonResponse(BaseModel):
     github_url: str | None
     work_email: str | None
     email_verified: bool
+    email_confidence: int | None = None
     person_type: str | None
     profile_data: dict | None
     github_data: dict | None
     source: str | None
     apollo_id: str | None = None
     relevance_score: int | None = None
+    match_quality: str | None = None
+    match_reason: str | None = None
     company: CompanyResponse | None = None
 
     model_config = {"from_attributes": True}

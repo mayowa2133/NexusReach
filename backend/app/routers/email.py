@@ -36,10 +36,16 @@ async def find_email(
     person_id: str,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    mode: str = Query("best_effort"),
 ):
     """Find a work email for a person using the waterfall (Apollo → Hunter → Proxycurl)."""
     try:
-        result = await find_email_for_person(db, user_id, uuid.UUID(person_id))
+        result = await find_email_for_person(
+            db,
+            user_id,
+            uuid.UUID(person_id),
+            mode=mode,
+        )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     return result

@@ -9,7 +9,7 @@ pytestmark = pytest.mark.asyncio
 
 def _mock_person(user_id, **overrides):
     p = MagicMock()
-    p.id = str(uuid.uuid4())
+    p.id = overrides.get("id", uuid.uuid4())
     p.user_id = user_id
     p.company_id = None
     p.full_name = overrides.get("full_name", "Jane Doe")
@@ -21,18 +21,21 @@ def _mock_person(user_id, **overrides):
     p.work_email = overrides.get("work_email", None)
     p.email_source = None
     p.email_verified = False
+    p.email_confidence = overrides.get("email_confidence", None)
     p.person_type = overrides.get("person_type", "peer")
     p.profile_data = overrides.get("profile_data", {})
     p.github_data = overrides.get("github_data", None)
     p.source = overrides.get("source", "apollo")
     p.apollo_id = overrides.get("apollo_id", None)
+    p.match_quality = overrides.get("match_quality", None)
+    p.match_reason = overrides.get("match_reason", None)
     p.company = overrides.get("company", None)
     return p
 
 
 def _mock_company(user_id):
     c = MagicMock()
-    c.id = str(uuid.uuid4())
+    c.id = uuid.uuid4()
     c.user_id = user_id
     c.name = "Stripe"
     c.domain = "stripe.com"
@@ -75,6 +78,8 @@ async def test_search_with_job_id(client, mock_user_id):
     assert data["job_context"] is not None
     assert data["job_context"]["department"] == "engineering"
     assert "backend" in data["job_context"]["team_keywords"]
+    assert data["company"]["id"] == str(company.id)
+    assert isinstance(data["peers"][0]["id"], str)
 
 
 async def test_search_without_job_id_still_works(client, mock_user_id):

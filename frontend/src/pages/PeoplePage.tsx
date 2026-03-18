@@ -9,7 +9,11 @@ import { Separator } from '@/components/ui/separator';
 import { usePeopleSearch, useEnrichPerson, useSavedPeople } from '@/hooks/usePeople';
 import { useFindEmail } from '@/hooks/useEmail';
 import { toast } from 'sonner';
-import type { Person, PeopleSearchResult } from '@/types';
+import type { EmailFindResult, Person, PeopleSearchResult } from '@/types';
+
+function formatFailureReason(reason: string): string {
+  return reason.replace(/_/g, ' ');
+}
 
 export function PeoplePage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -283,13 +287,17 @@ function PersonCard({ person }: { person: Person }) {
   const githubLangs = person.github_data?.languages ?? [];
   const findEmail = useFindEmail();
   const [emailStatus, setEmailStatus] = useState<'idle' | 'loading' | 'not_found'>('idle');
+  const [emailResult, setEmailResult] = useState<EmailFindResult | null>(null);
 
   const handleGetEmail = async () => {
     setEmailStatus('loading');
     try {
       const result = await findEmail.mutateAsync(person.id);
+      setEmailResult(result);
       if (!result.email) {
         setEmailStatus('not_found');
+      } else {
+        setEmailStatus('idle');
       }
     } catch {
       toast.error('Failed to find email');
@@ -297,7 +305,15 @@ function PersonCard({ person }: { person: Person }) {
     }
   };
 
-  const canEnrich = !!(person.apollo_id || person.linkedin_url);
+  const canEnrich = !!(person.full_name && (person.apollo_id || person.linkedin_url || person.company?.domain));
+  const shownEmail = person.work_email || emailResult?.email;
+  const shownConfidence = person.email_confidence ?? emailResult?.confidence ?? null;
+  const isVerifiedEmail = person.email_verified || emailResult?.verified === true;
+  const alternateGuesses = emailResult?.alternate_guesses ?? emailResult?.suggestions ?? [];
+  const publicProfileUrl =
+    !person.linkedin_url && person.profile_data && typeof person.profile_data.public_url === 'string'
+      ? person.profile_data.public_url
+      : null;
 
   return (
     <Card>
@@ -308,26 +324,55 @@ function PersonCard({ person }: { person: Person }) {
         </div>
 
         {person.person_type && (
-          <Badge variant={
-            person.person_type === 'recruiter' ? 'default' :
-            person.person_type === 'hiring_manager' ? 'secondary' : 'outline'
-          }>
+          <Badge
+            variant={
+              person.person_type === 'recruiter'
+                ? 'default'
+                : person.person_type === 'hiring_manager'
+                  ? 'secondary'
+                  : 'outline'
+            }
+          >
             {person.person_type === 'hiring_manager' ? 'Hiring Manager' :
              person.person_type.charAt(0).toUpperCase() + person.person_type.slice(1)}
           </Badge>
         )}
 
+        {person.match_quality && (
+          <Badge variant={person.match_quality === 'direct' ? 'secondary' : 'outline'}>
+            {person.match_quality === 'direct' ? 'Direct Match' : 'Next Best'}
+          </Badge>
+        )}
+
+        {person.match_reason && (
+          <div className="text-xs text-muted-foreground">{person.match_reason}</div>
+        )}
+
         {/* Email display with three states */}
-        {person.work_email ? (
+        {shownEmail ? (
           <div className="text-sm">
             <span className="text-muted-foreground">Email: </span>
-            {person.work_email}
-            {person.email_verified && (
+            {shownEmail}
+            {isVerifiedEmail ? (
               <Badge variant="outline" className="ml-1 text-xs">Verified</Badge>
+            ) : (
+              <Badge variant="outline" className="ml-1 text-xs">Unverified</Badge>
+            )}
+            {!isVerifiedEmail && shownConfidence != null && (
+              <span className="ml-2 text-xs text-muted-foreground">
+                Confidence {shownConfidence}
+              </span>
             )}
           </div>
         ) : emailStatus === 'not_found' ? (
-          <div className="text-sm text-muted-foreground">No email found</div>
+          <div className="space-y-1 text-sm text-muted-foreground">
+            <div>No verified email found</div>
+            {emailResult?.failure_reasons && emailResult.failure_reasons.length > 0 && (
+              <div className="text-xs">
+                Why: {emailResult.failure_reasons.map(formatFailureReason).join(', ')}
+              </div>
+            )}
+          </div>
         ) : canEnrich ? (
           <Button
             variant="outline"
@@ -339,6 +384,17 @@ function PersonCard({ person }: { person: Person }) {
           </Button>
         ) : (
           <div className="text-sm text-muted-foreground">No email available</div>
+        )}
+
+        {!isVerifiedEmail && alternateGuesses.length > 0 && (
+          <div className="space-y-1 rounded-md bg-muted/40 p-2">
+            <div className="text-xs font-medium">Alternate guesses</div>
+            {alternateGuesses.slice(0, 3).map((guess) => (
+              <div key={guess.email} className="text-xs text-muted-foreground">
+                {guess.email} · confidence {guess.confidence}
+              </div>
+            ))}
+          </div>
         )}
 
         {githubLangs.length > 0 && (
@@ -379,6 +435,16 @@ function PersonCard({ person }: { person: Person }) {
               className="text-xs text-primary hover:underline"
             >
               LinkedIn
+            </a>
+          )}
+          {publicProfileUrl && (
+            <a
+              href={publicProfileUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-primary hover:underline"
+            >
+              Profile
             </a>
           )}
           {person.github_url && (

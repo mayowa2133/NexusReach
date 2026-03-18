@@ -50,6 +50,8 @@ BLOCKED_DOMAINS = [
 
 
 def upgrade() -> None:
+    op.execute('CREATE EXTENSION IF NOT EXISTS "pgcrypto"')
+
     # Use INSERT ... ON CONFLICT DO NOTHING so re-running is safe and
     # doesn't overwrite records that already have organic probe history.
     for domain in BLOCKED_DOMAINS:

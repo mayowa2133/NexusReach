@@ -75,11 +75,14 @@ export interface Person {
   github_url: string | null;
   work_email: string | null;
   email_verified: boolean;
+  email_confidence: number | null;
   person_type: string | null;
   profile_data: Record<string, unknown> | null;
   github_data: GitHubData | null;
   source: string | null;
   apollo_id: string | null;
+  match_quality?: 'direct' | 'next_best' | null;
+  match_reason?: string | null;
   company: Company | null;
 }
 
@@ -147,10 +150,22 @@ export interface DraftResponse {
 }
 
 // Email Layer types
+export interface EmailSuggestion {
+  email: string;
+  confidence: number;
+}
+
 export interface EmailFindResult {
   email: string | null;
   source: string;
   verified: boolean;
+  result_type: 'verified' | 'best_guess' | 'not_found';
+  verified_email: string | null;
+  best_guess_email: string | null;
+  confidence: number | null;
+  suggestions: EmailSuggestion[] | null;
+  alternate_guesses: EmailSuggestion[] | null;
+  failure_reasons: string[];
   tried: string[];
 }
 
@@ -200,6 +215,12 @@ export interface JobSearchRequest {
   location?: string;
   remote_only?: boolean;
   sources?: string[];
+}
+
+export interface ATSSearchRequest {
+  company_slug?: string;
+  ats_type?: string;
+  job_url?: string;
 }
 
 // Outreach Tracker types

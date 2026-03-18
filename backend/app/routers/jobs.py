@@ -89,12 +89,22 @@ async def search_ats(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Search a specific ATS board (Greenhouse, Lever, Ashby)."""
-    jobs = await search_ats_jobs(
-        db=db,
-        user_id=user_id,
-        company_slug=body.company_slug,
-        ats_type=body.ats_type,
-    )
+    if not body.job_url and (not body.company_slug or not body.ats_type):
+        raise HTTPException(
+            status_code=400,
+            detail="Provide either job_url or company_slug plus ats_type.",
+        )
+
+    try:
+        jobs = await search_ats_jobs(
+            db=db,
+            user_id=user_id,
+            company_slug=body.company_slug,
+            ats_type=body.ats_type,
+            job_url=body.job_url,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return [_to_response(j) for j in jobs]
 
 

@@ -29,6 +29,7 @@ class Person(Base):
     work_email: Mapped[str | None] = mapped_column(String(255))
     email_source: Mapped[str | None] = mapped_column(String(50))
     email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    email_confidence: Mapped[int | None] = mapped_column(Integer, nullable=True)
     person_type: Mapped[str | None] = mapped_column(String(50))
     profile_data: Mapped[dict | None] = mapped_column(JSONB)
     github_data: Mapped[dict | None] = mapped_column(JSONB)

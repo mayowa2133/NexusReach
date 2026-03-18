@@ -9,8 +9,9 @@ class JobSearchRequest(BaseModel):
 
 
 class ATSSearchRequest(BaseModel):
-    company_slug: str
-    ats_type: str  # greenhouse | lever | ashby
+    company_slug: str | None = None
+    ats_type: str | None = None  # greenhouse | lever | ashby
+    job_url: str | None = None
 
 
 class JobStageUpdate(BaseModel):

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, String, Text, DateTime, ForeignKey, func
+from sqlalchemy import Boolean, Integer, String, Text, DateTime, ForeignKey, func
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -19,6 +19,8 @@ class Company(Base):
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     domain: Mapped[str | None] = mapped_column(String(255))
+    email_pattern: Mapped[str | None] = mapped_column(String(50))
+    email_pattern_confidence: Mapped[int | None] = mapped_column(Integer, nullable=True)
     size: Mapped[str | None] = mapped_column(String(50))
     industry: Mapped[str | None] = mapped_column(String(255))
     funding_stage: Mapped[str | None] = mapped_column(String(100))

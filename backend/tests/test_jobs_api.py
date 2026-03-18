@@ -72,6 +72,25 @@ async def test_search_ats(client, mock_user_id):
     assert data[0]["source"] == "greenhouse"
 
 
+async def test_search_ats_with_job_url(client, mock_user_id):
+    """POST /api/jobs/search/ats accepts a direct ATS job URL."""
+    job = _mock_job(mock_user_id, source="greenhouse", ats="greenhouse")
+
+    with patch("app.routers.jobs.search_ats_jobs", new_callable=AsyncMock) as mock_search:
+        mock_search.return_value = [job]
+        resp = await client.post(
+            "/api/jobs/search/ats",
+            json={"job_url": "https://job-boards.greenhouse.io/affirm/jobs/7550577003"},
+        )
+
+    assert resp.status_code == 200
+    mock_search.assert_awaited_once()
+    call_kwargs = mock_search.call_args.kwargs
+    assert call_kwargs["job_url"] == "https://job-boards.greenhouse.io/affirm/jobs/7550577003"
+    assert call_kwargs["company_slug"] is None
+    assert call_kwargs["ats_type"] is None
+
+
 async def test_list_jobs(client, mock_user_id):
     """GET /api/jobs returns saved jobs."""
     job1 = _mock_job(mock_user_id, match_score=80.0)

@@ -9,12 +9,38 @@ uses 1 query and returns up to 20 results.
 """
 
 import re
+from urllib.parse import urlparse
 
 import httpx
 
 from app.config import settings
 
 BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
+
+
+def _clean_profile_url(url: str) -> str:
+    return re.split(r"[?#]", url or "")[0].rstrip("/")
+
+
+async def _run_brave_query(query: str, count: int) -> list[dict]:
+    if not settings.brave_api_key:
+        return []
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                BRAVE_SEARCH_URL,
+                headers={"X-Subscription-Token": settings.brave_api_key},
+                params={"q": query, "count": min(count, 20)},
+            )
+            if resp.status_code in (401, 403, 429):
+                return []
+            resp.raise_for_status()
+            data = resp.json()
+    except httpx.HTTPError:
+        return []
+
+    return data.get("web", {}).get("results", [])
 
 
 def _parse_linkedin_result(item: dict, company_name: str) -> dict | None:
@@ -37,7 +63,7 @@ def _parse_linkedin_result(item: dict, company_name: str) -> dict | None:
         return None
 
     # Clean the LinkedIn URL (remove query params)
-    linkedin_url = re.split(r"[?#]", url)[0].rstrip("/")
+    linkedin_url = _clean_profile_url(url)
 
     title_raw = item.get("title", "")
     # Remove " | LinkedIn" suffix
@@ -74,6 +100,59 @@ def _parse_linkedin_result(item: dict, company_name: str) -> dict | None:
     }
 
 
+def _parse_public_people_result(item: dict, company_name: str) -> dict | None:
+    """Parse a public-web result from org charts or recruiter posts."""
+    title_raw = (item.get("title") or "").strip()
+    description = item.get("description", "")
+    url = (item.get("url") or "").strip()
+    if not title_raw or not url:
+        return None
+
+    clean_title = re.sub(r"\s*\|\s*[^|]+$", "", title_raw).strip()
+    full_name = ""
+    job_title = ""
+
+    if " on LinkedIn:" in clean_title:
+        full_name = clean_title.split(" on LinkedIn:", 1)[0].strip()
+        title_match = re.search(
+            rf"{re.escape(full_name)}\s+is\s+(?:a|an)\s+(.+?)\s+at\s+{re.escape(company_name)}",
+            description,
+            re.IGNORECASE,
+        )
+        if title_match:
+            job_title = title_match.group(1).strip()
+    else:
+        match = re.match(
+            rf"(?P<name>.+?)\s+-\s+(?P<title>.+?)(?:\s+at\s+{re.escape(company_name)}.*)?$",
+            clean_title,
+            re.IGNORECASE,
+        )
+        if match:
+            full_name = match.group("name").strip()
+            job_title = match.group("title").strip()
+
+    if not full_name:
+        return None
+
+    parsed_url = urlparse(url)
+    linkedin_url = _clean_profile_url(url) if "/in/" in parsed_url.path else ""
+    source = "brave_public_web"
+    public_url = _clean_profile_url(url)
+
+    return {
+        "full_name": full_name,
+        "title": job_title,
+        "company": company_name,
+        "department": "",
+        "seniority": "",
+        "linkedin_url": linkedin_url,
+        "apollo_id": "",
+        "source": source,
+        "snippet": description,
+        "profile_data": {"public_url": public_url},
+    }
+
+
 async def search_people(
     company_name: str,
     titles: list[str] | None = None,
@@ -97,9 +176,6 @@ async def search_people(
         List of person dicts compatible with ``_store_person()``.
         Returns ``[]`` if the Brave API key is not configured.
     """
-    if not settings.brave_api_key:
-        return []
-
     # Build search query
     title_part = ""
     if titles:
@@ -114,32 +190,43 @@ async def search_people(
 
     query = f'site:linkedin.com/in "{company_name}"{title_part}{team_part}'
 
-    try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(
-                BRAVE_SEARCH_URL,
-                headers={"X-Subscription-Token": settings.brave_api_key},
-                params={
-                    "q": query,
-                    "count": min(limit, 20),
-                },
-            )
-            if resp.status_code in (401, 403, 429):
-                # Auth error, forbidden, or rate-limited
-                return []
-            resp.raise_for_status()
-            data = resp.json()
-    except httpx.HTTPError:
-        return []
-
-    web = data.get("web", {})
-    items = web.get("results", [])
+    items = await _run_brave_query(query, limit)
     results = []
     for item in items:
         person = _parse_linkedin_result(item, company_name)
         if person:
             results.append(person)
 
+    return results[:limit]
+
+
+async def search_public_people(
+    company_name: str,
+    titles: list[str] | None = None,
+    team_keywords: list[str] | None = None,
+    limit: int = 5,
+) -> list[dict]:
+    """Search public web sources such as org charts and recruiter posts."""
+    title_part = ""
+    if titles:
+        quoted = [f'"{title}"' for title in titles[:2]]
+        title_part = " " + " OR ".join(quoted)
+
+    team_part = ""
+    if team_keywords:
+        team_part = f' "{team_keywords[0]}"'
+
+    query = (
+        f'("{company_name}"{title_part}{team_part}) '
+        '(site:theorg.com OR site:linkedin.com/posts OR site:clay.earth OR site:contactout.com)'
+    )
+
+    items = await _run_brave_query(query, limit)
+    results = []
+    for item in items:
+        person = _parse_public_people_result(item, company_name)
+        if person:
+            results.append(person)
     return results[:limit]
 
 
@@ -241,34 +328,12 @@ async def search_hiring_team(
         List of person dicts with ``source="brave_hiring_team"``.
         Returns ``[]`` if no hiring team info is found.
     """
-    if not settings.brave_api_key:
-        return []
-
     team_part = ""
     if team_keywords:
         team_part = f' "{team_keywords[0]}"'
 
     query = f'site:linkedin.com/jobs "{company_name}" "{job_title}"{team_part}'
-
-    try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(
-                BRAVE_SEARCH_URL,
-                headers={"X-Subscription-Token": settings.brave_api_key},
-                params={
-                    "q": query,
-                    "count": 5,
-                },
-            )
-            if resp.status_code in (401, 403, 429):
-                return []
-            resp.raise_for_status()
-            data = resp.json()
-    except httpx.HTTPError:
-        return []
-
-    web = data.get("web", {})
-    items = web.get("results", [])
+    items = await _run_brave_query(query, 5)
     results: list[dict] = []
     for item in items:
         results.extend(_parse_hiring_team_result(item, company_name))

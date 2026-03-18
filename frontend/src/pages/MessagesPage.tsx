@@ -115,10 +115,14 @@ export function MessagesPage() {
     if (!selectedPersonId) return;
     try {
       const result = await findEmail.mutateAsync(selectedPersonId);
-      if (result.email) {
+      if (result.verified_email) {
         toast.success(`Found email: ${result.email} (via ${result.source})`);
+      } else if (result.best_guess_email) {
+        const confidenceText = result.confidence != null ? ` · confidence ${result.confidence}` : '';
+        toast.error(`Best guess only: ${result.best_guess_email}${confidenceText}`);
       } else {
-        toast.error(`No email found. Tried: ${result.tried.join(', ')}`);
+        const reasons = result.failure_reasons.length > 0 ? ` Why: ${result.failure_reasons.join(', ')}` : '';
+        toast.error(`No email found. Tried: ${result.tried.join(', ')}.${reasons}`);
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Email search failed');

@@ -66,7 +66,7 @@ export function JobsPage() {
   const [query, setQuery] = useState('');
   const [location, setLocation] = useState('');
   const [remoteOnly, setRemoteOnly] = useState(false);
-  const [atsSlug, setAtsSlug] = useState('');
+  const [atsInput, setAtsInput] = useState('');
   const [atsType, setAtsType] = useState('greenhouse');
   const [stageFilter, setStageFilter] = useState<string>('');
   const [starredFilter, setStarredFilter] = useState(false);
@@ -98,14 +98,28 @@ export function JobsPage() {
 
   const handleATSSearch = async (e: FormEvent) => {
     e.preventDefault();
-    if (!atsSlug.trim()) return;
+    if (!atsInput.trim()) return;
+
+    const trimmedInput = atsInput.trim();
+    const isJobUrl = /^https?:\/\//i.test(trimmedInput);
 
     try {
-      const results = await atsSearch.mutateAsync({
-        company_slug: atsSlug.trim(),
-        ats_type: atsType,
-      });
-      toast.success(`Found ${results.length} new jobs from ${atsType}`);
+      const results = await atsSearch.mutateAsync(
+        isJobUrl
+          ? { job_url: trimmedInput }
+          : {
+              company_slug: trimmedInput,
+              ats_type: atsType,
+            }
+      );
+      if (results.length > 0) {
+        setSelectedJob(results[0]);
+      }
+      toast.success(
+        isJobUrl
+          ? `Loaded ${results.length} jobs and selected the pasted posting`
+          : `Found ${results.length} new jobs from ${atsType}`
+      );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'ATS search failed');
     }
@@ -190,19 +204,22 @@ export function JobsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Search Company Career Page</CardTitle>
-            <CardDescription>Search directly from Greenhouse, Lever, or Ashby boards.</CardDescription>
+            <CardDescription>Paste a Greenhouse, Lever, or Ashby job URL, or enter a board ID.</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleATSSearch} className="space-y-3">
               <div className="space-y-2">
-                <Label htmlFor="ats-slug">Company Board ID</Label>
+                <Label htmlFor="ats-slug">Board ID or Job URL</Label>
                 <Input
                   id="ats-slug"
-                  placeholder="e.g. stripe, vercel, netflix"
-                  value={atsSlug}
-                  onChange={(e) => setAtsSlug(e.target.value)}
+                  placeholder="e.g. stripe or https://job-boards.greenhouse.io/..."
+                  value={atsInput}
+                  onChange={(e) => setAtsInput(e.target.value)}
                   required
                 />
+                <p className="text-xs text-muted-foreground">
+                  Full job links auto-detect the ATS and exact posting. Board IDs still use the selected platform.
+                </p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="ats-type">ATS Platform</Label>

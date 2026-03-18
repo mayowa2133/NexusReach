@@ -9,7 +9,7 @@ pytestmark = pytest.mark.asyncio
 
 def _mock_person(user_id, **overrides):
     p = MagicMock()
-    p.id = str(uuid.uuid4())
+    p.id = overrides.get("id", uuid.uuid4())
     p.user_id = user_id
     p.company_id = None
     p.full_name = overrides.get("full_name", "Jane Doe")
@@ -21,18 +21,21 @@ def _mock_person(user_id, **overrides):
     p.work_email = overrides.get("work_email", None)
     p.email_source = None
     p.email_verified = False
+    p.email_confidence = overrides.get("email_confidence", None)
     p.person_type = overrides.get("person_type", "peer")
     p.profile_data = overrides.get("profile_data", {})
     p.github_data = overrides.get("github_data", None)
     p.source = overrides.get("source", "apollo")
     p.apollo_id = overrides.get("apollo_id", None)
+    p.match_quality = overrides.get("match_quality", None)
+    p.match_reason = overrides.get("match_reason", None)
     p.company = overrides.get("company", None)
     return p
 
 
 def _mock_company(user_id):
     c = MagicMock()
-    c.id = str(uuid.uuid4())
+    c.id = uuid.uuid4()
     c.user_id = user_id
     c.name = "TechCorp"
     c.domain = "techcorp.com"
@@ -68,6 +71,8 @@ async def test_search_people(client, mock_user_id):
     assert len(data["recruiters"]) == 1
     assert len(data["peers"]) == 1
     assert data["company"]["name"] == "TechCorp"
+    assert isinstance(data["company"]["id"], str)
+    assert isinstance(data["recruiters"][0]["id"], str)
 
 
 async def test_enrich_person(client, mock_user_id):
@@ -88,7 +93,8 @@ async def test_enrich_person(client, mock_user_id):
 
 async def test_list_people(client, mock_user_id):
     """GET /api/people returns saved people."""
-    person = _mock_person(mock_user_id)
+    company = _mock_company(mock_user_id)
+    person = _mock_person(mock_user_id, company=company)
 
     with patch("app.routers.people.get_saved_people", new_callable=AsyncMock) as mock_get:
         mock_get.return_value = [person]
@@ -98,3 +104,4 @@ async def test_list_people(client, mock_user_id):
     data = resp.json()
     assert len(data) == 1
     assert data[0]["full_name"] == "Jane Doe"
+    assert data[0]["company"]["id"] == str(company.id)

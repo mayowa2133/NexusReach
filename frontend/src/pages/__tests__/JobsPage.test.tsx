@@ -90,6 +90,12 @@ describe('JobsPage', () => {
     expect(screen.getByPlaceholderText(/stripe/i)).toBeInTheDocument();
   });
 
+  it('renders smart ATS input copy', () => {
+    renderJobs();
+    expect(screen.getByLabelText(/board id or job url/i)).toBeInTheDocument();
+    expect(screen.getByText(/full job links auto-detect the ats and exact posting/i)).toBeInTheDocument();
+  });
+
   it('renders the search buttons', () => {
     renderJobs();
     const buttons = screen.getAllByRole('button', { name: /search/i });

@@ -103,3 +103,32 @@ def test_director_seniority():
 def test_intern_seniority():
     ctx = extract_job_context("Software Engineering Intern")
     assert ctx.seniority == "intern"
+
+
+def test_credit_decisioning_keeps_high_signal_keywords():
+    ctx = extract_job_context(
+        "Software Engineer II, Backend (Credit Decisioning)",
+        description=(
+            "Build backend APIs for our credit decisioning platform. "
+            "Partner with risk teams and own decision engine reliability. "
+            "You will not work on frontend or growth surfaces."
+        ),
+    )
+    assert "backend" in ctx.team_keywords
+    assert "credit" in ctx.team_keywords
+    assert "decisioning" in ctx.team_keywords
+    assert "frontend" not in ctx.team_keywords
+    assert "growth" not in ctx.team_keywords
+
+
+def test_marketplace_performance_extracts_domain_context():
+    ctx = extract_job_context(
+        "Software Engineer, Backend (Marketplace Performance)",
+        description=(
+            "Join the marketplace team focused on search, discovery, deals, and merchant details. "
+            "Build backend services and APIs that improve the consumer experience."
+        ),
+    )
+    assert "backend" in ctx.team_keywords
+    assert "marketplace" in ctx.team_keywords
+    assert any(keyword in ctx.team_keywords for keyword in ("merchant", "consumer"))

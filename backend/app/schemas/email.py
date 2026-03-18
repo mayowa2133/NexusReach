@@ -10,10 +10,22 @@ class OAuthUrlResponse(BaseModel):
     auth_url: str
 
 
+class EmailSuggestion(BaseModel):
+    email: str
+    confidence: int
+
+
 class EmailFindResponse(BaseModel):
     email: str | None
     source: str
     verified: bool
+    result_type: str = "not_found"
+    verified_email: str | None = None
+    best_guess_email: str | None = None
+    confidence: int | None = None
+    suggestions: list[EmailSuggestion] | None = None
+    alternate_guesses: list[EmailSuggestion] | None = None
+    failure_reasons: list[str] = []
     tried: list[str]
 
 
