@@ -282,3 +282,7 @@ A living document of patterns, gotchas, and decisions encountered while building
 ### Verifier metadata must be explicit in both persistence and API mocks
 - A single `email_verified` boolean is too coarse once the product distinguishes SMTP-verified, Hunter-verified, provider-verified, and best-guess emails, and mocked API objects start breaking if the new optional fields are left implicit on `MagicMock`.
 - **Lesson:** Store discovery source and verification method as separate fields, and whenever response schemas grow, update test doubles to set the new optional attributes to concrete values like `None` instead of letting mocks invent nested placeholders.
+
+### New dependencies must be checked against pinned framework versions, not just the local environment
+- Adding `crawl4ai` while `requirements.txt` still pinned `pydantic==2.9.2` passed locally because the active interpreter already had a newer Pydantic installed, but CI failed during a clean install because `crawl4ai>=0.8` requires `pydantic>=2.10`.
+- **Lesson:** Whenever a new package is added, validate it against a fresh environment or the exact lockfile/requirements set, not the already-warmed local venv.
