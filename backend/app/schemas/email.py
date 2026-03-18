@@ -20,9 +20,16 @@ class EmailFindResponse(BaseModel):
     source: str
     verified: bool
     result_type: str = "not_found"
+    usable_for_outreach: bool = False
+    guess_basis: str | None = None
     verified_email: str | None = None
     best_guess_email: str | None = None
     confidence: int | None = None
+    email_verification_status: str | None = None
+    email_verification_method: str | None = None
+    email_verification_label: str | None = None
+    email_verification_evidence: str | None = None
+    email_verified_at: str | None = None
     suggestions: list[EmailSuggestion] | None = None
     alternate_guesses: list[EmailSuggestion] | None = None
     failure_reasons: list[str] = []
@@ -36,6 +43,10 @@ class EmailVerifyResponse(BaseModel):
     score: int = 0
     disposable: bool = False
     webmail: bool = False
+    email_verification_status: str | None = None
+    email_verification_method: str | None = None
+    email_verification_label: str | None = None
+    email_verification_evidence: str | None = None
 
 
 class StageDraftRequest(BaseModel):

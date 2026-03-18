@@ -38,7 +38,7 @@ async def find_email(
     db: Annotated[AsyncSession, Depends(get_db)],
     mode: str = Query("best_effort"),
 ):
-    """Find a work email for a person using the waterfall (Apollo → Hunter → Proxycurl)."""
+    """Find a work email using pattern-first best-effort discovery."""
     try:
         result = await find_email_for_person(
             db,
@@ -57,7 +57,7 @@ async def verify_email(
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Verify an existing email address via Hunter.io."""
+    """Verify an existing stored email address via Hunter.io."""
     try:
         result = await verify_person_email(db, user_id, uuid.UUID(person_id))
     except ValueError as e:

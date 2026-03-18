@@ -19,6 +19,7 @@ from app.services.people_service import (
     enrich_person_from_linkedin,
     get_saved_people,
 )
+from app.services.employment_verification_service import verify_current_company_for_person
 
 router = APIRouter(prefix="/people", tags=["people"])
 
@@ -89,3 +90,28 @@ async def list_people(
     cid = uuid.UUID(company_id) if company_id else None
     people = await get_saved_people(db, user_id, cid)
     return people
+
+
+@router.post("/verify-current-company/{person_id}", response_model=PersonResponse)
+@limiter.limit("10/minute")
+async def verify_current_company(
+    request: Request,
+    person_id: str,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Manually verify a saved person's current employer."""
+    try:
+        person_uuid = uuid.UUID(person_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid person_id format") from exc
+
+    try:
+        person = await verify_current_company_for_person(
+            db=db,
+            user_id=user_id,
+            person_id=person_uuid,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return person

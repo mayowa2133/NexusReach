@@ -18,6 +18,8 @@ async def record_usage(
     tokens_in: int | None = None,
     tokens_out: int | None = None,
     cost_cents: int | None = None,
+    credits_used: float | None = None,
+    details: dict | None = None,
 ) -> ApiUsage:
     """Record an external API call for the user."""
     record = ApiUsage(
@@ -27,6 +29,8 @@ async def record_usage(
         tokens_in=tokens_in,
         tokens_out=tokens_out,
         cost_cents=cost_cents,
+        credits_used=credits_used,
+        details=details,
     )
     db.add(record)
     await db.flush()
@@ -96,3 +100,81 @@ async def check_daily_limit(
         )
 
     return True
+
+
+async def get_monthly_usage_count(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    service: str,
+    endpoint_prefix: str | None = None,
+) -> int:
+    """Get the current month's usage count for a service, optionally by endpoint prefix."""
+    month_start = datetime.now(timezone.utc).replace(
+        day=1,
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+
+    query = select(func.count(ApiUsage.id)).where(
+        ApiUsage.user_id == user_id,
+        ApiUsage.service == service,
+        ApiUsage.created_at >= month_start,
+    )
+    if endpoint_prefix:
+        query = query.where(ApiUsage.endpoint.like(f"{endpoint_prefix}%"))
+
+    result = await db.execute(query)
+    return int(result.scalar() or 0)
+
+
+async def has_monthly_usage(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    service: str,
+    endpoint: str,
+) -> bool:
+    """Return True if the exact service+endpoint has been used this calendar month."""
+    month_start = datetime.now(timezone.utc).replace(
+        day=1,
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+
+    query = select(ApiUsage.id).where(
+        ApiUsage.user_id == user_id,
+        ApiUsage.service == service,
+        ApiUsage.endpoint == endpoint,
+        ApiUsage.created_at >= month_start,
+    ).limit(1)
+    result = await db.execute(query)
+    return result.scalar_one_or_none() is not None
+
+
+async def get_usage_records(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    service: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    limit: int = 100,
+) -> list[ApiUsage]:
+    """Return usage records ordered newest-first for auditing."""
+    query = select(ApiUsage).where(ApiUsage.user_id == user_id)
+
+    if service:
+        query = query.where(ApiUsage.service == service)
+    if date_from:
+        query = query.where(ApiUsage.created_at >= date_from)
+    if date_to:
+        query = query.where(ApiUsage.created_at <= date_to)
+
+    query = query.order_by(ApiUsage.created_at.desc()).limit(limit)
+    result = await db.execute(query)
+    return list(result.scalars().all())

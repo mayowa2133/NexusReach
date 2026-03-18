@@ -1,6 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import type { EmailFindResult, EmailConnectionStatus, StageDraftResult } from '@/types';
+import type {
+  EmailFindResult,
+  EmailVerifyResult,
+  EmailConnectionStatus,
+  StageDraftResult,
+} from '@/types';
 
 export function useEmailConnectionStatus() {
   return useQuery({
@@ -26,7 +31,7 @@ export function useVerifyEmail() {
 
   return useMutation({
     mutationFn: (personId: string) =>
-      api.post<{ email: string; status: string }>(`/api/email/verify/${personId}`),
+      api.post<EmailVerifyResult>(`/api/email/verify/${personId}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['people'] });
     },

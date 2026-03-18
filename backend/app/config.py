@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     google_cse_id: str = ""
     groq_api_key: str = ""
     brave_api_key: str = ""
+    firecrawl_base_url: str = ""
+    firecrawl_api_key: str = ""
 
     # LLM provider selection (anthropic | openai | gemini | groq)
     llm_provider: str = "anthropic"
@@ -52,6 +54,10 @@ class Settings(BaseSettings):
     # Usage limits
     daily_llm_token_limit: int = 100_000
     daily_api_call_limit: int = 50
+    hunter_pattern_monthly_budget: int = 25
+    employment_verify_top_n: int = 10
+    employment_verify_timeout_seconds: int = 20
+    employment_verify_enabled: bool = True
 
 
 settings = Settings()

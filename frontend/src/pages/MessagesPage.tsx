@@ -7,7 +7,12 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { useDraftMessage, useEditMessage, useMarkCopied, useMessages } from '@/hooks/useMessages';
 import { useSavedPeople } from '@/hooks/usePeople';
-import { useFindEmail, useEmailConnectionStatus, useStageDraft } from '@/hooks/useEmail';
+import { useFindEmail, useVerifyEmail, useEmailConnectionStatus, useStageDraft } from '@/hooks/useEmail';
+import {
+  formatEmailVerificationLabel,
+  formatGuessBasis,
+  isVerifiedEmailStatus,
+} from '@/lib/emailVerification';
 import { toast } from 'sonner';
 import type { Message, MessageChannel, MessageGoal } from '@/types';
 
@@ -49,6 +54,7 @@ export function MessagesPage() {
   const edit = useEditMessage();
   const markCopied = useMarkCopied();
   const findEmail = useFindEmail();
+  const verifyEmail = useVerifyEmail();
   const stageDraft = useStageDraft();
   const { data: savedPeople } = useSavedPeople();
   const { data: messages } = useMessages();
@@ -115,11 +121,21 @@ export function MessagesPage() {
     if (!selectedPersonId) return;
     try {
       const result = await findEmail.mutateAsync(selectedPersonId);
+      const verificationLabel = formatEmailVerificationLabel(
+        result.email_verification_status,
+        result.email_verification_method,
+        result.guess_basis,
+        result.email_verification_label,
+      );
       if (result.verified_email) {
-        toast.success(`Found email: ${result.email} (via ${result.source})`);
+        toast.success(
+          `${verificationLabel ?? 'Verified email'}: ${result.email}`
+        );
       } else if (result.best_guess_email) {
         const confidenceText = result.confidence != null ? ` · confidence ${result.confidence}` : '';
-        toast.error(`Best guess only: ${result.best_guess_email}${confidenceText}`);
+        toast.error(
+          `${verificationLabel ?? formatGuessBasis(result.guess_basis) ?? 'Best guess'}: ${result.best_guess_email}${confidenceText}`
+        );
       } else {
         const reasons = result.failure_reasons.length > 0 ? ` Why: ${result.failure_reasons.join(', ')}` : '';
         toast.error(`No email found. Tried: ${result.tried.join(', ')}.${reasons}`);
@@ -142,7 +158,38 @@ export function MessagesPage() {
     }
   };
 
+  const handleVerifySelectedEmail = async () => {
+    if (!selectedPersonId) return;
+    try {
+      const result = await verifyEmail.mutateAsync(selectedPersonId);
+      if (result.status === 'valid') {
+        toast.success(`${result.email_verification_label ?? 'Hunter-verified'}: ${result.email}`);
+      } else {
+        toast.error(`Verification result: ${result.result}`);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to verify email');
+    }
+  };
+
   const selectedPerson = savedPeople?.find((p) => p.id === selectedPersonId);
+  const selectedEmailVerificationLabel = selectedPerson
+    ? formatEmailVerificationLabel(
+        selectedPerson.email_verification_status ?? (selectedPerson.email_verified ? 'verified' : selectedPerson.work_email ? 'unknown' : null),
+        selectedPerson.email_verification_method ?? null,
+        selectedPerson.email_source === 'pattern_suggestion_learned'
+          ? 'learned_company_pattern'
+          : selectedPerson.email_source === 'pattern_suggestion'
+            ? 'generic_pattern'
+            : null,
+        selectedPerson.email_verification_label ?? null,
+      )
+    : null;
+  const selectedEmailIsVerified = selectedPerson
+    ? isVerifiedEmailStatus(
+        selectedPerson.email_verification_status ?? (selectedPerson.email_verified ? 'verified' : selectedPerson.work_email ? 'unknown' : null),
+      )
+    : false;
 
   return (
     <div className="space-y-6">
@@ -196,8 +243,8 @@ export function MessagesPage() {
                     <div className="flex items-center gap-1">
                       <span className="text-muted-foreground">Email:</span>
                       <span>{selectedPerson.work_email}</span>
-                      {selectedPerson.email_verified && (
-                        <Badge variant="outline" className="text-xs">Verified</Badge>
+                      {selectedEmailVerificationLabel && (
+                        <Badge variant="outline" className="text-xs">{selectedEmailVerificationLabel}</Badge>
                       )}
                     </div>
                   ) : (
@@ -210,6 +257,27 @@ export function MessagesPage() {
                     >
                       {findEmail.isPending ? 'Searching...' : 'Find Email Address'}
                     </Button>
+                  )}
+                  {selectedPerson.email_verification_evidence && (
+                    <div className="text-xs text-muted-foreground">
+                      Email evidence: {selectedPerson.email_verification_evidence}
+                    </div>
+                  )}
+                  {selectedPerson.work_email && !selectedEmailIsVerified && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleVerifySelectedEmail}
+                      disabled={verifyEmail.isPending}
+                      className="w-full"
+                    >
+                      {verifyEmail.isPending ? 'Verifying...' : 'Verify Email with Hunter'}
+                    </Button>
+                  )}
+                  {selectedPerson.work_email && !selectedEmailIsVerified && selectedEmailVerificationLabel && (
+                    <div className="text-xs text-muted-foreground">
+                      {selectedEmailVerificationLabel}
+                    </div>
                   )}
                 </div>
               )}

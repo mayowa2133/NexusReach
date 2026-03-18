@@ -30,12 +30,29 @@ class Person(Base):
     email_source: Mapped[str | None] = mapped_column(String(50))
     email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     email_confidence: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    email_verification_status: Mapped[str | None] = mapped_column(String(50))
+    email_verification_method: Mapped[str | None] = mapped_column(String(50))
+    email_verification_label: Mapped[str | None] = mapped_column(String(100))
+    email_verification_evidence: Mapped[str | None] = mapped_column(String(500))
+    email_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     person_type: Mapped[str | None] = mapped_column(String(50))
     profile_data: Mapped[dict | None] = mapped_column(JSONB)
     github_data: Mapped[dict | None] = mapped_column(JSONB)
     source: Mapped[str | None] = mapped_column(String(50))
     apollo_id: Mapped[str | None] = mapped_column(String(100))
     relevance_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    current_company_verified: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    current_company_verification_status: Mapped[str | None] = mapped_column(String(50))
+    current_company_verification_source: Mapped[str | None] = mapped_column(String(50))
+    current_company_verification_confidence: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    current_company_verification_evidence: Mapped[str | None] = mapped_column(String(500))
+    current_company_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

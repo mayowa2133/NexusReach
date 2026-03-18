@@ -74,8 +74,14 @@ export interface Person {
   linkedin_url: string | null;
   github_url: string | null;
   work_email: string | null;
+  email_source?: string | null;
   email_verified: boolean;
   email_confidence: number | null;
+  email_verification_status?: 'verified' | 'best_guess' | 'unverified' | 'unknown' | null;
+  email_verification_method?: 'smtp_pattern' | 'hunter_verifier' | 'provider_verified' | 'none' | null;
+  email_verification_label?: string | null;
+  email_verification_evidence?: string | null;
+  email_verified_at?: string | null;
   person_type: string | null;
   profile_data: Record<string, unknown> | null;
   github_data: GitHubData | null;
@@ -83,6 +89,14 @@ export interface Person {
   apollo_id: string | null;
   match_quality?: 'direct' | 'next_best' | null;
   match_reason?: string | null;
+  employment_status?: 'current' | 'ambiguous' | 'former' | null;
+  org_level?: 'ic' | 'manager' | 'director_plus' | null;
+  current_company_verified?: boolean | null;
+  current_company_verification_status?: 'verified' | 'unverified' | 'failed' | 'skipped' | null;
+  current_company_verification_source?: 'crawl4ai_linkedin' | 'firecrawl_public_web' | 'manual' | null;
+  current_company_verification_confidence?: number | null;
+  current_company_verification_evidence?: string | null;
+  current_company_verified_at?: string | null;
   company: Company | null;
 }
 
@@ -160,13 +174,33 @@ export interface EmailFindResult {
   source: string;
   verified: boolean;
   result_type: 'verified' | 'best_guess' | 'not_found';
+  usable_for_outreach: boolean;
+  guess_basis: 'learned_company_pattern' | 'generic_pattern' | null;
   verified_email: string | null;
   best_guess_email: string | null;
   confidence: number | null;
+  email_verification_status: 'verified' | 'best_guess' | 'unverified' | 'unknown' | null;
+  email_verification_method: 'smtp_pattern' | 'hunter_verifier' | 'provider_verified' | 'none' | null;
+  email_verification_label: string | null;
+  email_verification_evidence: string | null;
+  email_verified_at: string | null;
   suggestions: EmailSuggestion[] | null;
   alternate_guesses: EmailSuggestion[] | null;
   failure_reasons: string[];
   tried: string[];
+}
+
+export interface EmailVerifyResult {
+  email: string;
+  status: string;
+  result: string;
+  score: number;
+  disposable: boolean;
+  webmail: boolean;
+  email_verification_status: 'verified' | 'best_guess' | 'unverified' | 'unknown' | null;
+  email_verification_method: 'smtp_pattern' | 'hunter_verifier' | 'provider_verified' | 'none' | null;
+  email_verification_label: string | null;
+  email_verification_evidence: string | null;
 }
 
 export interface EmailConnectionStatus {

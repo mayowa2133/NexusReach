@@ -39,3 +39,15 @@ export function useSavedPeople(companyId?: string) {
     },
   });
 }
+
+export function useVerifyCurrentCompany() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (personId: string) =>
+      api.post<Person>(`/api/people/verify-current-company/${personId}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['people'] });
+    },
+  });
+}

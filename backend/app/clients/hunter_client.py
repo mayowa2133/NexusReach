@@ -1,10 +1,35 @@
-"""Hunter.io API client for email finding and verification."""
+"""Hunter.io API client for email finding, verification, and pattern learning."""
 
 import httpx
 
 from app.config import settings
 
 HUNTER_BASE_URL = "https://api.hunter.io/v2"
+
+_PATTERN_MAP = {
+    "{first}.{last}": "first.last",
+    "{first}{last}": "firstlast",
+    "{f}{last}": "flast",
+    "{first_initial}{last}": "flast",
+    "{first[0]}{last}": "flast",
+    "{first}": "first",
+    "{first}{l}": "firstl",
+    "{first}{last_initial}": "firstl",
+    "{first}{last[0]}": "firstl",
+    "{first}_{last}": "first_last",
+    "{last}.{first}": "last.first",
+}
+
+
+def _normalize_pattern(pattern: str | None) -> str | None:
+    """Normalize Hunter pattern syntax into NexusReach internal pattern keys."""
+    if not pattern:
+        return None
+
+    normalized = "".join((pattern or "").lower().split())
+    if normalized in _PATTERN_MAP:
+        return _PATTERN_MAP[normalized]
+    return None
 
 
 async def find_email(
@@ -83,14 +108,14 @@ async def verify_email(email: str) -> dict | None:
     }
 
 
-async def domain_search(domain: str, limit: int = 10) -> list[dict]:
-    """Search for email addresses at a domain.
+async def domain_search(domain: str, limit: int = 10) -> dict:
+    """Search for email addresses and pattern metadata at a domain.
 
     Returns:
-        List of email dicts found at the domain.
+        Dict with the learned pattern, accept-all status, and sample emails.
     """
     if not settings.hunter_api_key:
-        return []
+        return {"pattern": None, "accept_all": None, "emails": []}
 
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.get(
@@ -102,17 +127,21 @@ async def domain_search(domain: str, limit: int = 10) -> list[dict]:
             },
         )
         if resp.status_code != 200:
-            return []
+            return {"pattern": None, "accept_all": None, "emails": []}
         data = resp.json().get("data", {})
 
-    return [
-        {
-            "email": e.get("value", ""),
-            "type": e.get("type", ""),
-            "first_name": e.get("first_name", ""),
-            "last_name": e.get("last_name", ""),
-            "position": e.get("position", ""),
-            "confidence": e.get("confidence", 0),
-        }
-        for e in data.get("emails", [])
-    ]
+    return {
+        "pattern": _normalize_pattern(data.get("pattern")),
+        "accept_all": data.get("accept_all"),
+        "emails": [
+            {
+                "email": e.get("value", ""),
+                "type": e.get("type", ""),
+                "first_name": e.get("first_name", ""),
+                "last_name": e.get("last_name", ""),
+                "position": e.get("position", ""),
+                "confidence": e.get("confidence", 0),
+            }
+            for e in data.get("emails", [])
+        ],
+    }

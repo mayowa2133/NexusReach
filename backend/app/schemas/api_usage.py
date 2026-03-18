@@ -1,5 +1,7 @@
 """Pydantic schemas for API usage tracking."""
 
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 
@@ -25,6 +27,8 @@ class UsageRecordResponse(BaseModel):
     tokens_in: int | None = None
     tokens_out: int | None = None
     cost_cents: int | None = None
-    created_at: str
+    credits_used: float | None = None
+    details: dict | None = None
+    created_at: datetime
 
     model_config = {"from_attributes": True}

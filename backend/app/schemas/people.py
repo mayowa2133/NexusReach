@@ -1,3 +1,4 @@
+from datetime import datetime
 import uuid
 
 from pydantic import BaseModel
@@ -24,8 +25,14 @@ class PersonResponse(BaseModel):
     linkedin_url: str | None
     github_url: str | None
     work_email: str | None
+    email_source: str | None = None
     email_verified: bool
     email_confidence: int | None = None
+    email_verification_status: str | None = None
+    email_verification_method: str | None = None
+    email_verification_label: str | None = None
+    email_verification_evidence: str | None = None
+    email_verified_at: datetime | None = None
     person_type: str | None
     profile_data: dict | None
     github_data: dict | None
@@ -34,6 +41,14 @@ class PersonResponse(BaseModel):
     relevance_score: int | None = None
     match_quality: str | None = None
     match_reason: str | None = None
+    employment_status: str | None = None
+    org_level: str | None = None
+    current_company_verified: bool | None = None
+    current_company_verification_status: str | None = None
+    current_company_verification_source: str | None = None
+    current_company_verification_confidence: int | None = None
+    current_company_verification_evidence: str | None = None
+    current_company_verified_at: datetime | None = None
     company: CompanyResponse | None = None
 
     model_config = {"from_attributes": True}

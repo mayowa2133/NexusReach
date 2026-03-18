@@ -339,3 +339,36 @@ async def search_hiring_team(
         results.extend(_parse_hiring_team_result(item, company_name))
 
     return results[:limit]
+
+
+async def search_employment_sources(
+    full_name: str,
+    company_name: str,
+    *,
+    company_domain: str | None = None,
+    limit: int = 5,
+) -> list[dict]:
+    """Search public-web sources for current-employment corroboration."""
+    if not full_name or not company_name:
+        return []
+
+    company_site = f" OR site:{company_domain}" if company_domain else ""
+    query = (
+        f'"{full_name}" "{company_name}" '
+        f'(site:theorg.com OR site:linkedin.com/posts OR site:medium.com OR '
+        f'site:substack.com OR site:dev.to{company_site})'
+    )
+    items = await _run_brave_query(query, limit)
+    results = []
+    for item in items:
+        url = (item.get("url") or "").strip()
+        if not url:
+            continue
+        results.append(
+            {
+                "url": _clean_profile_url(url),
+                "title": (item.get("title") or "").strip(),
+                "description": (item.get("description") or "").strip(),
+            }
+        )
+    return results[:limit]

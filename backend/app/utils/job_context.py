@@ -234,21 +234,30 @@ def _keyword_label(keyword: str) -> str:
     return keyword.replace("_", " ").title()
 
 
-def _build_manager_titles(department: str, keywords: list[str], base_title: str) -> list[str]:
+def _build_manager_titles(
+    department: str,
+    keywords: list[str],
+    base_title: str,
+    seniority: str,
+) -> list[str]:
     titles: list[str] = []
     core = _extract_core_role(base_title)
     if core:
         titles.extend([
             f"{core} Manager",
             f"{core} Engineering Manager",
-            f"Head of {core}",
+            f"{core} Team Lead",
+            f"{core} Tech Lead",
         ])
+        if seniority in {"staff", "principal", "manager", "director", "vp", "executive"}:
+            titles.append(f"Head of {core}")
 
     dept_label = department.replace("_", " ").title()
     titles.extend([
         f"{dept_label} Manager",
         "Engineering Manager",
-        "Hiring Manager",
+        "Team Lead",
+        "Tech Lead",
     ])
 
     for keyword in keywords[:2]:
@@ -323,7 +332,7 @@ def extract_job_context(title: str, description: str | None = None) -> JobContex
 
     seniority = _detect_seniority(title_lower)
     apollo_departments = APOLLO_DEPARTMENT_SLUGS.get(department, ["engineering_technical"])
-    manager_titles = _build_manager_titles(department, team_keywords, title)
+    manager_titles = _build_manager_titles(department, team_keywords, title, seniority)
     peer_titles = _build_peer_titles(title, team_keywords, seniority)
     recruiter_titles = _build_recruiter_titles(department, domain_keywords)
 

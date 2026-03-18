@@ -41,6 +41,10 @@ const mockFindEmail = {
   mutateAsync: vi.fn(),
   isPending: false,
 };
+const mockVerifyEmail = {
+  mutateAsync: vi.fn(),
+  isPending: false,
+};
 
 let mockSavedPeople: unknown[] = [];
 
@@ -57,6 +61,7 @@ vi.mock('@/hooks/useMessages', () => ({
 
 vi.mock('@/hooks/useEmail', () => ({
   useFindEmail: () => mockFindEmail,
+  useVerifyEmail: () => mockVerifyEmail,
   useEmailConnectionStatus: () => ({ data: { gmail_connected: false, outlook_connected: false } }),
   useStageDraft: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
@@ -79,6 +84,7 @@ beforeEach(() => {
   toast.success.mockReset();
   toast.error.mockReset();
   mockFindEmail.mutateAsync.mockReset();
+  mockVerifyEmail.mutateAsync.mockReset();
   mockSavedPeople = [
     {
       id: 'p1',
@@ -98,6 +104,7 @@ describe('MessagesPage', () => {
       source: 'pattern_suggestion',
       verified: false,
       result_type: 'best_guess',
+      guess_basis: 'learned_company_pattern',
       verified_email: null,
       best_guess_email: 'alex.lee@affirm.com',
       confidence: 40,
@@ -112,7 +119,9 @@ describe('MessagesPage', () => {
     fireEvent.change(screen.getByLabelText(/person/i), { target: { value: 'p1' } });
     await userEvent.click(screen.getByRole('button', { name: /find email address/i }));
 
-    expect(toast.error).toHaveBeenCalledWith('Best guess only: alex.lee@affirm.com · confidence 40');
+    expect(toast.error).toHaveBeenCalledWith(
+      'Best guess from learned company pattern: alex.lee@affirm.com · confidence 40'
+    );
     expect(toast.success).not.toHaveBeenCalledWith(expect.stringMatching(/found email/i));
   });
 });

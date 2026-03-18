@@ -1,5 +1,6 @@
 """Email finding waterfall service."""
 
+from datetime import datetime, timezone
 import logging
 import uuid
 
@@ -18,12 +19,18 @@ from app.clients import (
 )
 from app.config import settings
 from app.models.person import Person
+from app.services import api_usage_service
 from app.services.smtp_domain_service import is_domain_blocked, record_smtp_result
 
 logger = logging.getLogger(__name__)
 
 LOW_CONFIDENCE_PERSIST_THRESHOLD = 60
 LEARNED_PATTERN_THRESHOLD = 80
+HUNTER_EXPLICIT_PATTERN_CONFIDENCE = 85
+HUNTER_INFERRED_PATTERN_CONFIDENCE = 75
+HUNTER_PATTERN_USAGE_PREFIX = "domain_search.pattern_learning:"
+HUNTER_PATTERN_CREDITS = 1.0
+HUNTER_VERIFY_CREDITS = 0.5
 
 
 def _split_name(full_name: str) -> tuple[str, str]:
@@ -41,9 +48,15 @@ def _response(
     source: str,
     verified: bool,
     tried: list[str],
+    guess_basis: str | None = None,
     confidence: int | None = None,
     suggestions: list[dict] | None = None,
     failure_reasons: list[str] | None = None,
+    email_verification_status: str | None = None,
+    email_verification_method: str | None = None,
+    email_verification_label: str | None = None,
+    email_verification_evidence: str | None = None,
+    email_verified_at: datetime | None = None,
 ) -> dict:
     result_type = "not_found"
     verified_email = None
@@ -55,15 +68,23 @@ def _response(
         else:
             result_type = "best_guess"
             best_guess_email = email
+            guess_basis = guess_basis or _guess_basis_from_source(source)
 
     return {
         "email": email,
         "source": source,
         "verified": verified,
         "result_type": result_type,
+        "usable_for_outreach": bool(email),
+        "guess_basis": guess_basis,
         "verified_email": verified_email,
         "best_guess_email": best_guess_email,
         "confidence": confidence,
+        "email_verification_status": email_verification_status,
+        "email_verification_method": email_verification_method,
+        "email_verification_label": email_verification_label,
+        "email_verification_evidence": email_verification_evidence,
+        "email_verified_at": email_verified_at.isoformat() if email_verified_at else None,
         "suggestions": suggestions,
         "alternate_guesses": suggestions,
         "failure_reasons": failure_reasons or [],
@@ -74,6 +95,236 @@ def _response(
 def _append_reason(failure_reasons: list[str], reason: str) -> None:
     if reason not in failure_reasons:
         failure_reasons.append(reason)
+
+
+def _guess_basis_from_source(source: str | None) -> str | None:
+    if source == "pattern_suggestion_learned":
+        return "learned_company_pattern"
+    if source == "pattern_suggestion":
+        return "generic_pattern"
+    return None
+
+
+def _verification_label(
+    status: str | None,
+    method: str | None,
+    *,
+    guess_basis: str | None = None,
+) -> str | None:
+    if status == "verified" and method == "smtp_pattern":
+        return "SMTP-verified"
+    if status == "verified" and method == "hunter_verifier":
+        return "Hunter-verified"
+    if status == "verified" and method == "provider_verified":
+        return "Provider-verified"
+    if status == "best_guess" and guess_basis == "learned_company_pattern":
+        return "Best guess from learned company pattern"
+    if status == "best_guess":
+        return "Best guess from generic pattern fallback"
+    if status == "unverified" and method == "provider_verified":
+        return "Provider email (unverified)"
+    if status == "unverified" and method == "hunter_verifier":
+        return "Hunter verification inconclusive"
+    if status == "unverified":
+        return "Unverified email"
+    if status == "unknown":
+        return "Verification unknown"
+    return None
+
+
+def _email_verification_payload(
+    *,
+    status: str | None,
+    method: str | None,
+    guess_basis: str | None = None,
+    evidence: str | None = None,
+    verified_at: datetime | None = None,
+) -> dict:
+    return {
+        "email_verification_status": status,
+        "email_verification_method": method,
+        "email_verification_label": _verification_label(status, method, guess_basis=guess_basis),
+        "email_verification_evidence": evidence,
+        "email_verified_at": verified_at,
+    }
+
+
+def _set_person_email_verification(
+    person: Person,
+    *,
+    status: str | None,
+    method: str | None,
+    guess_basis: str | None = None,
+    evidence: str | None = None,
+    verified_at: datetime | None = None,
+) -> None:
+    payload = _email_verification_payload(
+        status=status,
+        method=method,
+        guess_basis=guess_basis,
+        evidence=evidence,
+        verified_at=verified_at,
+    )
+    person.email_verification_status = payload["email_verification_status"]
+    person.email_verification_method = payload["email_verification_method"]
+    person.email_verification_label = payload["email_verification_label"]
+    person.email_verification_evidence = payload["email_verification_evidence"]
+    person.email_verified_at = payload["email_verified_at"]
+
+
+def _infer_saved_email_verification(person: Person) -> dict:
+    if not person.work_email:
+        return _email_verification_payload(status=None, method=None)
+
+    source = getattr(person, "email_source", None)
+    guess_basis = _guess_basis_from_source(source)
+    inferred_verified_at = getattr(person, "email_verified_at", None) or (
+        getattr(person, "created_at", None) if getattr(person, "email_verified", False) else None
+    )
+
+    if source in {"pattern_smtp", "pattern_smtp_gravatar"} and getattr(person, "email_verified", False):
+        return _email_verification_payload(
+            status="verified",
+            method="smtp_pattern",
+            evidence="Backfilled from existing SMTP pattern verification.",
+            verified_at=inferred_verified_at,
+        )
+    if source == "apollo":
+        return _email_verification_payload(
+            status="verified" if getattr(person, "email_verified", False) else "unverified",
+            method="provider_verified",
+            evidence=(
+                "Backfilled from existing provider-verified email."
+                if getattr(person, "email_verified", False)
+                else "Backfilled from existing provider email without verification."
+            ),
+            verified_at=inferred_verified_at if getattr(person, "email_verified", False) else None,
+        )
+    if source in {"pattern_suggestion", "pattern_suggestion_learned"}:
+        return _email_verification_payload(
+            status="best_guess",
+            method="none",
+            guess_basis=guess_basis,
+            evidence=(
+                "Backfilled from existing learned company-pattern best guess."
+                if guess_basis == "learned_company_pattern"
+                else "Backfilled from existing generic-pattern best guess."
+            ),
+        )
+    if getattr(person, "email_verified", False):
+        return _email_verification_payload(
+            status="verified",
+            method="none",
+            evidence="Backfilled from existing verified email.",
+            verified_at=inferred_verified_at,
+        )
+    return _email_verification_payload(
+        status="unknown",
+        method="none",
+        evidence="Backfilled from existing saved email with unknown verification provenance.",
+    )
+
+
+def _backfill_person_email_verification(person: Person) -> bool:
+    if not person.work_email:
+        return False
+    existing = (
+        getattr(person, "email_verification_status", None),
+        getattr(person, "email_verification_method", None),
+        getattr(person, "email_verification_label", None),
+        getattr(person, "email_verification_evidence", None),
+        getattr(person, "email_verified_at", None),
+    )
+    if any(value is not None for value in existing):
+        return False
+    payload = _infer_saved_email_verification(person)
+    _set_person_email_verification(
+        person,
+        status=payload["email_verification_status"],
+        method=payload["email_verification_method"],
+        evidence=payload["email_verification_evidence"],
+        verified_at=payload["email_verified_at"],
+        guess_basis=(
+            "learned_company_pattern"
+            if payload["email_verification_label"] == "Best guess from learned company pattern"
+            else "generic_pattern"
+            if payload["email_verification_label"] == "Best guess from generic pattern fallback"
+            else None
+        ),
+    )
+    return True
+
+
+def _hunter_pattern_endpoint(company_domain: str) -> str:
+    return f"{HUNTER_PATTERN_USAGE_PREFIX}{company_domain.lower().strip()}"
+
+
+def _hunter_verify_endpoint(email: str) -> str:
+    return f"email_verifier.manual_verify:{email.lower().strip()}"
+
+
+async def _record_hunter_usage(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    endpoint: str,
+    operation: str,
+    target: str,
+    billable: bool,
+    result: str,
+    credits_used: float,
+    extra_details: dict | None = None,
+) -> None:
+    details = {
+        "operation": operation,
+        "target": target,
+        "billable": billable,
+        "result": result,
+    }
+    if extra_details:
+        details.update(extra_details)
+
+    await api_usage_service.record_usage(
+        db,
+        user_id,
+        service="hunter",
+        endpoint=endpoint,
+        credits_used=credits_used,
+        details=details,
+    )
+
+
+def _extract_hunter_pattern(
+    domain_result: dict | None,
+    *,
+    company_domain: str,
+) -> tuple[str | None, int | None]:
+    if not domain_result:
+        return None, None
+
+    explicit_pattern = domain_result.get("pattern")
+    if explicit_pattern:
+        return explicit_pattern, HUNTER_EXPLICIT_PATTERN_CONFIDENCE
+
+    emails = sorted(
+        domain_result.get("emails", []),
+        key=lambda entry: int(entry.get("confidence") or 0),
+        reverse=True,
+    )
+    for entry in emails:
+        first_name = entry.get("first_name") or ""
+        last_name = entry.get("last_name") or ""
+        email = entry.get("email") or ""
+        inferred = email_suggestion_client.infer_pattern(
+            email,
+            first_name,
+            last_name,
+            company_domain,
+        )
+        if inferred:
+            return inferred, max(HUNTER_INFERRED_PATTERN_CONFIDENCE, int(entry.get("confidence") or 0))
+
+    return None, None
 
 
 async def _learn_company_pattern(
@@ -122,12 +373,19 @@ async def find_email_for_person(
     failure_reasons: list[str] = []
 
     if person.work_email:
+        if _backfill_person_email_verification(person):
+            await db.commit()
         return _response(
             email=person.work_email,
             source=person.email_source or "existing",
             verified=person.email_verified,
             tried=["existing"],
             confidence=person.email_confidence,
+            email_verification_status=getattr(person, "email_verification_status", None),
+            email_verification_method=getattr(person, "email_verification_method", None),
+            email_verification_label=getattr(person, "email_verification_label", None),
+            email_verification_evidence=getattr(person, "email_verification_evidence", None),
+            email_verified_at=getattr(person, "email_verified_at", None),
         )
 
     first_name, last_name = _split_name(person.full_name or "")
@@ -146,7 +404,6 @@ async def find_email_for_person(
 
     fallback_suggestion: dict | None = None
     fallback_confidence: int | None = None
-
     if person.github_url:
         tried.append("github_profile")
         profile_email = await github_email_client.get_profile_email(person.github_url)
@@ -154,6 +411,12 @@ async def find_email_for_person(
             person.work_email = profile_email
             person.email_source = "github_profile"
             person.email_verified = False
+            _set_person_email_verification(
+                person,
+                status="unknown",
+                method="none",
+                evidence="Email discovered from GitHub profile.",
+            )
             await db.commit()
             return _response(
                 email=profile_email,
@@ -161,6 +424,11 @@ async def find_email_for_person(
                 verified=False,
                 tried=tried,
                 failure_reasons=failure_reasons,
+                email_verification_status=getattr(person, "email_verification_status", None),
+                email_verification_method=getattr(person, "email_verification_method", None),
+                email_verification_label=getattr(person, "email_verification_label", None),
+                email_verification_evidence=getattr(person, "email_verification_evidence", None),
+                email_verified_at=getattr(person, "email_verified_at", None),
             )
         _append_reason(failure_reasons, "github_profile_no_email")
 
@@ -173,6 +441,12 @@ async def find_email_for_person(
             person.work_email = commit_email
             person.email_source = "github_commit"
             person.email_verified = False
+            _set_person_email_verification(
+                person,
+                status="unknown",
+                method="none",
+                evidence="Email discovered from GitHub commit metadata.",
+            )
             await db.commit()
             return _response(
                 email=commit_email,
@@ -180,13 +454,20 @@ async def find_email_for_person(
                 verified=False,
                 tried=tried,
                 failure_reasons=failure_reasons,
+                email_verification_status=getattr(person, "email_verification_status", None),
+                email_verification_method=getattr(person, "email_verification_method", None),
+                email_verification_label=getattr(person, "email_verification_label", None),
+                email_verification_evidence=getattr(person, "email_verification_evidence", None),
+                email_verified_at=getattr(person, "email_verified_at", None),
             )
         _append_reason(failure_reasons, "github_commit_no_email")
 
     if first_name and last_name and company_domain:
         tried.append("pattern_smtp")
+        learning_candidate = False
         if await is_domain_blocked(db, company_domain):
             _append_reason(failure_reasons, "smtp_domain_blocked")
+            learning_candidate = True
         else:
             pattern_result = await email_pattern_client.find_email_by_pattern(
                 first_name,
@@ -199,14 +480,18 @@ async def find_email_for_person(
             elif domain_status == "catch_all":
                 await record_smtp_result(db, company_domain, "catch_all")
                 _append_reason(failure_reasons, "smtp_catch_all")
+                learning_candidate = True
             elif domain_status == "timeout":
                 await record_smtp_result(db, company_domain, "blocked")
                 _append_reason(failure_reasons, "smtp_timeout")
+                learning_candidate = True
             elif domain_status == "infrastructure_blocked":
                 await record_smtp_result(db, company_domain, "infrastructure_blocked")
                 _append_reason(failure_reasons, "smtp_infrastructure_blocked")
+                learning_candidate = True
             elif domain_status == "all_rejected":
                 _append_reason(failure_reasons, "smtp_all_rejected")
+                learning_candidate = True
             elif domain_status == "no_mx":
                 _append_reason(failure_reasons, "smtp_no_mx")
 
@@ -221,6 +506,13 @@ async def find_email_for_person(
                 person.email_source = source
                 person.email_verified = True
                 person.email_confidence = 100
+                _set_person_email_verification(
+                    person,
+                    status="verified",
+                    method="smtp_pattern",
+                    evidence="SMTP RCPT accepted the generated company-pattern email.",
+                    verified_at=datetime.now(timezone.utc),
+                )
                 await _learn_company_pattern(
                     person,
                     email=found_email,
@@ -236,9 +528,71 @@ async def find_email_for_person(
                     source=source,
                     verified=True,
                     tried=tried,
+                    guess_basis=_guess_basis_from_source(source),
                     confidence=100,
                     failure_reasons=failure_reasons,
+                    email_verification_status=getattr(person, "email_verification_status", None),
+                    email_verification_method=getattr(person, "email_verification_method", None),
+                    email_verification_label=getattr(person, "email_verification_label", None),
+                    email_verification_evidence=getattr(person, "email_verification_evidence", None),
+                    email_verified_at=getattr(person, "email_verified_at", None),
                 )
+
+        if learning_candidate and not learned_pattern:
+            tried.append("hunter_pattern_learning")
+            if not settings.hunter_api_key:
+                tried.append("hunter_pattern_learning_skipped")
+                _append_reason(failure_reasons, "hunter_api_key_missing")
+            else:
+                monthly_usage = await api_usage_service.get_monthly_usage_count(
+                    db,
+                    user_id,
+                    service="hunter",
+                    endpoint_prefix=HUNTER_PATTERN_USAGE_PREFIX,
+                )
+                if monthly_usage >= settings.hunter_pattern_monthly_budget:
+                    tried.append("hunter_pattern_learning_skipped")
+                    _append_reason(failure_reasons, "hunter_pattern_budget_exhausted")
+                else:
+                    hunter_learning_endpoint = _hunter_pattern_endpoint(company_domain)
+                    if await api_usage_service.has_monthly_usage(
+                        db,
+                        user_id,
+                        service="hunter",
+                        endpoint=hunter_learning_endpoint,
+                    ):
+                        tried.append("hunter_pattern_learning_skipped")
+                        _append_reason(failure_reasons, "hunter_pattern_already_tried")
+                    else:
+                        domain_result = await hunter_client.domain_search(company_domain, limit=10)
+                        billable = bool(domain_result.get("emails"))
+                        credits_used = HUNTER_PATTERN_CREDITS if billable else 0.0
+                        outcome = "pattern_learned" if domain_result.get("pattern") else "no_result"
+                        await _record_hunter_usage(
+                            db,
+                            user_id,
+                            endpoint=hunter_learning_endpoint,
+                            operation="domain_search",
+                            target=company_domain,
+                            billable=billable,
+                            result=outcome,
+                            credits_used=credits_used,
+                            extra_details={
+                                "accept_all": domain_result.get("accept_all"),
+                                "email_count": len(domain_result.get("emails", [])),
+                            },
+                        )
+                        learned_pattern, learned_confidence = _extract_hunter_pattern(
+                            domain_result,
+                            company_domain=company_domain,
+                        )
+                        if learned_pattern and person.company:
+                            person.company.email_pattern = learned_pattern
+                            person.company.email_pattern_confidence = learned_confidence
+                            tried.append("hunter_pattern_learned")
+                        else:
+                            tried.append("hunter_pattern_learning_skipped")
+                            _append_reason(failure_reasons, "hunter_pattern_no_pattern_found")
 
         tried.append("pattern_suggestion")
         suggestion = email_suggestion_client.suggest_email(
@@ -262,6 +616,7 @@ async def find_email_for_person(
                 "email": suggestion["email"],
                 "confidence": confidence,
                 "suggestions": suggestion_list,
+                "guess_basis": "learned_company_pattern" if learned_pattern else "generic_pattern",
             }
             fallback_confidence = confidence
             if confidence < LOW_CONFIDENCE_PERSIST_THRESHOLD:
@@ -281,6 +636,17 @@ async def find_email_for_person(
             person.email_source = "apollo"
             person.email_verified = verified
             person.email_confidence = 100 if verified else person.email_confidence
+            _set_person_email_verification(
+                person,
+                status="verified" if verified else "unverified",
+                method="provider_verified",
+                evidence=(
+                    "Provider returned a verified work email."
+                    if verified
+                    else "Provider returned a work email without verification."
+                ),
+                verified_at=datetime.now(timezone.utc) if verified else None,
+            )
             if enrichment.get("apollo_id") and not person.apollo_id:
                 person.apollo_id = enrichment["apollo_id"]
             await _learn_company_pattern(
@@ -298,45 +664,16 @@ async def find_email_for_person(
                 source="apollo",
                 verified=verified,
                 tried=tried,
+                guess_basis=_guess_basis_from_source("apollo"),
                 confidence=100 if verified else None,
                 failure_reasons=failure_reasons,
+                email_verification_status=getattr(person, "email_verification_status", None),
+                email_verification_method=getattr(person, "email_verification_method", None),
+                email_verification_label=getattr(person, "email_verification_label", None),
+                email_verification_evidence=getattr(person, "email_verification_evidence", None),
+                email_verified_at=getattr(person, "email_verified_at", None),
             )
         _append_reason(failure_reasons, "apollo_no_email")
-
-    if company_domain and first_name and last_name:
-        tried.append("hunter")
-        if not settings.hunter_api_key:
-            _append_reason(failure_reasons, "hunter_api_key_missing")
-        else:
-            hunter_result = await hunter_client.find_email(
-                domain=company_domain,
-                first_name=first_name,
-                last_name=last_name,
-            )
-            if hunter_result and hunter_result.get("email"):
-                verified = hunter_result.get("verified", False)
-                person.work_email = hunter_result["email"]
-                person.email_source = "hunter"
-                person.email_verified = verified
-                person.email_confidence = 100 if verified else person.email_confidence
-                await _learn_company_pattern(
-                    person,
-                    email=hunter_result["email"],
-                    confidence=100 if verified else 70,
-                    first_name=first_name,
-                    last_name=last_name,
-                    company_domain=company_domain,
-                    verified=verified,
-                )
-                await db.commit()
-                return _response(
-                    email=hunter_result["email"],
-                    source="hunter",
-                    verified=verified,
-                    tried=tried,
-                    failure_reasons=failure_reasons,
-                )
-            _append_reason(failure_reasons, "hunter_no_email")
 
     if person.linkedin_url:
         tried.append("proxycurl")
@@ -350,6 +687,12 @@ async def find_email_for_person(
                 person.email_source = "proxycurl"
                 person.email_verified = False
                 person.profile_data = profile
+                _set_person_email_verification(
+                    person,
+                    status="unknown",
+                    method="none",
+                    evidence="Email discovered from Proxycurl profile enrichment.",
+                )
                 await db.commit()
                 return _response(
                     email=email,
@@ -357,52 +700,36 @@ async def find_email_for_person(
                     verified=False,
                     tried=tried,
                     failure_reasons=failure_reasons,
+                    email_verification_status=getattr(person, "email_verification_status", None),
+                    email_verification_method=getattr(person, "email_verification_method", None),
+                    email_verification_label=getattr(person, "email_verification_label", None),
+                    email_verification_evidence=getattr(person, "email_verification_evidence", None),
+                    email_verified_at=getattr(person, "email_verified_at", None),
                 )
             _append_reason(failure_reasons, "proxycurl_no_email")
-
-    if company_domain and first_name and last_name:
-        tried.append("hunter_domain")
-        if not settings.hunter_api_key:
-            _append_reason(failure_reasons, "hunter_api_key_missing")
-        else:
-            domain_results = await hunter_client.domain_search(company_domain, limit=20)
-            for result_entry in domain_results:
-                r_first = (result_entry.get("first_name") or "").lower()
-                r_last = (result_entry.get("last_name") or "").lower()
-                if r_first == first_name.lower() and r_last == last_name.lower():
-                    confidence = result_entry.get("confidence", 0)
-                    verified = confidence > 80
-                    person.work_email = result_entry["email"]
-                    person.email_source = "hunter_domain"
-                    person.email_verified = verified
-                    person.email_confidence = confidence or None
-                    await _learn_company_pattern(
-                        person,
-                        email=result_entry["email"],
-                        confidence=confidence,
-                        first_name=first_name,
-                        last_name=last_name,
-                        company_domain=company_domain,
-                        verified=verified,
-                    )
-                    await db.commit()
-                    return _response(
-                        email=result_entry["email"],
-                        source="hunter_domain",
-                        verified=verified,
-                        tried=tried,
-                        confidence=confidence or None,
-                        failure_reasons=failure_reasons,
-                    )
-            _append_reason(failure_reasons, "hunter_domain_no_email")
 
     tried.append("exhausted")
     if mode == "best_effort" and fallback_suggestion:
         if fallback_confidence and fallback_confidence >= LOW_CONFIDENCE_PERSIST_THRESHOLD:
             person.work_email = fallback_suggestion["email"]
-            person.email_source = "pattern_suggestion"
+            person.email_source = (
+                "pattern_suggestion_learned"
+                if fallback_suggestion["guess_basis"] == "learned_company_pattern"
+                else "pattern_suggestion"
+            )
             person.email_verified = False
             person.email_confidence = fallback_confidence
+            _set_person_email_verification(
+                person,
+                status="best_guess",
+                method="none",
+                guess_basis=fallback_suggestion["guess_basis"],
+                evidence=(
+                    "Best guess derived from a learned company email pattern."
+                    if fallback_suggestion["guess_basis"] == "learned_company_pattern"
+                    else "Best guess derived from the generic email pattern fallback."
+                ),
+            )
             await _learn_company_pattern(
                 person,
                 email=fallback_suggestion["email"],
@@ -418,9 +745,35 @@ async def find_email_for_person(
             source="pattern_suggestion",
             verified=False,
             tried=tried,
+            guess_basis=fallback_suggestion["guess_basis"],
             confidence=fallback_confidence,
             suggestions=fallback_suggestion["suggestions"],
             failure_reasons=failure_reasons,
+            email_verification_status=(
+                person.email_verification_status
+                if person.work_email == fallback_suggestion["email"]
+                else "best_guess"
+            ),
+            email_verification_method=(
+                person.email_verification_method
+                if person.work_email == fallback_suggestion["email"]
+                else "none"
+            ),
+            email_verification_label=_verification_label(
+                person.email_verification_status if person.work_email == fallback_suggestion["email"] else "best_guess",
+                person.email_verification_method if person.work_email == fallback_suggestion["email"] else "none",
+                guess_basis=fallback_suggestion["guess_basis"],
+            ),
+            email_verification_evidence=(
+                person.email_verification_evidence
+                if person.work_email == fallback_suggestion["email"]
+                else (
+                    "Best guess derived from a learned company email pattern."
+                    if fallback_suggestion["guess_basis"] == "learned_company_pattern"
+                    else "Best guess derived from the generic email pattern fallback."
+                )
+            ),
+            email_verified_at=getattr(person, "email_verified_at", None),
         )
 
     return _response(
@@ -429,6 +782,11 @@ async def find_email_for_person(
         verified=False,
         tried=tried,
         failure_reasons=failure_reasons,
+        email_verification_status=None,
+        email_verification_method=None,
+        email_verification_label=None,
+        email_verification_evidence=None,
+        email_verified_at=None,
     )
 
 
@@ -449,8 +807,52 @@ async def verify_person_email(
 
     verification = await hunter_client.verify_email(person.work_email)
     if verification:
-        person.email_verified = verification.get("status") == "valid"
+        result = verification.get("result", "unknown")
+        billable = result != "unknown"
+        await _record_hunter_usage(
+            db,
+            user_id,
+            endpoint=_hunter_verify_endpoint(person.work_email),
+            operation="email_verifier",
+            target=person.work_email,
+            billable=billable,
+            result=result,
+            credits_used=HUNTER_VERIFY_CREDITS if billable else 0.0,
+            extra_details={"status": verification.get("status", "unknown")},
+        )
+        status = verification.get("status", "unknown")
+        is_valid = status == "valid"
+        person.email_verified = is_valid
+        _set_person_email_verification(
+            person,
+            status="verified" if is_valid else ("unknown" if status == "unknown" else "unverified"),
+            method="hunter_verifier",
+            evidence=f"Hunter Email Verifier returned status={status} result={result}.",
+            verified_at=datetime.now(timezone.utc) if is_valid else None,
+        )
         await db.commit()
-        return verification
+        return {
+            **verification,
+            "email_verification_status": person.email_verification_status,
+            "email_verification_method": person.email_verification_method,
+            "email_verification_label": person.email_verification_label,
+            "email_verification_evidence": person.email_verification_evidence,
+        }
 
-    return {"email": person.work_email, "status": "unknown", "result": "unable_to_verify"}
+    _set_person_email_verification(
+        person,
+        status="unknown",
+        method="hunter_verifier",
+        evidence="Hunter Email Verifier could not return a result.",
+        verified_at=None,
+    )
+    await db.commit()
+    return {
+        "email": person.work_email,
+        "status": "unknown",
+        "result": "unable_to_verify",
+        "email_verification_status": person.email_verification_status,
+        "email_verification_method": person.email_verification_method,
+        "email_verification_label": person.email_verification_label,
+        "email_verification_evidence": person.email_verification_evidence,
+    }

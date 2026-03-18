@@ -6,13 +6,34 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { usePeopleSearch, useEnrichPerson, useSavedPeople } from '@/hooks/usePeople';
-import { useFindEmail } from '@/hooks/useEmail';
+import { usePeopleSearch, useEnrichPerson, useSavedPeople, useVerifyCurrentCompany } from '@/hooks/usePeople';
+import { useFindEmail, useVerifyEmail } from '@/hooks/useEmail';
+import {
+  formatEmailVerificationLabel,
+  formatGuessBasis,
+  getPersonGuessBasis,
+  isVerifiedEmailStatus,
+} from '@/lib/emailVerification';
 import { toast } from 'sonner';
 import type { EmailFindResult, Person, PeopleSearchResult } from '@/types';
 
 function formatFailureReason(reason: string): string {
   return reason.replace(/_/g, ' ');
+}
+
+function formatCompanyVerificationStatus(status: string | null | undefined): string | null {
+  if (status === 'verified') return 'Current company verified';
+  if (status === 'unverified') return 'Current company unverified';
+  if (status === 'failed') return 'Verification failed';
+  if (status === 'skipped') return 'Verification skipped';
+  return null;
+}
+
+function formatOrgLevel(level: string | null | undefined): string | null {
+  if (level === 'ic') return 'IC';
+  if (level === 'manager') return 'Manager';
+  if (level === 'director_plus') return 'Director+';
+  return null;
 }
 
 export function PeoplePage() {
@@ -286,8 +307,18 @@ function PersonCard({ person }: { person: Person }) {
   const githubRepos = person.github_data?.repos ?? [];
   const githubLangs = person.github_data?.languages ?? [];
   const findEmail = useFindEmail();
+  const verifyEmail = useVerifyEmail();
+  const verifyCurrentCompany = useVerifyCurrentCompany();
   const [emailStatus, setEmailStatus] = useState<'idle' | 'loading' | 'not_found'>('idle');
   const [emailResult, setEmailResult] = useState<EmailFindResult | null>(null);
+  const [companyVerification, setCompanyVerification] = useState({
+    current_company_verified: person.current_company_verified ?? null,
+    current_company_verification_status: person.current_company_verification_status ?? null,
+    current_company_verification_source: person.current_company_verification_source ?? null,
+    current_company_verification_confidence: person.current_company_verification_confidence ?? null,
+    current_company_verification_evidence: person.current_company_verification_evidence ?? null,
+    current_company_verified_at: person.current_company_verified_at ?? null,
+  });
 
   const handleGetEmail = async () => {
     setEmailStatus('loading');
@@ -305,15 +336,89 @@ function PersonCard({ person }: { person: Person }) {
     }
   };
 
+  const handleVerifyEmail = async () => {
+    try {
+      const result = await verifyEmail.mutateAsync(person.id);
+      const verified = result.status === 'valid';
+      const currentEmail = person.work_email || emailResult?.email || result.email;
+      if (currentEmail) {
+        setEmailResult((previous) => ({
+          email: currentEmail,
+          source: previous?.source || person.email_source || 'existing',
+          verified,
+          result_type: verified ? 'verified' : previous?.result_type ?? 'best_guess',
+          usable_for_outreach: true,
+          guess_basis: previous?.guess_basis ?? null,
+          verified_email: verified ? currentEmail : null,
+          best_guess_email: verified ? null : previous?.best_guess_email ?? currentEmail,
+          confidence: verified ? 100 : previous?.confidence ?? person.email_confidence ?? null,
+          email_verification_status: result.email_verification_status ?? (verified ? 'verified' : 'unverified'),
+          email_verification_method: result.email_verification_method ?? null,
+          email_verification_label: result.email_verification_label ?? null,
+          email_verification_evidence: result.email_verification_evidence ?? null,
+          email_verified_at: verified ? new Date().toISOString() : previous?.email_verified_at ?? null,
+          suggestions: previous?.suggestions ?? null,
+          alternate_guesses: previous?.alternate_guesses ?? previous?.suggestions ?? null,
+          failure_reasons: previous?.failure_reasons ?? [],
+          tried: [...(previous?.tried ?? []), 'manual_verify'],
+        }));
+      }
+
+      if (verified) {
+        toast.success(`Verified ${result.email}`);
+      } else {
+        toast.error(`Verification result: ${result.result}`);
+      }
+    } catch {
+      toast.error('Failed to verify email');
+    }
+  };
+
+  const handleVerifyCurrentCompany = async () => {
+    try {
+      const result = await verifyCurrentCompany.mutateAsync(person.id);
+      setCompanyVerification({
+        current_company_verified: result.current_company_verified ?? null,
+        current_company_verification_status: result.current_company_verification_status ?? null,
+        current_company_verification_source: result.current_company_verification_source ?? null,
+        current_company_verification_confidence: result.current_company_verification_confidence ?? null,
+        current_company_verification_evidence: result.current_company_verification_evidence ?? null,
+        current_company_verified_at: result.current_company_verified_at ?? null,
+      });
+      toast.success('Current company verification refreshed');
+    } catch {
+      toast.error('Failed to verify current company');
+    }
+  };
+
   const canEnrich = !!(person.full_name && (person.apollo_id || person.linkedin_url || person.company?.domain));
   const shownEmail = person.work_email || emailResult?.email;
   const shownConfidence = person.email_confidence ?? emailResult?.confidence ?? null;
-  const isVerifiedEmail = person.email_verified || emailResult?.verified === true;
+  const guessBasis = getPersonGuessBasis(person, emailResult);
+  const emailVerificationStatus =
+    emailResult?.email_verification_status ??
+    person.email_verification_status ??
+    (person.email_verified || emailResult?.verified ? 'verified' : shownEmail ? 'unknown' : null);
+  const emailVerificationMethod =
+    emailResult?.email_verification_method ?? person.email_verification_method ?? null;
+  const emailVerificationLabel = formatEmailVerificationLabel(
+    emailVerificationStatus,
+    emailVerificationMethod,
+    guessBasis,
+    emailResult?.email_verification_label ?? person.email_verification_label ?? null,
+  );
+  const emailVerificationEvidence =
+    emailResult?.email_verification_evidence ?? person.email_verification_evidence ?? null;
+  const isVerifiedEmail = isVerifiedEmailStatus(emailVerificationStatus);
+  const guessBasisLabel = formatGuessBasis(guessBasis);
   const alternateGuesses = emailResult?.alternate_guesses ?? emailResult?.suggestions ?? [];
   const publicProfileUrl =
     !person.linkedin_url && person.profile_data && typeof person.profile_data.public_url === 'string'
       ? person.profile_data.public_url
       : null;
+  const verificationStatusLabel = formatCompanyVerificationStatus(
+    companyVerification.current_company_verification_status
+  );
 
   return (
     <Card>
@@ -338,6 +443,24 @@ function PersonCard({ person }: { person: Person }) {
           </Badge>
         )}
 
+        {verificationStatusLabel && (
+          <Badge
+            variant={
+              companyVerification.current_company_verification_status === 'verified'
+                ? 'secondary'
+                : 'outline'
+            }
+          >
+            {verificationStatusLabel}
+          </Badge>
+        )}
+
+        {person.org_level && (
+          <Badge variant="outline">
+            {formatOrgLevel(person.org_level)}
+          </Badge>
+        )}
+
         {person.match_quality && (
           <Badge variant={person.match_quality === 'direct' ? 'secondary' : 'outline'}>
             {person.match_quality === 'direct' ? 'Direct Match' : 'Next Best'}
@@ -348,20 +471,56 @@ function PersonCard({ person }: { person: Person }) {
           <div className="text-xs text-muted-foreground">{person.match_reason}</div>
         )}
 
+        {companyVerification.current_company_verification_evidence && (
+          <div className="text-xs text-muted-foreground">
+            Evidence: {companyVerification.current_company_verification_evidence}
+          </div>
+        )}
+
+        {person.linkedin_url && companyVerification.current_company_verification_status !== 'verified' && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleVerifyCurrentCompany}
+            disabled={verifyCurrentCompany.isPending}
+          >
+            {verifyCurrentCompany.isPending ? 'Verifying company...' : 'Verify Current Company'}
+          </Button>
+        )}
+
         {/* Email display with three states */}
         {shownEmail ? (
           <div className="text-sm">
             <span className="text-muted-foreground">Email: </span>
             {shownEmail}
-            {isVerifiedEmail ? (
-              <Badge variant="outline" className="ml-1 text-xs">Verified</Badge>
-            ) : (
-              <Badge variant="outline" className="ml-1 text-xs">Unverified</Badge>
+            {emailVerificationLabel && (
+              <Badge variant="outline" className="ml-1 text-xs">{emailVerificationLabel}</Badge>
             )}
             {!isVerifiedEmail && shownConfidence != null && (
               <span className="ml-2 text-xs text-muted-foreground">
                 Confidence {shownConfidence}
               </span>
+            )}
+            {!isVerifiedEmail && guessBasisLabel && guessBasisLabel !== emailVerificationLabel && (
+              <div className="mt-1 text-xs text-muted-foreground">
+                {guessBasisLabel}
+              </div>
+            )}
+            {emailVerificationEvidence && (
+              <div className="mt-1 text-xs text-muted-foreground">
+                Email evidence: {emailVerificationEvidence}
+              </div>
+            )}
+            {!isVerifiedEmail && shownEmail && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-2"
+                onClick={handleVerifyEmail}
+                disabled={verifyEmail.isPending}
+              >
+                {verifyEmail.isPending ? 'Verifying...' : 'Verify Email with Hunter'}
+              </Button>
             )}
           </div>
         ) : emailStatus === 'not_found' ? (

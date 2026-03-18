@@ -1,5 +1,6 @@
 """Tests for API usage tracking endpoints — Phase 10."""
 
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -22,6 +23,27 @@ def _mock_daily_usage():
     }
 
 
+def _mock_usage_records():
+    return [
+        {
+            "id": "11111111-2222-3333-4444-555555555555",
+            "service": "hunter",
+            "endpoint": "domain_search.pattern_learning:twosigma.com",
+            "tokens_in": None,
+            "tokens_out": None,
+            "cost_cents": None,
+            "credits_used": 1.0,
+            "details": {
+                "operation": "domain_search",
+                "target": "twosigma.com",
+                "billable": True,
+                "result": "pattern_learned",
+            },
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+    ]
+
+
 # --- Tests ---
 
 
@@ -32,7 +54,7 @@ async def test_get_daily_usage(client, mock_user_id):
         new_callable=AsyncMock,
         return_value=_mock_daily_usage(),
     ):
-        resp = await client.get("/api/usage/daily")
+        resp = await client.get("/api/usage/daily", params={"service": "hunter"})
 
     assert resp.status_code == 200
     data = resp.json()
@@ -93,3 +115,20 @@ async def test_usage_response_has_all_fields(client, mock_user_id):
         "tokens_remaining",
     }
     assert set(data.keys()) == expected_fields
+
+
+async def test_get_usage_records(client, mock_user_id):
+    """GET /api/usage/records returns audit records."""
+    with patch(
+        "app.routers.usage.api_usage_service.get_usage_records",
+        new_callable=AsyncMock,
+        return_value=_mock_usage_records(),
+    ):
+        resp = await client.get("/api/usage/records", params={"service": "hunter", "limit": 50})
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["service"] == "hunter"
+    assert data[0]["credits_used"] == 1.0
+    assert data[0]["details"]["operation"] == "domain_search"

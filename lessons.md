@@ -128,6 +128,30 @@ A living document of patterns, gotchas, and decisions encountered while building
 - Greenhouse, Lever, and Ashby public board endpoints already return full board payloads.
 - **Lesson:** Default client behavior should preserve the full board and only apply limits when a caller asks for them explicitly, otherwise exact job handoff flows can fail before the UI ever sees the posting.
 
+### Hunter credits are better spent on company pattern learning than repeated person-by-person guessing
+- When SMTP is blocked or the domain is catch-all, spending a single Hunter Domain Search credit can improve many future best-guess emails for the same company.
+- **Lesson:** Learn and cache the company pattern once, then reuse it through the email suggestion path instead of repeatedly spending per-person enrichment calls.
+
+### Existing API usage tracking can double as provider-specific credit budgeting
+- The `api_usage` table was sufficient for monthly Hunter pattern-learning guardrails without creating a new budget table.
+- **Lesson:** Reuse existing usage logs for feature-level budget control when the unit cost is predictable and durable across restarts.
+
+### Best-guess email UX needs to explain why a guess is stronger than a generic fallback
+- Returning just `best_guess_email` is not enough once multiple guessing modes exist.
+- **Lesson:** Add explicit metadata such as `guess_basis=learned_company_pattern|generic_pattern` so the UI can distinguish learned-pattern guesses from default format guesses.
+
+### Current-company verification must be tracked separately from role-fit ranking
+- `direct` vs `next_best` answers “how close is this person to the job/team,” while current-company verification answers “do they still work there.”
+- **Lesson:** Keep these as separate fields so ambiguous employment does not silently downgrade role-fit logic or masquerade as a current employee.
+
+### Public LinkedIn verification needs strict positive signals
+- A stale LinkedIn snippet can mention a company without proving the person still works there.
+- **Lesson:** Only promote a candidate to `current_company_verified=true` when a public page shows a strong present-tense signal such as `currently/works at`, or a company mention near `present/current`. Bare company mentions are not enough.
+
+### Verification should be shortlist-based, not full-result-set based
+- Current-company verification is browser-heavy and slower than Brave/Apollo discovery.
+- **Lesson:** Verify only the top-ranked candidates per search and treat everyone else as `verification skipped` by default. This keeps latency bounded without hiding potentially useful next-best contacts.
+
 ---
 
 ## Phase 7 Testing Insights
@@ -242,3 +266,19 @@ A living document of patterns, gotchas, and decisions encountered while building
 ### Optional response fields break mocked API tests unless mocks set them explicitly
 - Adding `match_quality` and `match_reason` to `PersonResponse` caused FastAPI response validation failures because `MagicMock` auto-creates nested mocks for missing attributes.
 - **Lesson:** When extending Pydantic response models, update API test doubles to set new optional attributes to concrete values like `None`, not leave them implicit on `MagicMock`.
+
+### Hunter credit audits must log every outbound request, not just “special” paths
+- Recording only the pattern-learning branch made it impossible to answer simple questions like “how many Hunter credits did this run likely use?” once other Hunter calls were added or removed.
+- **Lesson:** Audit tables should capture every real outbound Hunter request with operation metadata and estimated credits used, while skipped branches stay out of usage logs.
+
+### Company-name mention alone is not enough to trust a people-search result
+- Brave and public-web results can mention the target company in a snippet while the actual profile belongs to another employer or an outdated org-chart page.
+- **Lesson:** Validate company fit using source-aware rules like current-org URL matching, title role quality, and explicit former-employment signals before storing or ranking a candidate.
+
+### Manager queries drift upward unless org-level fit is enforced explicitly
+- If manager searches allow `director` and `vp` for ordinary IC roles, the result set quickly fills with leadership profiles even when engineering managers exist.
+- **Lesson:** Parse org level separately from person type, then rank or exclude `director_plus` results unless the target role itself is senior enough to justify them.
+
+### Verifier metadata must be explicit in both persistence and API mocks
+- A single `email_verified` boolean is too coarse once the product distinguishes SMTP-verified, Hunter-verified, provider-verified, and best-guess emails, and mocked API objects start breaking if the new optional fields are left implicit on `MagicMock`.
+- **Lesson:** Store discovery source and verification method as separate fields, and whenever response schemas grow, update test doubles to set the new optional attributes to concrete values like `None` instead of letting mocks invent nested placeholders.

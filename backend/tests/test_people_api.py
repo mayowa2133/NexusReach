@@ -22,6 +22,11 @@ def _mock_person(user_id, **overrides):
     p.email_source = None
     p.email_verified = False
     p.email_confidence = overrides.get("email_confidence", None)
+    p.email_verification_status = overrides.get("email_verification_status", None)
+    p.email_verification_method = overrides.get("email_verification_method", None)
+    p.email_verification_label = overrides.get("email_verification_label", None)
+    p.email_verification_evidence = overrides.get("email_verification_evidence", None)
+    p.email_verified_at = overrides.get("email_verified_at", None)
     p.person_type = overrides.get("person_type", "peer")
     p.profile_data = overrides.get("profile_data", {})
     p.github_data = overrides.get("github_data", None)
@@ -29,6 +34,14 @@ def _mock_person(user_id, **overrides):
     p.apollo_id = overrides.get("apollo_id", None)
     p.match_quality = overrides.get("match_quality", None)
     p.match_reason = overrides.get("match_reason", None)
+    p.employment_status = overrides.get("employment_status", None)
+    p.org_level = overrides.get("org_level", None)
+    p.current_company_verified = overrides.get("current_company_verified", None)
+    p.current_company_verification_status = overrides.get("current_company_verification_status", None)
+    p.current_company_verification_source = overrides.get("current_company_verification_source", None)
+    p.current_company_verification_confidence = overrides.get("current_company_verification_confidence", None)
+    p.current_company_verification_evidence = overrides.get("current_company_verification_evidence", None)
+    p.current_company_verified_at = overrides.get("current_company_verified_at", None)
     p.company = overrides.get("company", None)
     return p
 
@@ -105,3 +118,27 @@ async def test_list_people(client, mock_user_id):
     assert len(data) == 1
     assert data[0]["full_name"] == "Jane Doe"
     assert data[0]["company"]["id"] == str(company.id)
+
+
+async def test_verify_current_company(client, mock_user_id):
+    """POST /api/people/verify-current-company returns refreshed metadata."""
+    person = _mock_person(
+        mock_user_id,
+        current_company_verified=True,
+        current_company_verification_status="verified",
+        current_company_verification_source="crawl4ai_linkedin",
+        current_company_verification_confidence=95,
+        current_company_verification_evidence="Works at TechCorp currently.",
+    )
+
+    with patch(
+        "app.routers.people.verify_current_company_for_person",
+        new_callable=AsyncMock,
+    ) as mock_verify:
+        mock_verify.return_value = person
+        resp = await client.post(f"/api/people/verify-current-company/{person.id}")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["current_company_verified"] is True
+    assert data["current_company_verification_status"] == "verified"

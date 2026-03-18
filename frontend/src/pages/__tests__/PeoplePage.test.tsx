@@ -34,8 +34,16 @@ const mockFindEmail = {
   mutateAsync: vi.fn(),
   isPending: false,
 };
+const mockVerifyEmail = {
+  mutateAsync: vi.fn(),
+  isPending: false,
+};
+const mockVerifyCurrentCompany = {
+  mutateAsync: vi.fn(),
+  isPending: false,
+};
 
-let mockSavedPeople: unknown[] = [];
+let mockSavedPeople: Array<Record<string, unknown>> = [];
 
 vi.mock('@/hooks/usePeople', () => ({
   usePeopleSearch: () => ({
@@ -49,10 +57,12 @@ vi.mock('@/hooks/usePeople', () => ({
   useSavedPeople: () => ({
     data: mockSavedPeople,
   }),
+  useVerifyCurrentCompany: () => mockVerifyCurrentCompany,
 }));
 
 vi.mock('@/hooks/useEmail', () => ({
   useFindEmail: () => mockFindEmail,
+  useVerifyEmail: () => mockVerifyEmail,
 }));
 
 vi.mock('sonner', () => ({
@@ -96,6 +106,14 @@ beforeEach(() => {
       apollo_id: 'apollo-1',
       match_quality: 'next_best',
       match_reason: 'Adjacent backend teammate at the target company.',
+      employment_status: 'current',
+      org_level: 'ic',
+      current_company_verified: null,
+      current_company_verification_status: 'skipped',
+      current_company_verification_source: null,
+      current_company_verification_confidence: null,
+      current_company_verification_evidence: 'Not shortlisted for verification.',
+      current_company_verified_at: null,
       company: {
         id: 'c1',
         name: 'Affirm',
@@ -109,6 +127,8 @@ beforeEach(() => {
     },
   ];
   mockFindEmail.mutateAsync.mockReset();
+  mockVerifyEmail.mutateAsync.mockReset();
+  mockVerifyCurrentCompany.mutateAsync.mockReset();
 });
 
 describe('PeoplePage', () => {
@@ -118,6 +138,7 @@ describe('PeoplePage', () => {
       source: 'pattern_suggestion',
       verified: false,
       result_type: 'best_guess',
+      guess_basis: 'learned_company_pattern',
       verified_email: null,
       best_guess_email: 'alex.lee@affirm.com',
       confidence: 40,
@@ -125,14 +146,43 @@ describe('PeoplePage', () => {
       alternate_guesses: [{ email: 'alee@affirm.com', confidence: 20 }],
       failure_reasons: ['pattern_suggestion_low_confidence'],
       tried: ['pattern_smtp', 'pattern_suggestion', 'exhausted'],
+      usable_for_outreach: true,
+      email_verification_status: 'best_guess',
+      email_verification_method: 'none',
+      email_verification_label: 'Best guess from learned company pattern',
+      email_verification_evidence: 'Best guess derived from a learned company email pattern.',
+      email_verified_at: null,
     });
 
     renderPeople();
     await userEvent.click(screen.getByRole('button', { name: /get email/i }));
 
     expect(await screen.findByText('alex.lee@affirm.com')).toBeInTheDocument();
-    expect(screen.getByText(/unverified/i)).toBeInTheDocument();
+    expect(screen.getByText(/best guess from learned company pattern/i)).toBeInTheDocument();
     expect(screen.getByText(/confidence 40/i)).toBeInTheDocument();
+    expect(screen.getByText(/email evidence: best guess derived from a learned company email pattern\./i)).toBeInTheDocument();
     expect(screen.getByText(/alternate guesses/i)).toBeInTheDocument();
+  });
+
+  it('renders current-company verification state and allows manual refresh', async () => {
+    mockVerifyCurrentCompany.mutateAsync.mockResolvedValue({
+      ...mockSavedPeople[0],
+      current_company_verified: true,
+      current_company_verification_status: 'verified',
+      current_company_verification_source: 'crawl4ai_linkedin',
+      current_company_verification_confidence: 95,
+      current_company_verification_evidence: 'Currently at Affirm.',
+      current_company_verified_at: null,
+    });
+
+    renderPeople();
+
+    expect(screen.getByText(/verification skipped/i)).toBeInTheDocument();
+    expect(screen.getByText(/not shortlisted for verification/i)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /verify current company/i }));
+
+    expect(await screen.findByText(/current company verified/i)).toBeInTheDocument();
+    expect(screen.getByText(/currently at affirm/i)).toBeInTheDocument();
   });
 });
