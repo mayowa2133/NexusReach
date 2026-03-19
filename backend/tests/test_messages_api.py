@@ -22,6 +22,7 @@ def _mock_message(user_id, **overrides):
     m.status = overrides.get("status", "draft")
     m.version = overrides.get("version", 1)
     m.parent_id = overrides.get("parent_id", None)
+    m.context_snapshot = overrides.get("context_snapshot", None)
     m.created_at = datetime(2024, 1, 15, tzinfo=timezone.utc)
     m.updated_at = datetime(2024, 1, 15, tzinfo=timezone.utc)
     return m
@@ -36,7 +37,19 @@ def _mock_person(**overrides):
 
 async def test_draft_message(client, mock_user_id):
     """POST /api/messages/draft creates a draft with Claude."""
-    msg = _mock_message(mock_user_id)
+    person_id = uuid.uuid4()
+    job_id = uuid.uuid4()
+    msg = _mock_message(
+        mock_user_id,
+        goal="interview",
+        person_id=person_id,
+        context_snapshot={
+            "recipient_strategy": "recruiter",
+            "primary_cta": "interview",
+            "fallback_cta": "redirect",
+            "job_id": str(job_id),
+        },
+    )
     person = _mock_person()
 
     with patch("app.routers.messages.draft_message", new_callable=AsyncMock) as mock_draft:
@@ -45,13 +58,18 @@ async def test_draft_message(client, mock_user_id):
             "person": person,
             "reasoning": "Chose intro angle",
             "token_usage": {"input": 100, "output": 50},
+            "recipient_strategy": "recruiter",
+            "primary_cta": "interview",
+            "fallback_cta": "redirect",
+            "job_id": str(job_id),
         }
         resp = await client.post(
             "/api/messages/draft",
             json={
-                "person_id": str(uuid.uuid4()),
+                "person_id": str(person_id),
                 "channel": "email",
-                "goal": "intro",
+                "goal": "interview",
+                "job_id": str(job_id),
             },
         )
 
@@ -59,6 +77,13 @@ async def test_draft_message(client, mock_user_id):
     data = resp.json()
     assert data["message"]["channel"] == "email"
     assert data["reasoning"] == "Chose intro angle"
+    assert data["message"]["recipient_strategy"] == "recruiter"
+    assert data["message"]["primary_cta"] == "interview"
+    assert data["message"]["fallback_cta"] == "redirect"
+    assert data["message"]["job_id"] == str(job_id)
+    assert data["recipient_strategy"] == "recruiter"
+    assert data["job_id"] == str(job_id)
+    assert mock_draft.await_args.kwargs["job_id"] == job_id
 
 
 async def test_draft_message_no_profile(client, mock_user_id):

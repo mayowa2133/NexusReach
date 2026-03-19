@@ -24,7 +24,13 @@ from app.services.message_service import (
 router = APIRouter(prefix="/messages", tags=["messages"])
 
 
+def _snapshot(msg) -> dict:
+    snapshot = getattr(msg, "context_snapshot", None)
+    return snapshot if isinstance(snapshot, dict) else {}
+
+
 def _to_response(msg, person=None) -> MessageResponse:
+    snapshot = _snapshot(msg)
     return MessageResponse(
         id=str(msg.id),
         person_id=str(msg.person_id),
@@ -37,6 +43,10 @@ def _to_response(msg, person=None) -> MessageResponse:
         status=msg.status,
         version=msg.version,
         parent_id=str(msg.parent_id) if msg.parent_id else None,
+        recipient_strategy=snapshot.get("recipient_strategy"),
+        primary_cta=snapshot.get("primary_cta"),
+        fallback_cta=snapshot.get("fallback_cta"),
+        job_id=snapshot.get("job_id"),
         person_name=person.full_name if person else None,
         person_title=person.title if person else None,
         created_at=msg.created_at.isoformat(),
@@ -60,6 +70,7 @@ async def create_draft(
             person_id=uuid.UUID(body.person_id),
             channel=body.channel,
             goal=body.goal,
+            job_id=uuid.UUID(body.job_id) if body.job_id else None,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -68,6 +79,10 @@ async def create_draft(
         message=_to_response(result["message"], result["person"]),
         reasoning=result["reasoning"],
         token_usage=result["token_usage"],
+        recipient_strategy=result.get("recipient_strategy"),
+        primary_cta=result.get("primary_cta"),
+        fallback_cta=result.get("fallback_cta"),
+        job_id=result.get("job_id"),
     )
 
 

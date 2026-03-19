@@ -4,7 +4,8 @@ from pydantic import BaseModel
 class DraftRequest(BaseModel):
     person_id: str
     channel: str  # linkedin_note | linkedin_message | email | follow_up | thank_you
-    goal: str  # intro | coffee_chat | referral | informational | follow_up | thank_you
+    goal: str  # interview | referral | warm_intro | follow_up | thank_you (+ legacy aliases)
+    job_id: str | None = None
 
 
 class EditRequest(BaseModel):
@@ -24,6 +25,10 @@ class MessageResponse(BaseModel):
     status: str
     version: int
     parent_id: str | None
+    recipient_strategy: str | None = None
+    primary_cta: str | None = None
+    fallback_cta: str | None = None
+    job_id: str | None = None
     person_name: str | None = None
     person_title: str | None = None
     created_at: str
@@ -36,3 +41,7 @@ class DraftResponse(BaseModel):
     message: MessageResponse
     reasoning: str
     token_usage: dict | None = None
+    recipient_strategy: str | None = None
+    primary_cta: str | None = None
+    fallback_cta: str | None = None
+    job_id: str | None = None

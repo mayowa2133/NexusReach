@@ -45,15 +45,24 @@ const mockVerifyEmail = {
   mutateAsync: vi.fn(),
   isPending: false,
 };
+const mockDraft = {
+  mutateAsync: vi.fn(),
+  isPending: false,
+};
 
 let mockSavedPeople: unknown[] = [];
+let mockJobs: unknown[] = [];
 
 vi.mock('@/hooks/usePeople', () => ({
   useSavedPeople: () => ({ data: mockSavedPeople }),
 }));
 
+vi.mock('@/hooks/useJobs', () => ({
+  useJobs: () => ({ data: mockJobs }),
+}));
+
 vi.mock('@/hooks/useMessages', () => ({
-  useDraftMessage: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useDraftMessage: () => mockDraft,
   useEditMessage: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useMarkCopied: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useMessages: () => ({ data: [] }),
@@ -83,6 +92,7 @@ function renderMessages() {
 beforeEach(() => {
   toast.success.mockReset();
   toast.error.mockReset();
+  mockDraft.mutateAsync.mockReset();
   mockFindEmail.mutateAsync.mockReset();
   mockVerifyEmail.mutateAsync.mockReset();
   mockSavedPeople = [
@@ -93,6 +103,14 @@ beforeEach(() => {
       person_type: 'peer',
       work_email: null,
       email_verified: false,
+      company: { id: 'c1', name: 'Affirm' },
+    },
+  ];
+  mockJobs = [
+    {
+      id: 'job-1',
+      title: 'Software Engineer, Backend',
+      company_name: 'Affirm',
     },
   ];
 });
@@ -123,5 +141,84 @@ describe('MessagesPage', () => {
       'Best guess from learned company pattern: alex.lee@affirm.com · confidence 40'
     );
     expect(toast.success).not.toHaveBeenCalledWith(expect.stringMatching(/found email/i));
+  });
+
+  it('defaults peer messaging to warm intro and shows the peer strategy hint', async () => {
+    renderMessages();
+
+    fireEvent.change(screen.getByLabelText(/person/i), { target: { value: 'p1' } });
+
+    expect(screen.getByLabelText(/outcome goal/i)).toHaveValue('warm_intro');
+    expect(
+      screen.getByText(/peer strategy: ask for advice, an intro, or the best contact/i)
+    ).toBeInTheDocument();
+  });
+
+  it('defaults recruiter messaging to interview path and shows the recruiter strategy hint', async () => {
+    mockSavedPeople = [
+      {
+        id: 'p2',
+        full_name: 'Taylor Reed',
+        title: 'Technical Recruiter',
+        person_type: 'recruiter',
+        work_email: null,
+        email_verified: false,
+        company: { id: 'c2', name: 'Affirm' },
+      },
+    ];
+
+    renderMessages();
+
+    fireEvent.change(screen.getByLabelText(/person/i), { target: { value: 'p2' } });
+
+    expect(screen.getByLabelText(/outcome goal/i)).toHaveValue('interview');
+    expect(
+      screen.getByText(/recruiter strategy: fit \+ next step toward the role/i)
+    ).toBeInTheDocument();
+  });
+
+  it('passes the selected job_id when generating a draft', async () => {
+    mockDraft.mutateAsync.mockResolvedValue({
+      message: {
+        id: 'm1',
+        person_id: 'p1',
+        channel: 'linkedin_message',
+        goal: 'warm_intro',
+        subject: null,
+        body: 'Hi Alex',
+        reasoning: null,
+        ai_model: 'test-model',
+        status: 'draft',
+        version: 1,
+        parent_id: null,
+        recipient_strategy: 'peer',
+        primary_cta: 'warm_intro',
+        fallback_cta: 'redirect',
+        job_id: 'job-1',
+        person_name: 'Alex Lee',
+        person_title: 'Software Engineer II',
+        created_at: '2026-03-19T00:00:00Z',
+        updated_at: '2026-03-19T00:00:00Z',
+      },
+      reasoning: 'Use a warm intro angle.',
+      token_usage: null,
+      recipient_strategy: 'peer',
+      primary_cta: 'warm_intro',
+      fallback_cta: 'redirect',
+      job_id: 'job-1',
+    });
+
+    renderMessages();
+
+    fireEvent.change(screen.getByLabelText(/person/i), { target: { value: 'p1' } });
+    fireEvent.change(screen.getByLabelText(/target job/i), { target: { value: 'job-1' } });
+    await userEvent.click(screen.getByRole('button', { name: /generate draft/i }));
+
+    expect(mockDraft.mutateAsync).toHaveBeenCalledWith({
+      person_id: 'p1',
+      channel: 'linkedin_message',
+      goal: 'warm_intro',
+      job_id: 'job-1',
+    });
   });
 });

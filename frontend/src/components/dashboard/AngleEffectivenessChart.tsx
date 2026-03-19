@@ -13,8 +13,10 @@ import type { AngleEffectiveness } from '@/types';
 const GOAL_LABELS: Record<string, string> = {
   intro: 'Introduction',
   coffee_chat: 'Coffee Chat',
+  interview: 'Interview Path',
   referral: 'Referral',
   informational: 'Info Interview',
+  warm_intro: 'Warm Intro',
   follow_up: 'Follow-up',
   thank_you: 'Thank You',
 };

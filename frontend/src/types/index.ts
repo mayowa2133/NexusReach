@@ -130,8 +130,18 @@ export interface PeopleSearchResult {
 
 // Message Drafting types
 export type MessageChannel = 'linkedin_note' | 'linkedin_message' | 'email' | 'follow_up' | 'thank_you';
-export type MessageGoal = 'intro' | 'coffee_chat' | 'referral' | 'informational' | 'follow_up' | 'thank_you';
+export type MessageGoal =
+  | 'intro'
+  | 'coffee_chat'
+  | 'referral'
+  | 'informational'
+  | 'follow_up'
+  | 'thank_you'
+  | 'interview'
+  | 'warm_intro';
 export type MessageStatus = 'draft' | 'edited' | 'copied' | 'sent';
+export type RecipientStrategy = 'recruiter' | 'hiring_manager' | 'peer';
+export type MessageCTA = 'interview' | 'referral' | 'warm_intro' | 'redirect';
 
 export interface Message {
   id: string;
@@ -145,6 +155,10 @@ export interface Message {
   status: MessageStatus;
   version: number;
   parent_id: string | null;
+  recipient_strategy?: RecipientStrategy | null;
+  primary_cta?: MessageCTA | null;
+  fallback_cta?: 'referral' | 'redirect' | null;
+  job_id?: string | null;
   person_name: string | null;
   person_title: string | null;
   created_at: string;
@@ -155,12 +169,17 @@ export interface DraftRequest {
   person_id: string;
   channel: MessageChannel;
   goal: MessageGoal;
+  job_id?: string;
 }
 
 export interface DraftResponse {
   message: Message;
   reasoning: string;
   token_usage: { input_tokens: number; output_tokens: number } | null;
+  recipient_strategy?: RecipientStrategy | null;
+  primary_cta?: MessageCTA | null;
+  fallback_cta?: 'referral' | 'redirect' | null;
+  job_id?: string | null;
 }
 
 // Email Layer types

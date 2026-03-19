@@ -9,6 +9,9 @@ from app.services.message_service import (
     _build_user_context,
     _build_person_context,
     _build_history_context,
+    _build_job_context,
+    _normalize_goal,
+    _resolve_cta_plan,
     CHANNEL_INSTRUCTIONS,
     GOAL_CONTEXT,
 )
@@ -111,5 +114,47 @@ class TestPromptConstants:
         assert set(CHANNEL_INSTRUCTIONS.keys()) == expected
 
     def test_all_goals_have_context(self):
-        expected = {"intro", "coffee_chat", "referral", "informational", "follow_up", "thank_you"}
+        expected = {"interview", "referral", "warm_intro", "follow_up", "thank_you"}
         assert set(GOAL_CONTEXT.keys()) == expected
+
+
+class TestGoalNormalization:
+    def test_maps_intro_to_warm_intro(self):
+        assert _normalize_goal("intro") == "warm_intro"
+
+    def test_maps_coffee_chat_to_warm_intro(self):
+        assert _normalize_goal("coffee_chat") == "warm_intro"
+
+    def test_keeps_interview_goal(self):
+        assert _normalize_goal("interview") == "interview"
+
+
+class TestCTAResolution:
+    def test_peer_interview_uses_redirect_then_referral(self):
+        assert _resolve_cta_plan("peer", "interview", []) == ("redirect", "referral")
+
+    def test_recruiter_interview_uses_interview_then_redirect(self):
+        assert _resolve_cta_plan("recruiter", "interview", []) == ("interview", "redirect")
+
+
+class TestBuildJobContext:
+    def test_includes_job_title_company_and_keywords(self):
+        job = MagicMock()
+        job.id = "job-1"
+        job.title = "Software Engineer, Backend (Marketplace Performance)"
+        job.company_name = "Affirm"
+        job.location = "Remote"
+        job.remote = True
+        job.department = "Engineering"
+        job.description = (
+            "Build backend systems for search, discovery, and marketplace experiences. "
+            "Work with merchants and consumer teams."
+        )
+
+        text, snapshot = _build_job_context(job)
+
+        assert "Software Engineer, Backend" in text
+        assert "Affirm" in text
+        assert snapshot is not None
+        assert snapshot["company_name"] == "Affirm"
+        assert "marketplace" in snapshot["domain_keywords"]
