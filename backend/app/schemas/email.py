@@ -60,6 +60,28 @@ class StageDraftResponse(BaseModel):
     message_id: str | None = None
 
 
+class StageDraftsRequest(BaseModel):
+    message_ids: list[str]
+    provider: str  # gmail | outlook
+
+
+class StageDraftsItem(BaseModel):
+    message_id: str
+    person_id: str | None = None
+    draft_id: str | None = None
+    provider: str
+    outreach_log_id: str | None = None
+    status: str  # staged | failed
+    error: str | None = None
+
+
+class StageDraftsResponse(BaseModel):
+    requested_count: int
+    staged_count: int
+    failed_count: int
+    items: list[StageDraftsItem]
+
+
 class EmailConnectionStatus(BaseModel):
     gmail_connected: bool
     outlook_connected: bool

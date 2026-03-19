@@ -8,17 +8,22 @@ from app.database import get_db
 from app.dependencies import get_current_user_id
 from app.middleware.rate_limit import limiter
 from app.schemas.messages import (
+    BatchDraftItem,
+    BatchDraftRequest,
+    BatchDraftResponse,
     DraftRequest,
     EditRequest,
-    MessageResponse,
     DraftResponse,
+    MessageResponse,
 )
+from app.schemas.people import PersonResponse
 from app.services.message_service import (
+    batch_draft_messages,
     draft_message,
-    update_message,
-    mark_copied,
-    get_messages,
     get_message,
+    get_messages,
+    mark_copied,
+    update_message,
 )
 
 router = APIRouter(prefix="/messages", tags=["messages"])
@@ -54,6 +59,17 @@ def _to_response(msg, person=None) -> MessageResponse:
     )
 
 
+def _to_batch_item(item: dict) -> BatchDraftItem:
+    person = item.get("person")
+    message = item.get("message")
+    return BatchDraftItem(
+        status=item["status"],
+        person=PersonResponse.model_validate(person) if person is not None else None,
+        message=_to_response(message, person) if message is not None else None,
+        reason=item.get("reason"),
+    )
+
+
 @router.post("/draft", response_model=DraftResponse)
 @limiter.limit("10/minute")
 async def create_draft(
@@ -83,6 +99,36 @@ async def create_draft(
         primary_cta=result.get("primary_cta"),
         fallback_cta=result.get("fallback_cta"),
         job_id=result.get("job_id"),
+    )
+
+
+@router.post("/batch-draft", response_model=BatchDraftResponse)
+@limiter.limit("5/minute")
+async def create_batch_drafts(
+    request: Request,
+    body: BatchDraftRequest,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Draft multiple individualized email messages for a shortlist of people."""
+    try:
+        result = await batch_draft_messages(
+            db=db,
+            user_id=user_id,
+            person_ids=[uuid.UUID(person_id) for person_id in body.person_ids],
+            goal=body.goal,
+            job_id=uuid.UUID(body.job_id) if body.job_id else None,
+            include_recent_contacts=body.include_recent_contacts,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return BatchDraftResponse(
+        requested_count=result["requested_count"],
+        ready_count=result["ready_count"],
+        skipped_count=result["skipped_count"],
+        failed_count=result["failed_count"],
+        items=[_to_batch_item(item) for item in result["items"]],
     )
 
 

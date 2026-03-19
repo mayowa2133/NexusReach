@@ -8,19 +8,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.dependencies import get_current_user_id
 from app.middleware.rate_limit import limiter
-from app.models.message import Message
-from app.models.person import Person
 from app.models.settings import UserSettings
 from app.schemas.email import (
     OAuthCallbackRequest,
     OAuthUrlResponse,
     EmailFindResponse,
     EmailVerifyResponse,
+    StageDraftsRequest,
+    StageDraftsResponse,
     StageDraftRequest,
     StageDraftResponse,
     EmailConnectionStatus,
 )
 from app.services import gmail_service, outlook_service
+from app.services.draft_staging_service import stage_message_draft, stage_message_drafts
 from app.services.email_finder_service import find_email_for_person, verify_person_email
 
 router = APIRouter(prefix="/email", tags=["email"])
@@ -166,61 +167,41 @@ async def stage_draft(
     The message must be an email-channel message with a subject and body.
     The target person must have a work_email.
     """
-    # Load the message
-    result = await db.execute(
-        select(Message).where(
-            Message.id == uuid.UUID(body.message_id),
-            Message.user_id == user_id,
-        )
-    )
-    message = result.scalar_one_or_none()
-    if not message:
-        raise HTTPException(status_code=404, detail="Message not found.")
-
-    if message.channel != "email":
-        raise HTTPException(status_code=400, detail="Only email messages can be staged as drafts.")
-
-    # Load the person to get their email
-    result = await db.execute(
-        select(Person).where(Person.id == message.person_id)
-    )
-    person = result.scalar_one_or_none()
-    if not person or not person.work_email:
-        raise HTTPException(
-            status_code=400,
-            detail="Recipient has no email address. Use the email finder first."
-        )
-
-    subject = message.subject or "No subject"
-
     try:
-        if body.provider == "gmail":
-            draft = await gmail_service.create_draft(
-                db=db,
-                user_id=user_id,
-                to_email=person.work_email,
-                subject=subject,
-                body=message.body,
-            )
-        elif body.provider == "outlook":
-            draft = await outlook_service.create_draft(
-                db=db,
-                user_id=user_id,
-                to_email=person.work_email,
-                subject=subject,
-                body=message.body,
-            )
-        else:
-            raise HTTPException(status_code=400, detail="Invalid provider. Use 'gmail' or 'outlook'.")
+        draft = await stage_message_draft(
+            db=db,
+            user_id=user_id,
+            message_id=uuid.UUID(body.message_id),
+            provider=body.provider,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-
-    # Update message status
-    message.status = "sent"
-    await db.commit()
 
     return StageDraftResponse(
         draft_id=draft["draft_id"],
         provider=body.provider,
         message_id=draft.get("message_id"),
+    )
+
+
+@router.post("/stage-drafts", response_model=StageDraftsResponse)
+@limiter.limit("5/minute")
+async def stage_drafts(
+    request: Request,
+    body: StageDraftsRequest,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Stage multiple email drafts sequentially with per-item results."""
+    result = await stage_message_drafts(
+        db=db,
+        user_id=user_id,
+        message_ids=[uuid.UUID(message_id) for message_id in body.message_ids],
+        provider=body.provider,
+    )
+    return StageDraftsResponse(
+        requested_count=result["requested_count"],
+        staged_count=result["staged_count"],
+        failed_count=result["failed_count"],
+        items=result["items"],
     )

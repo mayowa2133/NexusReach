@@ -4,17 +4,21 @@ from __future__ import annotations
 
 import re
 import uuid
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import nullslast, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.clients import llm_client
 from app.models.job import Job
 from app.models.message import Message
+from app.models.outreach import OutreachLog
 from app.models.person import Person
 from app.models.profile import Profile
+from app.models.settings import UserSettings
 from app.services import api_usage_service
+from app.services.email_finder_service import find_email_for_person
 from app.utils.job_context import extract_job_context
 
 
@@ -97,6 +101,7 @@ STRATEGY_HINTS = {
 
 HTML_TAG_RE = re.compile(r"<[^>]+>")
 WHITESPACE_RE = re.compile(r"\s+")
+BATCH_DRAFT_LIMIT = 10
 
 
 def _normalize_goal(goal: str) -> str:
@@ -314,6 +319,222 @@ def _build_history_context(prior_messages: list[Message]) -> str:
 
     lines.append("\nIMPORTANT: The user has contacted this person before. Acknowledge the history naturally and continue the same job-focused strategy unless the context clearly changed.")
     return "\n".join(lines)
+
+
+async def _load_guardrails(db: AsyncSession, user_id: uuid.UUID) -> tuple[bool, int]:
+    result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
+    settings = result.scalar_one_or_none()
+    if not settings:
+        return True, 7
+    return settings.min_message_gap_enabled, settings.min_message_gap_days
+
+
+async def _recent_outreach_by_person(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    person_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, datetime]:
+    if not person_ids:
+        return {}
+
+    result = await db.execute(
+        select(OutreachLog)
+        .where(
+            OutreachLog.user_id == user_id,
+            OutreachLog.person_id.in_(person_ids),
+        )
+        .order_by(
+            OutreachLog.person_id,
+            nullslast(OutreachLog.last_contacted_at.desc()),
+            OutreachLog.created_at.desc(),
+        )
+    )
+    recent: dict[uuid.UUID, datetime] = {}
+    for log in result.scalars().all():
+        if log.person_id in recent:
+            continue
+        recent[log.person_id] = log.last_contacted_at or log.created_at
+    return recent
+
+
+def _is_recent_contact(
+    last_contacted_at: datetime | None,
+    *,
+    gap_days: int,
+) -> bool:
+    if not last_contacted_at:
+        return False
+    if last_contacted_at.tzinfo is None:
+        last_contacted_at = last_contacted_at.replace(tzinfo=timezone.utc)
+    return last_contacted_at >= datetime.now(timezone.utc) - timedelta(days=gap_days)
+
+
+def _item_reason(email_result: dict | None, default_reason: str) -> str:
+    if email_result and email_result.get("failure_reasons"):
+        return str(email_result["failure_reasons"][0])
+    return default_reason
+
+
+async def batch_draft_messages(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    person_ids: list[uuid.UUID],
+    goal: str,
+    job_id: uuid.UUID | None = None,
+    include_recent_contacts: bool = False,
+) -> dict:
+    """Draft individualized email messages for multiple saved people."""
+    if not person_ids:
+        raise ValueError("Select at least one person.")
+    if len(person_ids) > BATCH_DRAFT_LIMIT:
+        raise ValueError(f"Batch drafting is limited to {BATCH_DRAFT_LIMIT} contacts.")
+
+    result = await db.execute(select(Profile).where(Profile.user_id == user_id))
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise ValueError("Please complete your profile before drafting messages.")
+
+    unique_person_ids = list(dict.fromkeys(person_ids))
+    result = await db.execute(
+        select(Person)
+        .options(selectinload(Person.company))
+        .where(Person.id.in_(unique_person_ids), Person.user_id == user_id)
+    )
+    people_map = {person.id: person for person in result.scalars().all()}
+    min_gap_enabled, min_gap_days = await _load_guardrails(db, user_id)
+    recent_outreach_map = await _recent_outreach_by_person(db, user_id, unique_person_ids)
+
+    items: list[dict] = []
+    seen: set[uuid.UUID] = set()
+    ready_count = 0
+    skipped_count = 0
+    failed_count = 0
+
+    for person_id in person_ids:
+        if person_id in seen:
+            skipped_count += 1
+            items.append(
+                {
+                    "status": "skipped",
+                    "person": people_map.get(person_id),
+                    "message": None,
+                    "reason": "duplicate_selection",
+                }
+            )
+            continue
+        seen.add(person_id)
+
+        person = people_map.get(person_id)
+        if not person:
+            skipped_count += 1
+            items.append(
+                {
+                    "status": "skipped",
+                    "person": None,
+                    "message": None,
+                    "reason": "person_not_found",
+                }
+            )
+            continue
+
+        last_contacted_at = recent_outreach_map.get(person_id)
+        if min_gap_enabled and not include_recent_contacts and _is_recent_contact(
+            last_contacted_at,
+            gap_days=min_gap_days,
+        ):
+            skipped_count += 1
+            items.append(
+                {
+                    "status": "skipped",
+                    "person": person,
+                    "message": None,
+                    "reason": "recent_outreach_within_gap",
+                }
+            )
+            continue
+
+        try:
+            email_result = await find_email_for_person(
+                db=db,
+                user_id=user_id,
+                person_id=person_id,
+                mode="best_effort",
+            )
+            await db.refresh(person)
+        except ValueError:
+            skipped_count += 1
+            items.append(
+                {
+                    "status": "skipped",
+                    "person": None,
+                    "message": None,
+                    "reason": "person_not_found",
+                }
+            )
+            continue
+
+        if not email_result.get("email"):
+            skipped_count += 1
+            items.append(
+                {
+                    "status": "skipped",
+                    "person": person,
+                    "message": None,
+                    "reason": _item_reason(email_result, "no_usable_email"),
+                }
+            )
+            continue
+
+        if email_result.get("result_type") not in {"verified", "best_guess"}:
+            skipped_count += 1
+            items.append(
+                {
+                    "status": "skipped",
+                    "person": person,
+                    "message": None,
+                    "reason": "email_not_eligible",
+                }
+            )
+            continue
+
+        try:
+            draft_result = await draft_message(
+                db=db,
+                user_id=user_id,
+                person_id=person_id,
+                channel="email",
+                goal=goal,
+                job_id=job_id,
+            )
+        except ValueError:
+            failed_count += 1
+            items.append(
+                {
+                    "status": "failed",
+                    "person": person,
+                    "message": None,
+                    "reason": "draft_generation_failed",
+                }
+            )
+            continue
+
+        ready_count += 1
+        items.append(
+            {
+                "status": "ready",
+                "person": person,
+                "message": draft_result["message"],
+                "reason": None,
+            }
+        )
+
+    return {
+        "requested_count": len(person_ids),
+        "ready_count": ready_count,
+        "skipped_count": skipped_count,
+        "failed_count": failed_count,
+        "items": items,
+    }
 
 
 async def draft_message(

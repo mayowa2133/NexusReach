@@ -139,9 +139,11 @@ export type MessageGoal =
   | 'thank_you'
   | 'interview'
   | 'warm_intro';
-export type MessageStatus = 'draft' | 'edited' | 'copied' | 'sent';
+export type MessageStatus = 'draft' | 'edited' | 'copied' | 'staged' | 'sent';
 export type RecipientStrategy = 'recruiter' | 'hiring_manager' | 'peer';
 export type MessageCTA = 'interview' | 'referral' | 'warm_intro' | 'redirect';
+export type BatchDraftStatus = 'ready' | 'skipped' | 'failed';
+export type BatchStageStatus = 'staged' | 'failed';
 
 export interface Message {
   id: string;
@@ -180,6 +182,28 @@ export interface DraftResponse {
   primary_cta?: MessageCTA | null;
   fallback_cta?: 'referral' | 'redirect' | null;
   job_id?: string | null;
+}
+
+export interface BatchDraftRequest {
+  person_ids: string[];
+  goal: MessageGoal;
+  job_id?: string;
+  include_recent_contacts?: boolean;
+}
+
+export interface BatchDraftItem {
+  status: BatchDraftStatus;
+  person: Person | null;
+  message: Message | null;
+  reason: string | null;
+}
+
+export interface BatchDraftResponse {
+  requested_count: number;
+  ready_count: number;
+  skipped_count: number;
+  failed_count: number;
+  items: BatchDraftItem[];
 }
 
 // Email Layer types
@@ -231,6 +255,28 @@ export interface StageDraftResult {
   draft_id: string;
   provider: string;
   message_id: string | null;
+}
+
+export interface StageDraftsRequest {
+  message_ids: string[];
+  provider: string;
+}
+
+export interface StageDraftsItem {
+  message_id: string;
+  person_id: string | null;
+  draft_id: string | null;
+  provider: string;
+  outreach_log_id: string | null;
+  status: BatchStageStatus;
+  error: string | null;
+}
+
+export interface StageDraftsResult {
+  requested_count: number;
+  staged_count: number;
+  failed_count: number;
+  items: StageDraftsItem[];
 }
 
 // Job Intelligence types

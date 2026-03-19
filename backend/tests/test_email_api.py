@@ -111,3 +111,48 @@ async def test_verify_email(client, mock_user_id):
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "valid"
+
+
+async def test_stage_drafts(client, mock_user_id):
+    """POST /api/email/stage-drafts returns per-message stage results."""
+    with patch("app.routers.email.stage_message_drafts", new_callable=AsyncMock) as mock_stage:
+        mock_stage.return_value = {
+            "requested_count": 2,
+            "staged_count": 1,
+            "failed_count": 1,
+            "items": [
+                {
+                    "message_id": "msg-1",
+                    "person_id": "person-1",
+                    "draft_id": "draft-1",
+                    "provider": "gmail",
+                    "outreach_log_id": "outreach-1",
+                    "status": "staged",
+                    "error": None,
+                },
+                {
+                    "message_id": "msg-2",
+                    "person_id": None,
+                    "draft_id": None,
+                    "provider": "gmail",
+                    "outreach_log_id": None,
+                    "status": "failed",
+                    "error": "Recipient has no email address.",
+                },
+            ],
+        }
+        resp = await client.post(
+            "/api/email/stage-drafts",
+            json={
+                "message_ids": [str(uuid.uuid4()), str(uuid.uuid4())],
+                "provider": "gmail",
+            },
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["requested_count"] == 2
+    assert data["staged_count"] == 1
+    assert data["failed_count"] == 1
+    assert data["items"][0]["status"] == "staged"
+    assert data["items"][1]["error"] == "Recipient has no email address."

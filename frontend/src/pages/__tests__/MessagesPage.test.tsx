@@ -49,9 +49,18 @@ const mockDraft = {
   mutateAsync: vi.fn(),
   isPending: false,
 };
+const mockBatchDraft = {
+  mutateAsync: vi.fn(),
+  isPending: false,
+};
+const mockStageDrafts = {
+  mutateAsync: vi.fn(),
+  isPending: false,
+};
 
 let mockSavedPeople: unknown[] = [];
 let mockJobs: unknown[] = [];
+let mockEmailConnectionStatus = { gmail_connected: false, outlook_connected: false };
 
 vi.mock('@/hooks/usePeople', () => ({
   useSavedPeople: () => ({ data: mockSavedPeople }),
@@ -63,6 +72,7 @@ vi.mock('@/hooks/useJobs', () => ({
 
 vi.mock('@/hooks/useMessages', () => ({
   useDraftMessage: () => mockDraft,
+  useBatchDraftMessages: () => mockBatchDraft,
   useEditMessage: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useMarkCopied: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useMessages: () => ({ data: [] }),
@@ -71,18 +81,19 @@ vi.mock('@/hooks/useMessages', () => ({
 vi.mock('@/hooks/useEmail', () => ({
   useFindEmail: () => mockFindEmail,
   useVerifyEmail: () => mockVerifyEmail,
-  useEmailConnectionStatus: () => ({ data: { gmail_connected: false, outlook_connected: false } }),
+  useEmailConnectionStatus: () => ({ data: mockEmailConnectionStatus }),
   useStageDraft: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useStageDrafts: () => mockStageDrafts,
 }));
 
-function renderMessages() {
+function renderMessages(initialEntries: string[] = ['/messages']) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={initialEntries}>
         <MessagesPage />
       </MemoryRouter>
     </QueryClientProvider>
@@ -93,8 +104,11 @@ beforeEach(() => {
   toast.success.mockReset();
   toast.error.mockReset();
   mockDraft.mutateAsync.mockReset();
+  mockBatchDraft.mutateAsync.mockReset();
+  mockStageDrafts.mutateAsync.mockReset();
   mockFindEmail.mutateAsync.mockReset();
   mockVerifyEmail.mutateAsync.mockReset();
+  mockEmailConnectionStatus = { gmail_connected: false, outlook_connected: false };
   mockSavedPeople = [
     {
       id: 'p1',
@@ -220,5 +234,126 @@ describe('MessagesPage', () => {
       goal: 'warm_intro',
       job_id: 'job-1',
     });
+  });
+
+  it('loads batch mode from query params and stages selected ready drafts', async () => {
+    mockEmailConnectionStatus = { gmail_connected: true, outlook_connected: false };
+    mockSavedPeople = [
+      {
+        id: 'p1',
+        full_name: 'Alex Lee',
+        title: 'Software Engineer II',
+        person_type: 'peer',
+        work_email: 'alex.lee@affirm.com',
+        email_verified: true,
+        email_verification_status: 'verified',
+        email_verification_method: 'smtp_pattern',
+        company: { id: 'c1', name: 'Affirm', domain: 'affirm.com' },
+      },
+      {
+        id: 'p2',
+        full_name: 'Taylor Reed',
+        title: 'Software Engineer II',
+        person_type: 'peer',
+        work_email: null,
+        email_verified: false,
+        company: { id: 'c1', name: 'Affirm', domain: 'affirm.com' },
+      },
+    ];
+    mockBatchDraft.mutateAsync.mockResolvedValue({
+      requested_count: 2,
+      ready_count: 1,
+      skipped_count: 1,
+      failed_count: 0,
+      items: [
+        {
+          status: 'ready',
+          reason: null,
+          person: {
+            id: 'p1',
+            full_name: 'Alex Lee',
+            title: 'Software Engineer II',
+            person_type: 'peer',
+            work_email: 'alex.lee@affirm.com',
+            email_verified: true,
+            email_verification_status: 'verified',
+            email_verification_method: 'smtp_pattern',
+            current_company_verification_status: 'verified',
+            company: { id: 'c1', name: 'Affirm', domain: 'affirm.com' },
+          },
+          message: {
+            id: 'm1',
+            person_id: 'p1',
+            channel: 'email',
+            goal: 'warm_intro',
+            subject: 'Quick intro',
+            body: 'Hi Alex',
+            reasoning: null,
+            ai_model: 'test-model',
+            status: 'draft',
+            version: 1,
+            parent_id: null,
+            recipient_strategy: 'peer',
+            primary_cta: 'warm_intro',
+            fallback_cta: 'redirect',
+            job_id: null,
+            person_name: 'Alex Lee',
+            person_title: 'Software Engineer II',
+            created_at: '2026-03-19T00:00:00Z',
+            updated_at: '2026-03-19T00:00:00Z',
+          },
+        },
+        {
+          status: 'skipped',
+          reason: 'recent_outreach_within_gap',
+          person: {
+            id: 'p2',
+            full_name: 'Taylor Reed',
+            title: 'Software Engineer II',
+            person_type: 'peer',
+            work_email: null,
+            email_verified: false,
+            current_company_verification_status: 'skipped',
+            company: { id: 'c1', name: 'Affirm', domain: 'affirm.com' },
+          },
+          message: null,
+        },
+      ],
+    });
+    mockStageDrafts.mutateAsync.mockResolvedValue({
+      requested_count: 1,
+      staged_count: 1,
+      failed_count: 0,
+      items: [
+        {
+          message_id: 'm1',
+          person_id: 'p1',
+          draft_id: 'draft-1',
+          provider: 'gmail',
+          outreach_log_id: 'outreach-1',
+          status: 'staged',
+          error: null,
+        },
+      ],
+    });
+
+    renderMessages(['/messages?mode=batch&person_ids=p1,p2']);
+
+    expect(await screen.findByText(/batch email drafts/i)).toBeInTheDocument();
+    expect(await screen.findByText('Alex Lee')).toBeInTheDocument();
+    expect(screen.getByText(/skipped because this person was contacted too recently/i)).toBeInTheDocument();
+    expect(mockBatchDraft.mutateAsync).toHaveBeenCalledWith({
+      person_ids: ['p1', 'p2'],
+      goal: 'warm_intro',
+      job_id: undefined,
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: /stage selected in gmail/i }));
+
+    expect(mockStageDrafts.mutateAsync).toHaveBeenCalledWith({
+      message_ids: ['m1'],
+      provider: 'gmail',
+    });
+    expect(await screen.findByText(/^Staged$/i)).toBeInTheDocument();
   });
 });

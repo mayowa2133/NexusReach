@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import type { Message, DraftRequest, DraftResponse } from '@/types';
+import type { BatchDraftRequest, BatchDraftResponse, DraftRequest, DraftResponse, Message } from '@/types';
 
 export function useDraftMessage() {
   const queryClient = useQueryClient();
@@ -10,6 +10,19 @@ export function useDraftMessage() {
       api.post<DraftResponse>('/api/messages/draft', params),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['messages'] });
+    },
+  });
+}
+
+export function useBatchDraftMessages() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (params: BatchDraftRequest) =>
+      api.post<BatchDraftResponse>('/api/messages/batch-draft', params),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['messages'] });
+      queryClient.invalidateQueries({ queryKey: ['people'] });
     },
   });
 }

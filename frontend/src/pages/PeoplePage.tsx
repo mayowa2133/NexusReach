@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, type FormEvent } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -37,15 +37,18 @@ function formatOrgLevel(level: string | null | undefined): string | null {
 }
 
 export function PeoplePage() {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const jobId = searchParams.get('job_id');
   const jobCompany = searchParams.get('company');
   const jobTitle = searchParams.get('title');
 
   const [companyName, setCompanyName] = useState(jobCompany || '');
+  const [activeJobId, setActiveJobId] = useState(jobId || '');
   const [githubOrg, setGithubOrg] = useState('');
   const [linkedinUrl, setLinkedinUrl] = useState('');
   const [searchResults, setSearchResults] = useState<PeopleSearchResult | null>(null);
+  const [selectedPersonIds, setSelectedPersonIds] = useState<string[]>([]);
 
   const search = usePeopleSearch();
   const enrich = useEnrichPerson();
@@ -63,6 +66,7 @@ export function PeoplePage() {
         })
         .then((result) => {
           setSearchResults(result);
+          setActiveJobId(jobId);
           // Clear job params from URL after search completes
           setSearchParams({}, { replace: true });
         })
@@ -104,6 +108,39 @@ export function PeoplePage() {
     (searchResults?.recruiters.length ?? 0) +
     (searchResults?.hiring_managers.length ?? 0) +
     (searchResults?.peers.length ?? 0);
+
+  const togglePersonSelection = (personId: string) => {
+    setSelectedPersonIds((current) => {
+      if (current.includes(personId)) {
+        return current.filter((id) => id !== personId);
+      }
+      if (current.length >= 10) {
+        toast.error('Batch outreach is limited to 10 contacts.');
+        return current;
+      }
+      return [...current, personId];
+    });
+  };
+
+  const clearSelection = () => {
+    setSelectedPersonIds([]);
+  };
+
+  const handleStartBatchDraft = () => {
+    if (selectedPersonIds.length === 0) {
+      toast.error('Select at least one contact first.');
+      return;
+    }
+
+    const params = new URLSearchParams({
+      mode: 'batch',
+      person_ids: selectedPersonIds.join(','),
+    });
+    if (activeJobId) {
+      params.set('job_id', activeJobId);
+    }
+    navigate(`/messages?${params.toString()}`);
+  };
 
   return (
     <div className="space-y-6">
@@ -209,6 +246,27 @@ export function PeoplePage() {
         </Card>
       </div>
 
+      {selectedPersonIds.length > 0 && (
+        <div className="rounded-lg border bg-muted/30 p-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="font-medium">
+              Batch email shortlist: {selectedPersonIds.length} selected
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Create individualized email drafts for this shortlist and review them before staging.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={clearSelection}>
+              Clear Selection
+            </Button>
+            <Button onClick={handleStartBatchDraft}>
+              Create Batch Email Drafts
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Search results */}
       {searchResults && (
         <div className="space-y-4">
@@ -238,16 +296,22 @@ export function PeoplePage() {
                 title="Recruiters & Talent Acquisition"
                 description="Direct line into the hiring process"
                 people={searchResults.recruiters}
+                selectedPersonIds={selectedPersonIds}
+                onToggleSelect={togglePersonSelection}
               />
               <PersonSection
                 title="Hiring Managers & Team Leads"
                 description="Understand the role deeply, can champion you"
                 people={searchResults.hiring_managers}
+                selectedPersonIds={selectedPersonIds}
+                onToggleSelect={togglePersonSelection}
               />
               <PersonSection
                 title="Peers & Potential Teammates"
                 description="Most likely to respond, most authentic conversation"
                 people={searchResults.peers}
+                selectedPersonIds={selectedPersonIds}
+                onToggleSelect={togglePersonSelection}
               />
             </div>
           )}
@@ -260,7 +324,12 @@ export function PeoplePage() {
           <h2 className="text-xl font-semibold">Saved Contacts ({savedPeople.length})</h2>
           <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
             {savedPeople.map((person) => (
-              <PersonCard key={person.id} person={person} />
+              <PersonCard
+                key={person.id}
+                person={person}
+                selected={selectedPersonIds.includes(person.id)}
+                onToggleSelect={togglePersonSelection}
+              />
             ))}
           </div>
         </div>
@@ -281,10 +350,14 @@ function PersonSection({
   title,
   description,
   people,
+  selectedPersonIds,
+  onToggleSelect,
 }: {
   title: string;
   description: string;
   people: Person[];
+  selectedPersonIds: string[];
+  onToggleSelect: (personId: string) => void;
 }) {
   if (people.length === 0) return null;
 
@@ -296,14 +369,27 @@ function PersonSection({
       </div>
       <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
         {people.map((person) => (
-          <PersonCard key={person.id} person={person} />
+          <PersonCard
+            key={person.id}
+            person={person}
+            selected={selectedPersonIds.includes(person.id)}
+            onToggleSelect={onToggleSelect}
+          />
         ))}
       </div>
     </div>
   );
 }
 
-function PersonCard({ person }: { person: Person }) {
+function PersonCard({
+  person,
+  selected = false,
+  onToggleSelect,
+}: {
+  person: Person;
+  selected?: boolean;
+  onToggleSelect?: (personId: string) => void;
+}) {
   const githubRepos = person.github_data?.repos ?? [];
   const githubLangs = person.github_data?.languages ?? [];
   const findEmail = useFindEmail();
@@ -423,6 +509,17 @@ function PersonCard({ person }: { person: Person }) {
   return (
     <Card>
       <CardContent className="pt-4 space-y-2">
+        {onToggleSelect && (
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={() => onToggleSelect(person.id)}
+              aria-label={`Select ${person.full_name || 'Unknown'}`}
+            />
+            Select for batch email
+          </label>
+        )}
         <div>
           <div className="font-medium">{person.full_name || 'Unknown'}</div>
           <div className="text-sm text-muted-foreground">{person.title || 'No title'}</div>

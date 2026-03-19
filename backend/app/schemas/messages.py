@@ -1,5 +1,7 @@
 from pydantic import BaseModel
 
+from app.schemas.people import PersonResponse
+
 
 class DraftRequest(BaseModel):
     person_id: str
@@ -45,3 +47,25 @@ class DraftResponse(BaseModel):
     primary_cta: str | None = None
     fallback_cta: str | None = None
     job_id: str | None = None
+
+
+class BatchDraftRequest(BaseModel):
+    person_ids: list[str]
+    goal: str
+    job_id: str | None = None
+    include_recent_contacts: bool = False
+
+
+class BatchDraftItem(BaseModel):
+    status: str  # ready | skipped | failed
+    person: PersonResponse | None = None
+    message: MessageResponse | None = None
+    reason: str | None = None
+
+
+class BatchDraftResponse(BaseModel):
+    requested_count: int
+    ready_count: int
+    skipped_count: int
+    failed_count: int
+    items: list[BatchDraftItem]

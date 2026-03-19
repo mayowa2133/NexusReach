@@ -6,6 +6,16 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import { PeoplePage } from '../PeoplePage';
 
+const mockNavigate = vi.fn();
+
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
+  return {
+    ...actual,
+    useNavigate: () => mockNavigate,
+  };
+});
+
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({
     auth: {
@@ -87,6 +97,7 @@ function renderPeople() {
 }
 
 beforeEach(() => {
+  mockNavigate.mockReset();
   mockSavedPeople = [
     {
       id: 'p1',
@@ -184,5 +195,14 @@ describe('PeoplePage', () => {
 
     expect(await screen.findByText(/current company verified/i)).toBeInTheDocument();
     expect(screen.getByText(/currently at affirm/i)).toBeInTheDocument();
+  });
+
+  it('navigates into batch draft mode from a shortlist selection', async () => {
+    renderPeople();
+
+    await userEvent.click(screen.getByLabelText(/select alex lee/i));
+    await userEvent.click(screen.getByRole('button', { name: /create batch email drafts/i }));
+
+    expect(mockNavigate).toHaveBeenCalledWith('/messages?mode=batch&person_ids=p1');
   });
 });

@@ -218,6 +218,17 @@ A living document of patterns, gotchas, and decisions encountered while building
 - **Fix:** Add an eslint config override for `src/components/ui/**/*.{ts,tsx}` to disable this rule. These are generated files with an intentional pattern.
 
 ### TypeScript's `tsc -b` (build mode) catches errors that `eslint` and `vitest` don't
+### Batch outreach works better as a review queue than a send queue
+- A shortlist-to-review workflow is safer than trying to batch-stage or batch-send immediately from the People page.
+- **Lesson:** Generate individualized drafts first, surface skip reasons per contact, and only create outreach tracking once drafts are actually staged in Gmail or Outlook.
+
+### Query-param handoff is enough for shortlist workflows
+- Passing `mode=batch`, `person_ids`, and optional `job_id` through the Messages route was sufficient to move a shortlist from People into a batch review flow without adding new global state.
+- **Lesson:** For bounded UI handoffs, query params keep the state debuggable and avoid adding another store.
+
+### Batch APIs need per-item results, not a single success flag
+- Batch drafting and staging both have mixed outcomes in real use: some contacts are ready, some are skipped, some fail.
+- **Lesson:** Return per-item `ready | skipped | failed | staged` style results plus summary counts so the UI can keep partial progress instead of collapsing on the first error.
 - The CI runs `tsc -b && vite build` as a separate step from lint and test.
 - Type errors in component props (wrong prop names, missing types) only surface during `tsc` build, not during test runs (vitest uses esbuild which skips type checking).
 - **Lesson:** Always run `npx tsc -b` locally before pushing, not just lint + test.

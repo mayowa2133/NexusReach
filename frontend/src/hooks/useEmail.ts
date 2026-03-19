@@ -5,6 +5,8 @@ import type {
   EmailVerifyResult,
   EmailConnectionStatus,
   StageDraftResult,
+  StageDraftsRequest,
+  StageDraftsResult,
 } from '@/types';
 
 export function useEmailConnectionStatus() {
@@ -92,6 +94,19 @@ export function useStageDraft() {
       api.post<StageDraftResult>('/api/email/stage-draft', params),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['messages'] });
+    },
+  });
+}
+
+export function useStageDrafts() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (params: StageDraftsRequest) =>
+      api.post<StageDraftsResult>('/api/email/stage-drafts', params),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['messages'] });
+      queryClient.invalidateQueries({ queryKey: ['outreach'] });
     },
   });
 }

@@ -1,42 +1,42 @@
 # NexusReach Handoff
 
 ## Completed in this pass
-- Added first-class email verification metadata across the backend and frontend.
-  - New migration: `013_add_email_verification_fields.py`.
-  - `persons` now persist:
-    - `email_verification_status`
-    - `email_verification_method`
-    - `email_verification_label`
-    - `email_verification_evidence`
-    - `email_verified_at`
-- Kept the rollout additive.
-  - Existing compatibility fields still remain:
-    - `email_verified`
-    - `email_source`
-    - `verified` in email responses
-    - `source` in email responses
-- Split discovery source from verification method in the email service.
-  - `pattern_smtp` now persists `SMTP-verified`
-  - manual Hunter verify persists `Hunter-verified`
-  - Apollo/provider enrichment persists `Provider-verified`
-  - learned/generic pattern suggestions persist `Best guess ...` metadata
-- Updated the People and Messages UI to show method-aware badges instead of a generic verified/unverified badge.
-  - Current-company verification badges remain separate from email verification badges.
-  - Email evidence now renders in the detail area.
-  - Best guesses remain usable for outreach, but visually distinct.
-- Added frontend helper logic in `frontend/src/lib/emailVerification.ts` to keep badge wording consistent.
+- Added safe batch email drafting from a People shortlist.
+  - People page now supports multi-select with a max of 10 contacts.
+  - Selected contacts navigate into Messages via `mode=batch`, `person_ids`, and optional `job_id`.
+- Added backend batch APIs.
+  - `POST /api/messages/batch-draft`
+  - `POST /api/email/stage-drafts`
+- Batch drafting now:
+  - deduplicates selections
+  - skips recent contacts by default
+  - allows verified and best-guess emails
+  - skips contacts with no usable email
+  - returns per-item `ready`, `skipped`, or `failed` results with reasons
+- Batch staging now:
+  - stages drafts sequentially through Gmail or Outlook
+  - continues after partial failures
+  - sets `Message.status = "staged"`
+  - creates outreach logs only for successfully staged drafts
+- Messages page now has a batch review mode.
+  - shows one review card per contact
+  - supports per-row edit, regenerate, deselect
+  - supports recent-contact override from the review queue
+  - stages only the drafts the user explicitly selects
+- Added route/UI/tests coverage for the new batch flow.
 - Updated `lessons.md`.
 
 ## Files changed in this pass
-- `backend/alembic/versions/013_add_email_verification_fields.py`
-- `backend/app/models/person.py`
+- `backend/app/routers/email.py`
+- `backend/app/routers/messages.py`
 - `backend/app/schemas/email.py`
-- `backend/app/schemas/people.py`
-- `backend/app/services/email_finder_service.py`
-- `backend/tests/test_email_finder_service.py`
-- `backend/tests/test_people_api.py`
-- `backend/tests/test_people_job_search.py`
-- `frontend/src/lib/emailVerification.ts`
+- `backend/app/schemas/messages.py`
+- `backend/app/services/draft_staging_service.py`
+- `backend/app/services/message_service.py`
+- `backend/tests/test_email_api.py`
+- `backend/tests/test_messages_api.py`
+- `frontend/src/hooks/useEmail.ts`
+- `frontend/src/hooks/useMessages.ts`
 - `frontend/src/pages/MessagesPage.tsx`
 - `frontend/src/pages/PeoplePage.tsx`
 - `frontend/src/pages/__tests__/MessagesPage.test.tsx`
@@ -48,22 +48,23 @@
 ## Verification completed
 - `cd backend && ruff check app tests conftest.py`
 - `cd backend && pytest`
-  - result: `477 passed`
-- `cd backend && PYTHONPATH=. PGOPTIONS='-c search_path=emailverifier' NEXUSREACH_DATABASE_URL='postgresql+asyncpg://postgres:postgres@localhost:5432/nexusreach' alembic upgrade head`
+  - result: `485 passed`
 - `cd frontend && npx eslint .`
 - `cd frontend && npx tsc -b`
 - `cd frontend && npm run test`
-  - result: `91 passed`
+  - result: `96 passed`
 - `cd frontend && npm run build`
 
 ## Remaining caveats
-- Shared or deployed environments still need migration `013_add_email_verification_fields.py` applied before the new persistence fields are available there.
-- The UI now treats `email_source` as discovery provenance and `email_verification_method` as confidence provenance. Any future reporting/export code should do the same instead of inferring verification from `source`.
-- Full backend pytest still emits pre-existing warning noise about sync tests marked with `pytest.mark.asyncio`; I did not clean that up here because it is unrelated to this feature.
+- Batch mode is email-only in v1. LinkedIn note/message batching is still not implemented.
+- The batch review queue is driven by query-param handoff from People. There is no persisted “campaign” object yet.
+- Deselecting a contact inside batch mode updates the local queue only; it does not rewrite the URL query string.
+- Shared or deployed environments do not need a migration for this pass, but they do need the updated backend/frontend code together because both new endpoints are used by the new UI flow.
 
 ## Suggested next manual check
-- Run a live people search and then:
-  - confirm SMTP hits render as `SMTP-verified`
-  - confirm Hunter manual verify upgrades the badge to `Hunter-verified`
-  - confirm Apollo-returned emails render as `Provider-verified` when marked verified
-  - confirm learned/generic pattern emails render as `Best guess ...` while still remaining usable for outreach
+- In People, select 3-5 contacts with mixed email states.
+- Start batch drafts and confirm:
+  - ready rows show individualized drafts
+  - no-email and recent-contact rows show explicit skip reasons
+  - `Include Anyway` only affects the targeted recent-contact row
+  - staging selected drafts marks them `staged` and creates outreach entries only for the staged subset

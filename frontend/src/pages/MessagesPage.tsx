@@ -1,26 +1,42 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import { useDraftMessage, useEditMessage, useMarkCopied, useMessages } from '@/hooks/useMessages';
+import {
+  useBatchDraftMessages,
+  useDraftMessage,
+  useEditMessage,
+  useMarkCopied,
+  useMessages,
+} from '@/hooks/useMessages';
 import { useSavedPeople } from '@/hooks/usePeople';
 import { useJobs } from '@/hooks/useJobs';
-import { useFindEmail, useVerifyEmail, useEmailConnectionStatus, useStageDraft } from '@/hooks/useEmail';
+import {
+  useEmailConnectionStatus,
+  useFindEmail,
+  useStageDraft,
+  useStageDrafts,
+  useVerifyEmail,
+} from '@/hooks/useEmail';
 import {
   formatEmailVerificationLabel,
   formatGuessBasis,
+  getPersonGuessBasis,
   isVerifiedEmailStatus,
 } from '@/lib/emailVerification';
 import { toast } from 'sonner';
 import type {
+  BatchDraftItem,
   Job,
   Message,
-  MessageChannel,
   MessageCTA,
+  MessageChannel,
   MessageGoal,
+  Person,
   RecipientStrategy,
 } from '@/types';
 
@@ -62,6 +78,7 @@ const STATUS_COLORS: Record<string, 'default' | 'secondary' | 'outline'> = {
   draft: 'outline',
   edited: 'secondary',
   copied: 'default',
+  staged: 'secondary',
   sent: 'default',
 };
 
@@ -96,7 +113,105 @@ function formatJobOption(job: Job): string {
   return `${job.title} — ${job.company_name}`;
 }
 
+function formatRecipientStrategyLabel(strategy: string | null | undefined): string | null {
+  if (!strategy) return null;
+  if (strategy === 'hiring_manager') return 'Hiring Manager';
+  return strategy.charAt(0).toUpperCase() + strategy.slice(1);
+}
+
+function formatCompanyVerificationStatus(status: string | null | undefined): string | null {
+  if (status === 'verified') return 'Current company verified';
+  if (status === 'unverified') return 'Current company unverified';
+  if (status === 'failed') return 'Verification failed';
+  if (status === 'skipped') return 'Verification skipped';
+  return null;
+}
+
+function formatBatchReason(reason: string | null | undefined): string {
+  if (!reason) {
+    return 'Unknown issue';
+  }
+
+  const reasonLabels: Record<string, string> = {
+    duplicate_selection: 'Skipped because this person was selected twice.',
+    person_not_found: 'Skipped because this contact is no longer available in your saved people.',
+    recent_outreach_within_gap: 'Skipped because this person was contacted too recently based on your message-gap guardrail.',
+    no_usable_email: 'Skipped because no usable email address was found.',
+    email_not_eligible: 'Skipped because the email result was not eligible for batch outreach.',
+    draft_generation_failed: 'Draft generation failed for this contact.',
+    pattern_suggestion_low_confidence: 'Skipped because only a very low-confidence email guess was available.',
+    not_found: 'No email could be found for this contact.',
+  };
+
+  return reasonLabels[reason] ?? reason.replace(/_/g, ' ');
+}
+
+function getRecommendedBatchGoal(people: Person[]): MessageGoal {
+  return people.some((person) => normalizeRecipientStrategy(person.person_type) !== 'peer')
+    ? 'interview'
+    : 'warm_intro';
+}
+
+function isReadyBatchItem(item: BatchDraftItem): item is BatchDraftItem & { person: Person; message: Message } {
+  return item.status === 'ready' && item.person != null && item.message != null;
+}
+
+function mergeBatchItems(current: BatchDraftItem[], incoming: BatchDraftItem[]): BatchDraftItem[] {
+  const incomingByPersonId = new Map<string, BatchDraftItem>();
+  for (const item of incoming) {
+    if (item.person?.id) {
+      incomingByPersonId.set(item.person.id, item);
+    }
+  }
+
+  const merged = current.map((item) => {
+    const personId = item.person?.id;
+    if (!personId) {
+      return item;
+    }
+    return incomingByPersonId.get(personId) ?? item;
+  });
+
+  for (const item of incoming) {
+    const personId = item.person?.id;
+    if (!personId) {
+      merged.push(item);
+      continue;
+    }
+    if (!current.some((existing) => existing.person?.id === personId)) {
+      merged.push(item);
+    }
+  }
+
+  return merged;
+}
+
 export function MessagesPage() {
+  const [searchParams] = useSearchParams();
+
+  if (searchParams.get('mode') === 'batch') {
+    const personIds = Array.from(
+      new Set(
+        (searchParams.get('person_ids') ?? '')
+          .split(',')
+          .map((value) => value.trim())
+          .filter(Boolean)
+      )
+    );
+    const jobId = searchParams.get('job_id') ?? '';
+    return (
+      <BatchMessagesView
+        key={`${personIds.join(',')}|${jobId}`}
+        initialPersonIds={personIds}
+        initialJobId={jobId}
+      />
+    );
+  }
+
+  return <SingleMessagesView />;
+}
+
+function SingleMessagesView() {
   const [selectedPersonId, setSelectedPersonId] = useState<string>('');
   const [selectedJobId, setSelectedJobId] = useState<string>('');
   const [channel, setChannel] = useState<MessageChannel>('linkedin_message');
@@ -128,9 +243,7 @@ export function MessagesPage() {
     if (!companyName) {
       return jobs;
     }
-    const matchingJobs = jobs.filter(
-      (job) => job.company_name.trim().toLowerCase() === companyName
-    );
+    const matchingJobs = jobs.filter((job) => job.company_name.trim().toLowerCase() === companyName);
     return matchingJobs.length > 0 ? matchingJobs : jobs;
   })();
 
@@ -226,6 +339,7 @@ export function MessagesPage() {
         message_id: activeDraft.id,
         provider,
       });
+      setActiveDraft((current) => (current ? { ...current, status: 'staged' } : current));
       toast.success(
         `Draft staged in ${provider === 'gmail' ? 'Gmail' : 'Outlook'}. Open your inbox to review and send.`
       );
@@ -318,8 +432,7 @@ export function MessagesPage() {
                     <Badge variant="outline" className="text-xs">
                       {selectedPerson.person_type === 'hiring_manager'
                         ? 'Hiring Manager'
-                        : selectedPerson.person_type.charAt(0).toUpperCase() +
-                          selectedPerson.person_type.slice(1)}
+                        : selectedPerson.person_type.charAt(0).toUpperCase() + selectedPerson.person_type.slice(1)}
                     </Badge>
                   )}
                   <div className="text-xs text-muted-foreground">{strategyHint}</div>
@@ -445,19 +558,14 @@ export function MessagesPage() {
                         {GOAL_LABELS[activeDraft.goal] || activeDraft.goal}
                       </CardDescription>
                     </div>
-                    <Badge variant={STATUS_COLORS[activeDraft.status] || 'outline'}>
-                      {activeDraft.status}
-                    </Badge>
+                    <Badge variant={STATUS_COLORS[activeDraft.status] || 'outline'}>{activeDraft.status}</Badge>
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="flex flex-wrap gap-2">
                     {activeDraft.recipient_strategy && (
                       <Badge variant="outline" className="text-xs">
-                        {activeDraft.recipient_strategy === 'hiring_manager'
-                          ? 'Hiring Manager'
-                          : activeDraft.recipient_strategy.charAt(0).toUpperCase() +
-                            activeDraft.recipient_strategy.slice(1)}
+                        {formatRecipientStrategyLabel(activeDraft.recipient_strategy)}
                       </Badge>
                     )}
                     {activeDraft.primary_cta && (
@@ -631,6 +739,602 @@ export function MessagesPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function BatchMessagesView({
+  initialPersonIds,
+  initialJobId,
+}: {
+  initialPersonIds: string[];
+  initialJobId: string;
+}) {
+  const [, setSearchParams] = useSearchParams();
+  const { data: savedPeople } = useSavedPeople();
+  const { data: jobs } = useJobs();
+  const { data: emailStatus } = useEmailConnectionStatus();
+  const batchDraft = useBatchDraftMessages();
+  const edit = useEditMessage();
+  const stageDrafts = useStageDrafts();
+
+  const [manualBatchGoal, setManualBatchGoal] = useState<MessageGoal | null>(null);
+  const [selectedJobId, setSelectedJobId] = useState(initialJobId);
+  const [batchItems, setBatchItems] = useState<BatchDraftItem[]>([]);
+  const [hasLoadedInitialBatch, setHasLoadedInitialBatch] = useState(false);
+  const [selectedStageMessageIds, setSelectedStageMessageIds] = useState<string[]>([]);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [batchEditSubject, setBatchEditSubject] = useState('');
+  const [batchEditBody, setBatchEditBody] = useState('');
+
+  const selectedPeople = useMemo(() => {
+    const selectedIds = new Set(initialPersonIds);
+    return (savedPeople ?? []).filter((person) => selectedIds.has(person.id));
+  }, [initialPersonIds, savedPeople]);
+
+  const relevantJobs = useMemo(() => {
+    if (!jobs) {
+      return [];
+    }
+
+    const companyNames = new Set(
+      selectedPeople
+        .map((person) => person.company?.name?.trim().toLowerCase())
+        .filter((value): value is string => Boolean(value))
+    );
+
+    if (companyNames.size === 0) {
+      return jobs;
+    }
+
+    const matchingJobs = jobs.filter((job) => companyNames.has(job.company_name.trim().toLowerCase()));
+    return matchingJobs.length > 0 ? matchingJobs : jobs;
+  }, [jobs, selectedPeople]);
+
+  const batchGoal = manualBatchGoal ?? getRecommendedBatchGoal(selectedPeople);
+  const readyItems = batchItems.filter(isReadyBatchItem);
+  const summary = {
+    requested: batchItems.length,
+    ready: batchItems.filter((item) => item.status === 'ready').length,
+    skipped: batchItems.filter((item) => item.status === 'skipped').length,
+    failed: batchItems.filter((item) => item.status === 'failed').length,
+    staged: readyItems.filter((item) => item.message.status === 'staged').length,
+  };
+  const stageableMessageIds = readyItems
+    .filter((item) => item.message.status !== 'staged')
+    .map((item) => item.message.id);
+  const recentSkipItems = batchItems.filter(
+    (item) => item.status === 'skipped' && item.reason === 'recent_outreach_within_gap' && item.person
+  );
+  const selectedJob = relevantJobs.find((job) => job.id === selectedJobId) ?? null;
+
+  useEffect(() => {
+    if (savedPeople === undefined || hasLoadedInitialBatch) {
+      return;
+    }
+    if (initialPersonIds.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+
+    batchDraft
+      .mutateAsync({
+        person_ids: initialPersonIds,
+        goal: batchGoal,
+        job_id: selectedJobId || undefined,
+      })
+      .then((result) => {
+        if (cancelled) return;
+        setBatchItems(result.items);
+        setSelectedStageMessageIds(
+          result.items
+            .filter(isReadyBatchItem)
+            .filter((item) => item.message.status !== 'staged')
+            .map((item) => item.message.id)
+        );
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        toast.error(err instanceof Error ? err.message : 'Failed to prepare batch drafts');
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setHasLoadedInitialBatch(true);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [batchDraft, batchGoal, hasLoadedInitialBatch, initialPersonIds, savedPeople, selectedJobId]);
+
+  const handleRegenerateBatch = async () => {
+    if (initialPersonIds.length === 0) {
+      toast.error('This batch is empty.');
+      return;
+    }
+
+    try {
+      const result = await batchDraft.mutateAsync({
+        person_ids: initialPersonIds,
+        goal: batchGoal,
+        job_id: selectedJobId || undefined,
+      });
+      setBatchItems(result.items);
+      setSelectedStageMessageIds(
+        result.items
+          .filter(isReadyBatchItem)
+          .filter((item) => item.message.status !== 'staged')
+          .map((item) => item.message.id)
+      );
+      setEditingMessageId(null);
+      toast.success('Batch drafts regenerated');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to regenerate batch drafts');
+    }
+  };
+
+  const handleRetryRecentContact = async (personId: string) => {
+    try {
+      const result = await batchDraft.mutateAsync({
+        person_ids: [personId],
+        goal: batchGoal,
+        job_id: selectedJobId || undefined,
+        include_recent_contacts: true,
+      });
+      setBatchItems((current) => mergeBatchItems(current, result.items));
+      const nextReadyIds = result.items
+        .filter(isReadyBatchItem)
+        .filter((item) => item.message.status !== 'staged')
+        .map((item) => item.message.id);
+      setSelectedStageMessageIds((current) => Array.from(new Set([...current, ...nextReadyIds])));
+      toast.success('Recent-contact override applied');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to override the recent-contact guardrail');
+    }
+  };
+
+  const handleDeselectPerson = (personId: string) => {
+    setBatchItems((current) => current.filter((item) => item.person?.id !== personId));
+    setSelectedStageMessageIds((current) =>
+      current.filter(
+        (messageId) =>
+          batchItems.find((item) => item.message?.id === messageId)?.person?.id !== personId
+      )
+    );
+    if (editingMessageId && batchItems.find((item) => item.message?.id === editingMessageId)?.person?.id === personId) {
+      setEditingMessageId(null);
+      setBatchEditSubject('');
+      setBatchEditBody('');
+    }
+  };
+
+  const handleStartEdit = (item: BatchDraftItem & { message: Message }) => {
+    setEditingMessageId(item.message.id);
+    setBatchEditSubject(item.message.subject || '');
+    setBatchEditBody(item.message.body);
+  };
+
+  const handleSaveBatchEdit = async (messageId: string) => {
+    try {
+      const updated = await edit.mutateAsync({
+        id: messageId,
+        body: batchEditBody,
+        subject: batchEditSubject || undefined,
+      });
+      setBatchItems((current) =>
+        current.map((item) =>
+          item.message?.id === messageId
+            ? {
+                ...item,
+                message: updated,
+              }
+            : item
+        )
+      );
+      setEditingMessageId(null);
+      setBatchEditSubject('');
+      setBatchEditBody('');
+      toast.success('Draft updated');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save edit');
+    }
+  };
+
+  const handleRegenerateRow = async (personId: string) => {
+    try {
+      const result = await batchDraft.mutateAsync({
+        person_ids: [personId],
+        goal: batchGoal,
+        job_id: selectedJobId || undefined,
+      });
+      setBatchItems((current) => mergeBatchItems(current, result.items));
+      const nextReadyIds = result.items
+        .filter(isReadyBatchItem)
+        .filter((item) => item.message.status !== 'staged')
+        .map((item) => item.message.id);
+      setSelectedStageMessageIds((current) => Array.from(new Set([...current, ...nextReadyIds])));
+      toast.success('Draft regenerated');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to regenerate this draft');
+    }
+  };
+
+  const handleToggleStageSelection = (messageId: string) => {
+    setSelectedStageMessageIds((current) =>
+      current.includes(messageId) ? current.filter((id) => id !== messageId) : [...current, messageId]
+    );
+  };
+
+  const handleStageSelected = async (provider: 'gmail' | 'outlook') => {
+    const messageIds = selectedStageMessageIds.filter((messageId) => stageableMessageIds.includes(messageId));
+    if (messageIds.length === 0) {
+      toast.error('Select at least one ready draft to stage.');
+      return;
+    }
+
+    try {
+      const result = await stageDrafts.mutateAsync({
+        message_ids: messageIds,
+        provider,
+      });
+      const stagedIds = new Set(
+        result.items.filter((item) => item.status === 'staged').map((item) => item.message_id)
+      );
+      setBatchItems((current) =>
+        current.map((item) =>
+          item.message && stagedIds.has(item.message.id)
+            ? { ...item, message: { ...item.message, status: 'staged' } }
+            : item
+        )
+      );
+      setSelectedStageMessageIds((current) => current.filter((messageId) => !stagedIds.has(messageId)));
+
+      if (result.staged_count > 0) {
+        toast.success(
+          `Staged ${result.staged_count} draft${result.staged_count === 1 ? '' : 's'} in ${
+            provider === 'gmail' ? 'Gmail' : 'Outlook'
+          }.`
+        );
+      }
+      if (result.failed_count > 0) {
+        toast.error(`${result.failed_count} draft${result.failed_count === 1 ? '' : 's'} failed to stage.`);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to stage selected drafts');
+    }
+  };
+
+  const handleExitBatchMode = () => {
+    setSearchParams({}, { replace: true });
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h1 className="text-3xl font-semibold tracking-tight">Batch Email Drafts</h1>
+          <p className="text-muted-foreground">
+            Review individualized email drafts for your shortlist before staging them in Gmail or Outlook.
+          </p>
+        </div>
+        <Button variant="outline" onClick={handleExitBatchMode}>
+          Back to Single Draft
+        </Button>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-5">
+        <div className="lg:col-span-2 space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Batch Settings</CardTitle>
+              <CardDescription>
+                Batch drafting is email-only. Each contact gets a separate, recipient-specific draft.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="rounded-md bg-muted/40 p-3">
+                  <div className="font-medium">{summary.requested}</div>
+                  <div className="text-muted-foreground">Selected</div>
+                </div>
+                <div className="rounded-md bg-muted/40 p-3">
+                  <div className="font-medium">{summary.ready}</div>
+                  <div className="text-muted-foreground">Ready</div>
+                </div>
+                <div className="rounded-md bg-muted/40 p-3">
+                  <div className="font-medium">{summary.skipped}</div>
+                  <div className="text-muted-foreground">Skipped</div>
+                </div>
+                <div className="rounded-md bg-muted/40 p-3">
+                  <div className="font-medium">{summary.failed}</div>
+                  <div className="text-muted-foreground">Failed</div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="batch-goal-select">Outcome Goal</Label>
+                <select
+                  id="batch-goal-select"
+                  value={batchGoal}
+                  onChange={(e) => setManualBatchGoal(e.target.value as MessageGoal)}
+                  className="flex h-9 w-full rounded-lg border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
+                >
+                  {GOAL_OPTIONS.map((item) => (
+                    <option key={item.value} value={item.value}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  Batch drafts keep the same outcome goal, but each draft still adapts to recruiter, manager, or peer strategy.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="batch-job-select">Target Job (Optional)</Label>
+                <select
+                  id="batch-job-select"
+                  value={selectedJobId}
+                  onChange={(e) => setSelectedJobId(e.target.value)}
+                  className="flex h-9 w-full rounded-lg border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
+                >
+                  <option value="">No saved job context</option>
+                  {relevantJobs.map((job) => (
+                    <option key={job.id} value={job.id}>
+                      {formatJobOption(job)}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  {selectedJob
+                    ? `Drafts will reference ${selectedJob.title} at ${selectedJob.company_name}.`
+                    : 'Attach a saved job when this shortlist is about one specific role.'}
+                </p>
+              </div>
+
+              <Button
+                onClick={handleRegenerateBatch}
+                className="w-full"
+                disabled={batchDraft.isPending || initialPersonIds.length === 0}
+              >
+                {batchDraft.isPending ? 'Regenerating...' : 'Regenerate Batch Drafts'}
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Stage Selected Drafts</CardTitle>
+              <CardDescription>
+                Only ready drafts with usable email addresses can be staged. Drafts are staged, not sent.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="text-sm text-muted-foreground">
+                {selectedStageMessageIds.length} selected for staging
+              </div>
+              <div className="flex flex-col gap-2">
+                {emailStatus?.gmail_connected && (
+                  <Button onClick={() => handleStageSelected('gmail')} disabled={stageDrafts.isPending}>
+                    {stageDrafts.isPending ? 'Staging...' : 'Stage Selected in Gmail'}
+                  </Button>
+                )}
+                {emailStatus?.outlook_connected && (
+                  <Button variant="outline" onClick={() => handleStageSelected('outlook')} disabled={stageDrafts.isPending}>
+                    {stageDrafts.isPending ? 'Staging...' : 'Stage Selected in Outlook'}
+                  </Button>
+                )}
+                {!emailStatus?.gmail_connected && !emailStatus?.outlook_connected && (
+                  <p className="text-xs text-muted-foreground">
+                    Connect Gmail or Outlook in Settings to stage drafts in your inbox.
+                  </p>
+                )}
+              </div>
+              {recentSkipItems.length > 0 && (
+                <div className="rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">
+                  {recentSkipItems.length} contact{recentSkipItems.length === 1 ? '' : 's'} were skipped by your recent-outreach guardrail.
+                  Use the individual “Include anyway” action in the review queue if you want to override that safely.
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="lg:col-span-3 space-y-4">
+          {batchDraft.isPending && batchItems.length === 0 ? (
+            <div className="rounded-lg border border-dashed p-12 text-center text-muted-foreground">
+              Preparing your batch review queue...
+            </div>
+          ) : batchItems.length > 0 ? (
+            batchItems.map((item) => {
+              const person = item.person;
+              const message = item.message;
+              const isEditingThisRow = message != null && editingMessageId === message.id;
+              const emailVerificationLabel = person
+                ? formatEmailVerificationLabel(
+                    person.email_verification_status ??
+                      (person.email_verified ? 'verified' : person.work_email ? 'unknown' : null),
+                    person.email_verification_method ?? null,
+                    getPersonGuessBasis(person),
+                    person.email_verification_label ?? null,
+                  )
+                : null;
+              const companyVerificationLabel = person
+                ? formatCompanyVerificationStatus(person.current_company_verification_status)
+                : null;
+              const strategyLabel = message ? formatRecipientStrategyLabel(message.recipient_strategy) : formatRecipientStrategyLabel(person?.person_type);
+              const canStage = message != null && item.status === 'ready' && message.status !== 'staged';
+
+              return (
+                <Card key={`${person?.id ?? 'missing'}-${message?.id ?? item.reason ?? item.status}`}>
+                  <CardHeader className="space-y-3">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                      <div className="space-y-2">
+                        <div>
+                          <CardTitle className="text-lg">{person?.full_name || 'Unavailable contact'}</CardTitle>
+                          {person?.title && <CardDescription>{person.title}</CardDescription>}
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Badge variant={item.status === 'ready' ? 'secondary' : 'outline'}>
+                            {item.status === 'ready'
+                              ? message?.status === 'staged'
+                                ? 'Staged'
+                                : 'Ready'
+                              : item.status === 'skipped'
+                                ? 'Skipped'
+                                : 'Failed'}
+                          </Badge>
+                          {strategyLabel && (
+                            <Badge variant="outline" className="text-xs">
+                              {strategyLabel}
+                            </Badge>
+                          )}
+                          {companyVerificationLabel && (
+                            <Badge variant="outline" className="text-xs">
+                              {companyVerificationLabel}
+                            </Badge>
+                          )}
+                          {emailVerificationLabel && (
+                            <Badge variant="outline" className="text-xs">
+                              {emailVerificationLabel}
+                            </Badge>
+                          )}
+                          {message?.primary_cta && (
+                            <Badge variant="outline" className="text-xs">
+                              Primary: {CTA_LABELS[message.primary_cta] || message.primary_cta}
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+
+                      {canStage && message && (
+                        <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <input
+                            type="checkbox"
+                            aria-label={`Stage draft for ${person?.full_name || 'contact'}`}
+                            checked={selectedStageMessageIds.includes(message.id)}
+                            onChange={() => handleToggleStageSelection(message.id)}
+                          />
+                          Stage this draft
+                        </label>
+                      )}
+                    </div>
+
+                    {person?.work_email && (
+                      <div className="text-sm text-muted-foreground">
+                        Email: <span className="text-foreground">{person.work_email}</span>
+                      </div>
+                    )}
+
+                    {item.reason && (
+                      <div className="rounded-md bg-muted/40 p-3 text-sm text-muted-foreground">
+                        {formatBatchReason(item.reason)}
+                      </div>
+                    )}
+                  </CardHeader>
+
+                  <CardContent className="space-y-4">
+                    {message ? (
+                      <>
+                        <div className="space-y-1">
+                          <Label>Subject</Label>
+                          {isEditingThisRow ? (
+                            <input
+                              value={batchEditSubject}
+                              onChange={(e) => setBatchEditSubject(e.target.value)}
+                              className="flex h-9 w-full rounded-lg border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
+                            />
+                          ) : (
+                            <div className="rounded-md bg-muted/50 p-2 text-sm">
+                              {message.subject || 'No subject'}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="space-y-1">
+                          <Label>Message</Label>
+                          {isEditingThisRow ? (
+                            <Textarea
+                              value={batchEditBody}
+                              onChange={(e) => setBatchEditBody(e.target.value)}
+                              className="min-h-[180px]"
+                            />
+                          ) : (
+                            <div className="rounded-md bg-muted/50 p-3 text-sm whitespace-pre-wrap min-h-[180px]">
+                              {message.body}
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        No draft was generated for this contact.
+                      </p>
+                    )}
+
+                    <div className="flex flex-wrap gap-2">
+                      {message && isEditingThisRow ? (
+                        <>
+                          <Button onClick={() => void handleSaveBatchEdit(message.id)} disabled={edit.isPending}>
+                            {edit.isPending ? 'Saving...' : 'Save Edit'}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            onClick={() => {
+                              setEditingMessageId(null);
+                              setBatchEditSubject('');
+                              setBatchEditBody('');
+                            }}
+                          >
+                            Cancel
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          {message && (
+                            <Button variant="outline" onClick={() => handleStartEdit({ ...item, message })}>
+                              Edit
+                            </Button>
+                          )}
+                          {person && (
+                            <Button variant="outline" onClick={() => void handleRegenerateRow(person.id)} disabled={batchDraft.isPending}>
+                              {batchDraft.isPending ? 'Regenerating...' : 'Regenerate'}
+                            </Button>
+                          )}
+                          {item.reason === 'recent_outreach_within_gap' && person && (
+                            <Button
+                              variant="outline"
+                              onClick={() => void handleRetryRecentContact(person.id)}
+                              disabled={batchDraft.isPending}
+                            >
+                              Include Anyway
+                            </Button>
+                          )}
+                          {person && (
+                            <Button variant="ghost" onClick={() => handleDeselectPerson(person.id)}>
+                              Deselect
+                            </Button>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })
+          ) : (
+            <div className="rounded-lg border border-dashed p-12 text-center">
+              <p className="text-muted-foreground">
+                {initialPersonIds.length > 0
+                  ? 'No batch items are available yet.'
+                  : 'Start from the People page by selecting contacts for batch outreach.'}
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
