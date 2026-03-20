@@ -31,6 +31,12 @@ HUNTER_INFERRED_PATTERN_CONFIDENCE = 75
 HUNTER_PATTERN_USAGE_PREFIX = "domain_search.pattern_learning:"
 HUNTER_PATTERN_CREDITS = 1.0
 HUNTER_VERIFY_CREDITS = 0.5
+DOMAIN_DEPENDENT_EMAIL_SOURCES = {
+    "pattern_smtp",
+    "pattern_smtp_gravatar",
+    "pattern_suggestion",
+    "pattern_suggestion_learned",
+}
 
 
 def _split_name(full_name: str) -> tuple[str, str]:
@@ -255,6 +261,33 @@ def _backfill_person_email_verification(person: Person) -> bool:
     return True
 
 
+def _company_domain_is_trusted(person: Person) -> bool:
+    return bool(
+        person.company
+        and getattr(person.company, "domain", None)
+        and getattr(person.company, "domain_trusted", False)
+    )
+
+
+def _saved_email_depends_on_company_domain(person: Person) -> bool:
+    return (person.email_source or "") in DOMAIN_DEPENDENT_EMAIL_SOURCES
+
+
+async def _clear_untrusted_domain_email(db: AsyncSession, person: Person) -> None:
+    person.work_email = None
+    person.email_source = None
+    person.email_verified = False
+    person.email_confidence = None
+    _set_person_email_verification(
+        person,
+        status=None,
+        method=None,
+        evidence=None,
+        verified_at=None,
+    )
+    await db.commit()
+
+
 def _hunter_pattern_endpoint(company_domain: str) -> str:
     return f"{HUNTER_PATTERN_USAGE_PREFIX}{company_domain.lower().strip()}"
 
@@ -372,6 +405,9 @@ async def find_email_for_person(
     tried: list[str] = []
     failure_reasons: list[str] = []
 
+    if person.work_email and _saved_email_depends_on_company_domain(person) and not _company_domain_is_trusted(person):
+        await _clear_untrusted_domain_email(db, person)
+
     if person.work_email:
         if _backfill_person_email_verification(person):
             await db.commit()
@@ -395,10 +431,14 @@ async def find_email_for_person(
     company_domain = None
     learned_pattern = None
     learned_confidence = None
-    if person.company and person.company.domain:
+    if _company_domain_is_trusted(person):
         company_domain = person.company.domain
         learned_pattern = person.company.email_pattern
         learned_confidence = person.company.email_pattern_confidence
+    elif person.company and getattr(person.company, "domain_trusted", False) is False:
+        _append_reason(failure_reasons, "company_domain_untrusted")
+        if not getattr(person.company, "domain", None):
+            _append_reason(failure_reasons, "missing_company_domain")
     else:
         _append_reason(failure_reasons, "missing_company_domain")
 

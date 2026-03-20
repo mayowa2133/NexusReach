@@ -2,6 +2,7 @@
 
 import hashlib
 import uuid
+from urllib.parse import urlparse
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +19,71 @@ def _fingerprint(company_name: str, title: str, location: str) -> str:
     """Create a fingerprint for deduplication based on company + title + location."""
     raw = f"{company_name.lower().strip()}|{title.lower().strip()}|{location.lower().strip()}"
     return hashlib.md5(raw.encode()).hexdigest()
+
+
+def _canonical_job_url(url: str | None) -> str | None:
+    if not url:
+        return None
+    parsed = ats_client.parse_ats_job_url(url)
+    if parsed and parsed.canonical_url:
+        return parsed.canonical_url.rstrip("/")
+    normalized = url.rstrip("/")
+    if not normalized:
+        return None
+    parsed_url = urlparse(normalized)
+    if parsed_url.scheme and parsed_url.netloc:
+        return normalized
+    return None
+
+
+def _result_first(result) -> Job | None:
+    scalars = getattr(result, "scalars", None)
+    if callable(scalars):
+        return scalars().first()
+    return result.scalar_one_or_none()
+
+
+async def _find_existing_job(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    ats: str | None,
+    external_id: str | None,
+    url: str | None,
+    fingerprint: str | None,
+) -> Job | None:
+    if ats and external_id:
+        result = await db.execute(
+            select(Job)
+            .where(Job.user_id == user_id, Job.ats == ats, Job.external_id == external_id)
+            .order_by(Job.created_at.asc(), Job.id.asc())
+        )
+        existing = _result_first(result)
+        if existing:
+            return existing
+
+    normalized_url = _canonical_job_url(url)
+    if ats and normalized_url:
+        result = await db.execute(
+            select(Job)
+            .where(Job.user_id == user_id, Job.ats == ats, Job.url.is_not(None))
+            .order_by(Job.created_at.asc(), Job.id.asc())
+        )
+        for existing in result.scalars().all():
+            if _canonical_job_url(existing.url) == normalized_url:
+                return existing
+
+    if fingerprint:
+        result = await db.execute(
+            select(Job)
+            .where(Job.user_id == user_id, Job.fingerprint == fingerprint)
+            .order_by(Job.created_at.asc(), Job.id.asc())
+        )
+        existing = _result_first(result)
+        if existing:
+            return existing
+
+    return None
 
 
 # --- Scoring ---
@@ -154,10 +220,15 @@ async def search_jobs(
         seen_fingerprints.add(fp)
 
         # Check if already stored for this user
-        existing = await db.execute(
-            select(Job).where(Job.user_id == user_id, Job.fingerprint == fp)
+        existing = await _find_existing_job(
+            db,
+            user_id=user_id,
+            ats=data.get("ats"),
+            external_id=data.get("external_id"),
+            url=data.get("url"),
+            fingerprint=fp,
         )
-        if existing.scalar_one_or_none():
+        if existing:
             continue
 
         # Score
@@ -249,18 +320,28 @@ async def search_ats_jobs(
 
     stored_jobs: list[Job] = []
     board_jobs: list[Job] = []
-    seen_fingerprints: set[str] = set()
+    seen_job_keys: set[str] = set()
     for data in raw_jobs:
         fp = _fingerprint(data.get("company_name", ""), data["title"], data.get("location", ""))
-
-        if fp in seen_fingerprints:
-            continue
-        seen_fingerprints.add(fp)
-
-        existing = await db.execute(
-            select(Job).where(Job.user_id == user_id, Job.fingerprint == fp)
+        job_key = (
+            f"external:{data.get('external_id')}"
+            if data.get("external_id")
+            else f"url:{_canonical_job_url(data.get('url'))}"
+            if _canonical_job_url(data.get("url"))
+            else f"fingerprint:{fp}"
         )
-        existing_job = existing.scalar_one_or_none()
+        if job_key in seen_job_keys:
+            continue
+        seen_job_keys.add(job_key)
+
+        existing_job = await _find_existing_job(
+            db,
+            user_id=user_id,
+            ats=ats_type,
+            external_id=data.get("external_id"),
+            url=data.get("url"),
+            fingerprint=fp,
+        )
         if existing_job:
             board_jobs.append(existing_job)
             continue
@@ -294,20 +375,12 @@ async def search_ats_jobs(
     if not job_url:
         return stored_jobs
 
-    def _normalized(url: str | None) -> str | None:
-        if not url:
-            return None
-        parsed = ats_client.parse_ats_job_url(url)
-        if parsed and parsed.canonical_url:
-            return parsed.canonical_url.rstrip("/")
-        return url.rstrip("/")
-
-    normalized_target = _normalized(target_url or job_url)
+    normalized_target = _canonical_job_url(target_url or job_url)
     exact_matches = [
         job
         for job in board_jobs
         if (target_external_id and job.external_id == target_external_id)
-        or (_normalized(job.url) and _normalized(job.url) == normalized_target)
+        or (_canonical_job_url(job.url) and _canonical_job_url(job.url) == normalized_target)
     ]
     if not exact_matches:
         return board_jobs

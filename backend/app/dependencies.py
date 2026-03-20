@@ -14,7 +14,7 @@ from app.models.user import User
 from app.models.profile import Profile
 from app.models.settings import UserSettings
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 
 @dataclass(frozen=True)
@@ -28,9 +28,19 @@ def _fallback_email(user_id: uuid.UUID) -> str:
 
 
 async def get_current_auth_user(
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
 ) -> AuthenticatedUser:
     """Validate Supabase JWT and return the current user context."""
+    if settings.auth_mode == "dev":
+        email = settings.dev_user_email.strip().lower() if settings.dev_user_email.strip() else None
+        return AuthenticatedUser(user_id=settings.dev_user_id, email=email)
+
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing bearer token",
+        )
+
     token = credentials.credentials
     try:
         payload = jwt.decode(

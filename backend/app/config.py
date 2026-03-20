@@ -1,3 +1,5 @@
+import uuid
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,6 +20,9 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_key: str = ""
     supabase_jwt_secret: str = ""
+    auth_mode: str = "supabase"
+    dev_user_id: uuid.UUID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+    dev_user_email: str = "dev@nexusreach.local"
 
     # External APIs (populated later per phase)
     apollo_api_key: str = ""

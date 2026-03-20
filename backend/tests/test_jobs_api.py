@@ -91,6 +91,38 @@ async def test_search_ats_with_job_url(client, mock_user_id):
     assert call_kwargs["ats_type"] is None
 
 
+async def test_search_ats_accepts_dev_mode_without_token(unauthed_client, monkeypatch):
+    """POST /api/jobs/search/ats works without Authorization in dev auth mode."""
+    from app.database import get_db
+    from app.main import app
+    from app.config import settings
+
+    fake_db = MagicMock()
+
+    async def _override_db():
+        yield fake_db
+
+    monkeypatch.setattr(settings, "auth_mode", "dev")
+    monkeypatch.setattr(settings, "dev_user_id", uuid.UUID("00000000-0000-0000-0000-000000000001"))
+    monkeypatch.setattr(settings, "dev_user_email", "dev@nexusreach.local")
+    app.dependency_overrides[get_db] = _override_db
+
+    job = _mock_job(settings.dev_user_id, source="lever", ats="lever")
+
+    try:
+        with patch("app.routers.jobs.search_ats_jobs", new_callable=AsyncMock) as mock_search:
+            mock_search.return_value = [job]
+            resp = await unauthed_client.post(
+                "/api/jobs/search/ats",
+                json={"job_url": "https://jobs.lever.co/pointclickcare/471f17d7-98b4-446c-9f62-796aa783a648"},
+            )
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+    assert resp.status_code == 200
+    assert resp.json()[0]["ats"] == "lever"
+
+
 async def test_list_jobs(client, mock_user_id):
     """GET /api/jobs returns saved jobs."""
     job1 = _mock_job(mock_user_id, match_score=80.0)

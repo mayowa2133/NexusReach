@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,6 +27,8 @@ from app.routers import (
     settings as settings_router,
     usage,
 )
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="NexusReach API",
@@ -72,3 +76,12 @@ app.include_router(usage.router, prefix="/api")
 @app.get("/api/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.on_event("startup")
+async def log_auth_mode() -> None:
+    if settings.auth_mode == "dev":
+        logger.warning(
+            "NEXUSREACH_AUTH_MODE=dev is enabled. Supabase auth is bypassed and all requests run as %s.",
+            settings.dev_user_email,
+        )

@@ -14,6 +14,12 @@ from app.models.company import Company
 from app.models.job import Job
 from app.models.person import Person
 from app.services.employment_verification_service import verify_people_current_company
+from app.utils.company_identity import (
+    canonical_company_display_name,
+    is_ambiguous_company_name,
+    normalize_company_name,
+    should_trust_company_enrichment,
+)
 from app.utils.job_context import JobContext, extract_job_context
 from app.utils.relevance_scorer import score_candidate_relevance
 
@@ -84,10 +90,18 @@ FORMER_COMPANY_PATTERNS = (
     r"\bex[-\s]",
     r"\bpast\b",
 )
+AMBIGUOUS_COMPANY_NEGATIVE_SUFFIXES = {"co", "company", "limited", "ltd", "corp", "corporation"}
+COMPANY_NEGATIVE_TERMS = {
+    "zip": {"ziprecruiter"},
+}
 
 
 def _normalize_identity(value: str | None) -> str:
     return " ".join((value or "").lower().split())
+
+
+def _identity_tokens(value: str | None) -> list[str]:
+    return re.findall(r"[a-z0-9]+", (value or "").lower())
 
 
 def _candidate_key(data: dict) -> str:
@@ -130,7 +144,29 @@ def _public_profile_host(data: dict) -> str:
 
 
 def _mentions_company(text: str, company_name: str) -> bool:
-    return _normalize_identity(company_name) in _normalize_identity(text)
+    company_tokens = normalize_company_name(company_name).split()
+    text_tokens = _identity_tokens(text)
+    if not company_tokens or not text_tokens:
+        return False
+
+    negative_terms = COMPANY_NEGATIVE_TERMS.get(company_tokens[0], set())
+    if any(term in "".join(text_tokens) for term in negative_terms):
+        return False
+
+    company_length = len(company_tokens)
+    for index in range(len(text_tokens) - company_length + 1):
+        window = text_tokens[index:index + company_length]
+        if window != company_tokens:
+            continue
+        if (
+            is_ambiguous_company_name(company_name)
+            and company_length == 1
+            and index + company_length < len(text_tokens)
+            and text_tokens[index + company_length] in AMBIGUOUS_COMPANY_NEGATIVE_SUFFIXES
+        ):
+            continue
+        return True
+    return False
 
 
 def _role_like_title(title: str) -> bool:
@@ -140,6 +176,8 @@ def _role_like_title(title: str) -> bool:
 
 def _public_url_matches_company(public_url: str, company_name: str) -> bool:
     if not public_url:
+        return False
+    if is_ambiguous_company_name(company_name):
         return False
     return _slugify(company_name) in urlparse(public_url).path.lower()
 
@@ -259,6 +297,14 @@ def _candidate_sort_key(data: dict, *, bucket: str, context: JobContext | None) 
 
 def _allow_director_plus(context: JobContext | None) -> bool:
     return bool(context and context.seniority in SENIOR_MANAGER_LEVELS)
+
+
+def _manager_seniority_filters(context: JobContext | None) -> list[str]:
+    if context and getattr(context, "early_career", False):
+        return ["manager"]
+    if context and context.seniority in {"intern", "junior"}:
+        return ["manager"]
+    return ["manager", "director", "vp"]
 
 
 def _prepare_candidates(
@@ -480,26 +526,48 @@ async def get_or_create_company(
     company_name: str,
 ) -> Company:
     """Find existing company or create plus enrich a new one."""
+    requested_name = canonical_company_display_name(company_name)
+    normalized_name = normalize_company_name(requested_name)
     result = await db.execute(
         select(Company).where(
             Company.user_id == user_id,
-            Company.name.ilike(company_name),
+            Company.normalized_name == normalized_name,
         )
     )
-    company = result.scalar_one_or_none()
+    company = result.scalars().first()
     if company:
+        if len(requested_name) < len(company.name or ""):
+            company.name = requested_name
+        if not company.domain_trusted and is_ambiguous_company_name(requested_name):
+            company.domain = None
+            company.domain_trusted = False
+            company.email_pattern = None
+            company.email_pattern_confidence = None
         return company
 
-    company_data = await apollo_client.search_company(company_name)
+    company_data = await apollo_client.search_company(requested_name)
+    trusted_domain = None
+    use_apollo_enrichment = False
+    if company_data:
+        use_apollo_enrichment = should_trust_company_enrichment(
+            requested_name,
+            resolved_name=company_data.get("name"),
+            domain=company_data.get("domain"),
+        )
+        if use_apollo_enrichment:
+            trusted_domain = company_data.get("domain")
+
     company = Company(
         user_id=user_id,
-        name=company_data.get("name", company_name) if company_data else company_name,
-        domain=company_data.get("domain") if company_data else None,
-        size=str(company_data.get("size", "")) if company_data else None,
-        industry=company_data.get("industry") if company_data else None,
-        description=company_data.get("description") if company_data else None,
-        careers_url=company_data.get("careers_url") if company_data else None,
-        enriched_at=datetime.now(timezone.utc) if company_data else None,
+        name=requested_name,
+        normalized_name=normalized_name,
+        domain=trusted_domain,
+        domain_trusted=bool(trusted_domain),
+        size=str(company_data.get("size", "")) if company_data and use_apollo_enrichment else None,
+        industry=company_data.get("industry") if company_data and use_apollo_enrichment else None,
+        description=company_data.get("description") if company_data and use_apollo_enrichment else None,
+        careers_url=company_data.get("careers_url") if company_data and use_apollo_enrichment else None,
+        enriched_at=datetime.now(timezone.utc) if company_data and use_apollo_enrichment else None,
     )
     db.add(company)
     await db.flush()
@@ -509,19 +577,20 @@ async def get_or_create_company(
 async def _store_person(
     db: AsyncSession,
     user_id: uuid.UUID,
-    company_id: uuid.UUID | None,
+    company: Company | None,
     data: dict,
     person_type: str,
 ) -> Person:
     """Create or update a Person record from API data."""
     linkedin = data.get("linkedin_url", "")
     apollo_id = data.get("apollo_id", "")
+    company_id = company.id if company else None
 
     if linkedin:
         result = await db.execute(
             select(Person).where(Person.user_id == user_id, Person.linkedin_url == linkedin)
         )
-        existing = result.scalar_one_or_none()
+        existing = result.scalars().first()
         if existing:
             if apollo_id and not existing.apollo_id:
                 existing.apollo_id = apollo_id
@@ -529,6 +598,10 @@ async def _store_person(
                 existing.title = data.get("title")
             if not existing.full_name and data.get("full_name"):
                 existing.full_name = data.get("full_name")
+            if company_id and existing.company_id != company_id:
+                existing.company_id = company_id
+            if company:
+                existing.company = company
             if data.get("profile_data"):
                 profile_data = existing.profile_data if isinstance(existing.profile_data, dict) else {}
                 profile_data.update(data.get("profile_data"))
@@ -539,8 +612,12 @@ async def _store_person(
         result = await db.execute(
             select(Person).where(Person.user_id == user_id, Person.apollo_id == apollo_id)
         )
-        existing = result.scalar_one_or_none()
+        existing = result.scalars().first()
         if existing:
+            if company_id and existing.company_id != company_id:
+                existing.company_id = company_id
+            if company:
+                existing.company = company
             return existing
 
     if not linkedin and not apollo_id and data.get("full_name") and data.get("title"):
@@ -552,8 +629,10 @@ async def _store_person(
                 Person.title == data.get("title"),
             )
         )
-        existing = result.scalar_one_or_none()
+        existing = result.scalars().first()
         if existing:
+            if company:
+                existing.company = company
             return existing
 
     person = Person(
@@ -575,6 +654,8 @@ async def _store_person(
         apollo_id=apollo_id or None,
         relevance_score=data.get("relevance_score"),
     )
+    if company:
+        person.company = company
     db.add(person)
     return person
 
@@ -634,6 +715,13 @@ def _append_bucket(
     bucketed[bucket_name].append(person)
 
 
+def _filter_verified_bucketed(bucketed: dict[str, list[Person]]) -> dict[str, list[Person]]:
+    filtered: dict[str, list[Person]] = {}
+    for bucket, people in bucketed.items():
+        filtered[bucket] = [person for person in people if person.current_company_verified is True]
+    return filtered
+
+
 async def search_people_at_company(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -644,7 +732,12 @@ async def search_people_at_company(
     """Find people at a company using company-level search."""
     company = await get_or_create_company(db, user_id, company_name)
 
-    recruiter_titles = ["technical recruiter", "engineering recruiter", "talent acquisition"]
+    recruiter_titles = [
+        "technical recruiter",
+        "engineering recruiter",
+        "talent acquisition",
+        "technical sourcer",
+    ]
     manager_titles = roles or ["engineering manager", "technical lead", "team lead"]
     peer_titles = roles or ["software engineer", "backend engineer", "developer"]
 
@@ -688,28 +781,34 @@ async def search_people_at_company(
     seen = {"recruiters": set(), "hiring_managers": set(), "peers": set()}
 
     for data in recruiter_results:
-        person = await _store_person(db, user_id, company.id, data, "recruiter")
+        person = await _store_person(db, user_id, company, data, "recruiter")
         _append_bucket(bucketed, seen, person, data, explicit_type="recruiter", company_name=company_name)
 
     for data in manager_results:
-        person = await _store_person(db, user_id, company.id, data, _classify_person(data.get("title", "")))
+        person = await _store_person(
+            db,
+            user_id,
+            company,
+            data,
+            _classify_person(data.get("title", "")),
+        )
         _append_bucket(bucketed, seen, person, data, company_name=company_name)
 
     for data in peer_results:
-        person = await _store_person(db, user_id, company.id, data, "peer")
+        person = await _store_person(db, user_id, company, data, "peer")
         _append_bucket(bucketed, seen, person, data, explicit_type="peer", company_name=company_name)
 
     for data in github_members:
-        person = await _store_person(db, user_id, company.id, data, "peer")
+        person = await _store_person(db, user_id, company, data, "peer")
         _append_bucket(bucketed, seen, person, data, explicit_type="peer")
 
     await verify_people_current_company(
         bucketed,
         company_name=company_name,
-        company_domain=company.domain,
+        company_domain=company.domain if company.domain_trusted else None,
     )
     await db.commit()
-    return {"company": company, **bucketed}
+    return {"company": company, **_filter_verified_bucketed(bucketed)}
 
 
 async def search_people_for_job(
@@ -740,7 +839,7 @@ async def search_people_for_job(
         job.company_name,
         titles=context.manager_titles,
         departments=context.apollo_departments,
-        seniority=["manager", "director", "vp"],
+        seniority=_manager_seniority_filters(context),
         team_keywords=context.team_keywords + context.domain_keywords,
         limit=10,
         min_results=min_results,
@@ -799,7 +898,7 @@ async def search_people_for_job(
     seen = {"recruiters": set(), "hiring_managers": set(), "peers": set()}
 
     for data in recruiter_results:
-        person = await _store_person(db, user_id, company.id, data, "recruiter")
+        person = await _store_person(db, user_id, company, data, "recruiter")
         _append_bucket(
             bucketed,
             seen,
@@ -811,11 +910,17 @@ async def search_people_for_job(
         )
 
     for data in manager_results:
-        person = await _store_person(db, user_id, company.id, data, _classify_person(data.get("title", ""), data.get("source", ""), data.get("snippet", "")))
+        person = await _store_person(
+            db,
+            user_id,
+            company,
+            data,
+            _classify_person(data.get("title", ""), data.get("source", ""), data.get("snippet", "")),
+        )
         _append_bucket(bucketed, seen, person, data, context=context, company_name=job.company_name)
 
     for data in peer_results:
-        person = await _store_person(db, user_id, company.id, data, "peer")
+        person = await _store_person(db, user_id, company, data, "peer")
         _append_bucket(bucketed, seen, person, data, explicit_type="peer", context=context, company_name=job.company_name)
 
     for data in hiring_team_results:
@@ -829,18 +934,25 @@ async def search_people_for_job(
             source=data.get("source", ""),
             snippet=data.get("snippet", ""),
         )
-        person = await _store_person(db, user_id, company.id, data, _classify_person(data.get("title", ""), data.get("source", ""), data.get("snippet", "")))
+        person = await _store_person(
+            db,
+            user_id,
+            company,
+            data,
+            _classify_person(data.get("title", ""), data.get("source", ""), data.get("snippet", "")),
+        )
         _append_bucket(bucketed, seen, person, data, context=context, company_name=job.company_name)
 
     await verify_people_current_company(
         bucketed,
         company_name=job.company_name,
-        company_domain=company.domain,
+        company_domain=company.domain if company.domain_trusted else None,
     )
     await db.commit()
+    filtered_bucketed = _filter_verified_bucketed(bucketed)
     return {
         "company": company,
-        **bucketed,
+        **filtered_bucketed,
         "job_context": {
             "department": context.department,
             "team_keywords": context.team_keywords,

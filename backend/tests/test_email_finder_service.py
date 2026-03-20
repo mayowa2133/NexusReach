@@ -22,6 +22,7 @@ class _ScalarResult:
 def _person() -> SimpleNamespace:
     company = SimpleNamespace(
         domain="affirm.com",
+        domain_trusted=True,
         email_pattern=None,
         email_pattern_confidence=None,
     )
@@ -115,6 +116,54 @@ async def test_verified_only_suppresses_low_confidence_suggestion(mock_db):
     assert result["result_type"] == "not_found"
     assert result["email"] is None
     assert "pattern_suggestion_low_confidence" in result["failure_reasons"]
+
+
+async def test_untrusted_company_domain_suppresses_pattern_guesses(mock_db):
+    person = _person()
+    person.company.domain = "zip.co"
+    person.company.domain_trusted = False
+    mock_db.execute.return_value = _ScalarResult(person)
+
+    with (
+        patch("app.services.email_finder_service.github_email_client.get_profile_email", new_callable=AsyncMock, return_value=None),
+        patch("app.services.email_finder_service.github_email_client.get_commit_email", new_callable=AsyncMock, return_value=None),
+        patch("app.services.email_finder_service.apollo_client.enrich_person", new_callable=AsyncMock, return_value=None),
+        patch("app.services.email_finder_service.email_suggestion_client.suggest_email") as mock_suggest,
+        patch("app.services.email_finder_service.settings") as mock_settings,
+    ):
+        mock_settings.proxycurl_api_key = ""
+        result = await find_email_for_person(mock_db, person.user_id, person.id, mode="best_effort")
+
+    assert result["result_type"] == "not_found"
+    assert result["email"] is None
+    assert "company_domain_untrusted" in result["failure_reasons"]
+    mock_suggest.assert_not_called()
+
+
+async def test_untrusted_company_domain_clears_stale_pattern_email(mock_db):
+    person = _person()
+    person.company.domain = "zip.co"
+    person.company.domain_trusted = False
+    person.work_email = "alex.lee@zip.co"
+    person.email_source = "pattern_suggestion_learned"
+    person.email_verified = False
+    person.email_confidence = 85
+    mock_db.execute.return_value = _ScalarResult(person)
+
+    with (
+        patch("app.services.email_finder_service.github_email_client.get_profile_email", new_callable=AsyncMock, return_value=None),
+        patch("app.services.email_finder_service.github_email_client.get_commit_email", new_callable=AsyncMock, return_value=None),
+        patch("app.services.email_finder_service.apollo_client.enrich_person", new_callable=AsyncMock, return_value=None),
+        patch("app.services.email_finder_service.settings") as mock_settings,
+    ):
+        mock_settings.proxycurl_api_key = ""
+        result = await find_email_for_person(mock_db, person.user_id, person.id, mode="best_effort")
+
+    assert result["email"] is None
+    assert result["result_type"] == "not_found"
+    assert person.work_email is None
+    assert person.email_source is None
+    assert mock_db.commit.await_count >= 1
 
 
 async def test_hunter_pattern_learning_persists_company_pattern_and_improves_guess(mock_db):

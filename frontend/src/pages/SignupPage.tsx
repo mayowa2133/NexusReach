@@ -9,11 +9,27 @@ import { useAuthStore } from '@/stores/auth';
 import { toast } from 'sonner';
 
 export function SignupPage() {
-  const { user, signUp, signInWithGoogle, signInWithGithub, loading } = useAuthStore();
+  const { user, initialized, devMode, signUp, signInWithGoogle, signInWithGithub, loading } = useAuthStore();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
+  if (devMode && !initialized) {
+    return (
+      <div className="flex min-h-screen items-center justify-center px-4">
+        <Card className="w-full max-w-md">
+          <CardHeader className="text-center">
+            <CardTitle className="text-2xl font-semibold tracking-tight">
+              Dev auth enabled
+            </CardTitle>
+            <CardDescription>Creating accounts is bypassed in local development mode.</CardDescription>
+          </CardHeader>
+        </Card>
+      </div>
+    );
+  }
+
+  if (devMode) return <Navigate to="/dashboard" replace />;
   if (user) return <Navigate to="/dashboard" replace />;
 
   const handleSubmit = async (e: FormEvent) => {

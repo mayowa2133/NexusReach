@@ -296,6 +296,7 @@ export function PeoplePage() {
                 title="Recruiters & Talent Acquisition"
                 description="Direct line into the hiring process"
                 people={searchResults.recruiters}
+                emptyMessage="No current-company-verified recruiter was found for this company yet."
                 selectedPersonIds={selectedPersonIds}
                 onToggleSelect={togglePersonSelection}
               />
@@ -303,6 +304,7 @@ export function PeoplePage() {
                 title="Hiring Managers & Team Leads"
                 description="Understand the role deeply, can champion you"
                 people={searchResults.hiring_managers}
+                emptyMessage="No current-company-verified hiring-side contact was found for this role."
                 selectedPersonIds={selectedPersonIds}
                 onToggleSelect={togglePersonSelection}
               />
@@ -310,6 +312,7 @@ export function PeoplePage() {
                 title="Peers & Potential Teammates"
                 description="Most likely to respond, most authentic conversation"
                 people={searchResults.peers}
+                emptyMessage="No current-company-verified teammate surfaced for this role."
                 selectedPersonIds={selectedPersonIds}
                 onToggleSelect={togglePersonSelection}
               />
@@ -350,33 +353,39 @@ function PersonSection({
   title,
   description,
   people,
+  emptyMessage,
   selectedPersonIds,
   onToggleSelect,
 }: {
   title: string;
   description: string;
   people: Person[];
+  emptyMessage: string;
   selectedPersonIds: string[];
   onToggleSelect: (personId: string) => void;
 }) {
-  if (people.length === 0) return null;
-
   return (
     <div className="space-y-2">
       <div>
         <h3 className="font-medium">{title}</h3>
         <p className="text-sm text-muted-foreground">{description}</p>
       </div>
-      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-        {people.map((person) => (
-          <PersonCard
-            key={person.id}
-            person={person}
-            selected={selectedPersonIds.includes(person.id)}
-            onToggleSelect={onToggleSelect}
-          />
-        ))}
-      </div>
+      {people.length === 0 ? (
+        <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+          {emptyMessage}
+        </div>
+      ) : (
+        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+          {people.map((person) => (
+            <PersonCard
+              key={person.id}
+              person={person}
+              selected={selectedPersonIds.includes(person.id)}
+              onToggleSelect={onToggleSelect}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -622,7 +631,11 @@ function PersonCard({
           </div>
         ) : emailStatus === 'not_found' ? (
           <div className="space-y-1 text-sm text-muted-foreground">
-            <div>No verified email found</div>
+            <div>
+              {emailResult?.failure_reasons?.includes('company_domain_untrusted')
+                ? 'Email withheld until company domain is verified'
+                : 'No verified email found'}
+            </div>
             {emailResult?.failure_reasons && emailResult.failure_reasons.length > 0 && (
               <div className="text-xs">
                 Why: {emailResult.failure_reasons.map(formatFailureReason).join(', ')}

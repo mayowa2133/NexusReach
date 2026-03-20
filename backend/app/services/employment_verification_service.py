@@ -14,6 +14,7 @@ from sqlalchemy.orm import selectinload
 from app.clients import brave_search_client, crawl4ai_client, firecrawl_client
 from app.config import settings
 from app.models.person import Person
+from app.utils.company_identity import is_ambiguous_company_name, normalize_company_name
 
 VERIFIED_STATUSES = {"verified"}
 BLOCKED_CORROBORATION_HOSTS = {
@@ -21,6 +22,7 @@ BLOCKED_CORROBORATION_HOSTS = {
     "clay.earth",
     "rocketreach.co",
 }
+AMBIGUOUS_COMPANY_NEGATIVE_SUFFIXES = ("co", "company", "limited", "ltd", "corp", "corporation")
 
 
 @dataclass
@@ -39,7 +41,7 @@ def _normalize_text(value: str | None) -> str:
 
 
 def _normalize_company_name(value: str | None) -> str:
-    return re.sub(r"[^a-z0-9]+", " ", (value or "").lower()).strip()
+    return normalize_company_name(value)
 
 
 def _excerpt(text: str, start: int, end: int, *, window: int = 80) -> str:
@@ -56,11 +58,31 @@ def _match_patterns(text: str, patterns: list[tuple[str, int]]) -> tuple[int, st
     return None
 
 
+def _has_conflicting_company_variant(text: str, company_name: str) -> bool:
+    company_normalized = _normalize_company_name(company_name)
+    if not company_normalized or not is_ambiguous_company_name(company_name):
+        return False
+    first_token = company_normalized.split()[0]
+    suffix_group = "|".join(AMBIGUOUS_COMPANY_NEGATIVE_SUFFIXES)
+    return re.search(rf"\b{re.escape(first_token)}\s+(?:{suffix_group})\b", text, flags=re.IGNORECASE) is not None
+
+
 def _analyze_linkedin_content(content: str, company_name: str) -> EmploymentVerificationResult:
     normalized = _normalize_text(content)
     company_normalized = _normalize_company_name(company_name)
     company_pattern = re.escape(company_normalized).replace(r"\ ", r"\s+")
     haystack = _normalize_company_name(normalized)
+
+    if _has_conflicting_company_variant(normalized.lower(), company_name):
+        return EmploymentVerificationResult(
+            current_company_verified=False,
+            current_company_verification_status="unverified",
+            current_company_verification_source="crawl4ai_linkedin",
+            current_company_verification_confidence=5,
+            current_company_verification_evidence="Conflicting company variant found in public profile evidence.",
+            current_company_verified_at=None,
+            debug={"kind": "linkedin", "conflict": True},
+        )
 
     positive_patterns = [
         (rf"\b(?:currently|current|works|working)\b[^.:\n]{{0,80}}\b{company_pattern}\b", 96),
@@ -98,6 +120,17 @@ def _analyze_public_content(content: str, company_name: str) -> EmploymentVerifi
     haystack = _normalize_company_name(normalized)
     company_normalized = _normalize_company_name(company_name)
     company_pattern = re.escape(company_normalized).replace(r"\ ", r"\s+")
+
+    if _has_conflicting_company_variant(normalized.lower(), company_name):
+        return EmploymentVerificationResult(
+            current_company_verified=False,
+            current_company_verification_status="unverified",
+            current_company_verification_source="firecrawl_public_web",
+            current_company_verification_confidence=5,
+            current_company_verification_evidence="Conflicting company variant found in public corroboration.",
+            current_company_verified_at=None,
+            debug={"kind": "public_web", "conflict": True},
+        )
 
     positive_patterns = [
         (rf"\b(?:currently|current|serving|works|working)\b[^.:\n]{{0,100}}\b{company_pattern}\b", 92),
@@ -333,7 +366,7 @@ async def verify_current_company_for_person(
         raise ValueError("Person not found.")
 
     company_name = person.company.name if person.company else ""
-    company_domain = person.company.domain if person.company else None
+    company_domain = person.company.domain if person.company and getattr(person.company, "domain_trusted", False) else None
     verification = await _verify_person(
         person,
         company_name=company_name,

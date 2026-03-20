@@ -144,6 +144,7 @@ class JobContext:
     team_keywords: list[str] = field(default_factory=list)
     domain_keywords: list[str] = field(default_factory=list)
     seniority: str = "mid"
+    early_career: bool = False
     manager_titles: list[str] = field(default_factory=list)
     peer_titles: list[str] = field(default_factory=list)
     recruiter_titles: list[str] = field(default_factory=list)
@@ -158,9 +159,50 @@ def _contains_keyword(text: str, keyword: str) -> bool:
     return re.search(rf"(?<!\w){re.escape(keyword.strip())}(?!\w)", text) is not None
 
 
+EARLY_CAREER_PATTERNS = (
+    r"\bnew grad\b",
+    r"\bgraduate\b",
+    r"\bgraduat(?:e|ing)\b",
+    r"\bcampus\b",
+    r"\buniversity\b",
+    r"\bco[- ]?op\b",
+    r"\bstudent\b",
+)
+
+BOILERPLATE_SENTENCE_PATTERNS = (
+    r"^about\s+[a-z0-9& .-]+$",
+    r"^about us$",
+    r"^about the company$",
+    r"^why (?:join|work at)\b",
+    r"^our mission\b",
+    r"^our values\b",
+    r"^benefits\b",
+    r"^perks\b",
+)
+
+
+def _detect_early_career(title_lower: str, description_lower: str) -> bool:
+    haystack = f"{title_lower} {description_lower}".strip()
+    return any(re.search(pattern, haystack) for pattern in EARLY_CAREER_PATTERNS)
+
+
+def _strip_boilerplate_sentences(text: str) -> str:
+    sentences = re.split(r"(?<=[.!?])\s+|\s{2,}", text)
+    kept: list[str] = []
+    for sentence in sentences:
+        normalized = sentence.strip().lower().strip(":.-")
+        if not normalized:
+            continue
+        if any(re.search(pattern, normalized) for pattern in BOILERPLATE_SENTENCE_PATTERNS):
+            continue
+        kept.append(sentence.strip())
+    return " ".join(kept)
+
+
 def _extract_sections(title: str, description: str | None) -> tuple[str, str, str]:
     title_lower = title.lower().strip()
     desc_clean = _strip_html(description or "")
+    desc_clean = _strip_boilerplate_sentences(desc_clean)
     desc_lower = desc_clean.lower()
     lead_lower = desc_lower[:1200]
     body_lower = desc_lower[1200:]
@@ -296,7 +338,12 @@ def _build_peer_titles(base_title: str, keywords: list[str], seniority: str) -> 
     return list(dict.fromkeys(title for title in titles if title))
 
 
-def _build_recruiter_titles(department: str, domain_keywords: list[str]) -> list[str]:
+def _build_recruiter_titles(
+    department: str,
+    domain_keywords: list[str],
+    *,
+    early_career: bool,
+) -> list[str]:
     titles = ["Technical Recruiter", "Talent Acquisition", "Recruiter"]
 
     if department in {"engineering", "data_science"}:
@@ -311,19 +358,86 @@ def _build_recruiter_titles(department: str, domain_keywords: list[str]) -> list
     if "credit" in domain_keywords or "risk" in domain_keywords or "decisioning" in domain_keywords:
         titles.append("Fintech Recruiter")
 
+    if early_career:
+        titles.extend(
+            [
+                "Campus Recruiter",
+                "University Recruiter",
+                "Early Careers Recruiter",
+                "University Programs Recruiter",
+                "Technical Sourcer",
+            ]
+        )
+
     return list(dict.fromkeys(titles))
+
+
+def _keyword_labels_with_title_hits(
+    keyword_map: dict[str, list[str]],
+    title_lower: str,
+) -> set[str]:
+    labels: set[str] = set()
+    for label, keywords in keyword_map.items():
+        if any(_contains_keyword(title_lower, keyword) for keyword in keywords):
+            labels.add(label)
+    return labels
+
+
+def _generic_early_career_engineering_title(title_lower: str, department: str, *, early_career: bool) -> bool:
+    if not early_career or department != "engineering":
+        return False
+    if not any(term in title_lower for term in ("engineer", "developer", "swe", "sde")):
+        return False
+    technical_title_hits = _keyword_labels_with_title_hits(TECHNICAL_KEYWORDS_MAP, title_lower)
+    domain_title_hits = _keyword_labels_with_title_hits(DOMAIN_KEYWORDS_MAP, title_lower)
+    return not technical_title_hits and not domain_title_hits
+
+
+def _conservative_early_career_keywords(
+    scores: dict[str, int],
+    *,
+    title_hits: set[str],
+    min_repeated_score: int,
+    limit: int,
+) -> list[str]:
+    ranked: list[str] = []
+    for label, score in sorted(scores.items(), key=lambda item: (-item[1], item[0])):
+        if label in title_hits or score >= min_repeated_score:
+            ranked.append(label)
+        if len(ranked) >= limit:
+            break
+    return ranked
 
 
 def extract_job_context(title: str, description: str | None = None) -> JobContext:
     """Extract structured job context from a title and description."""
     title_lower, lead_lower, body_lower = _extract_sections(title, description)
+    early_career = _detect_early_career(title_lower, f"{lead_lower} {body_lower}")
 
     department = _score_department(title_lower, lead_lower, body_lower)
     technical_scores = _score_keyword_group(TECHNICAL_KEYWORDS_MAP, title_lower, lead_lower, body_lower)
     domain_scores = _score_keyword_group(DOMAIN_KEYWORDS_MAP, title_lower, lead_lower, body_lower)
 
-    technical_keywords = _top_keywords(technical_scores, min_score=3, limit=2)
-    domain_keywords = _top_keywords(domain_scores, min_score=2, limit=2)
+    technical_title_hits = _keyword_labels_with_title_hits(TECHNICAL_KEYWORDS_MAP, title_lower)
+    domain_title_hits = _keyword_labels_with_title_hits(DOMAIN_KEYWORDS_MAP, title_lower)
+
+    if _generic_early_career_engineering_title(title_lower, department, early_career=early_career):
+        technical_keywords = _conservative_early_career_keywords(
+            technical_scores,
+            title_hits=technical_title_hits,
+            min_repeated_score=8,
+            limit=2,
+        )
+        domain_keywords = _conservative_early_career_keywords(
+            domain_scores,
+            title_hits=domain_title_hits,
+            min_repeated_score=6,
+            limit=2,
+        )
+    else:
+        technical_keywords = _top_keywords(technical_scores, min_score=3, limit=2)
+        domain_keywords = _top_keywords(domain_scores, min_score=2, limit=2)
+
     combined_scores = {
         **{keyword: technical_scores[keyword] for keyword in technical_keywords},
         **{keyword: domain_scores[keyword] for keyword in domain_keywords},
@@ -331,16 +445,23 @@ def extract_job_context(title: str, description: str | None = None) -> JobContex
     team_keywords = _top_keywords(combined_scores, min_score=2, limit=3)
 
     seniority = _detect_seniority(title_lower)
+    if early_career and seniority == "mid":
+        seniority = "junior"
     apollo_departments = APOLLO_DEPARTMENT_SLUGS.get(department, ["engineering_technical"])
     manager_titles = _build_manager_titles(department, team_keywords, title, seniority)
     peer_titles = _build_peer_titles(title, team_keywords, seniority)
-    recruiter_titles = _build_recruiter_titles(department, domain_keywords)
+    recruiter_titles = _build_recruiter_titles(
+        department,
+        domain_keywords,
+        early_career=early_career,
+    )
 
     return JobContext(
         department=department,
         team_keywords=team_keywords,
         domain_keywords=domain_keywords,
         seniority=seniority,
+        early_career=early_career,
         manager_titles=manager_titles,
         peer_titles=peer_titles,
         recruiter_titles=recruiter_titles,

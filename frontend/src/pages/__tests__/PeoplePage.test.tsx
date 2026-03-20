@@ -44,6 +44,10 @@ const mockFindEmail = {
   mutateAsync: vi.fn(),
   isPending: false,
 };
+const mockPeopleSearch = {
+  mutateAsync: vi.fn(),
+  isPending: false,
+};
 const mockVerifyEmail = {
   mutateAsync: vi.fn(),
   isPending: false,
@@ -56,10 +60,7 @@ const mockVerifyCurrentCompany = {
 let mockSavedPeople: Array<Record<string, unknown>> = [];
 
 vi.mock('@/hooks/usePeople', () => ({
-  usePeopleSearch: () => ({
-    mutateAsync: vi.fn(),
-    isPending: false,
-  }),
+  usePeopleSearch: () => mockPeopleSearch,
   useEnrichPerson: () => ({
     mutateAsync: vi.fn(),
     isPending: false,
@@ -138,6 +139,7 @@ beforeEach(() => {
     },
   ];
   mockFindEmail.mutateAsync.mockReset();
+  mockPeopleSearch.mutateAsync.mockReset();
   mockVerifyEmail.mutateAsync.mockReset();
   mockVerifyCurrentCompany.mutateAsync.mockReset();
 });
@@ -175,6 +177,35 @@ describe('PeoplePage', () => {
     expect(screen.getByText(/alternate guesses/i)).toBeInTheDocument();
   });
 
+  it('explains when email is withheld because the company domain is untrusted', async () => {
+    mockFindEmail.mutateAsync.mockResolvedValue({
+      email: null,
+      source: 'not_found',
+      verified: false,
+      result_type: 'not_found',
+      guess_basis: null,
+      verified_email: null,
+      best_guess_email: null,
+      confidence: null,
+      suggestions: null,
+      alternate_guesses: null,
+      failure_reasons: ['company_domain_untrusted'],
+      tried: ['exhausted'],
+      usable_for_outreach: false,
+      email_verification_status: null,
+      email_verification_method: null,
+      email_verification_label: null,
+      email_verification_evidence: null,
+      email_verified_at: null,
+    });
+
+    renderPeople();
+    await userEvent.click(screen.getByRole('button', { name: /get email/i }));
+
+    expect(await screen.findByText(/email withheld until company domain is verified/i)).toBeInTheDocument();
+    expect(screen.getByText(/company domain untrusted/i)).toBeInTheDocument();
+  });
+
   it('renders current-company verification state and allows manual refresh', async () => {
     mockVerifyCurrentCompany.mutateAsync.mockResolvedValue({
       ...mockSavedPeople[0],
@@ -195,6 +226,32 @@ describe('PeoplePage', () => {
 
     expect(await screen.findByText(/current company verified/i)).toBeInTheDocument();
     expect(screen.getByText(/currently at affirm/i)).toBeInTheDocument();
+  });
+
+  it('renders verified-first empty state copy for empty recruiter buckets', async () => {
+    mockPeopleSearch.mutateAsync.mockResolvedValue({
+      company: {
+        id: 'c1',
+        name: 'Zip',
+        domain: null,
+        size: null,
+        industry: null,
+        description: null,
+        careers_url: null,
+      },
+      recruiters: [],
+      hiring_managers: [],
+      peers: [mockSavedPeople[0]],
+      job_context: null,
+    });
+
+    renderPeople();
+
+    await userEvent.type(screen.getByLabelText(/company name/i), 'Zip');
+    await userEvent.click(screen.getByRole('button', { name: /find people/i }));
+
+    expect(await screen.findByText(/no current-company-verified recruiter was found/i)).toBeInTheDocument();
+    expect(screen.getByText(/no current-company-verified hiring-side contact was found/i)).toBeInTheDocument();
   });
 
   it('navigates into batch draft mode from a shortlist selection', async () => {

@@ -4,15 +4,41 @@ Tests pure functions: _classify_person from people_service,
 _split_name from email_finder_service.
 """
 
+import uuid
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
 from app.services.people_service import (
     _candidate_matches_company,
     _classify_employment_status,
     _classify_org_level,
     _classify_person,
     _prepare_candidates,
+    get_or_create_company,
 )
 from app.services.email_finder_service import _split_name
 from app.utils.job_context import JobContext
+
+
+class _ScalarResult:
+    def __init__(self, value):
+        self._value = value
+
+    def scalars(self):
+        value = self._value
+
+        class _Scalars:
+            def __init__(self, raw):
+                self._raw = raw
+
+            def first(self):
+                if isinstance(self._raw, list):
+                    return self._raw[0] if self._raw else None
+                return self._raw
+
+        return _Scalars(value)
 
 
 class TestClassifyPerson:
@@ -67,6 +93,33 @@ class TestSplitName:
 
 
 class TestEmploymentAndRanking:
+    @pytest.mark.asyncio
+    async def test_get_or_create_company_reuses_normalized_company_name(self):
+        existing = SimpleNamespace(
+            id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+            name="Zip",
+            normalized_name="zip",
+            domain=None,
+            domain_trusted=False,
+            email_pattern=None,
+            email_pattern_confidence=None,
+        )
+        db = MagicMock()
+        db.execute = AsyncMock(return_value=_ScalarResult(existing))
+
+        with patch(
+            "app.services.people_service.apollo_client.search_company",
+            new_callable=AsyncMock,
+            return_value={"name": "Zip Co", "domain": "zip.co"},
+        ):
+            company = await get_or_create_company(db, existing.user_id, "zip")
+
+        assert company is existing
+        assert company.name == "Zip"
+        assert company.domain is None
+        assert company.domain_trusted is False
+
     def test_classify_employment_status_former(self):
         status = _classify_employment_status(
             {
@@ -90,6 +143,16 @@ class TestEmploymentAndRanking:
                 },
             },
             "Two Sigma",
+        ) is False
+
+    def test_candidate_matches_company_rejects_ziprecruiter_for_zip(self):
+        assert _candidate_matches_company(
+            {
+                "title": "Technical Recruiter",
+                "snippet": "Technical recruiter at ZipRecruiter focused on engineering hiring.",
+                "source": "brave_search",
+            },
+            "Zip",
         ) is False
 
     def test_classify_org_level(self):

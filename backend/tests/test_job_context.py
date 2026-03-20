@@ -105,6 +105,25 @@ def test_intern_seniority():
     assert ctx.seniority == "intern"
 
 
+def test_new_grad_generic_engineer_stays_early_career_without_marketing_overfit():
+    ctx = extract_job_context(
+        "Software Engineer, New Grad (2026 Start)",
+        description=(
+            "Join Zip's engineering team. About Zip. Zip is building a procurement platform that helps "
+            "businesses modernize purchasing with AI-powered workflows for finance teams and merchants. "
+            "As a new grad engineer, you will learn quickly, work with mentors, and build high-quality software."
+        ),
+    )
+
+    assert ctx.department == "engineering"
+    assert ctx.seniority == "junior"
+    assert ctx.early_career is True
+    assert "consumer" not in ctx.team_keywords
+    assert "ml" not in ctx.team_keywords
+    assert "platform" not in ctx.team_keywords
+    assert any("campus" in title.lower() for title in ctx.recruiter_titles)
+
+
 def test_credit_decisioning_keeps_high_signal_keywords():
     ctx = extract_job_context(
         "Software Engineer II, Backend (Credit Decisioning)",

@@ -74,6 +74,17 @@ def test_analyze_public_content_verifies_strong_current_signal():
     assert result.current_company_verification_source == "firecrawl_public_web"
 
 
+def test_ambiguous_company_variant_does_not_verify_target_company():
+    result = _analyze_linkedin_content(
+        "Headline: Engineering Manager at Zip Co Limited. Experience: Zip Co Limited Present.",
+        "Zip",
+    )
+
+    assert result.current_company_verified is False
+    assert result.current_company_verification_status == "unverified"
+    assert "conflicting company variant" in (result.current_company_verification_evidence or "").lower()
+
+
 def test_shortlist_people_for_verification_limits_to_top_candidates():
     bucketed = {
         "recruiters": [_person("Recruiter 1"), _person("Recruiter 2"), _person("Recruiter 3")],

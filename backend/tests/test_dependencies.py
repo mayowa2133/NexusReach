@@ -6,7 +6,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.dependencies import AuthenticatedUser, get_or_create_user
+from app.config import settings
+from app.dependencies import AuthenticatedUser, get_current_auth_user, get_or_create_user
 
 pytestmark = pytest.mark.asyncio
 
@@ -52,3 +53,15 @@ async def test_get_or_create_user_backfills_blank_email_and_defaults():
 
     assert user.email == "person@example.com"
     assert db.add.call_count == 2
+
+
+async def test_get_current_auth_user_returns_configured_dev_user(monkeypatch):
+    dev_user_id = uuid.uuid4()
+    monkeypatch.setattr(settings, "auth_mode", "dev")
+    monkeypatch.setattr(settings, "dev_user_id", dev_user_id)
+    monkeypatch.setattr(settings, "dev_user_email", "DevUser@example.com")
+
+    auth_user = await get_current_auth_user(None)
+
+    assert auth_user.user_id == dev_user_id
+    assert auth_user.email == "devuser@example.com"
