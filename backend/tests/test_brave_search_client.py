@@ -312,22 +312,33 @@ class TestPublicPeople:
         assert _parse_public_people_result(item, "Zip") is None
 
     async def test_search_public_people_includes_public_identity_terms(self):
-        mock_client = _mock_client_with(_mock_httpx_response({"web": {"results": []}}))
-
-        with (
-            patch("app.clients.brave_search_client.httpx.AsyncClient", return_value=mock_client),
-            patch("app.clients.brave_search_client.settings") as s,
-        ):
-            s.brave_api_key = "key"
+        with patch("app.clients.brave_search_client._run_brave_query", new_callable=AsyncMock) as mock_query:
+            mock_query.return_value = []
             await search_public_people(
                 "Zip",
                 titles=["technical recruiter"],
                 public_identity_terms=["ziphq"],
             )
 
-        query = mock_client.get.call_args[1]["params"]["q"]
-        assert '"Zip"' in query
-        assert '"ziphq"' in query
+        queries = [call.args[0] for call in mock_query.await_args_list]
+        assert any('"Zip"' in query and '"ziphq"' in query for query in queries)
+        assert any("site:theorg.com/org/ziphq" in query for query in queries)
+        assert "site:theorg.com/org/ziphq" in queries[0]
+
+    async def test_search_public_people_uses_recruiter_role_hint_for_slug_queries(self):
+        with patch("app.clients.brave_search_client._run_brave_query", new_callable=AsyncMock) as mock_query:
+            mock_query.return_value = []
+            await search_public_people(
+                "Whatnot",
+                titles=["campus recruiter", "university recruiter", "talent acquisition partner"],
+                public_identity_terms=["whatnot"],
+            )
+
+        queries = [call.args[0] for call in mock_query.await_args_list]
+        slug_queries = [query for query in queries if "site:theorg.com/org/whatnot" in query]
+        assert slug_queries
+        assert any('"recruiter"' in query and '"talent acquisition"' in query for query in slug_queries)
+        assert "site:theorg.com/org/whatnot" in queries[0]
 
 
 class TestParseHiringTeamResult:

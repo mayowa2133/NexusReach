@@ -10,7 +10,7 @@ class JobSearchRequest(BaseModel):
 
 class ATSSearchRequest(BaseModel):
     company_slug: str | None = None
-    ats_type: str | None = None  # greenhouse | lever | ashby
+    ats_type: str | None = None  # greenhouse | lever | ashby | workable
     job_url: str | None = None
 
 

@@ -1,6 +1,10 @@
 # NexusReach Handoff
 
 ## Completed in this pass
+- Added exact-job Workable ATS support.
+  - `parse_ats_job_url()` now recognizes `apply.workable.com/<company>/j/<shortcode>` URLs
+  - ATS search can import a pasted Workable posting through the public `api/v2/accounts/{company}/jobs/{shortcode}` endpoint
+  - normalized jobs are stored as `ats="workable"` and use the returned canonical Workable shortcode URL
 - Added a generic free-first public page fetch layer.
   - Strategy is now direct `httpx` fetch first, then Crawl4AI, then Firecrawl only if configured.
   - Public-web employment verification no longer bails out when Firecrawl env is missing.
@@ -23,15 +27,19 @@
 
 ## Files changed in this pass
 - `backend/app/clients/firecrawl_client.py`
+- `backend/app/clients/ats_client.py`
 - `backend/app/clients/public_page_client.py`
 - `backend/app/clients/theorg_client.py`
 - `backend/app/clients/crawl4ai_client.py`
 - `backend/app/config.py`
+- `backend/app/services/job_service.py`
 - `backend/app/services/employment_verification_service.py`
 - `backend/app/services/people_service.py`
 - `backend/app/services/theorg_discovery_service.py`
 - `backend/app/utils/company_identity.py`
+- `backend/tests/test_ats_client.py`
 - `backend/tests/test_employment_verification_service.py`
+- `backend/tests/test_job_service_ats.py`
 - `backend/tests/test_theorg_client.py`
 - `backend/tests/test_theorg_discovery_service.py`
 - `backend/.env.example`
@@ -41,13 +49,14 @@
 ## Verification completed
 - `cd backend && ruff check app tests conftest.py`
 - `cd backend && pytest`
-  - result: `514 passed`
+  - result: `517 passed`
 - Targeted The Org / verification checks:
   - `cd backend && pytest tests/test_public_page_client.py tests/test_theorg_client.py tests/test_theorg_discovery_service.py tests/test_employment_verification_service.py tests/test_people_utils.py -q`
   - result: `39 passed`
 
 ## Remaining caveats
 - Firecrawl is now an optional fallback, but self-hosted or hosted Firecrawl can still help on harder public pages where direct fetch and Crawl4AI both underperform.
+- Workable support currently covers the pasted job URL flow. Full Workable company-board crawling from `company_slug + ats_type` alone is still not implemented.
 - This pass improves contact recall only. It does not change email-domain trust, email guessing safety, or the verified-only final bucket rule.
 - The traversal is intentionally bounded:
   - up to 3 team pages

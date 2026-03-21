@@ -138,3 +138,44 @@ async def test_search_ats_jobs_reuses_existing_external_id_without_error():
 
     assert jobs == [existing_job]
     db.add.assert_not_called()
+
+
+async def test_search_ats_jobs_dispatches_workable_exact_job_lookup():
+    user_id = uuid.uuid4()
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=_ScalarResult(None))
+    db.add = MagicMock()
+    db.commit = AsyncMock()
+
+    workable_job = {
+        "external_id": "wk_11DC4EA360",
+        "title": "Software Engineer - Early Career (USA)",
+        "company_name": "Trexquant Investment",
+        "location": "Stamford, Connecticut, United States",
+        "remote": False,
+        "url": "https://apply.workable.com/trexquant/j/11DC4EA360",
+        "description": "<p>Build systems</p>",
+        "source": "workable",
+        "ats": "workable",
+        "ats_slug": "trexquant",
+        "department": "Technology",
+        "posted_at": "2025-09-09T00:00:00.000Z",
+    }
+
+    with patch(
+        "app.services.job_service.ats_client.search_workable",
+        new_callable=AsyncMock,
+    ) as mock_search:
+        mock_search.return_value = [workable_job]
+        jobs = await search_ats_jobs(
+            db,
+            user_id,
+            None,
+            None,
+            job_url="https://apply.workable.com/trexquant/j/AC6E22F084/?jr_id=68c040328e65e77df55bf6c3",
+        )
+
+    mock_search.assert_awaited_once_with("trexquant", job_shortcode="AC6E22F084")
+    assert len(jobs) == 1
+    assert jobs[0].ats == "workable"
+    assert jobs[0].title == "Software Engineer - Early Career (USA)"

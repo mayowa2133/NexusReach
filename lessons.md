@@ -309,3 +309,7 @@ A living document of patterns, gotchas, and decisions encountered while building
 ### Retrieval providers should stay behind a generic interface
 - Once Firecrawl, direct `httpx`, and Crawl4AI all existed in the codebase, hard-coding `firecrawl_public_web` and branching on `firecrawl_base_url` made the product behavior depend on one provider even when others could do the job for free.
 - **Lesson:** Keep provider-specific retrieval behind one normalized public-fetch layer, and expose a generic product-level source like `public_web` while recording the exact retrieval method only in debug metadata.
+
+### Workable exact-job support is reliable even when board listing is not
+- Workable’s public exact-job endpoint at `apply.workable.com/api/v2/accounts/{company}/jobs/{shortcode}` returns full job JSON for pasted posting URLs, but the broader board-list endpoints are not equally usable without extra assumptions.
+- **Lesson:** For ATS integrations, exact job URL import is often the highest-value first step; support that path directly even if full board crawling needs a separate implementation.

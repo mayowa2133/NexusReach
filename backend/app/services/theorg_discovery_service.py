@@ -8,17 +8,30 @@ from datetime import datetime, timedelta, timezone
 from app.clients import theorg_client
 from app.config import settings
 from app.models.company import Company
+from app.utils.company_identity import is_compatible_public_identity_slug
 from app.utils.job_context import JobContext
 
 RECRUITER_TITLE_KEYWORDS = (
     "recruiter",
+    "recruiting",
+    "recruiting coordinator",
     "talent acquisition",
     "talent partner",
     "sourcer",
-    "recruiting",
-    "people ops",
-    "people operations",
+    "technical sourcer",
+    "campus recruiter",
+    "university recruiter",
+    "early careers",
+    "early talent",
+    "university programs",
+)
+GENERIC_PEOPLE_TITLE_KEYWORDS = (
     "human resources",
+    "people operations",
+    "people ops",
+    "people partner",
+    "hr business partner",
+    "hrbp",
 )
 MANAGER_TITLE_KEYWORDS = (
     "manager",
@@ -38,12 +51,20 @@ DIRECTOR_PLUS_KEYWORDS = (
 
 TEAM_KEYWORDS_BY_BUCKET = {
     "recruiters": (
-        "human resources",
-        "talent",
-        "people",
         "recruit",
+        "talent acquisition",
+        "talent",
+        "people and recruiting",
+        "recruiting",
+        "university recruiting",
+        "university programs",
         "university",
         "early career",
+        "early talent",
+        "campus",
+        "talent operations",
+        "human resources",
+        "people",
     ),
 }
 TEAM_KEYWORDS_BY_DEPARTMENT = {
@@ -116,11 +137,29 @@ def _is_useful_org_page(parsed: dict | None) -> bool:
     return bool(parsed.get("company_name"))
 
 
-def _ordered_public_identity_slugs(slugs: list[str] | None) -> list[str]:
-    candidates = list(slugs or [])
+def _ordered_public_identity_slugs(company: Company, slugs: list[str] | None = None) -> list[str]:
+    candidates = list(company.public_identity_slugs or [])
+    if slugs:
+        candidates.extend(
+            slug
+            for slug in slugs
+            if is_compatible_public_identity_slug(company.name, slug)
+        )
+    cache = _theorg_cache(company)
+    preferred_slug = cache.get("preferred_org_slug")
+    ordered = []
+    if isinstance(preferred_slug, str) and preferred_slug:
+        ordered.append(preferred_slug)
+    ordered.extend(candidates)
+    deduped = list(dict.fromkeys(slug for slug in ordered if slug))
     return sorted(
-        candidates,
-        key=lambda slug: (0 if slug.endswith("hq") else 1, -len(slug), slug),
+        deduped,
+        key=lambda slug: (
+            0 if slug == preferred_slug else 1,
+            0 if slug.endswith("hq") else 1,
+            -len(slug),
+            slug,
+        ),
     )
 
 
@@ -130,7 +169,12 @@ def _title_haystack(value: str | None) -> str:
 
 def _is_recruiter(title: str | None) -> bool:
     haystack = _title_haystack(title)
-    return any(keyword in haystack for keyword in RECRUITER_TITLE_KEYWORDS)
+    if not any(keyword in haystack for keyword in RECRUITER_TITLE_KEYWORDS):
+        return False
+    generic_only = any(keyword in haystack for keyword in GENERIC_PEOPLE_TITLE_KEYWORDS) and not any(
+        keyword in haystack for keyword in ("recruit", "talent acquisition", "talent partner", "sourcer", "early talent", "early careers", "university")
+    )
+    return not generic_only
 
 
 def _is_manager(title: str | None) -> bool:
@@ -193,7 +237,35 @@ def _select_team_refs(org_page: dict, *, bucket: str, context: JobContext | None
     return [team for _, team in scored]
 
 
-async def _get_org_page(company: Company) -> dict | None:
+def _record_slug_status(company: Company, slug: str, status: str) -> None:
+    cache = _theorg_cache(company)
+    slug_status = cache.setdefault("slug_status", {})
+    slug_status[slug] = status
+    company.identity_hints = _company_hints(company)
+
+
+def _page_looks_not_found(page: dict | None) -> bool:
+    if not page:
+        return True
+    combined = " ".join(
+        part for part in [
+            page.get("title", ""),
+            page.get("markdown", ""),
+            page.get("html", "")[:300],
+        ] if part
+    ).lower()
+    return "page not found" in combined or ">404<" in combined
+
+
+def _bucket_target(bucket: str, context: JobContext | None) -> int:
+    if context and getattr(context, "early_career", False):
+        if bucket == "recruiters":
+            return 3
+        return 1
+    return 2
+
+
+async def _get_org_page(company: Company, *, slug_candidates: list[str] | None = None) -> dict | None:
     cache = _theorg_cache(company)
     org_entry = cache.get("org")
     if _is_cache_fresh(org_entry, ttl_hours=settings.theorg_cache_ttl_hours):
@@ -201,18 +273,24 @@ async def _get_org_page(company: Company) -> dict | None:
         if _is_useful_org_page(parsed):
             return parsed
 
-    for slug in _ordered_public_identity_slugs(company.public_identity_slugs):
+    for slug in _ordered_public_identity_slugs(company, slug_candidates):
         page = await theorg_client.fetch_page(
             f"https://theorg.com/org/{slug}",
             timeout_seconds=settings.theorg_timeout_seconds,
         )
+        if _page_looks_not_found(page):
+            _record_slug_status(company, slug, "rejected_not_found")
+            continue
         parsed = theorg_client.parse_org_page(page or {})
         if not _is_useful_org_page(parsed):
+            _record_slug_status(company, slug, "rejected_empty")
             continue
         cache["org"] = {
             "cached_at": _iso_now(),
             "parsed": parsed,
         }
+        cache["preferred_org_slug"] = parsed.get("org_slug") or slug
+        _record_slug_status(company, cache["preferred_org_slug"], "validated")
         company.identity_hints = _company_hints(company)
         return parsed
     return None
@@ -237,6 +315,9 @@ async def _get_team_page(company: Company, team_ref: dict) -> dict | None:
         "cached_at": _iso_now(),
         "parsed": parsed,
     }
+    if parsed.get("org_slug"):
+        cache["preferred_org_slug"] = parsed["org_slug"]
+        _record_slug_status(company, parsed["org_slug"], "validated")
     company.identity_hints = _company_hints(company)
     return parsed
 
@@ -259,6 +340,9 @@ async def _get_person_page(company: Company, public_url: str) -> dict | None:
         "cached_at": _iso_now(),
         "parsed": parsed,
     }
+    if parsed.get("org_slug"):
+        cache["preferred_org_slug"] = parsed["org_slug"]
+        _record_slug_status(company, parsed["org_slug"], "validated")
     company.identity_hints = _company_hints(company)
     return parsed
 
@@ -301,6 +385,7 @@ async def discover_theorg_candidates(
     company_name: str,
     context: JobContext | None,
     current_counts: dict[str, int],
+    slug_candidates: list[str] | None = None,
 ) -> dict[str, list[dict]]:
     """Traverse trusted The Org pages to expand underfilled candidate buckets."""
     if not settings.theorg_traversal_enabled:
@@ -308,7 +393,7 @@ async def discover_theorg_candidates(
     if not company.public_identity_slugs:
         return {"recruiters": [], "hiring_managers": [], "peers": []}
 
-    org_page = await _get_org_page(company)
+    org_page = await _get_org_page(company, slug_candidates=slug_candidates)
     if not org_page:
         return {"recruiters": [], "hiring_managers": [], "peers": []}
 
@@ -317,9 +402,9 @@ async def discover_theorg_candidates(
     manager_seeds: list[dict] = []
 
     bucket_needs = {
-        "recruiters": current_counts.get("recruiters", 0) < 2,
-        "hiring_managers": current_counts.get("hiring_managers", 0) < 2,
-        "peers": current_counts.get("peers", 0) < 2,
+        "recruiters": current_counts.get("recruiters", 0) < _bucket_target("recruiters", context),
+        "hiring_managers": current_counts.get("hiring_managers", 0) < _bucket_target("hiring_managers", context),
+        "peers": current_counts.get("peers", 0) < _bucket_target("peers", context),
     }
 
     ordered_team_refs: list[tuple[str, dict]] = []
@@ -381,7 +466,15 @@ async def discover_theorg_candidates(
                 if _bucket_candidate(report, bucket="peers", context=context)
             )
 
+    resolved_slug = _theorg_cache(company).get("preferred_org_slug") or org_page.get("org_slug")
     for bucket, people in grouped.items():
+        for person in people:
+            profile_data = dict(person.get("profile_data") or {})
+            if resolved_slug:
+                profile_data["public_identity_slug"] = resolved_slug
+                profile_data["public_identity_slug_resolution"] = resolved_slug
+                profile_data["public_identity_slug_status"] = "validated"
+            person["profile_data"] = profile_data
         grouped[bucket] = _dedupe_candidates(people)
 
     grouped = _truncate_grouped(grouped)

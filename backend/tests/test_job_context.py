@@ -124,6 +124,31 @@ def test_new_grad_generic_engineer_stays_early_career_without_marketing_overfit(
     assert any("campus" in title.lower() for title in ctx.recruiter_titles)
 
 
+def test_early_career_title_normalizes_seniority_and_search_titles():
+    ctx = extract_job_context(
+        "Software Engineer - Early Career (USA)",
+        description=(
+            "Trexquant is a systematic investment manager. Join our technology team to build and improve the "
+            "platform that powers research and trading workflows. As an early career software engineer, you will "
+            "work with mentors, learn quickly, and build production systems across the stack."
+        ),
+    )
+
+    assert ctx.department == "engineering"
+    assert ctx.early_career is True
+    assert ctx.seniority == "junior"
+    assert "platform" not in ctx.team_keywords
+    assert "Software Engineer" in ctx.peer_titles
+    assert all("Early Career" not in title for title in ctx.peer_titles)
+    assert all("(USA)" not in title for title in ctx.peer_titles)
+    assert "Software Engineering Manager" in ctx.manager_titles
+    assert any(title == "Engineering Manager" for title in ctx.manager_titles)
+    assert all("Early Career" not in title for title in ctx.manager_titles)
+    assert any("early careers recruiter" == title.lower() for title in ctx.recruiter_titles)
+    assert any("talent acquisition partner" == title.lower() for title in ctx.recruiter_titles)
+    assert any("recruiting coordinator" == title.lower() for title in ctx.recruiter_titles)
+
+
 def test_credit_decisioning_keeps_high_signal_keywords():
     ctx = extract_job_context(
         "Software Engineer II, Backend (Credit Decisioning)",

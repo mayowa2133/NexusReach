@@ -8,6 +8,7 @@ from app.clients.ats_client import (
     search_ashby,
     search_greenhouse,
     search_lever,
+    search_workable,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -120,6 +121,42 @@ class TestSearchAshby:
         assert results[-1]["title"] == "Role 24"
 
 
+class TestSearchWorkable:
+    async def test_fetches_exact_job_from_public_endpoint(self):
+        job_response = _mock_httpx_response(
+            {
+                "id": 5128536,
+                "shortcode": "11DC4EA360",
+                "title": "Software Engineer - Early Career (USA)",
+                "remote": False,
+                "location": {
+                    "country": "United States",
+                    "city": "Stamford",
+                    "region": "Connecticut",
+                },
+                "locations": [],
+                "published": "2025-09-09T00:00:00.000Z",
+                "type": "full",
+                "department": ["Technology"],
+                "workplace": "on_site",
+                "description": "<p>Build systems</p>",
+            }
+        )
+        account_response = _mock_httpx_response({"name": "Trexquant Investment"})
+        mock_client = _mock_client_with(job_response)
+        mock_client.get = AsyncMock(side_effect=[job_response, account_response])
+
+        with patch("app.clients.ats_client.httpx.AsyncClient", return_value=mock_client):
+            results = await search_workable("trexquant", job_shortcode="AC6E22F084")
+
+        assert len(results) == 1
+        assert results[0]["external_id"] == "wk_11DC4EA360"
+        assert results[0]["company_name"] == "Trexquant Investment"
+        assert results[0]["url"] == "https://apply.workable.com/trexquant/j/11DC4EA360"
+        assert results[0]["location"] == "Stamford, Connecticut, United States"
+        assert results[0]["department"] == "Technology"
+
+
 class TestParseATSJobURL:
     def test_parses_greenhouse_canonical_url(self):
         parsed = parse_ats_job_url("https://job-boards.greenhouse.io/affirm/jobs/7550577003")
@@ -151,3 +188,11 @@ class TestParseATSJobURL:
         assert parsed.ats_type == "ashby"
         assert parsed.company_slug == "notion"
         assert parsed.external_id == "ab_1234"
+
+    def test_parses_workable_url(self):
+        parsed = parse_ats_job_url("https://apply.workable.com/trexquant/j/AC6E22F084/?jr_id=68c040328e65e77df55bf6c3")
+        assert parsed is not None
+        assert parsed.ats_type == "workable"
+        assert parsed.company_slug == "trexquant"
+        assert parsed.external_id == "wk_AC6E22F084"
+        assert parsed.canonical_url == "https://apply.workable.com/trexquant/j/AC6E22F084"

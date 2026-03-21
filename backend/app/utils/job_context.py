@@ -160,6 +160,7 @@ def _contains_keyword(text: str, keyword: str) -> bool:
 
 
 EARLY_CAREER_PATTERNS = (
+    r"\bearly[- ]careers?\b",
     r"\bnew grad\b",
     r"\bgraduate\b",
     r"\bgraduat(?:e|ing)\b",
@@ -178,6 +179,28 @@ BOILERPLATE_SENTENCE_PATTERNS = (
     r"^our values\b",
     r"^benefits\b",
     r"^perks\b",
+)
+
+TITLE_QUALIFIER_PATTERNS = (
+    r"\bearly[- ]careers?\b",
+    r"\bnew grad(?:uate)?\b",
+    r"\bcampus\b",
+    r"\buniversity\b",
+    r"\bco[- ]?op\b",
+    r"\bintern(?:ship)?\b",
+    r"\bstudent\b",
+)
+
+LOCATION_QUALIFIER_PATTERNS = (
+    r"usa",
+    r"us",
+    r"canada",
+    r"uk",
+    r"emea",
+    r"apac",
+    r"remote",
+    r"hybrid",
+    r"onsite",
 )
 
 
@@ -269,6 +292,20 @@ def _extract_core_role(title: str) -> str:
         r"\biii\b\s*[,|-]?\s*",
     ]:
         result = re.sub(prefix, "", result, count=1, flags=re.IGNORECASE)
+    title_qualifier_pattern = "|".join(TITLE_QUALIFIER_PATTERNS)
+    location_qualifier_pattern = "|".join(LOCATION_QUALIFIER_PATTERNS)
+    result = re.sub(
+        rf"\s*[-,:|]\s*(?:{title_qualifier_pattern})\b.*$",
+        "",
+        result,
+        flags=re.IGNORECASE,
+    )
+    result = re.sub(
+        rf"\s*\((?:{location_qualifier_pattern})\)\s*$",
+        "",
+        result,
+        flags=re.IGNORECASE,
+    )
     return WHITESPACE_RE.sub(" ", result).strip(" ,|-")
 
 
@@ -285,12 +322,21 @@ def _build_manager_titles(
     titles: list[str] = []
     core = _extract_core_role(base_title)
     if core:
-        titles.extend([
-            f"{core} Manager",
-            f"{core} Engineering Manager",
-            f"{core} Team Lead",
-            f"{core} Tech Lead",
-        ])
+        if "engineer" in core.lower():
+            engineering_core = re.sub(r"Engineer\b", "Engineering", core, flags=re.IGNORECASE)
+            titles.extend([
+                f"{engineering_core} Manager",
+                f"{engineering_core} Lead",
+                f"{core} Team Lead",
+                f"{core} Tech Lead",
+            ])
+        else:
+            titles.extend([
+                f"{core} Manager",
+                f"{core} Engineering Manager",
+                f"{core} Team Lead",
+                f"{core} Tech Lead",
+            ])
         if seniority in {"staff", "principal", "manager", "director", "vp", "executive"}:
             titles.append(f"Head of {core}")
 
@@ -319,7 +365,8 @@ def _build_peer_titles(base_title: str, keywords: list[str], seniority: str) -> 
         titles.append(core)
         if "engineer" in core.lower():
             titles.append(core.replace("Engineer", "Developer"))
-            titles.append(core.replace("Engineer", "Software Engineer"))
+            if "software engineer" not in core.lower():
+                titles.append(core.replace("Engineer", "Software Engineer"))
         elif "developer" in core.lower():
             titles.append(core.replace("Developer", "Engineer"))
 
@@ -344,7 +391,12 @@ def _build_recruiter_titles(
     *,
     early_career: bool,
 ) -> list[str]:
-    titles = ["Technical Recruiter", "Talent Acquisition", "Recruiter"]
+    titles = [
+        "Technical Recruiter",
+        "Talent Acquisition",
+        "Recruiter",
+        "Talent Acquisition Partner",
+    ]
 
     if department in {"engineering", "data_science"}:
         titles.insert(0, "Engineering Recruiter")
@@ -365,6 +417,9 @@ def _build_recruiter_titles(
                 "University Recruiter",
                 "Early Careers Recruiter",
                 "University Programs Recruiter",
+                "Early Talent Recruiter",
+                "Recruiting Coordinator",
+                "University Programs",
                 "Technical Sourcer",
             ]
         )

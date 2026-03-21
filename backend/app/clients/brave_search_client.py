@@ -32,6 +32,15 @@ def _clean_profile_url(url: str) -> str:
     return re.split(r"[?#]", url or "")[0].rstrip("/")
 
 
+def _public_role_hint(titles: list[str] | None) -> str:
+    normalized = " ".join(title.lower() for title in (titles or []) if title)
+    if any(keyword in normalized for keyword in ("recruit", "talent acquisition", "sourcer", "campus", "university", "early careers", "early talent")):
+        return '("recruiter" OR "recruiting" OR "talent acquisition" OR "sourcer")'
+    if any(keyword in normalized for keyword in ("manager", "director", "lead")):
+        return '("manager" OR "director" OR "lead")'
+    return ""
+
+
 async def _run_brave_query(query: str, count: int) -> list[dict]:
     if not settings.brave_api_key:
         return []
@@ -248,12 +257,34 @@ async def search_public_people(
         if quoted_terms:
             identity_part = " " + " OR ".join(quoted_terms)
 
-    query = (
+    queries: list[str] = []
+    role_hint = _public_role_hint(titles)
+    for slug in public_identity_terms[:2] if public_identity_terms else []:
+        clean_slug = (slug or "").strip().lower()
+        if not clean_slug:
+            continue
+        scoped_hint = role_hint or title_part.strip()
+        if scoped_hint:
+            queries.append(f'site:theorg.com/org/{clean_slug} "{company_name}" {scoped_hint}')
+        else:
+            queries.append(f'site:theorg.com/org/{clean_slug} "{company_name}"')
+
+    queries.append(
         f'("{company_name}"{title_part}{team_part}{identity_part}) '
         '(site:theorg.com OR site:linkedin.com/posts OR site:clay.earth OR site:contactout.com)'
     )
 
-    items = await _run_brave_query(query, limit)
+    items: list[dict] = []
+    seen_urls: set[str] = set()
+    for query in dict.fromkeys(queries):
+        for item in await _run_brave_query(query, limit):
+            clean_url = _clean_profile_url(item.get("url", ""))
+            key = clean_url or f'{item.get("title", "")}|{item.get("description", "")}'
+            if key in seen_urls:
+                continue
+            seen_urls.add(key)
+            items.append(item)
+
     results = []
     for item in items:
         person = _parse_public_people_result(item, company_name)

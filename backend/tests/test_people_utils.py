@@ -15,7 +15,10 @@ from app.services.people_service import (
     _classify_employment_status,
     _classify_org_level,
     _classify_person,
+    _compute_match_metadata,
+    _prioritize_titles_for_search,
     _prepare_candidates,
+    _recover_candidate_titles,
     get_or_create_company,
 )
 from app.services.email_finder_service import _split_name
@@ -46,6 +49,7 @@ class TestClassifyPerson:
         assert _classify_person("Technical Recruiter") == "recruiter"
         assert _classify_person("Talent Acquisition Specialist") == "recruiter"
         assert _classify_person("Hiring Coordinator") == "recruiter"
+        assert _classify_person("People Operations Manager") != "recruiter"
 
     def test_hiring_manager(self):
         assert _classify_person("Engineering Manager") == "hiring_manager"
@@ -210,6 +214,60 @@ class TestEmploymentAndRanking:
         assert _classify_org_level("Engineering Manager") == "manager"
         assert _classify_org_level("Managing Director") == "director_plus"
 
+    def test_prioritize_titles_for_search_prefers_early_career_recruiters(self):
+        context = JobContext(
+            department="engineering",
+            team_keywords=[],
+            domain_keywords=[],
+            seniority="junior",
+            early_career=True,
+        )
+        titles = [
+            "Engineering Recruiter",
+            "Technical Recruiter",
+            "Campus Recruiter",
+            "University Recruiter",
+            "Talent Acquisition",
+        ]
+
+        prioritized = _prioritize_titles_for_search(
+            titles,
+            bucket="recruiters",
+            context=context,
+        )
+
+        assert prioritized[:3] == [
+            "Campus Recruiter",
+            "University Recruiter",
+            "Engineering Recruiter",
+        ]
+
+    def test_prioritize_titles_for_search_prefers_generic_engineering_managers_for_early_career(self):
+        context = JobContext(
+            department="engineering",
+            team_keywords=[],
+            domain_keywords=[],
+            seniority="junior",
+            early_career=True,
+        )
+        titles = [
+            "Software Engineering Lead",
+            "Software Engineering Manager",
+            "Software Engineer Team Lead",
+            "Engineering Manager",
+        ]
+
+        prioritized = _prioritize_titles_for_search(
+            titles,
+            bucket="hiring_managers",
+            context=context,
+        )
+
+        assert prioritized[:2] == [
+            "Engineering Manager",
+            "Software Engineering Manager",
+        ]
+
     def test_prepare_candidates_prefers_current_manager_before_director_fallback(self):
         context = JobContext(
             department="engineering",
@@ -251,3 +309,162 @@ class TestEmploymentAndRanking:
             "Ambiguous Avery",
             "Director Dana",
         ]
+
+    def test_prepare_candidates_rejects_recruiter_with_company_only_title(self):
+        context = JobContext(
+            department="engineering",
+            team_keywords=[],
+            domain_keywords=[],
+            seniority="junior",
+            early_career=True,
+        )
+        candidates = [
+            {
+                "full_name": "Anthony Bihl",
+                "title": "Trexquant Investment LP",
+                "snippet": "Technical recruiter focused on engineering hiring at Trexquant Investment.",
+                "source": "brave_search",
+            },
+            {
+                "full_name": "Kanchan Kaur",
+                "title": "Senior Manager - Talent Acquisition and Human Resources",
+                "snippet": "Talent acquisition leader at Trexquant Investment.",
+                "source": "brave_search",
+            },
+        ]
+
+        results = _prepare_candidates(
+            candidates,
+            company_name="Trexquant Investment",
+            bucket="recruiters",
+            context=context,
+            limit=5,
+        )
+
+        assert [candidate["full_name"] for candidate in results] == ["Kanchan Kaur"]
+
+    def test_prepare_candidates_rejects_generic_people_leaders_from_recruiter_bucket(self):
+        context = JobContext(
+            department="engineering",
+            team_keywords=[],
+            domain_keywords=[],
+            seniority="junior",
+            early_career=True,
+        )
+        candidates = [
+            {
+                "full_name": "People Pat",
+                "title": "VP, People Operations",
+                "snippet": "People operations leader at Whatnot.",
+                "source": "brave_public_web",
+                "profile_data": {
+                    "public_url": "https://theorg.com/org/whatnot/org-chart/pat",
+                    "public_identity_slug": "whatnot",
+                },
+            }
+        ]
+
+        results = _prepare_candidates(
+            candidates,
+            company_name="Whatnot",
+            bucket="recruiters",
+            context=context,
+            limit=5,
+        )
+
+        assert results == []
+
+    def test_compute_match_metadata_marks_weak_peer_title_next_best(self):
+        match_quality, match_reason = _compute_match_metadata(
+            {
+                "title": "Whatnot",
+                "snippet": "Software Engineer at Whatnot.",
+                "_weak_title": True,
+            },
+            "peer",
+            JobContext(
+                department="engineering",
+                team_keywords=[],
+                domain_keywords=[],
+                seniority="junior",
+                early_career=True,
+            ),
+        )
+
+        assert match_quality == "next_best"
+        assert "title specificity is weak" in (match_reason or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_recover_candidate_titles_recovers_from_snippet(self):
+        company = SimpleNamespace(
+            public_identity_slugs=["whatnot"],
+            identity_hints={},
+        )
+        recovered = await _recover_candidate_titles(
+            [
+                {
+                    "full_name": "Brandon Lee",
+                    "title": "Whatnot",
+                    "snippet": "Brandon Lee is a Software Engineer at Whatnot.",
+                    "source": "brave_search",
+                    "profile_data": {},
+                }
+            ],
+            company=company,
+            company_name="Whatnot",
+        )
+
+        assert recovered[0]["title"] == "Software Engineer"
+        assert recovered[0]["profile_data"]["title_recovery_source"] == "snippet"
+        assert recovered[0]["_weak_title"] is False
+
+    @pytest.mark.asyncio
+    async def test_recover_candidate_titles_recovers_from_theorg_and_updates_slug(self):
+        company = SimpleNamespace(
+            public_identity_slugs=["whatnot-inc"],
+            identity_hints={},
+        )
+        page = {
+            "url": "https://theorg.com/org/whatnot/org-chart/blake-morgan",
+            "next_data": {
+                "props": {
+                    "pageProps": {
+                        "initialPosition": {
+                            "slug": "blake-morgan",
+                            "fullName": "Blake Morgan",
+                            "currentRole": "Engineering Manager",
+                            "companyV2": {"name": "Whatnot", "slug": "whatnot"},
+                            "teams": [{"slug": "engineering", "name": "Engineering"}],
+                            "reports": [],
+                        }
+                    }
+                }
+            },
+            "public_identity_hints": {"company_slug": "whatnot", "page_type": "org_chart_person"},
+        }
+
+        with patch("app.services.people_service.theorg_client.fetch_page", new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.return_value = page
+            recovered = await _recover_candidate_titles(
+                [
+                    {
+                        "full_name": "Blake Morgan",
+                        "title": "Whatnot",
+                        "snippet": "Whatnot engineering leader.",
+                        "source": "brave_public_web",
+                        "profile_data": {
+                            "public_url": "https://theorg.com/org/whatnot/org-chart/blake-morgan",
+                            "public_identity_slug": "whatnot",
+                            "public_page_type": "org_chart_person",
+                        },
+                    }
+                ],
+                company=company,
+                company_name="Whatnot",
+            )
+
+        assert recovered[0]["title"] == "Engineering Manager"
+        assert recovered[0]["profile_data"]["title_recovery_source"] == "theorg"
+        assert recovered[0]["profile_data"]["public_identity_slug_resolution"] == "whatnot"
+        assert company.identity_hints["theorg"]["preferred_org_slug"] == "whatnot"
+        assert "whatnot" in company.public_identity_slugs

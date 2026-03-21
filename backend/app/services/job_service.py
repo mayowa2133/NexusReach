@@ -315,6 +315,13 @@ async def search_ats_jobs(
         raw_jobs = await ats_client.search_lever(company_slug, limit)
     elif ats_type == "ashby":
         raw_jobs = await ats_client.search_ashby(company_slug, limit)
+    elif ats_type == "workable":
+        if not target_external_id:
+            raise ValueError("Workable ATS search currently requires a direct job URL.")
+        raw_jobs = await ats_client.search_workable(
+            company_slug,
+            job_shortcode=target_external_id.removeprefix("wk_"),
+        )
     else:
         return []
 
