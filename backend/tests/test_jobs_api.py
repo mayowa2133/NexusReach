@@ -73,7 +73,7 @@ async def test_search_ats(client, mock_user_id):
 
 
 async def test_search_ats_with_job_url(client, mock_user_id):
-    """POST /api/jobs/search/ats accepts a direct ATS job URL."""
+    """POST /api/jobs/search/ats accepts a direct job posting URL."""
     job = _mock_job(mock_user_id, source="greenhouse", ats="greenhouse")
 
     with patch("app.routers.jobs.search_ats_jobs", new_callable=AsyncMock) as mock_search:
@@ -89,6 +89,28 @@ async def test_search_ats_with_job_url(client, mock_user_id):
     assert call_kwargs["job_url"] == "https://job-boards.greenhouse.io/affirm/jobs/7550577003"
     assert call_kwargs["company_slug"] is None
     assert call_kwargs["ats_type"] is None
+
+
+async def test_search_ats_with_apple_job_url(client, mock_user_id):
+    """POST /api/jobs/search/ats accepts Apple Jobs exact-job URLs."""
+    job = _mock_job(mock_user_id, source="apple_jobs", ats="apple_jobs", company_name="Apple")
+
+    with patch("app.routers.jobs.search_ats_jobs", new_callable=AsyncMock) as mock_search:
+        mock_search.return_value = [job]
+        resp = await client.post(
+            "/api/jobs/search/ats",
+            json={
+                "job_url": (
+                    "https://jobs.apple.com/en-us/details/200652765/software-engineer-core-os-telemetry"
+                    "?board_id=17682&jr_id=69bdc46c393a1008f7434e68"
+                )
+            },
+        )
+
+    assert resp.status_code == 200
+    mock_search.assert_awaited_once()
+    call_kwargs = mock_search.call_args.kwargs
+    assert call_kwargs["job_url"].startswith("https://jobs.apple.com/en-us/details/200652765/")
 
 
 async def test_search_ats_accepts_dev_mode_without_token(unauthed_client, monkeypatch):

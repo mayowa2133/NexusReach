@@ -88,7 +88,7 @@ async def search_ats(
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Search a specific ATS board (Greenhouse, Lever, Ashby, Workable)."""
+    """Search a supported job board or ingest an exact job posting URL."""
     if not body.job_url and (not body.company_slug or not body.ats_type):
         raise HTTPException(
             status_code=400,

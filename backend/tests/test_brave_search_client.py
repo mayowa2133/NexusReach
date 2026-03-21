@@ -6,7 +6,7 @@ from unittest.mock import patch, AsyncMock, MagicMock
 from app.clients.brave_search_client import (
     search_people, _parse_linkedin_result,
     search_hiring_team, _parse_hiring_team_result,
-    _parse_public_people_result, search_public_people,
+    _parse_public_people_result, search_public_people, search_exact_linkedin_profile,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -285,6 +285,35 @@ class TestSearchPeople:
 
         query = mock_client.get.call_args[1]["params"]["q"]
         assert query == 'site:linkedin.com/in "Google" "engineer"'
+
+
+class TestSearchExactLinkedInProfile:
+    async def test_queries_exact_name_and_company(self):
+        mock_resp = _mock_httpx_response({
+            "web": {
+                "results": [
+                    {
+                        "title": "Lauren Tyson - Research Recruiter at Apple | LinkedIn",
+                        "url": "https://www.linkedin.com/in/laurentyson",
+                        "description": "Research Recruiter at Apple.",
+                    }
+                ]
+            }
+        })
+        mock_client = _mock_client_with(mock_resp)
+
+        with (
+            patch("app.clients.brave_search_client.httpx.AsyncClient", return_value=mock_client),
+            patch("app.clients.brave_search_client.settings") as s,
+        ):
+            s.brave_api_key = "brave-key"
+            results = await search_exact_linkedin_profile("Lauren Tyson", "Apple")
+
+        assert len(results) == 1
+        assert results[0]["linkedin_url"] == "https://www.linkedin.com/in/laurentyson"
+        query = mock_client.get.call_args[1]["params"]["q"]
+        assert query == 'site:linkedin.com/in "Lauren Tyson" "Apple"'
+        assert results[0]["profile_data"]["linkedin_result_title"] == "Lauren Tyson - Research Recruiter at Apple"
 
 
 class TestPublicPeople:

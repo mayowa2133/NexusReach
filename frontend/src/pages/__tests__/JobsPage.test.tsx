@@ -87,13 +87,13 @@ describe('JobsPage', () => {
   it('renders the ATS search form', () => {
     renderJobs();
     expect(screen.getByText(/search company career page/i)).toBeInTheDocument();
-    expect(screen.getByPlaceholderText(/stripe/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/jobs\.apple\.com/i)).toBeInTheDocument();
   });
 
   it('renders smart ATS input copy', () => {
     renderJobs();
-    expect(screen.getByLabelText(/board id or job url/i)).toBeInTheDocument();
-    expect(screen.getByText(/full job links auto-detect the ats and exact posting/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/board id or job posting url/i)).toBeInTheDocument();
+    expect(screen.getByText(/full job links auto-detect the platform and exact posting/i)).toBeInTheDocument();
   });
 
   it('renders the search buttons', () => {

@@ -116,6 +116,9 @@ def _parse_linkedin_result(item: dict, company_name: str) -> dict | None:
         "apollo_id": "",
         "source": "brave_search",
         "snippet": item.get("description", ""),
+        "profile_data": {
+            "linkedin_result_title": title_clean,
+        },
     }
 
 
@@ -231,6 +234,31 @@ async def search_people(
         if person:
             results.append(person)
 
+    return results[:limit]
+
+
+async def search_exact_linkedin_profile(
+    full_name: str,
+    company_name: str,
+    *,
+    limit: int = 3,
+) -> list[dict]:
+    """Search Brave for one person's LinkedIn profile at a target company."""
+    if not full_name or not company_name:
+        return []
+
+    query = f'site:linkedin.com/in "{full_name}" "{company_name}"'
+    items = await _run_brave_query(query, max(1, min(limit, 5)))
+    results: list[dict] = []
+    for item in items:
+        person = _parse_linkedin_result(item, company_name)
+        if not person:
+            continue
+        profile_data = dict(person.get("profile_data") or {})
+        profile_data["linkedin_backfill_query"] = query
+        profile_data["linkedin_backfill_result_url"] = person.get("linkedin_url")
+        person["profile_data"] = profile_data
+        results.append(person)
     return results[:limit]
 
 

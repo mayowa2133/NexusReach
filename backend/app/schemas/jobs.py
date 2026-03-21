@@ -10,7 +10,7 @@ class JobSearchRequest(BaseModel):
 
 class ATSSearchRequest(BaseModel):
     company_slug: str | None = None
-    ats_type: str | None = None  # greenhouse | lever | ashby | workable
+    ats_type: str | None = None  # board-backed ATS type when not using job_url
     job_url: str | None = None
 
 

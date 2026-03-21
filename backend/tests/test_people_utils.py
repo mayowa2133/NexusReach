@@ -11,14 +11,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.services.people_service import (
+    _backfill_linkedin_profiles,
     _candidate_matches_company,
     _classify_employment_status,
     _classify_org_level,
     _classify_person,
+    _choose_linkedin_backfill_match,
     _compute_match_metadata,
+    _name_match_score,
     _prioritize_titles_for_search,
     _prepare_candidates,
     _recover_candidate_titles,
+    _store_person,
     get_or_create_company,
 )
 from app.services.email_finder_service import _split_name
@@ -468,3 +472,193 @@ class TestEmploymentAndRanking:
         assert recovered[0]["profile_data"]["public_identity_slug_resolution"] == "whatnot"
         assert company.identity_hints["theorg"]["preferred_org_slug"] == "whatnot"
         assert "whatnot" in company.public_identity_slugs
+
+    def test_name_match_score_accepts_same_name_and_last_initial(self):
+        assert _name_match_score("Derek S.", "Derek Smith") == 90
+        assert _name_match_score("Lauren Tyson", "Lauren Tyson") == 100
+        assert _name_match_score("Lauren Tyson", "Laura Tyson") == 0
+
+    def test_choose_linkedin_backfill_match_rejects_wrong_company(self):
+        chosen, confidence, status = _choose_linkedin_backfill_match(
+            {
+                "full_name": "Lauren Tyson",
+                "title": "Research Recruiter",
+                "snippet": "Verified recruiter at Apple.",
+                "source": "theorg_traversal",
+                "profile_data": {
+                    "public_url": "https://theorg.com/org/apple/org-chart/lauren-tyson",
+                    "public_identity_slug": "apple",
+                },
+            },
+            [
+                {
+                    "full_name": "Lauren Tyson",
+                    "title": "Research Recruiter",
+                    "snippet": "Research Recruiter at Meta.",
+                    "source": "brave_search",
+                    "linkedin_url": "https://www.linkedin.com/in/laurentyson",
+                    "profile_data": {"linkedin_result_title": "Lauren Tyson - Research Recruiter at Meta"},
+                }
+            ],
+            company_name="Apple",
+            bucket="recruiters",
+        )
+
+        assert chosen is None
+        assert confidence is None
+        assert status == "no_match"
+
+    def test_choose_linkedin_backfill_match_rejects_wrong_role_for_bucket(self):
+        chosen, confidence, status = _choose_linkedin_backfill_match(
+            {
+                "full_name": "Lauren Tyson",
+                "title": "Research Recruiter",
+                "snippet": "Verified recruiter at Apple.",
+                "source": "theorg_traversal",
+                "profile_data": {
+                    "public_url": "https://theorg.com/org/apple/org-chart/lauren-tyson",
+                    "public_identity_slug": "apple",
+                },
+            },
+            [
+                {
+                    "full_name": "Lauren Tyson",
+                    "title": "Software Engineer",
+                    "snippet": "Software Engineer at Apple.",
+                    "source": "brave_search",
+                    "linkedin_url": "https://www.linkedin.com/in/laurentyson",
+                    "profile_data": {"linkedin_result_title": "Lauren Tyson - Software Engineer at Apple"},
+                }
+            ],
+            company_name="Apple",
+            bucket="recruiters",
+        )
+
+        assert chosen is None
+        assert confidence is None
+        assert status == "no_match"
+
+    @pytest.mark.asyncio
+    async def test_backfill_linkedin_profiles_upgrades_weak_peer_title(self):
+        with patch(
+            "app.services.people_service.brave_search_client.search_exact_linkedin_profile",
+            new_callable=AsyncMock,
+        ) as mock_search:
+            mock_search.return_value = [
+                {
+                    "full_name": "Brandon Lee",
+                    "title": "Software Engineer",
+                    "snippet": "Software Engineer at Whatnot.",
+                    "source": "brave_search",
+                    "linkedin_url": "https://www.linkedin.com/in/brandonlee",
+                    "profile_data": {"linkedin_result_title": "Brandon Lee - Software Engineer at Whatnot"},
+                }
+            ]
+            results = await _backfill_linkedin_profiles(
+                [
+                    {
+                        "full_name": "Brandon Lee",
+                        "title": "Whatnot",
+                        "snippet": "Current teammate at Whatnot.",
+                        "source": "theorg_traversal",
+                        "_weak_title": True,
+                        "_employment_status": "current",
+                        "profile_data": {
+                            "public_url": "https://theorg.com/org/whatnot/org-chart/brandon-lee",
+                            "public_identity_slug": "whatnot",
+                        },
+                    }
+                ],
+                company_name="Whatnot",
+                public_identity_slugs=["whatnot"],
+                bucket="peers",
+            )
+
+        assert results[0]["linkedin_url"] == "https://www.linkedin.com/in/brandonlee"
+        assert results[0]["title"] == "Software Engineer"
+        assert results[0]["_weak_title"] is False
+        assert results[0]["profile_data"]["linkedin_backfill_status"] == "matched"
+        assert results[0]["profile_data"]["title_recovery_source"] == "linkedin_backfill"
+
+    @pytest.mark.asyncio
+    async def test_backfill_linkedin_profiles_marks_ambiguous_matches(self):
+        with patch(
+            "app.services.people_service.brave_search_client.search_exact_linkedin_profile",
+            new_callable=AsyncMock,
+        ) as mock_search:
+            mock_search.return_value = [
+                {
+                    "full_name": "Alex Kim",
+                    "title": "Software Engineer",
+                    "snippet": "Software Engineer at Apple.",
+                    "source": "brave_search",
+                    "linkedin_url": "https://www.linkedin.com/in/alexkim1",
+                    "profile_data": {"linkedin_result_title": "Alex Kim - Software Engineer at Apple"},
+                },
+                {
+                    "full_name": "Alex Kim",
+                    "title": "Software Engineer",
+                    "snippet": "Software Engineer at Apple.",
+                    "source": "brave_search",
+                    "linkedin_url": "https://www.linkedin.com/in/alexkim2",
+                    "profile_data": {"linkedin_result_title": "Alex Kim - Software Engineer at Apple"},
+                },
+            ]
+            results = await _backfill_linkedin_profiles(
+                [
+                    {
+                        "full_name": "Alex Kim",
+                        "title": "Software Engineer",
+                        "snippet": "Current teammate at Apple.",
+                        "source": "theorg_traversal",
+                        "_weak_title": False,
+                        "_employment_status": "current",
+                        "profile_data": {
+                            "public_url": "https://theorg.com/org/apple/org-chart/alex-kim",
+                            "public_identity_slug": "apple",
+                        },
+                    }
+                ],
+                company_name="Apple",
+                public_identity_slugs=["apple"],
+                bucket="peers",
+            )
+
+        assert results[0].get("linkedin_url") in {None, ""}
+        assert results[0]["profile_data"]["linkedin_backfill_status"] == "ambiguous"
+
+    @pytest.mark.asyncio
+    async def test_store_person_merges_linkedin_into_existing_public_profile(self):
+        existing = SimpleNamespace(
+            apollo_id=None,
+            title="Whatnot",
+            full_name="Brandon Lee",
+            company_id=None,
+            company=None,
+            profile_data={"public_url": "https://theorg.com/org/whatnot/org-chart/brandon-lee"},
+            linkedin_url=None,
+        )
+        company = SimpleNamespace(id=uuid.uuid4(), name="Whatnot")
+        db = MagicMock()
+        db.execute = AsyncMock(side_effect=[_ScalarResult(existing)])
+
+        person = await _store_person(
+            db,
+            uuid.uuid4(),
+            company,
+            {
+                "full_name": "Brandon Lee",
+                "title": "Software Engineer",
+                "linkedin_url": "https://www.linkedin.com/in/brandonlee",
+                "profile_data": {
+                    "public_url": "https://theorg.com/org/whatnot/org-chart/brandon-lee",
+                    "linkedin_backfill_status": "matched",
+                },
+            },
+            "peer",
+        )
+
+        assert person is existing
+        assert existing.linkedin_url == "https://www.linkedin.com/in/brandonlee"
+        assert existing.title == "Software Engineer"
+        assert existing.profile_data["linkedin_backfill_status"] == "matched"

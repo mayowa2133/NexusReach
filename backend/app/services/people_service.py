@@ -1,6 +1,7 @@
 """People discovery service for company and job-aware search."""
 
 import re
+import unicodedata
 import uuid
 from datetime import datetime, timezone
 from urllib.parse import urlparse
@@ -137,6 +138,12 @@ def _normalize_identity(value: str | None) -> str:
     return " ".join((value or "").lower().split())
 
 
+def _normalize_name_for_matching(value: str | None) -> str:
+    normalized = unicodedata.normalize("NFKD", value or "")
+    ascii_only = normalized.encode("ascii", "ignore").decode("ascii")
+    return " ".join(re.findall(r"[a-z0-9]+", ascii_only.lower()))
+
+
 def _contains_any_keyword(text: str | None, keywords: tuple[str, ...]) -> bool:
     normalized = _normalize_identity(text)
     return any(keyword in normalized for keyword in keywords)
@@ -170,6 +177,27 @@ def _keyword_in_text(keyword: str, text: str) -> bool:
 
 def _slugify(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", (value or "").lower()).strip("-")
+
+
+def _name_match_score(candidate_name: str | None, linkedin_name: str | None) -> int:
+    candidate_tokens = _normalize_name_for_matching(candidate_name).split()
+    linkedin_tokens = _normalize_name_for_matching(linkedin_name).split()
+    if len(candidate_tokens) < 2 or len(linkedin_tokens) < 2:
+        return 0
+
+    candidate_first, candidate_last = candidate_tokens[0], candidate_tokens[-1]
+    linkedin_first, linkedin_last = linkedin_tokens[0], linkedin_tokens[-1]
+    if candidate_first != linkedin_first:
+        return 0
+
+    if candidate_last == linkedin_last:
+        return 100 if candidate_tokens == linkedin_tokens else 96
+
+    if len(candidate_last) == 1 and linkedin_last.startswith(candidate_last):
+        return 90
+    if len(linkedin_last) == 1 and candidate_last.startswith(linkedin_last):
+        return 90
+    return 0
 
 
 def _public_profile_url(data: dict) -> str:
@@ -318,6 +346,20 @@ def _title_recovery_metadata(
     return profile_data
 
 
+def _linkedin_backfill_metadata(
+    data: dict,
+    *,
+    status: str,
+    confidence: int | None = None,
+) -> dict:
+    profile_data = dict(data.get("profile_data") or {})
+    profile_data["linkedin_backfill_status"] = status
+    profile_data["linkedin_backfill_source"] = "brave_search"
+    if confidence is not None:
+        profile_data["linkedin_backfill_confidence"] = confidence
+    return profile_data
+
+
 def _recover_title_from_snippet(
     data: dict,
     *,
@@ -449,6 +491,122 @@ async def _recover_candidate_titles(
         recovered_candidates.append(data)
 
     return recovered_candidates
+
+
+def _linkedin_company_match(candidate: dict, company_name: str) -> bool:
+    profile_data = candidate.get("profile_data") or {}
+    result_title = profile_data.get("linkedin_result_title")
+    texts = [candidate.get("snippet", ""), candidate.get("title", ""), result_title]
+    return any(_mentions_company(str(text), company_name) for text in texts if text)
+
+
+def _linkedin_role_match(candidate: dict, *, bucket: str) -> bool:
+    title = candidate.get("title", "") or ""
+    snippet = candidate.get("snippet", "") or ""
+    person_type = _classify_person(title, source=candidate.get("source", ""), snippet=snippet)
+    if bucket == "recruiters":
+        return person_type == "recruiter" and (_is_recruiter_like(title) or _is_recruiter_like(snippet))
+    if bucket == "hiring_managers":
+        return person_type == "hiring_manager" and (_is_manager_like(title) or _is_manager_like(snippet))
+    return person_type == "peer"
+
+
+def _choose_linkedin_backfill_match(
+    candidate: dict,
+    matches: list[dict],
+    *,
+    company_name: str,
+    bucket: str,
+) -> tuple[dict | None, int | None, str]:
+    scored_matches: list[tuple[int, dict]] = []
+    for match in matches:
+        name_score = _name_match_score(candidate.get("full_name"), match.get("full_name"))
+        if name_score < 90:
+            continue
+        if not _linkedin_company_match(match, company_name):
+            continue
+        if not _linkedin_role_match(match, bucket=bucket):
+            continue
+        scored_matches.append((name_score, match))
+
+    if not scored_matches:
+        return None, None, "no_match"
+
+    scored_matches.sort(key=lambda item: (-item[0], _normalize_identity(item[1].get("full_name"))))
+    best_score, best_match = scored_matches[0]
+    if len(scored_matches) > 1:
+        second_score = scored_matches[1][0]
+        if best_score == second_score or (best_score < 100 and second_score >= best_score - 4):
+            return None, None, "ambiguous"
+    return best_match, best_score, "matched"
+
+
+async def _backfill_linkedin_profiles(
+    candidates: list[dict],
+    *,
+    company_name: str,
+    public_identity_slugs: list[str] | None,
+    bucket: str,
+) -> list[dict]:
+    backfilled: list[dict] = []
+    for raw in candidates:
+        data = dict(raw)
+        if data.get("linkedin_url"):
+            backfilled.append(data)
+            continue
+
+        public_url = _public_profile_url(data)
+        if not public_url:
+            backfilled.append(data)
+            continue
+
+        employment_status = data.get("_employment_status") or _classify_employment_status(
+            data,
+            company_name,
+            public_identity_slugs,
+        )
+        trusted_public = _trusted_public_match(data, company_name, public_identity_slugs)
+        if employment_status != "current" and not trusted_public:
+            data["profile_data"] = _linkedin_backfill_metadata(data, status="skipped")
+            backfilled.append(data)
+            continue
+
+        matches = await brave_search_client.search_exact_linkedin_profile(
+            data.get("full_name", ""),
+            company_name,
+            limit=3,
+        )
+        chosen, confidence, status = _choose_linkedin_backfill_match(
+            data,
+            matches,
+            company_name=company_name,
+            bucket=bucket,
+        )
+        data["profile_data"] = _linkedin_backfill_metadata(
+            data,
+            status=status,
+            confidence=confidence,
+        )
+        if chosen:
+            data["linkedin_url"] = chosen.get("linkedin_url", "")
+            recovered_title = chosen.get("title", "")
+            if recovered_title and (
+                bucket != "peer"
+                or data.get("_weak_title")
+                or _title_is_weak(data.get("title"), company_name)
+            ):
+                if not _title_is_weak(recovered_title, company_name):
+                    data["title"] = recovered_title
+                    data["_weak_title"] = False
+                    profile_data = _title_recovery_metadata(
+                        data,
+                        source="linkedin_backfill",
+                        confidence=confidence,
+                    )
+                    profile_data.update(data.get("profile_data") or {})
+                    data["profile_data"] = profile_data
+        backfilled.append(data)
+    return backfilled
 
 
 def _prioritize_titles_for_search(
@@ -1078,10 +1236,18 @@ async def _store_person(
         if existing:
             if apollo_id and not existing.apollo_id:
                 existing.apollo_id = apollo_id
-            if not existing.title and data.get("title"):
+            if (
+                data.get("title")
+                and (
+                    not existing.title
+                    or (_title_is_weak(existing.title, company.name if company else "") and not _title_is_weak(data.get("title"), company.name if company else ""))
+                )
+            ):
                 existing.title = data.get("title")
             if not existing.full_name and data.get("full_name"):
                 existing.full_name = data.get("full_name")
+            if linkedin and not existing.linkedin_url:
+                existing.linkedin_url = linkedin
             if company_id and existing.company_id != company_id:
                 existing.company_id = company_id
             if company:
@@ -1099,7 +1265,13 @@ async def _store_person(
         if existing:
             if apollo_id and not existing.apollo_id:
                 existing.apollo_id = apollo_id
-            if not existing.title and data.get("title"):
+            if (
+                data.get("title")
+                and (
+                    not existing.title
+                    or (_title_is_weak(existing.title, company.name if company else "") and not _title_is_weak(data.get("title"), company.name if company else ""))
+                )
+            ):
                 existing.title = data.get("title")
             if not existing.full_name and data.get("full_name"):
                 existing.full_name = data.get("full_name")
@@ -1376,6 +1548,25 @@ async def search_people_at_company(
             limit=5,
         )
 
+    recruiter_results = await _backfill_linkedin_profiles(
+        recruiter_results,
+        company_name=company_name,
+        public_identity_slugs=public_identity_terms,
+        bucket="recruiters",
+    )
+    manager_results = await _backfill_linkedin_profiles(
+        manager_results,
+        company_name=company_name,
+        public_identity_slugs=public_identity_terms,
+        bucket="hiring_managers",
+    )
+    peer_results = await _backfill_linkedin_profiles(
+        peer_results,
+        company_name=company_name,
+        public_identity_slugs=public_identity_terms,
+        bucket="peers",
+    )
+
     github_members: list[dict] = []
     if github_org:
         github_members = await github_client.search_org_members(github_org, limit=5)
@@ -1617,6 +1808,25 @@ async def search_people_for_job(
             context=context,
             limit=5,
         )
+
+    recruiter_results = await _backfill_linkedin_profiles(
+        recruiter_results,
+        company_name=job.company_name,
+        public_identity_slugs=public_identity_terms,
+        bucket="recruiters",
+    )
+    manager_results = await _backfill_linkedin_profiles(
+        manager_results,
+        company_name=job.company_name,
+        public_identity_slugs=public_identity_terms,
+        bucket="hiring_managers",
+    )
+    peer_results = await _backfill_linkedin_profiles(
+        peer_results,
+        company_name=job.company_name,
+        public_identity_slugs=public_identity_terms,
+        bucket="peers",
+    )
 
     hiring_team_results = await brave_search_client.search_hiring_team(
         job.company_name,

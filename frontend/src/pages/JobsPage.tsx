@@ -60,6 +60,8 @@ const SOURCE_LABELS: Record<string, string> = {
   greenhouse: 'Greenhouse',
   lever: 'Lever',
   ashby: 'Ashby',
+  workable: 'Workable',
+  apple_jobs: 'Apple Jobs',
 };
 
 export function JobsPage() {
@@ -204,21 +206,23 @@ export function JobsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Search Company Career Page</CardTitle>
-            <CardDescription>Paste a Greenhouse, Lever, or Ashby job URL, or enter a board ID.</CardDescription>
+            <CardDescription>
+              Paste a job posting URL from Apple Jobs, Greenhouse, Lever, Ashby, Workable, or a similar careers page, or enter a supported board ID.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleATSSearch} className="space-y-3">
               <div className="space-y-2">
-                <Label htmlFor="ats-slug">Board ID or Job URL</Label>
+                <Label htmlFor="ats-slug">Board ID or Job Posting URL</Label>
                 <Input
                   id="ats-slug"
-                  placeholder="e.g. stripe or https://job-boards.greenhouse.io/..."
+                  placeholder="e.g. stripe or https://jobs.apple.com/en-us/details/..."
                   value={atsInput}
                   onChange={(e) => setAtsInput(e.target.value)}
                   required
                 />
                 <p className="text-xs text-muted-foreground">
-                  Full job links auto-detect the ATS and exact posting. Board IDs still use the selected platform.
+                  Full job links auto-detect the platform and exact posting. Board IDs still use the selected platform.
                 </p>
               </div>
               <div className="space-y-2">

@@ -288,42 +288,41 @@ async def search_ats_jobs(
     limit: int | None = None,
     job_url: str | None = None,
 ) -> list[Job]:
-    """Search a specific ATS board for jobs."""
+    """Search a supported board-backed ATS or ingest a single exact job URL."""
     target_external_id: str | None = None
     target_url: str | None = None
+    parsed_job_url: ats_client.ParsedATSJobURL | None = None
 
     if job_url:
         parsed_job_url = ats_client.parse_ats_job_url(job_url)
         if not parsed_job_url:
-            raise ValueError("Unsupported ATS job URL.")
+            raise ValueError("Unsupported or invalid job posting URL.")
         company_slug = parsed_job_url.company_slug
         ats_type = parsed_job_url.ats_type
         target_external_id = parsed_job_url.external_id
         target_url = parsed_job_url.canonical_url
 
-    if not company_slug or not ats_type:
+    if not ats_type:
         raise ValueError("ATS search requires either job_url or company_slug plus ats_type.")
+
+    adapter = ats_client.get_adapter(ats_type)
+    if not adapter:
+        raise ValueError("Unsupported or invalid job posting URL.")
 
     result = await db.execute(
         select(Profile).where(Profile.user_id == user_id)
     )
     profile = result.scalar_one_or_none()
 
-    if ats_type == "greenhouse":
-        raw_jobs = await ats_client.search_greenhouse(company_slug, limit)
-    elif ats_type == "lever":
-        raw_jobs = await ats_client.search_lever(company_slug, limit)
-    elif ats_type == "ashby":
-        raw_jobs = await ats_client.search_ashby(company_slug, limit)
-    elif ats_type == "workable":
-        if not target_external_id:
-            raise ValueError("Workable ATS search currently requires a direct job URL.")
-        raw_jobs = await ats_client.search_workable(
-            company_slug,
-            job_shortcode=target_external_id.removeprefix("wk_"),
-        )
+    if job_url and parsed_job_url and adapter.fetch_exact is not None:
+        try:
+            raw_jobs = await ats_client.fetch_exact_job(parsed_job_url)
+        except ats_client.ExactJobFetchError as exc:
+            raise ValueError(str(exc)) from exc
     else:
-        return []
+        if not company_slug or adapter.search_board is None:
+            raise ValueError("This job platform currently requires a direct job posting URL.")
+        raw_jobs = await adapter.search_board(company_slug, limit)
 
     stored_jobs: list[Job] = []
     board_jobs: list[Job] = []
@@ -341,10 +340,12 @@ async def search_ats_jobs(
             continue
         seen_job_keys.add(job_key)
 
+        job_ats = data.get("ats", ats_type)
+        job_ats_slug = data.get("ats_slug", company_slug)
         existing_job = await _find_existing_job(
             db,
             user_id=user_id,
-            ats=ats_type,
+            ats=job_ats,
             external_id=data.get("external_id"),
             url=data.get("url"),
             fingerprint=fp,
@@ -365,13 +366,14 @@ async def search_ats_jobs(
             url=data.get("url"),
             description=data.get("description"),
             source=data.get("source", ats_type),
-            ats=ats_type,
-            ats_slug=company_slug,
+            ats=job_ats,
+            ats_slug=job_ats_slug,
             posted_at=data.get("posted_at"),
             match_score=score,
             score_breakdown=breakdown,
             fingerprint=fp,
             department=data.get("department"),
+            employment_type=data.get("employment_type"),
         )
         db.add(job)
         stored_jobs.append(job)

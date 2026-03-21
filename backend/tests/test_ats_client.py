@@ -1,18 +1,18 @@
 """Unit tests for ATS public board clients."""
 
+import json
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
 
 from app.clients.ats_client import (
+    ExactJobFetchError,
+    fetch_exact_job,
     parse_ats_job_url,
     search_ashby,
     search_greenhouse,
     search_lever,
     search_workable,
 )
-
-pytestmark = pytest.mark.asyncio
-
 
 def _mock_httpx_response(json_data, status_code=200):
     resp = MagicMock()
@@ -196,3 +196,150 @@ class TestParseATSJobURL:
         assert parsed.company_slug == "trexquant"
         assert parsed.external_id == "wk_AC6E22F084"
         assert parsed.canonical_url == "https://apply.workable.com/trexquant/j/AC6E22F084"
+
+    def test_parses_apple_jobs_url(self):
+        parsed = parse_ats_job_url(
+            "https://jobs.apple.com/en-us/details/200652765/software-engineer-core-os-telemetry?board_id=17682&jr_id=69bdc46c393a1008f7434e68"
+        )
+        assert parsed is not None
+        assert parsed.ats_type == "apple_jobs"
+        assert parsed.company_slug == "apple"
+        assert parsed.external_id == "apple_200652765"
+        assert parsed.canonical_url == (
+            "https://jobs.apple.com/en-us/details/200652765/software-engineer-core-os-telemetry"
+        )
+        assert parsed.exact_url_only is True
+
+    def test_parses_generic_exact_job_url(self):
+        parsed = parse_ats_job_url("https://careers.example.com/jobs/platform-engineer?utm_source=test")
+        assert parsed is not None
+        assert parsed.ats_type == "generic_exact"
+        assert parsed.company_slug == "example"
+        assert parsed.canonical_url == "https://careers.example.com/jobs/platform-engineer"
+        assert parsed.exact_url_only is True
+
+
+class TestFetchExactJob:
+    async def test_fetches_apple_job_from_hydration_payload(self):
+        parsed = parse_ats_job_url(
+            "https://jobs.apple.com/en-us/details/200652765/software-engineer-core-os-telemetry"
+        )
+        assert parsed is not None
+
+        payload = {
+            "loaderData": {
+                "jobDetails": {
+                    "jobsData": {
+                        "jobNumber": "200652765",
+                        "postingTitle": "Software Engineer - Core OS Telemetry",
+                        "jobSummary": "Build telemetry systems.",
+                        "description": "You will work on Core OS telemetry.",
+                        "responsibilities": "<ul><li>Ship backend services</li></ul>",
+                        "minimumQualifications": "<ul><li>BS in CS</li></ul>",
+                        "preferredQualifications": "<ul><li>Swift or Python</li></ul>",
+                        "locations": [
+                            {
+                                "city": "Cupertino",
+                                "stateProvince": "California",
+                                "countryName": "United States",
+                            }
+                        ],
+                        "teamNames": ["Core OS"],
+                        "employmentType": "Full Time",
+                        "postDateInGMT": "2026-03-21T00:00:00Z",
+                    }
+                }
+            }
+        }
+        escaped_payload = json.dumps(json.dumps(payload))[1:-1]
+        page = {
+            "url": parsed.canonical_url,
+            "title": "Software Engineer - Core OS Telemetry - Jobs - Careers at Apple",
+            "html": (
+                "<html><body><script>"
+                f'window.__staticRouterHydrationData = JSON.parse("{escaped_payload}");'
+                "</script></body></html>"
+            ),
+            "content": "",
+        }
+
+        with patch(
+            "app.clients.ats_client.public_page_client.fetch_page",
+            new_callable=AsyncMock,
+        ) as mock_fetch_page:
+            mock_fetch_page.return_value = page
+            jobs = await fetch_exact_job(parsed)
+
+        assert len(jobs) == 1
+        assert jobs[0]["ats"] == "apple_jobs"
+        assert jobs[0]["title"] == "Software Engineer - Core OS Telemetry"
+        assert jobs[0]["company_name"] == "Apple"
+        assert jobs[0]["location"] == "Cupertino, California, United States"
+        assert jobs[0]["department"] == "Core OS"
+        assert "Minimum Qualifications" in (jobs[0]["description"] or "")
+
+    async def test_fetches_generic_exact_job_from_json_ld(self):
+        parsed = parse_ats_job_url("https://careers.example.com/jobs/platform-engineer")
+        assert parsed is not None
+
+        page = {
+            "url": parsed.canonical_url,
+            "title": "Platform Engineer - Example",
+            "html": """
+                <html><head>
+                <script type="application/ld+json">
+                {
+                  "@context":"https://schema.org",
+                  "@type":"JobPosting",
+                  "title":"Platform Engineer",
+                  "description":"Build platform systems.",
+                  "employmentType":"FULL_TIME",
+                  "datePosted":"2026-03-20",
+                  "hiringOrganization":{"name":"Example"},
+                  "jobLocation":{
+                    "@type":"Place",
+                    "address":{
+                      "@type":"PostalAddress",
+                      "addressLocality":"Toronto",
+                      "addressRegion":"ON",
+                      "addressCountry":"CA"
+                    }
+                  }
+                }
+                </script>
+                </head><body></body></html>
+            """,
+            "content": "",
+        }
+
+        with patch(
+            "app.clients.ats_client.public_page_client.fetch_page",
+            new_callable=AsyncMock,
+        ) as mock_fetch_page:
+            mock_fetch_page.return_value = page
+            jobs = await fetch_exact_job(parsed)
+
+        assert len(jobs) == 1
+        assert jobs[0]["ats"] == "example_jobs"
+        assert jobs[0]["company_name"] == "Example"
+        assert jobs[0]["location"] == "Toronto, ON, CA"
+        assert jobs[0]["source"] == "example_jobs"
+
+    async def test_fetch_exact_job_raises_when_page_lacks_required_metadata(self):
+        parsed = parse_ats_job_url("https://careers.example.com/jobs/platform-engineer")
+        assert parsed is not None
+
+        page = {
+            "url": parsed.canonical_url,
+            "title": "",
+            "html": "<html><body><p>No useful metadata</p></body></html>",
+            "content": "",
+        }
+
+        with patch(
+            "app.clients.ats_client.public_page_client.fetch_page",
+            new_callable=AsyncMock,
+        ) as mock_fetch_page:
+            mock_fetch_page.return_value = page
+            with pytest.raises(ExactJobFetchError):
+                await fetch_exact_job(parsed)
