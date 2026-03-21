@@ -26,11 +26,12 @@ class _ScalarResult:
 
 
 def _person(name: str, *, linkedin_url: str | None = "https://linkedin.com/in/test") -> SimpleNamespace:
-    company = SimpleNamespace(name="Twitch", domain="twitch.tv")
+    company = SimpleNamespace(name="Twitch", domain="twitch.tv", public_identity_slugs=["twitch"])
     return SimpleNamespace(
         id=uuid.uuid4(),
         user_id=uuid.uuid4(),
         full_name=name,
+        title="Software Engineer",
         linkedin_url=linkedin_url,
         company=company,
         profile_data={},
@@ -71,7 +72,34 @@ def test_analyze_public_content_verifies_strong_current_signal():
     )
 
     assert result.current_company_verified is True
-    assert result.current_company_verification_source == "firecrawl_public_web"
+    assert result.current_company_verification_source == "public_web"
+
+
+def test_analyze_public_content_verifies_theorg_slug_match_for_ambiguous_company():
+    result = _analyze_public_content(
+        "Andre Nguyen is a Sr Technical Recruiter at Zip.",
+        "Zip",
+        public_url="https://theorg.com/org/ziphq/org-chart/andre-nguyen",
+        trusted_public_identity_slugs=["zip", "ziphq"],
+    )
+
+    assert result.current_company_verified is True
+    assert result.current_company_verification_source == "public_web"
+
+
+def test_analyze_public_content_verifies_theorg_team_page_candidate_match():
+    result = _analyze_public_content(
+        "People Alicia Zhou Engineering Manager Nick Galloway Software Engineer Sophia Feng Software Engineer - Payments",
+        "Zip",
+        public_url="https://theorg.com/org/ziphq/teams/software-development-and-engineering",
+        trusted_public_identity_slugs=["zip", "ziphq"],
+        public_page_type="team",
+        candidate_name="Nick Galloway",
+        candidate_title="Software Engineer",
+    )
+
+    assert result.current_company_verified is True
+    assert "team page" in (result.current_company_verification_evidence or "").lower()
 
 
 def test_ambiguous_company_variant_does_not_verify_target_company():
@@ -191,3 +219,142 @@ async def test_verify_current_company_for_person_refreshes_person():
 
     assert refreshed.current_company_verified is True
     db.commit.assert_awaited_once()
+
+
+async def test_verify_people_current_company_can_verify_public_profile_without_linkedin():
+    person = _person("Andre Nguyen", linkedin_url=None)
+    person.company = SimpleNamespace(name="Zip", domain=None, public_identity_slugs=["zip", "ziphq"])
+    person.profile_data = {
+        "public_url": "https://theorg.com/org/ziphq/org-chart/andre-nguyen",
+        "public_identity_slug": "ziphq",
+    }
+    bucketed = {
+        "recruiters": [person],
+        "hiring_managers": [],
+        "peers": [],
+    }
+
+    with (
+        patch("app.services.employment_verification_service.settings") as mock_settings,
+        patch(
+            "app.services.employment_verification_service.public_page_client.fetch_page",
+            new_callable=AsyncMock,
+            return_value={
+                "url": "https://theorg.com/org/ziphq/org-chart/andre-nguyen",
+                "content": "Andre Nguyen is a Sr Technical Recruiter at Zip.",
+                "html": "<html></html>",
+                "markdown": "",
+                "retrieval_method": "direct",
+                "fallback_used": False,
+            },
+        ),
+        patch(
+            "app.services.employment_verification_service.brave_search_client.search_employment_sources",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        ):
+        mock_settings.employment_verify_enabled = True
+        mock_settings.employment_verify_top_n = 10
+        mock_settings.employment_verify_timeout_seconds = 5
+        await verify_people_current_company(
+            bucketed,
+            company_name="Zip",
+            company_domain=None,
+            company_public_identity_slugs=["zip", "ziphq"],
+        )
+
+    assert bucketed["recruiters"][0].current_company_verified is True
+    assert bucketed["recruiters"][0].current_company_verification_source == "public_web"
+    assert bucketed["recruiters"][0].profile_data["employment_verification"]["retrieval_method"] == "direct"
+
+
+async def test_verify_people_current_company_does_not_shortcut_team_page_without_scrape():
+    person = _person("Nick Galloway", linkedin_url=None)
+    person.company = SimpleNamespace(name="Zip", domain=None, public_identity_slugs=["zip", "ziphq"])
+    person.profile_data = {
+        "public_url": "https://theorg.com/org/ziphq/teams/software-development-and-engineering",
+        "public_identity_slug": "ziphq",
+        "public_page_type": "team",
+    }
+    bucketed = {
+        "recruiters": [],
+        "hiring_managers": [],
+        "peers": [person],
+    }
+
+    with (
+        patch("app.services.employment_verification_service.settings") as mock_settings,
+        patch(
+            "app.services.employment_verification_service.public_page_client.fetch_page",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "app.services.employment_verification_service.brave_search_client.search_employment_sources",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+    ):
+        mock_settings.employment_verify_enabled = True
+        mock_settings.employment_verify_top_n = 10
+        mock_settings.employment_verify_timeout_seconds = 5
+        await verify_people_current_company(
+            bucketed,
+            company_name="Zip",
+            company_domain=None,
+            company_public_identity_slugs=["zip", "ziphq"],
+        )
+
+    assert bucketed["peers"][0].current_company_verified is None
+    assert bucketed["peers"][0].current_company_verification_status == "skipped"
+
+
+async def test_verify_people_current_company_records_crawl4ai_public_fallback():
+    person = _person("Taylor Example", linkedin_url=None)
+    person.company = SimpleNamespace(name="Twitch", domain="twitch.tv", public_identity_slugs=["twitch"])
+    person.profile_data = {
+        "public_url": "https://example.com/taylor-example",
+        "public_page_type": "org_chart_person",
+    }
+    bucketed = {
+        "recruiters": [person],
+        "hiring_managers": [],
+        "peers": [],
+    }
+
+    with (
+        patch("app.services.employment_verification_service.settings") as mock_settings,
+        patch(
+            "app.services.employment_verification_service.public_page_client.fetch_page",
+            new_callable=AsyncMock,
+            return_value={
+                "url": "https://example.com/taylor-example",
+                "content": "Currently serving as an Engineering Manager at Twitch since 2022.",
+                "html": "<html></html>",
+                "markdown": "",
+                "retrieval_method": "crawl4ai",
+                "fallback_used": True,
+            },
+        ),
+        patch(
+            "app.services.employment_verification_service.brave_search_client.search_employment_sources",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+    ):
+        mock_settings.employment_verify_enabled = True
+        mock_settings.employment_verify_top_n = 10
+        mock_settings.employment_verify_timeout_seconds = 5
+        await verify_people_current_company(
+            bucketed,
+            company_name="Twitch",
+            company_domain="twitch.tv",
+            company_public_identity_slugs=["twitch"],
+        )
+
+    verification = bucketed["recruiters"][0].profile_data["employment_verification"]
+    assert bucketed["recruiters"][0].current_company_verified is True
+    assert bucketed["recruiters"][0].current_company_verification_source == "public_web"
+    assert verification["retrieval_method"] == "crawl4ai"
+    assert verification["fallback_used"] is True

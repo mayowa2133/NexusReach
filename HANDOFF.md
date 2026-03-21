@@ -1,70 +1,64 @@
 # NexusReach Handoff
 
 ## Completed in this pass
-- Added safe batch email drafting from a People shortlist.
-  - People page now supports multi-select with a max of 10 contacts.
-  - Selected contacts navigate into Messages via `mode=batch`, `person_ids`, and optional `job_id`.
-- Added backend batch APIs.
-  - `POST /api/messages/batch-draft`
-  - `POST /api/email/stage-drafts`
-- Batch drafting now:
-  - deduplicates selections
-  - skips recent contacts by default
-  - allows verified and best-guess emails
-  - skips contacts with no usable email
-  - returns per-item `ready`, `skipped`, or `failed` results with reasons
-- Batch staging now:
-  - stages drafts sequentially through Gmail or Outlook
-  - continues after partial failures
-  - sets `Message.status = "staged"`
-  - creates outreach logs only for successfully staged drafts
-- Messages page now has a batch review mode.
-  - shows one review card per contact
-  - supports per-row edit, regenerate, deselect
-  - supports recent-contact override from the review queue
-  - stages only the drafts the user explicitly selects
-- Added route/UI/tests coverage for the new batch flow.
-- Updated `lessons.md`.
+- Added a generic free-first public page fetch layer.
+  - Strategy is now direct `httpx` fetch first, then Crawl4AI, then Firecrawl only if configured.
+  - Public-web employment verification no longer bails out when Firecrawl env is missing.
+  - New public-web verification writes use `current_company_verification_source="public_web"` while old `firecrawl_public_web` rows remain readable.
+- Added Firecrawl-backed The Org graph traversal for people discovery.
+  - Resolves a trusted The Org org slug from `Company.public_identity_slugs`
+  - Traverses company org pages, relevant team pages, and selected manager person pages
+  - Harvests recruiter, hiring-manager, and peer candidates with `source="theorg_traversal"`
+- The Org candidates now carry richer public metadata in `profile_data`.
+  - `public_url`, `public_host`, `public_identity_slug`, `public_page_type`
+  - `theorg_origin_url`, `theorg_team_slug`, `theorg_team_name`
+  - `theorg_relationship`, `theorg_parent_name`, `theorg_parent_title`
+- People discovery now uses The Org as a second-stage expansion when buckets are underfilled or the company name is ambiguous.
+  - Existing Apollo + Brave + hiring-team search stays in place
+  - The Org candidates are merged into the existing `_prepare_candidates()` path before storage/ranking
+- Current-company verification is stricter for public pages.
+  - direct trusted-slug shortcut now only applies to The Org person pages
+  - team-page verification now requires the trusted company slug plus the candidate’s name and title on the scraped team page
+- Added backend config for bounded traversal and cache TTL in `backend/.env.example`.
 
 ## Files changed in this pass
-- `backend/app/routers/email.py`
-- `backend/app/routers/messages.py`
-- `backend/app/schemas/email.py`
-- `backend/app/schemas/messages.py`
-- `backend/app/services/draft_staging_service.py`
-- `backend/app/services/message_service.py`
-- `backend/tests/test_email_api.py`
-- `backend/tests/test_messages_api.py`
-- `frontend/src/hooks/useEmail.ts`
-- `frontend/src/hooks/useMessages.ts`
-- `frontend/src/pages/MessagesPage.tsx`
-- `frontend/src/pages/PeoplePage.tsx`
-- `frontend/src/pages/__tests__/MessagesPage.test.tsx`
-- `frontend/src/pages/__tests__/PeoplePage.test.tsx`
-- `frontend/src/types/index.ts`
+- `backend/app/clients/firecrawl_client.py`
+- `backend/app/clients/public_page_client.py`
+- `backend/app/clients/theorg_client.py`
+- `backend/app/clients/crawl4ai_client.py`
+- `backend/app/config.py`
+- `backend/app/services/employment_verification_service.py`
+- `backend/app/services/people_service.py`
+- `backend/app/services/theorg_discovery_service.py`
+- `backend/app/utils/company_identity.py`
+- `backend/tests/test_employment_verification_service.py`
+- `backend/tests/test_theorg_client.py`
+- `backend/tests/test_theorg_discovery_service.py`
+- `backend/.env.example`
 - `HANDOFF.md`
 - `lessons.md`
 
 ## Verification completed
 - `cd backend && ruff check app tests conftest.py`
 - `cd backend && pytest`
-  - result: `485 passed`
-- `cd frontend && npx eslint .`
-- `cd frontend && npx tsc -b`
-- `cd frontend && npm run test`
-  - result: `96 passed`
-- `cd frontend && npm run build`
+  - result: `514 passed`
+- Targeted The Org / verification checks:
+  - `cd backend && pytest tests/test_public_page_client.py tests/test_theorg_client.py tests/test_theorg_discovery_service.py tests/test_employment_verification_service.py tests/test_people_utils.py -q`
+  - result: `39 passed`
 
 ## Remaining caveats
-- Batch mode is email-only in v1. LinkedIn note/message batching is still not implemented.
-- The batch review queue is driven by query-param handoff from People. There is no persisted “campaign” object yet.
-- Deselecting a contact inside batch mode updates the local queue only; it does not rewrite the URL query string.
-- Shared or deployed environments do not need a migration for this pass, but they do need the updated backend/frontend code together because both new endpoints are used by the new UI flow.
+- Firecrawl is now an optional fallback, but self-hosted or hosted Firecrawl can still help on harder public pages where direct fetch and Crawl4AI both underperform.
+- This pass improves contact recall only. It does not change email-domain trust, email guessing safety, or the verified-only final bucket rule.
+- The traversal is intentionally bounded:
+  - up to 3 team pages
+  - up to 3 manager person pages
+  - up to 25 harvested candidates before normal prep/ranking
 
 ## Suggested next manual check
-- In People, select 3-5 contacts with mixed email states.
-- Start batch drafts and confirm:
-  - ready rows show individualized drafts
-  - no-email and recent-contact rows show explicit skip reasons
-  - `Include Anyway` only affects the targeted recent-contact row
-  - staging selected drafts marks them `staged` and creates outreach entries only for the staged subset
+- Run the Zip Ashby posting again with Firecrawl configured and confirm the People buckets recover:
+  - recruiters from the HR / Talent team
+  - engineering managers from the Software Development and Engineering team
+  - peers from engineering team members and manager direct reports
+- Then run one non-ambiguous company and confirm:
+  - The Org traversal does not overrun already-good results
+  - email lookup still withholds guesses when `company.domain_trusted` is false

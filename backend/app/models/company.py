@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Boolean, Integer, String, Text, DateTime, ForeignKey, func
-from sqlalchemy.dialects.postgresql import UUID, ARRAY
+from sqlalchemy.dialects.postgresql import UUID, ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -21,6 +21,8 @@ class Company(Base):
     normalized_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     domain: Mapped[str | None] = mapped_column(String(255))
     domain_trusted: Mapped[bool] = mapped_column(Boolean, default=False)
+    public_identity_slugs: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+    identity_hints: Mapped[dict | None] = mapped_column(JSONB)
     email_pattern: Mapped[str | None] = mapped_column(String(50))
     email_pattern_confidence: Mapped[int | None] = mapped_column(Integer, nullable=True)
     size: Mapped[str | None] = mapped_column(String(50))

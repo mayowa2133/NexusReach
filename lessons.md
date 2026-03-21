@@ -152,6 +152,14 @@ A living document of patterns, gotchas, and decisions encountered while building
 - Current-company verification is browser-heavy and slower than Brave/Apollo discovery.
 - **Lesson:** Verify only the top-ranked candidates per search and treat everyone else as `verification skipped` by default. This keeps latency bounded without hiding potentially useful next-best contacts.
 
+### The Org is much more reliable through embedded page JSON than visual scraping
+- Public The Org company, team, and person pages embed structured `__NEXT_DATA__` JSON with team slugs, members, current roles, and direct reports.
+- **Lesson:** Parse that embedded JSON instead of brittle markdown/text blocks when building org-chart traversal features. It is more stable and gives direct person/team metadata without inference-heavy scraping.
+
+### Public identity trust and email-domain trust should stay independent
+- A company can have enough trusted public identity to verify current employees from The Org while still lacking a trusted email domain for safe best guesses.
+- **Lesson:** Use The Org/public identity only to improve people recall and employment verification. Do not let successful public traversal silently reactivate unsafe email guesses.
+
 ---
 
 ## Phase 7 Testing Insights
@@ -297,3 +305,7 @@ A living document of patterns, gotchas, and decisions encountered while building
 ### New dependencies must be checked against pinned framework versions, not just the local environment
 - Adding `crawl4ai` while `requirements.txt` still pinned `pydantic==2.9.2` passed locally because the active interpreter already had a newer Pydantic installed, but CI failed during a clean install because `crawl4ai>=0.8` requires `pydantic>=2.10`.
 - **Lesson:** Whenever a new package is added, validate it against a fresh environment or the exact lockfile/requirements set, not the already-warmed local venv.
+
+### Retrieval providers should stay behind a generic interface
+- Once Firecrawl, direct `httpx`, and Crawl4AI all existed in the codebase, hard-coding `firecrawl_public_web` and branching on `firecrawl_base_url` made the product behavior depend on one provider even when others could do the job for free.
+- **Lesson:** Keep provider-specific retrieval behind one normalized public-fetch layer, and expose a generic product-level source like `public_web` while recording the exact retrieval method only in debug metadata.

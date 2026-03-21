@@ -11,10 +11,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.clients import brave_search_client, crawl4ai_client, firecrawl_client
+from app.clients import brave_search_client, crawl4ai_client, public_page_client
 from app.config import settings
 from app.models.person import Person
-from app.utils.company_identity import is_ambiguous_company_name, normalize_company_name
+from app.utils.company_identity import (
+    extract_public_identity_hints,
+    is_ambiguous_company_name,
+    matches_public_company_identity,
+    normalize_company_name,
+)
 
 VERIFIED_STATUSES = {"verified"}
 BLOCKED_CORROBORATION_HOSTS = {
@@ -23,6 +28,7 @@ BLOCKED_CORROBORATION_HOSTS = {
     "rocketreach.co",
 }
 AMBIGUOUS_COMPANY_NEGATIVE_SUFFIXES = ("co", "company", "limited", "ltd", "corp", "corporation")
+PUBLIC_WEB_VERIFICATION_SOURCE = "public_web"
 
 
 @dataclass
@@ -65,6 +71,33 @@ def _has_conflicting_company_variant(text: str, company_name: str) -> bool:
     first_token = company_normalized.split()[0]
     suffix_group = "|".join(AMBIGUOUS_COMPANY_NEGATIVE_SUFFIXES)
     return re.search(rf"\b{re.escape(first_token)}\s+(?:{suffix_group})\b", text, flags=re.IGNORECASE) is not None
+
+
+def _team_page_lists_candidate(
+    text: str,
+    *,
+    candidate_name: str | None,
+    candidate_title: str | None,
+) -> bool:
+    if not candidate_name:
+        return False
+    normalized = _normalize_text(text).lower()
+    name = _normalize_text(candidate_name).lower()
+    title = _normalize_text(candidate_title).lower()
+    if not name or name not in normalized:
+        return False
+    if not title:
+        return False
+    return title in normalized
+
+
+def _enrich_public_debug(result: EmploymentVerificationResult, page: dict | None, *, retrieval_url: str) -> None:
+    debug = result.debug.copy() if isinstance(result.debug, dict) else {}
+    if page:
+        debug["retrieval_method"] = page.get("retrieval_method")
+        debug["fallback_used"] = bool(page.get("fallback_used"))
+    debug["retrieval_url"] = retrieval_url
+    result.debug = debug
 
 
 def _analyze_linkedin_content(content: str, company_name: str) -> EmploymentVerificationResult:
@@ -115,7 +148,16 @@ def _analyze_linkedin_content(content: str, company_name: str) -> EmploymentVeri
     )
 
 
-def _analyze_public_content(content: str, company_name: str) -> EmploymentVerificationResult:
+def _analyze_public_content(
+    content: str,
+    company_name: str,
+    *,
+    public_url: str | None = None,
+    trusted_public_identity_slugs: list[str] | None = None,
+    public_page_type: str | None = None,
+    candidate_name: str | None = None,
+    candidate_title: str | None = None,
+) -> EmploymentVerificationResult:
     normalized = _normalize_text(content)
     haystack = _normalize_company_name(normalized)
     company_normalized = _normalize_company_name(company_name)
@@ -125,12 +167,40 @@ def _analyze_public_content(content: str, company_name: str) -> EmploymentVerifi
         return EmploymentVerificationResult(
             current_company_verified=False,
             current_company_verification_status="unverified",
-            current_company_verification_source="firecrawl_public_web",
+            current_company_verification_source=PUBLIC_WEB_VERIFICATION_SOURCE,
             current_company_verification_confidence=5,
             current_company_verification_evidence="Conflicting company variant found in public corroboration.",
             current_company_verified_at=None,
             debug={"kind": "public_web", "conflict": True},
         )
+
+    public_identity_hints = extract_public_identity_hints(public_url)
+    if matches_public_company_identity(public_url, company_name, trusted_public_identity_slugs):
+        resolved_page_type = public_page_type or public_identity_hints.get("page_type")
+        if resolved_page_type == "org_chart_person":
+            return EmploymentVerificationResult(
+                current_company_verified=True,
+                current_company_verification_status="verified",
+                current_company_verification_source=PUBLIC_WEB_VERIFICATION_SOURCE,
+                current_company_verification_confidence=95,
+                current_company_verification_evidence="Trusted The Org company slug matched the target company identity.",
+                current_company_verified_at=datetime.now(timezone.utc),
+                debug={"kind": "public_web", "public_slug_match": True, "page_type": resolved_page_type},
+            )
+        if resolved_page_type == "team" and _team_page_lists_candidate(
+            normalized,
+            candidate_name=candidate_name,
+            candidate_title=candidate_title,
+        ):
+            return EmploymentVerificationResult(
+                current_company_verified=True,
+                current_company_verification_status="verified",
+                current_company_verification_source=PUBLIC_WEB_VERIFICATION_SOURCE,
+                current_company_verification_confidence=93,
+                current_company_verification_evidence="Trusted The Org team page matched the target company and listed the candidate.",
+                current_company_verified_at=datetime.now(timezone.utc),
+                debug={"kind": "public_web", "public_slug_match": True, "page_type": resolved_page_type},
+            )
 
     positive_patterns = [
         (rf"\b(?:currently|current|serving|works|working)\b[^.:\n]{{0,100}}\b{company_pattern}\b", 92),
@@ -145,7 +215,7 @@ def _analyze_public_content(content: str, company_name: str) -> EmploymentVerifi
         return EmploymentVerificationResult(
             current_company_verified=True,
             current_company_verification_status="verified",
-            current_company_verification_source="firecrawl_public_web",
+            current_company_verification_source=PUBLIC_WEB_VERIFICATION_SOURCE,
             current_company_verification_confidence=confidence,
             current_company_verification_evidence=evidence,
             current_company_verified_at=datetime.now(timezone.utc),
@@ -155,7 +225,7 @@ def _analyze_public_content(content: str, company_name: str) -> EmploymentVerifi
     return EmploymentVerificationResult(
         current_company_verified=False,
         current_company_verification_status="unverified",
-        current_company_verification_source="firecrawl_public_web",
+        current_company_verification_source=PUBLIC_WEB_VERIFICATION_SOURCE,
         current_company_verification_confidence=25 if company_normalized in haystack else 10,
         current_company_verification_evidence=None,
         current_company_verified_at=None,
@@ -255,46 +325,107 @@ async def _verify_person(
     *,
     company_name: str,
     company_domain: str | None,
+    company_public_identity_slugs: list[str] | None = None,
 ) -> EmploymentVerificationResult:
     if not settings.employment_verify_enabled:
         return _skipped_result("Employment verification is disabled.")
     if not company_name:
         return _skipped_result("No target company available for verification.")
-    if not person.linkedin_url:
-        return _skipped_result("No LinkedIn URL available for verification.")
+    linkedin_result = _skipped_result("No LinkedIn URL available for verification.")
 
-    linkedin_page = await crawl4ai_client.fetch_profile(
-        person.linkedin_url,
-        timeout_seconds=settings.employment_verify_timeout_seconds,
-    )
-    if linkedin_page and linkedin_page.get("content"):
-        linkedin_result = _analyze_linkedin_content(linkedin_page["content"], company_name)
-        if linkedin_result.current_company_verified:
-            return linkedin_result
-    else:
-        linkedin_result = _failed_result("LinkedIn profile could not be fetched.")
+    if person.linkedin_url:
+        linkedin_page = await crawl4ai_client.fetch_profile(
+            person.linkedin_url,
+            timeout_seconds=settings.employment_verify_timeout_seconds,
+        )
+        if linkedin_page and linkedin_page.get("content"):
+            linkedin_result = _analyze_linkedin_content(linkedin_page["content"], company_name)
+            if linkedin_result.current_company_verified:
+                return linkedin_result
+        else:
+            linkedin_result = _failed_result("LinkedIn profile could not be fetched.")
 
-    if not settings.firecrawl_base_url:
-        return linkedin_result
+    public_url = ""
+    public_page_type = None
+    if isinstance(person.profile_data, dict):
+        raw_public_url = person.profile_data.get("public_url")
+        if isinstance(raw_public_url, str):
+            public_url = raw_public_url
+        raw_page_type = person.profile_data.get("public_page_type")
+        if isinstance(raw_page_type, str):
+            public_page_type = raw_page_type
+
+    if (
+        public_page_type == "org_chart_person"
+        and matches_public_company_identity(public_url, company_name, company_public_identity_slugs)
+    ):
+        seed_text = " ".join(
+            part for part in [getattr(person, "full_name", "") or "", getattr(person, "title", "") or ""] if part
+        )
+        if not _has_conflicting_company_variant(seed_text.lower(), company_name):
+            return EmploymentVerificationResult(
+                current_company_verified=True,
+                current_company_verification_status="verified",
+                current_company_verification_source=PUBLIC_WEB_VERIFICATION_SOURCE,
+                current_company_verification_confidence=93,
+                current_company_verification_evidence="Trusted public org/company slug matched the target company identity.",
+                current_company_verified_at=datetime.now(timezone.utc),
+                debug={
+                    "kind": "public_web",
+                    "public_slug_match": True,
+                    "direct_result": True,
+                    "retrieval_method": "direct",
+                    "retrieval_url": public_url,
+                    "fallback_used": False,
+                },
+            )
+
+    if public_url:
+        page = await public_page_client.fetch_page(
+            public_url,
+            timeout_seconds=settings.employment_verify_timeout_seconds,
+        )
+        if page and page.get("content"):
+            public_result = _analyze_public_content(
+                page["content"],
+                company_name,
+                public_url=public_url,
+                trusted_public_identity_slugs=company_public_identity_slugs,
+                public_page_type=public_page_type,
+                candidate_name=person.full_name,
+                candidate_title=person.title,
+            )
+            if public_result.current_company_verified:
+                _enrich_public_debug(public_result, page, retrieval_url=public_url)
+                return public_result
 
     corroboration_results = await brave_search_client.search_employment_sources(
         person.full_name or "",
         company_name,
         company_domain=company_domain,
+        public_identity_terms=company_public_identity_slugs,
         limit=3,
     )
     for result in corroboration_results:
         host = urlparse(result["url"]).netloc.lower()
         if host in BLOCKED_CORROBORATION_HOSTS:
             continue
-        page = await firecrawl_client.scrape_url(
+        page = await public_page_client.fetch_page(
             result["url"],
             timeout_seconds=settings.employment_verify_timeout_seconds,
         )
         if not page or not page.get("content"):
             continue
-        public_result = _analyze_public_content(page["content"], company_name)
+        public_result = _analyze_public_content(
+            page["content"],
+            company_name,
+            public_url=result["url"],
+            trusted_public_identity_slugs=company_public_identity_slugs,
+            candidate_name=person.full_name,
+            candidate_title=person.title,
+        )
         if public_result.current_company_verified:
+            _enrich_public_debug(public_result, page, retrieval_url=result["url"])
             return public_result
 
     return linkedin_result
@@ -305,6 +436,7 @@ async def verify_people_current_company(
     *,
     company_name: str,
     company_domain: str | None,
+    company_public_identity_slugs: list[str] | None = None,
     force: bool = False,
 ) -> None:
     """Verify current employment for the top-ranked people in a result set."""
@@ -332,6 +464,7 @@ async def verify_people_current_company(
                 person,
                 company_name=company_name,
                 company_domain=company_domain,
+                company_public_identity_slugs=company_public_identity_slugs,
             )
         )
 
@@ -367,10 +500,12 @@ async def verify_current_company_for_person(
 
     company_name = person.company.name if person.company else ""
     company_domain = person.company.domain if person.company and getattr(person.company, "domain_trusted", False) else None
+    company_public_identity_slugs = getattr(person.company, "public_identity_slugs", None) if person.company else None
     verification = await _verify_person(
         person,
         company_name=company_name,
         company_domain=company_domain,
+        company_public_identity_slugs=company_public_identity_slugs,
     )
     _apply_verification_result(person, verification)
     await db.commit()

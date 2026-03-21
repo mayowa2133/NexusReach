@@ -93,7 +93,12 @@ export interface Person {
   org_level?: 'ic' | 'manager' | 'director_plus' | null;
   current_company_verified?: boolean | null;
   current_company_verification_status?: 'verified' | 'unverified' | 'failed' | 'skipped' | null;
-  current_company_verification_source?: 'crawl4ai_linkedin' | 'firecrawl_public_web' | 'manual' | null;
+  current_company_verification_source?:
+    | 'crawl4ai_linkedin'
+    | 'public_web'
+    | 'firecrawl_public_web'
+    | 'manual'
+    | null;
   current_company_verification_confidence?: number | null;
   current_company_verification_evidence?: string | null;
   current_company_verified_at?: string | null;

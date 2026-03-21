@@ -41,6 +41,12 @@ class Settings(BaseSettings):
     brave_api_key: str = ""
     firecrawl_base_url: str = ""
     firecrawl_api_key: str = ""
+    theorg_traversal_enabled: bool = True
+    theorg_cache_ttl_hours: int = 24
+    theorg_max_team_pages: int = 3
+    theorg_max_manager_pages: int = 3
+    theorg_max_harvested_people: int = 25
+    theorg_timeout_seconds: int = 20
 
     # LLM provider selection (anthropic | openai | gemini | groq)
     llm_provider: str = "anthropic"

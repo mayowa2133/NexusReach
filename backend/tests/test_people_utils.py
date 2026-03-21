@@ -102,6 +102,8 @@ class TestEmploymentAndRanking:
             normalized_name="zip",
             domain=None,
             domain_trusted=False,
+            public_identity_slugs=[],
+            identity_hints={},
             email_pattern=None,
             email_pattern_confidence=None,
         )
@@ -119,6 +121,8 @@ class TestEmploymentAndRanking:
         assert company.name == "Zip"
         assert company.domain is None
         assert company.domain_trusted is False
+        assert "zip" in company.public_identity_slugs
+        assert "ziphq" in company.public_identity_slugs
 
     def test_classify_employment_status_former(self):
         status = _classify_employment_status(
@@ -154,6 +158,52 @@ class TestEmploymentAndRanking:
             },
             "Zip",
         ) is False
+
+    def test_candidate_matches_company_accepts_theorg_slug_for_ambiguous_company(self):
+        assert _candidate_matches_company(
+            {
+                "title": "Andre Nguyen - Sr Technical Recruiter",
+                "snippet": "Currently serving as a Sr Technical Recruiter at Zip.",
+                "source": "brave_public_web",
+                "profile_data": {
+                    "public_url": "https://theorg.com/org/ziphq/org-chart/andre-nguyen",
+                    "public_identity_slug": "ziphq",
+                },
+            },
+            "Zip",
+            ["zip", "ziphq"],
+        ) is True
+
+    def test_candidate_matches_company_rejects_directory_style_public_result(self):
+        assert _candidate_matches_company(
+            {
+                "title": "Courtney Cronin's Email & Phone",
+                "snippet": "Staff directory and contact information for Zip.",
+                "source": "brave_public_web",
+                "profile_data": {
+                    "public_url": "https://www.contactout.com/courtney-cronin",
+                },
+            },
+            "Zip",
+            ["zip", "ziphq"],
+        ) is False
+
+    def test_classify_employment_status_marks_theorg_slug_match_current(self):
+        status = _classify_employment_status(
+            {
+                "title": "Sophia Feng - Software Engineer",
+                "snippet": "Software Engineer, Payments at Zip.",
+                "source": "brave_public_web",
+                "profile_data": {
+                    "public_url": "https://theorg.com/org/ziphq/org-chart/sophia-feng",
+                    "public_identity_slug": "ziphq",
+                },
+            },
+            "Zip",
+            ["zip", "ziphq"],
+        )
+
+        assert status == "current"
 
     def test_classify_org_level(self):
         assert _classify_org_level("Software Engineer") == "ic"

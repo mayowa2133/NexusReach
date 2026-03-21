@@ -14,8 +14,18 @@ from urllib.parse import urlparse
 import httpx
 
 from app.config import settings
+from app.utils.company_identity import extract_public_identity_hints
 
 BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
+PUBLIC_RESULT_REJECTION_TERMS = (
+    "email & phone",
+    "phone number",
+    "staff directory",
+    "company profile",
+    "contact info",
+    "contact information",
+    "directory",
+)
 
 
 def _clean_profile_url(url: str) -> str:
@@ -107,6 +117,9 @@ def _parse_public_people_result(item: dict, company_name: str) -> dict | None:
     url = (item.get("url") or "").strip()
     if not title_raw or not url:
         return None
+    combined = f"{title_raw} {description}".lower()
+    if any(term in combined for term in PUBLIC_RESULT_REJECTION_TERMS):
+        return None
 
     clean_title = re.sub(r"\s*\|\s*[^|]+$", "", title_raw).strip()
     full_name = ""
@@ -133,11 +146,18 @@ def _parse_public_people_result(item: dict, company_name: str) -> dict | None:
 
     if not full_name:
         return None
+    if len(full_name.split()) < 2:
+        return None
+    if full_name.strip().lower() == company_name.strip().lower():
+        return None
+    if any(term in full_name.lower() for term in ("email", "phone", "directory", "profile")):
+        return None
 
     parsed_url = urlparse(url)
     linkedin_url = _clean_profile_url(url) if "/in/" in parsed_url.path else ""
     source = "brave_public_web"
     public_url = _clean_profile_url(url)
+    public_identity = extract_public_identity_hints(public_url)
 
     return {
         "full_name": full_name,
@@ -149,7 +169,12 @@ def _parse_public_people_result(item: dict, company_name: str) -> dict | None:
         "apollo_id": "",
         "source": source,
         "snippet": description,
-        "profile_data": {"public_url": public_url},
+        "profile_data": {
+            "public_url": public_url,
+            "public_host": public_identity.get("host"),
+            "public_identity_slug": public_identity.get("company_slug"),
+            "public_page_type": public_identity.get("page_type"),
+        },
     }
 
 
@@ -204,6 +229,7 @@ async def search_public_people(
     company_name: str,
     titles: list[str] | None = None,
     team_keywords: list[str] | None = None,
+    public_identity_terms: list[str] | None = None,
     limit: int = 5,
 ) -> list[dict]:
     """Search public web sources such as org charts and recruiter posts."""
@@ -216,8 +242,14 @@ async def search_public_people(
     if team_keywords:
         team_part = f' "{team_keywords[0]}"'
 
+    identity_part = ""
+    if public_identity_terms:
+        quoted_terms = [f'"{term}"' for term in public_identity_terms[:2] if term]
+        if quoted_terms:
+            identity_part = " " + " OR ".join(quoted_terms)
+
     query = (
-        f'("{company_name}"{title_part}{team_part}) '
+        f'("{company_name}"{title_part}{team_part}{identity_part}) '
         '(site:theorg.com OR site:linkedin.com/posts OR site:clay.earth OR site:contactout.com)'
     )
 
@@ -346,6 +378,7 @@ async def search_employment_sources(
     company_name: str,
     *,
     company_domain: str | None = None,
+    public_identity_terms: list[str] | None = None,
     limit: int = 5,
 ) -> list[dict]:
     """Search public-web sources for current-employment corroboration."""
@@ -353,8 +386,13 @@ async def search_employment_sources(
         return []
 
     company_site = f" OR site:{company_domain}" if company_domain else ""
+    identity_part = ""
+    if public_identity_terms:
+        quoted_terms = [f'"{term}"' for term in public_identity_terms[:2] if term]
+        if quoted_terms:
+            identity_part = " " + " OR ".join(quoted_terms)
     query = (
-        f'"{full_name}" "{company_name}" '
+        f'"{full_name}" "{company_name}"{identity_part} '
         f'(site:theorg.com OR site:linkedin.com/posts OR site:medium.com OR '
         f'site:substack.com OR site:dev.to{company_site})'
     )

@@ -6,6 +6,7 @@ from unittest.mock import patch, AsyncMock, MagicMock
 from app.clients.brave_search_client import (
     search_people, _parse_linkedin_result,
     search_hiring_team, _parse_hiring_team_result,
+    _parse_public_people_result, search_public_people,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -284,6 +285,49 @@ class TestSearchPeople:
 
         query = mock_client.get.call_args[1]["params"]["q"]
         assert query == 'site:linkedin.com/in "Google" "engineer"'
+
+
+class TestPublicPeople:
+    def test_parse_public_people_result_extracts_theorg_identity_hints(self):
+        item = {
+            "title": "Andre Nguyen - Sr Technical Recruiter at Zip | The Org",
+            "url": "https://theorg.com/org/ziphq/org-chart/andre-nguyen",
+            "description": "Currently serving as a Sr Technical Recruiter at Zip.",
+        }
+
+        result = _parse_public_people_result(item, "Zip")
+
+        assert result is not None
+        assert result["full_name"] == "Andre Nguyen"
+        assert result["profile_data"]["public_identity_slug"] == "ziphq"
+        assert result["profile_data"]["public_page_type"] == "org_chart_person"
+
+    def test_parse_public_people_result_rejects_directory_style_titles(self):
+        item = {
+            "title": "Courtney Cronin's Email & Phone - Zip Staff Directory",
+            "url": "https://www.contactout.com/courtney",
+            "description": "Staff directory and contact information for Zip.",
+        }
+
+        assert _parse_public_people_result(item, "Zip") is None
+
+    async def test_search_public_people_includes_public_identity_terms(self):
+        mock_client = _mock_client_with(_mock_httpx_response({"web": {"results": []}}))
+
+        with (
+            patch("app.clients.brave_search_client.httpx.AsyncClient", return_value=mock_client),
+            patch("app.clients.brave_search_client.settings") as s,
+        ):
+            s.brave_api_key = "key"
+            await search_public_people(
+                "Zip",
+                titles=["technical recruiter"],
+                public_identity_terms=["ziphq"],
+            )
+
+        query = mock_client.get.call_args[1]["params"]["q"]
+        assert '"Zip"' in query
+        assert '"ziphq"' in query
 
 
 class TestParseHiringTeamResult:

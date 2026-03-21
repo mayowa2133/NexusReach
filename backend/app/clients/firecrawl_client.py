@@ -36,7 +36,9 @@ async def scrape_url(url: str, *, timeout_seconds: int = 20) -> dict | None:
 
             data = resp.json()
             page = data.get("data", data)
-            content = page.get("markdown") or page.get("html") or ""
+            markdown = page.get("markdown") or ""
+            html = page.get("html") or ""
+            content = markdown or html or ""
             if not content:
                 return None
 
@@ -44,6 +46,9 @@ async def scrape_url(url: str, *, timeout_seconds: int = 20) -> dict | None:
                 "url": url,
                 "title": (page.get("metadata") or {}).get("title", "") or page.get("title", ""),
                 "content": content,
+                "markdown": markdown,
+                "html": html,
+                "retrieval_method": "firecrawl",
             }
 
     return None
