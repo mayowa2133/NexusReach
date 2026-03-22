@@ -113,6 +113,29 @@ async def test_search_ats_with_apple_job_url(client, mock_user_id):
     assert call_kwargs["job_url"].startswith("https://jobs.apple.com/en-us/details/200652765/")
 
 
+async def test_search_ats_with_workday_job_url(client, mock_user_id):
+    """POST /api/jobs/search/ats accepts Workday exact-job URLs."""
+    job = _mock_job(mock_user_id, source="workday", ats="workday", company_name="NVIDIA")
+
+    with patch("app.routers.jobs.search_ats_jobs", new_callable=AsyncMock) as mock_search:
+        mock_search.return_value = [job]
+        resp = await client.post(
+            "/api/jobs/search/ats",
+            json={
+                "job_url": (
+                    "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite/job/US-OR-Hillsboro/"
+                    "Senior-Systems-Software-Engineer---New-College-Grad-2026_JR2015144-1"
+                    "?jr_id=69bd8442b106024562826cc8"
+                )
+            },
+        )
+
+    assert resp.status_code == 200
+    mock_search.assert_awaited_once()
+    call_kwargs = mock_search.call_args.kwargs
+    assert call_kwargs["job_url"].startswith("https://nvidia.wd5.myworkdayjobs.com/")
+
+
 async def test_search_ats_accepts_dev_mode_without_token(unauthed_client, monkeypatch):
     """POST /api/jobs/search/ats works without Authorization in dev auth mode."""
     from app.database import get_db

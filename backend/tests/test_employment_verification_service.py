@@ -249,7 +249,7 @@ async def test_verify_people_current_company_can_verify_public_profile_without_l
             },
         ),
         patch(
-            "app.services.employment_verification_service.brave_search_client.search_employment_sources",
+            "app.services.employment_verification_service.search_router_client.search_employment_sources",
             new_callable=AsyncMock,
             return_value=[],
         ),
@@ -291,7 +291,7 @@ async def test_verify_people_current_company_does_not_shortcut_team_page_without
             return_value=None,
         ),
         patch(
-            "app.services.employment_verification_service.brave_search_client.search_employment_sources",
+            "app.services.employment_verification_service.search_router_client.search_employment_sources",
             new_callable=AsyncMock,
             return_value=[],
         ),
@@ -338,7 +338,7 @@ async def test_verify_people_current_company_records_crawl4ai_public_fallback():
             },
         ),
         patch(
-            "app.services.employment_verification_service.brave_search_client.search_employment_sources",
+            "app.services.employment_verification_service.search_router_client.search_employment_sources",
             new_callable=AsyncMock,
             return_value=[],
         ),

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
@@ -50,6 +51,7 @@ const STATUS_COLORS: Record<OutreachStatus, 'default' | 'secondary' | 'outline' 
 export function OutreachPage() {
   const [filterStatus, setFilterStatus] = useState<string>('');
   const [selectedPersonId, setSelectedPersonId] = useState('');
+  const [savedPeopleCompanyFilter, setSavedPeopleCompanyFilter] = useState('');
   const [channel, setChannel] = useState<OutreachChannel>('linkedin_message');
   const [notes, setNotes] = useState('');
   const [linkedJobId, setLinkedJobId] = useState('');
@@ -64,6 +66,14 @@ export function OutreachPage() {
   const createOutreach = useCreateOutreach();
   const updateOutreach = useUpdateOutreach();
   const deleteOutreach = useDeleteOutreach();
+  const normalizedSavedPeopleCompanyFilter = savedPeopleCompanyFilter.trim().toLowerCase();
+  const filteredSavedPeople = (savedPeople ?? []).filter((person) => {
+    if (!normalizedSavedPeopleCompanyFilter) {
+      return true;
+    }
+    const companyLabel = person.company?.name?.toLowerCase() || 'unknown company';
+    return companyLabel.includes(normalizedSavedPeopleCompanyFilter);
+  });
 
   const handleCreate = async () => {
     if (!selectedPersonId) {
@@ -156,6 +166,16 @@ export function OutreachPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
+                <Label htmlFor="outreach-person-company-filter">Filter contacts by company</Label>
+                <Input
+                  id="outreach-person-company-filter"
+                  value={savedPeopleCompanyFilter}
+                  onChange={(e) => setSavedPeopleCompanyFilter(e.target.value)}
+                  placeholder="e.g. Uber, Stripe, Apple"
+                />
+              </div>
+
+              <div className="space-y-2">
                 <Label htmlFor="outreach-person">Person</Label>
                 <select
                   id="outreach-person"
@@ -164,12 +184,17 @@ export function OutreachPage() {
                   className="flex h-9 w-full rounded-lg border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
                 >
                   <option value="">Select a person...</option>
-                  {savedPeople?.map((person) => (
+                  {filteredSavedPeople.map((person) => (
                     <option key={person.id} value={person.id}>
                       {person.full_name || 'Unknown'} — {person.title || 'No title'}
                     </option>
                   ))}
                 </select>
+                {normalizedSavedPeopleCompanyFilter && filteredSavedPeople.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No saved contacts match that company filter.
+                  </p>
+                ) : null}
               </div>
 
               <div className="space-y-2">

@@ -12,12 +12,18 @@ import pytest
 
 from app.services.people_service import (
     _backfill_linkedin_profiles,
+    _broaden_peer_titles_for_retry,
     _candidate_matches_company,
+    _merge_company_public_identity_slugs,
+    _saved_theorg_slug_candidates,
     _classify_employment_status,
     _classify_org_level,
     _classify_person,
     _choose_linkedin_backfill_match,
+    _expand_peer_candidates,
     _compute_match_metadata,
+    _finalize_bucketed,
+    _linkedin_backfill_name_variants,
     _name_match_score,
     _prioritize_titles_for_search,
     _prepare_candidates,
@@ -26,6 +32,7 @@ from app.services.people_service import (
     get_or_create_company,
 )
 from app.services.email_finder_service import _split_name
+from app.utils.company_identity import effective_public_identity_slugs, matches_public_company_identity
 from app.utils.job_context import JobContext
 
 
@@ -39,6 +46,13 @@ class _ScalarResult:
         class _Scalars:
             def __init__(self, raw):
                 self._raw = raw
+
+            def all(self):
+                if isinstance(self._raw, list):
+                    return self._raw
+                if self._raw is None:
+                    return []
+                return [self._raw]
 
             def first(self):
                 if isinstance(self._raw, list):
@@ -182,6 +196,104 @@ class TestEmploymentAndRanking:
             ["zip", "ziphq"],
         ) is True
 
+    def test_effective_public_identity_slugs_rejects_fortune_brands_pollution(self):
+        slugs = effective_public_identity_slugs(
+            "Fortune",
+            ["fortune", "fortune-magazine", "fortune-brands-home-security"],
+            identity_hints={
+                "normalized_slug": "fortune",
+                "ats_slug": "fortune",
+                "linkedin_company_slug": "fortune",
+                "careers_host": "fortune.wd108.myworkdayjobs.com",
+            },
+        )
+
+        assert "fortune" in slugs
+        assert "fortune-magazine" in slugs
+        assert "fortune-brands-home-security" not in slugs
+        assert "myworkdayjobs" not in slugs
+
+    def test_matches_public_company_identity_accepts_fortune_magazine_from_official_alias(self):
+        assert matches_public_company_identity(
+            "https://theorg.com/org/fortune-magazine/org-chart/diane-brady",
+            "Fortune Media",
+            ["fortune", "fortune-media"],
+        ) is True
+
+    def test_matches_public_company_identity_rejects_fortune_brands_from_official_alias(self):
+        assert matches_public_company_identity(
+            "https://theorg.com/org/fortune-brands-home-security/org-chart/ashley-molyneux",
+            "Fortune Media",
+            ["fortune", "fortune-media"],
+        ) is False
+
+    def test_merge_company_public_identity_slugs_does_not_promote_candidate_slug_to_preferred(self):
+        company = SimpleNamespace(
+            public_identity_slugs=["fortune", "fortune-media"],
+            identity_hints={},
+        )
+
+        _merge_company_public_identity_slugs(
+            company,
+            "Fortune Media",
+            ["fortune-magazine"],
+            preferred_slug="fortune-magazine",
+            preferred_status="candidate",
+        )
+
+        assert company.identity_hints.get("theorg", {}).get("slug_status", {}) == {}
+        assert "preferred_org_slug" not in company.identity_hints["theorg"]
+
+    def test_merge_company_public_identity_slugs_ignores_incompatible_candidate_slug_status(self):
+        company = SimpleNamespace(
+            public_identity_slugs=["fortune", "fortune-media"],
+            identity_hints={},
+        )
+
+        _merge_company_public_identity_slugs(
+            company,
+            "Fortune Media",
+            ["infosys"],
+            preferred_slug="infosys",
+            preferred_status="candidate",
+        )
+
+        assert "infosys" not in company.public_identity_slugs
+        assert company.identity_hints.get("theorg", {}).get("slug_status", {}) == {}
+
+    @pytest.mark.asyncio
+    async def test_saved_theorg_slug_candidates_filters_incompatible_saved_public_urls(self):
+        company = SimpleNamespace(
+            id=uuid.uuid4(),
+            name="Fortune Media",
+            public_identity_slugs=["fortune", "fortune-media", "fortune-magazine"],
+            identity_hints={"ats_slug": "fortune", "normalized_slug": "fortune-media"},
+        )
+        people = [
+            SimpleNamespace(
+                profile_data={
+                    "public_url": "https://theorg.com/org/fortune-magazine/org-chart/diane-brady",
+                    "public_identity_slug": "fortune-magazine",
+                }
+            ),
+            SimpleNamespace(
+                profile_data={
+                    "public_url": "https://theorg.com/org/fortune-brands-home-security/org-chart/ashley-molyneux",
+                    "public_identity_slug": "fortune-brands-home-security",
+                }
+            ),
+        ]
+        db = MagicMock()
+        db.execute = AsyncMock(return_value=_ScalarResult(people))
+
+        candidates = await _saved_theorg_slug_candidates(
+            db,
+            user_id=uuid.uuid4(),
+            company=company,
+        )
+
+        assert candidates == ["fortune-magazine"]
+
     def test_candidate_matches_company_rejects_directory_style_public_result(self):
         assert _candidate_matches_company(
             {
@@ -245,6 +357,94 @@ class TestEmploymentAndRanking:
             "University Recruiter",
             "Engineering Recruiter",
         ]
+
+    def test_broaden_peer_titles_for_ml_roles_adds_general_engineering_variants(self):
+        context = JobContext(
+            department="information_technology",
+            team_keywords=["ml", "security"],
+            domain_keywords=[],
+            seniority="mid",
+            early_career=False,
+            peer_titles=[
+                "Machine Learning Engineer",
+                "Machine Learning Developer",
+                "Machine Learning Software Engineer",
+                "Ml Engineer",
+                "Ml Software Engineer",
+            ],
+        )
+
+        titles = _broaden_peer_titles_for_retry(context)
+
+        assert titles[:4] == [
+            "Machine Learning Engineer",
+            "Software Engineer",
+            "Applied Scientist",
+            "Research Engineer",
+        ]
+        assert "Security Engineer" not in titles
+
+    def test_broaden_peer_titles_for_junior_backend_roles_prefers_entry_level_variants(self):
+        context = JobContext(
+            department="engineering",
+            team_keywords=["backend", "platform"],
+            domain_keywords=[],
+            seniority="junior",
+            early_career=True,
+            peer_titles=["Backend Engineer", "Software Engineer"],
+        )
+
+        titles = _broaden_peer_titles_for_retry(context)
+
+        assert titles[:4] == [
+            "Junior Backend Engineer",
+            "Associate Backend Engineer",
+            "Entry Level Backend Engineer",
+            "Backend Engineer I",
+        ]
+        assert "Platform Engineer" in titles
+        assert "Infrastructure Engineer" in titles
+
+    @pytest.mark.asyncio
+    async def test_expand_peer_candidates_retries_with_broader_titles_and_no_team_keywords(self):
+        context = JobContext(
+            department="data_science",
+            team_keywords=["ml", "security"],
+            domain_keywords=[],
+            seniority="mid",
+            early_career=False,
+            peer_titles=["Machine Learning Engineer"],
+            apollo_departments=["engineering_technical", "data"],
+        )
+
+        with patch(
+            "app.services.people_service._search_candidates",
+            new_callable=AsyncMock,
+        ) as mock_search:
+            mock_search.return_value = [
+                {
+                    "full_name": "Peer Pat",
+                    "title": "Software Engineer",
+                    "source": "brave_search",
+                }
+            ]
+            candidates = await _expand_peer_candidates(
+                "Microsoft",
+                [],
+                context=context,
+                public_identity_terms=["microsoft"],
+                limit=10,
+                min_results=2,
+            )
+
+        _, kwargs = mock_search.await_args
+        assert kwargs["team_keywords"] is None
+        assert kwargs["titles"][:3] == [
+            "Machine Learning Engineer",
+            "Software Engineer",
+            "Applied Scientist",
+        ]
+        assert candidates[0]["full_name"] == "Peer Pat"
 
     def test_prioritize_titles_for_search_prefers_generic_engineering_managers_for_early_career(self):
         context = JobContext(
@@ -313,6 +513,112 @@ class TestEmploymentAndRanking:
             "Ambiguous Avery",
             "Director Dana",
         ]
+
+    def test_finalize_bucketed_dedupes_people_across_buckets_by_best_fit(self):
+        shared_id = uuid.uuid4()
+        hiring_manager_copy = SimpleNamespace(
+            id=shared_id,
+            full_name="Priya Principal",
+            title="Principal Engineer",
+            linkedin_url=None,
+            current_company_verified=True,
+            match_quality="next_best",
+            fallback_reason="Senior IC fallback at the target company.",
+            employment_status="current",
+            org_level="ic",
+            person_type="hiring_manager",
+        )
+        peer_copy = SimpleNamespace(
+            id=shared_id,
+            full_name="Priya Principal",
+            title="Principal Engineer",
+            linkedin_url="https://linkedin.com/in/priya-principal",
+            current_company_verified=True,
+            match_quality="direct",
+            fallback_reason=None,
+            employment_status="current",
+            org_level="ic",
+            person_type="peer",
+        )
+
+        finalized = _finalize_bucketed(
+            {
+                "recruiters": [],
+                "hiring_managers": [hiring_manager_copy],
+                "peers": [peer_copy],
+            },
+            target_count_per_bucket=3,
+        )
+
+        assert finalized["hiring_managers"] == []
+        assert [person.full_name for person in finalized["peers"]] == ["Priya Principal"]
+
+    def test_finalize_bucketed_prefers_linkedin_when_match_quality_is_tied(self):
+        people = [
+            SimpleNamespace(
+                id=uuid.uuid4(),
+                full_name="Alex Org",
+                title="Software Engineer",
+                linkedin_url=None,
+                current_company_verified=True,
+                match_quality="adjacent",
+                fallback_reason=None,
+                employment_status="current",
+                org_level="ic",
+                person_type="peer",
+            ),
+            SimpleNamespace(
+                id=uuid.uuid4(),
+                full_name="Alex LinkedIn",
+                title="Software Engineer",
+                linkedin_url="https://linkedin.com/in/alexlinkedin",
+                current_company_verified=True,
+                match_quality="adjacent",
+                fallback_reason=None,
+                employment_status="current",
+                org_level="ic",
+                person_type="peer",
+            ),
+        ]
+
+        finalized = _finalize_bucketed(
+            {
+                "recruiters": [],
+                "hiring_managers": [],
+                "peers": people,
+            },
+            target_count_per_bucket=3,
+        )
+
+        assert [person.full_name for person in finalized["peers"][:2]] == [
+            "Alex LinkedIn",
+            "Alex Org",
+        ]
+
+    def test_prepare_candidates_allows_senior_ic_fallback_for_hiring_managers(self):
+        context = JobContext(
+            department="engineering",
+            team_keywords=["ml"],
+            domain_keywords=[],
+            seniority="staff",
+        )
+        results = _prepare_candidates(
+            [
+                {
+                    "full_name": "Priya Principal",
+                    "title": "Principal Engineer",
+                    "snippet": "Currently at xAI working on model training.",
+                    "source": "brave_search",
+                }
+            ],
+            company_name="xAI",
+            bucket="hiring_managers",
+            context=context,
+            limit=5,
+        )
+
+        assert results[0]["full_name"] == "Priya Principal"
+        assert results[0]["_senior_ic_fallback"] is True
 
     def test_prepare_candidates_rejects_recruiter_with_company_only_title(self):
         context = JobContext(
@@ -398,11 +704,30 @@ class TestEmploymentAndRanking:
         assert match_quality == "next_best"
         assert "title specificity is weak" in (match_reason or "").lower()
 
+    def test_compute_match_metadata_marks_adjacent_manager(self):
+        match_quality, match_reason = _compute_match_metadata(
+            {
+                "title": "Infrastructure Manager",
+                "snippet": "Manager at xAI working on infrastructure systems.",
+            },
+            "hiring_manager",
+            JobContext(
+                department="engineering",
+                team_keywords=["ml"],
+                domain_keywords=[],
+                seniority="staff",
+            ),
+        )
+
+        assert match_quality == "adjacent"
+        assert "adjacent engineering manager" in (match_reason or "").lower()
+
     @pytest.mark.asyncio
     async def test_recover_candidate_titles_recovers_from_snippet(self):
         company = SimpleNamespace(
             public_identity_slugs=["whatnot"],
             identity_hints={},
+            name="Whatnot",
         )
         recovered = await _recover_candidate_titles(
             [
@@ -427,6 +752,7 @@ class TestEmploymentAndRanking:
         company = SimpleNamespace(
             public_identity_slugs=["whatnot-inc"],
             identity_hints={},
+            name="Whatnot",
         )
         page = {
             "url": "https://theorg.com/org/whatnot/org-chart/blake-morgan",
@@ -473,10 +799,49 @@ class TestEmploymentAndRanking:
         assert company.identity_hints["theorg"]["preferred_org_slug"] == "whatnot"
         assert "whatnot" in company.public_identity_slugs
 
+    @pytest.mark.asyncio
+    async def test_recover_candidate_titles_rejects_incompatible_theorg_slug(self):
+        company = SimpleNamespace(
+            public_identity_slugs=["fortune", "fortune-media"],
+            identity_hints={"ats_slug": "fortune", "normalized_slug": "fortune-media"},
+            name="Fortune Media",
+        )
+
+        with patch("app.services.people_service.theorg_client.fetch_page", new_callable=AsyncMock) as mock_fetch:
+            recovered = await _recover_candidate_titles(
+                [
+                    {
+                        "full_name": "Wrong Person",
+                        "title": "Fortune Media",
+                        "snippet": "Engineering leader.",
+                        "source": "brave_public_web",
+                        "profile_data": {
+                            "public_url": "https://theorg.com/org/infosys/org-chart/wrong-person",
+                            "public_identity_slug": "infosys",
+                            "public_page_type": "org_chart_person",
+                        },
+                    }
+                ],
+                company=company,
+                company_name="Fortune Media",
+            )
+
+        mock_fetch.assert_not_awaited()
+        assert recovered[0]["title"] == "Fortune Media"
+        assert "infosys" not in getattr(company, "public_identity_slugs", [])
+
     def test_name_match_score_accepts_same_name_and_last_initial(self):
         assert _name_match_score("Derek S.", "Derek Smith") == 90
         assert _name_match_score("Lauren Tyson", "Lauren Tyson") == 100
         assert _name_match_score("Lauren Tyson", "Laura Tyson") == 0
+
+    def test_name_match_score_accepts_reversed_two_token_name(self):
+        assert _name_match_score("Ting Xu", "Xu Ting") == 92
+
+    def test_linkedin_backfill_name_variants_generates_controlled_variants(self):
+        assert _linkedin_backfill_name_variants("Alex H. Li") == ["Alex Li"]
+        assert _linkedin_backfill_name_variants("Xu, Ting") == ["Ting Xu"]
+        assert _linkedin_backfill_name_variants("Ting Xu") == ["Xu Ting"]
 
     def test_choose_linkedin_backfill_match_rejects_wrong_company(self):
         chosen, confidence, status = _choose_linkedin_backfill_match(
@@ -538,10 +903,49 @@ class TestEmploymentAndRanking:
         assert confidence is None
         assert status == "no_match"
 
+    def test_choose_linkedin_backfill_match_prefers_closest_title_when_names_tie(self):
+        chosen, confidence, status = _choose_linkedin_backfill_match(
+            {
+                "full_name": "Jordan Ferber",
+                "title": "Engineering Manager",
+                "snippet": "Engineering manager at AppLovin.",
+                "source": "theorg_traversal",
+                "profile_data": {
+                    "public_url": "https://theorg.com/org/applovin/org-chart/jordan-ferber",
+                    "public_identity_slug": "applovin",
+                },
+            },
+            [
+                {
+                    "full_name": "Jordan Ferber",
+                    "title": "Engineering Manager",
+                    "snippet": "Engineering Manager at AppLovin.",
+                    "source": "serper_search",
+                    "linkedin_url": "https://www.linkedin.com/in/jordan-ferber",
+                    "profile_data": {"linkedin_result_title": "Jordan Ferber - Engineering Manager at AppLovin"},
+                },
+                {
+                    "full_name": "Jordan Ferber",
+                    "title": "Senior Director, Sales",
+                    "snippet": "Senior Director, Sales at AppLovin.",
+                    "source": "serper_search",
+                    "linkedin_url": "https://www.linkedin.com/in/jordan-ferber-sales",
+                    "profile_data": {"linkedin_result_title": "Jordan Ferber - Senior Director, Sales at AppLovin"},
+                },
+            ],
+            company_name="AppLovin",
+            bucket="hiring_managers",
+        )
+
+        assert chosen is not None
+        assert chosen["linkedin_url"] == "https://www.linkedin.com/in/jordan-ferber"
+        assert confidence == 100
+        assert status == "matched"
+
     @pytest.mark.asyncio
     async def test_backfill_linkedin_profiles_upgrades_weak_peer_title(self):
         with patch(
-            "app.services.people_service.brave_search_client.search_exact_linkedin_profile",
+            "app.services.people_service.search_router_client.search_exact_linkedin_profile",
             new_callable=AsyncMock,
         ) as mock_search:
             mock_search.return_value = [
@@ -583,7 +987,7 @@ class TestEmploymentAndRanking:
     @pytest.mark.asyncio
     async def test_backfill_linkedin_profiles_marks_ambiguous_matches(self):
         with patch(
-            "app.services.people_service.brave_search_client.search_exact_linkedin_profile",
+            "app.services.people_service.search_router_client.search_exact_linkedin_profile",
             new_callable=AsyncMock,
         ) as mock_search:
             mock_search.return_value = [
@@ -626,6 +1030,97 @@ class TestEmploymentAndRanking:
 
         assert results[0].get("linkedin_url") in {None, ""}
         assert results[0]["profile_data"]["linkedin_backfill_status"] == "ambiguous"
+
+    @pytest.mark.asyncio
+    async def test_backfill_linkedin_profiles_retries_recruiters_with_broad_title_query(self):
+        with (
+            patch(
+                "app.services.people_service.search_router_client.search_exact_linkedin_profile",
+                new_callable=AsyncMock,
+            ) as mock_exact,
+            patch(
+                "app.services.people_service.search_router_client.search_people",
+                new_callable=AsyncMock,
+            ) as mock_people,
+        ):
+            mock_exact.return_value = []
+            mock_people.return_value = [
+                {
+                    "full_name": "Meaghan Joynt",
+                    "title": "Talent Acquisition @AppLovin",
+                    "snippet": "Talent Acquisition @AppLovin.",
+                    "source": "serper_search",
+                    "linkedin_url": "https://www.linkedin.com/in/meaghanjoynt",
+                    "profile_data": {
+                        "linkedin_result_title": "Meaghan Joynt - Talent Acquisition @AppLovin",
+                    },
+                }
+            ]
+            results = await _backfill_linkedin_profiles(
+                [
+                    {
+                        "full_name": "Meaghan Joynt",
+                        "title": "Talent Acquisition Partner",
+                        "snippet": "Current recruiter at AppLovin.",
+                        "source": "theorg_traversal",
+                        "_weak_title": False,
+                        "_employment_status": "current",
+                        "profile_data": {
+                            "public_url": "https://theorg.com/org/applovin/org-chart/meaghan-joynt",
+                            "public_identity_slug": "applovin",
+                        },
+                    }
+                ],
+                company_name="AppLovin",
+                public_identity_slugs=["applovin"],
+                bucket="recruiters",
+            )
+
+        assert results[0]["linkedin_url"] == "https://www.linkedin.com/in/meaghanjoynt"
+        assert results[0]["profile_data"]["linkedin_backfill_status"] == "matched"
+        assert results[0]["profile_data"]["linkedin_backfill_strategy"] == "broad_company_title_query"
+        mock_people.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_backfill_linkedin_profiles_passes_exact_query_hints(self):
+        with (
+            patch(
+                "app.services.people_service.search_router_client.search_exact_linkedin_profile",
+                new_callable=AsyncMock,
+                return_value=[],
+            ) as mock_exact,
+            patch(
+                "app.services.people_service.search_router_client.search_people",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+        ):
+            await _backfill_linkedin_profiles(
+                [
+                    {
+                        "full_name": "Ting Xu",
+                        "title": "Global Talent Acquisition Partner",
+                        "snippet": "Current recruiter at AppLovin.",
+                        "source": "theorg_traversal",
+                        "_weak_title": False,
+                        "_employment_status": "current",
+                        "profile_data": {
+                            "public_url": "https://theorg.com/org/applovin/org-chart/ting-xu",
+                            "public_identity_slug": "applovin",
+                            "theorg_team_name": "People and Talent",
+                            "theorg_team_slug": "people-and-talent",
+                        },
+                    }
+                ],
+                company_name="AppLovin",
+                public_identity_slugs=["applovin"],
+                bucket="recruiters",
+            )
+
+        _, kwargs = mock_exact.await_args
+        assert kwargs["name_variants"] == ["Xu Ting"]
+        assert "Global Talent Acquisition Partner" in kwargs["title_hints"]
+        assert "talent acquisition" in kwargs["team_keywords"]
 
     @pytest.mark.asyncio
     async def test_store_person_merges_linkedin_into_existing_public_profile(self):

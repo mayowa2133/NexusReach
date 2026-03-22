@@ -11,10 +11,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.clients import brave_search_client, crawl4ai_client, public_page_client
+from app.clients import crawl4ai_client, public_page_client, search_router_client
 from app.config import settings
 from app.models.person import Person
 from app.utils.company_identity import (
+    effective_public_identity_slugs,
     extract_public_identity_hints,
     is_ambiguous_company_name,
     matches_public_company_identity,
@@ -399,12 +400,13 @@ async def _verify_person(
                 _enrich_public_debug(public_result, page, retrieval_url=public_url)
                 return public_result
 
-    corroboration_results = await brave_search_client.search_employment_sources(
+    corroboration_results = await search_router_client.search_employment_sources(
         person.full_name or "",
         company_name,
         company_domain=company_domain,
         public_identity_terms=company_public_identity_slugs,
         limit=3,
+        min_results=1,
     )
     for result in corroboration_results:
         host = urlparse(result["url"]).netloc.lower()
@@ -500,7 +502,15 @@ async def verify_current_company_for_person(
 
     company_name = person.company.name if person.company else ""
     company_domain = person.company.domain if person.company and getattr(person.company, "domain_trusted", False) else None
-    company_public_identity_slugs = getattr(person.company, "public_identity_slugs", None) if person.company else None
+    company_public_identity_slugs = (
+        effective_public_identity_slugs(
+            person.company.name,
+            getattr(person.company, "public_identity_slugs", None),
+            identity_hints=getattr(person.company, "identity_hints", None),
+        )
+        if person.company
+        else None
+    )
     verification = await _verify_person(
         person,
         company_name=company_name,

@@ -1,5 +1,6 @@
 """People discovery service for company and job-aware search."""
 
+import copy
 import re
 import unicodedata
 import uuid
@@ -10,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.clients import apollo_client, brave_search_client, github_client, proxycurl_client, theorg_client
+from app.clients import apollo_client, github_client, proxycurl_client, search_router_client, theorg_client
 from app.models.company import Company
 from app.models.job import Job
 from app.models.person import Person
@@ -19,6 +20,7 @@ from app.services.theorg_discovery_service import discover_theorg_candidates
 from app.utils.company_identity import (
     build_public_identity_hints,
     canonical_company_display_name,
+    effective_public_identity_slugs,
     extract_public_identity_hints,
     is_ambiguous_company_name,
     is_compatible_public_identity_slug,
@@ -90,18 +92,29 @@ CURRENT_TRUSTED_SOURCES = {
     "apollo",
     "proxycurl",
     "brave_hiring_team",
+    "serper_hiring_team",
 }
 CURRENT_TRUSTED_PUBLIC_HOSTS = {
     "theorg.com",
     "www.theorg.com",
 }
+PUBLIC_WEB_SOURCES = {
+    "brave_public_web",
+    "serper_public_web",
+    "tavily_public_web",
+}
 SOURCE_PRIORITY = {
     "apollo": 0,
     "proxycurl": 1,
     "brave_hiring_team": 1,
+    "serper_hiring_team": 1,
     "theorg_traversal": 2,
     "brave_search": 3,
+    "serper_search": 3,
+    "google_cse": 3,
     "brave_public_web": 4,
+    "serper_public_web": 4,
+    "tavily_public_web": 4,
     "github": 4,
 }
 SENIOR_MANAGER_LEVELS = {"staff", "principal", "manager", "director", "vp", "executive"}
@@ -132,6 +145,65 @@ WEAK_TITLE_PLACEHOLDERS = {
     "staff member",
     "teammate",
 }
+RECRUITER_ADJACENT_KEYWORDS = (
+    "talent acquisition",
+    "talent partner",
+    "early talent",
+    "early careers",
+    "university programs",
+    "recruiting coordinator",
+)
+SENIOR_IC_FALLBACK_KEYWORDS = (
+    "staff engineer",
+    "principal engineer",
+    "member of technical staff",
+    "technical staff",
+    "architect",
+)
+DEFAULT_TARGET_COUNT_PER_BUCKET = 3
+MAX_TARGET_COUNT_PER_BUCKET = 10
+SENIORITY_ORDER = {
+    "intern": 0,
+    "junior": 1,
+    "mid": 2,
+    "senior": 3,
+    "staff": 4,
+    "principal": 4,
+    "lead": 3,
+    "manager": 5,
+    "director": 6,
+    "vp": 7,
+    "executive": 8,
+}
+
+
+def _clamp_target_count_per_bucket(value: int | None) -> int:
+    if value is None:
+        return DEFAULT_TARGET_COUNT_PER_BUCKET
+    return max(1, min(int(value), MAX_TARGET_COUNT_PER_BUCKET))
+
+
+def _search_limit_for_target(target_count_per_bucket: int) -> int:
+    return min(40, max(10, target_count_per_bucket * 4))
+
+
+def _prepare_limit_for_target(target_count_per_bucket: int) -> int:
+    return min(30, max(6, target_count_per_bucket * 3))
+
+
+def _minimum_results_for_target(target_count_per_bucket: int) -> int:
+    return max(1, min(target_count_per_bucket, 5))
+
+
+def _count_linkedin_candidates(candidates: list[dict]) -> int:
+    return sum(1 for candidate in candidates if candidate.get("linkedin_url"))
+
+
+def _needs_more_bucket_candidates(candidates: list[dict], *, target_count_per_bucket: int) -> bool:
+    return (
+        len(candidates) < target_count_per_bucket
+        or _count_linkedin_candidates(candidates) < min(target_count_per_bucket, len(candidates))
+    )
 
 
 def _normalize_identity(value: str | None) -> str:
@@ -187,17 +259,75 @@ def _name_match_score(candidate_name: str | None, linkedin_name: str | None) -> 
 
     candidate_first, candidate_last = candidate_tokens[0], candidate_tokens[-1]
     linkedin_first, linkedin_last = linkedin_tokens[0], linkedin_tokens[-1]
-    if candidate_first != linkedin_first:
-        return 0
 
     if candidate_last == linkedin_last:
+        if candidate_first != linkedin_first:
+            return 0
         return 100 if candidate_tokens == linkedin_tokens else 96
+
+    if (
+        len(candidate_tokens) == 2
+        and len(linkedin_tokens) == 2
+        and candidate_first == linkedin_last
+        and candidate_last == linkedin_first
+    ):
+        return 92
+
+    if candidate_first != linkedin_first:
+        return 0
 
     if len(candidate_last) == 1 and linkedin_last.startswith(candidate_last):
         return 90
     if len(linkedin_last) == 1 and candidate_last.startswith(linkedin_last):
         return 90
     return 0
+
+
+def _linkedin_backfill_name_variants(full_name: str | None) -> list[str]:
+    raw = (full_name or "").strip()
+    if not raw:
+        return []
+
+    variants: list[str] = []
+    normalized = unicodedata.normalize("NFKD", raw).encode("ascii", "ignore").decode("ascii")
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    if normalized and normalized != raw:
+        variants.append(normalized)
+
+    comma_parts = [part.strip() for part in raw.split(",", 1)]
+    if len(comma_parts) == 2 and all(comma_parts):
+        variants.append(f"{comma_parts[1]} {comma_parts[0]}")
+
+    raw_tokens = [token.strip() for token in re.split(r"\s+", raw) if token.strip()]
+    cleaned_tokens = [re.sub(r"[^A-Za-z0-9'-]", "", token) for token in raw_tokens]
+    cleaned_tokens = [token for token in cleaned_tokens if token]
+    if len(cleaned_tokens) >= 3:
+        without_middle_initials = [
+            cleaned_tokens[0],
+            *[token for token in cleaned_tokens[1:-1] if len(token) > 1],
+            cleaned_tokens[-1],
+        ]
+        if len(without_middle_initials) >= 2:
+            variants.append(" ".join(without_middle_initials))
+
+    normalized_tokens = _normalize_name_for_matching(raw).split()
+    if len(normalized_tokens) == 2:
+        first, last = normalized_tokens
+        variants.append(f"{last.title()} {first.title()}")
+
+    ordered: list[str] = []
+    seen: set[str] = set()
+    canonical = _normalize_name_for_matching(raw)
+    for variant in variants:
+        clean_variant = " ".join(variant.split()).strip()
+        if not clean_variant:
+            continue
+        normalized_variant = _normalize_name_for_matching(clean_variant)
+        if not normalized_variant or normalized_variant == canonical or normalized_variant in seen:
+            continue
+        seen.add(normalized_variant)
+        ordered.append(clean_variant)
+    return ordered[:3]
 
 
 def _public_profile_url(data: dict) -> str:
@@ -289,6 +419,127 @@ def _is_manager_like(text: str | None) -> bool:
     return _contains_any_keyword(normalized, MANAGER_TITLE_KEYWORDS + CONTROLLED_LEAD_KEYWORDS)
 
 
+def _is_adjacent_recruiter_like(text: str | None) -> bool:
+    normalized = _normalize_identity(text)
+    if not normalized:
+        return False
+    return any(keyword in normalized for keyword in RECRUITER_ADJACENT_KEYWORDS)
+
+
+def _is_senior_ic_fallback(title: str | None) -> bool:
+    normalized = _normalize_identity(title)
+    if not normalized:
+        return False
+    if normalized.startswith("senior ") and any(role in normalized for role in ("engineer", "scientist", "developer")):
+        return True
+    return any(keyword in normalized for keyword in SENIOR_IC_FALLBACK_KEYWORDS)
+
+
+def _strip_seniority_prefix(title: str | None) -> str:
+    cleaned = (title or "").strip()
+    cleaned = re.sub(
+        r"^(?:senior|sr\.?|junior|jr\.?|staff|principal|lead|associate|entry[- ]level|new grad(?:uate)?|intern)\s+",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(r"\s+\b(i|ii|iii|iv)\b$", "", cleaned, flags=re.IGNORECASE)
+    return " ".join(cleaned.split()).strip()
+
+
+def _candidate_seniority_level(data: dict) -> str:
+    explicit = _normalize_identity(str(data.get("seniority") or ""))
+    if explicit in SENIORITY_ORDER:
+        return explicit
+
+    haystack = " ".join(
+        part for part in [data.get("title", ""), data.get("snippet", "")]
+        if part
+    ).lower()
+    patterns = (
+        (r"\bintern\b", "intern"),
+        (r"\bjunior\b|\bjr\.?\b|\bentry[- ]level\b|\bassociate\b|\bnew grad\b", "junior"),
+        (r"\bsenior\b|\bsr\.?\b", "senior"),
+        (r"\bstaff\b", "staff"),
+        (r"\bprincipal\b", "principal"),
+        (r"\blead\b", "lead"),
+        (r"\bmanager\b", "manager"),
+        (r"\bdirector\b", "director"),
+        (r"\bvp\b|\bvice president\b", "vp"),
+        (r"\bchief\b|\bc-level\b", "executive"),
+    )
+    for pattern, level in patterns:
+        if re.search(pattern, haystack):
+            return level
+    return "mid"
+
+
+def _seniority_fit_rank(data: dict, *, bucket: str, context: JobContext | None) -> int:
+    if not context:
+        return 1
+
+    candidate_level = _candidate_seniority_level(data)
+    candidate_rank = SENIORITY_ORDER.get(candidate_level, 2)
+
+    if bucket == "hiring_managers":
+        if data.get("_senior_ic_fallback"):
+            return 2
+        return 0 if candidate_rank >= SENIORITY_ORDER["manager"] else 1
+
+    target_level = "junior" if context.early_career else context.seniority
+    target_rank = SENIORITY_ORDER.get(target_level, 2)
+    distance = abs(candidate_rank - target_rank)
+    if distance == 0:
+        return 0
+    if distance == 1:
+        return 1
+    return 2
+
+
+def _peer_title_variants_for_seniority(title: str, seniority: str) -> tuple[list[str], list[str]]:
+    base_title = _strip_seniority_prefix(title)
+    if not base_title:
+        return [], []
+
+    same_level: list[str]
+    adjacent_level: list[str]
+
+    if seniority == "intern":
+        same_level = [f"{base_title} Intern", "Software Engineering Intern", base_title]
+        adjacent_level = [f"Junior {base_title}", f"Associate {base_title}"]
+    elif seniority == "junior":
+        same_level = [
+            f"Junior {base_title}",
+            f"Associate {base_title}",
+            f"Entry Level {base_title}",
+            f"{base_title} I",
+            base_title,
+        ]
+        adjacent_level = [f"Mid-Level {base_title}", f"Senior {base_title}"]
+    elif seniority == "senior":
+        same_level = [f"Senior {base_title}", base_title]
+        adjacent_level = [f"Staff {base_title}", f"Principal {base_title}"]
+    elif seniority in {"staff", "principal"}:
+        same_level = [f"Staff {base_title}", f"Principal {base_title}", f"Senior {base_title}"]
+        adjacent_level = [base_title]
+    else:
+        same_level = [base_title]
+        adjacent_level = [f"Junior {base_title}", f"Senior {base_title}", f"Associate {base_title}"]
+
+    def _dedupe_variants(values: list[str]) -> list[str]:
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for variant in values:
+            normalized = _normalize_identity(variant)
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            ordered.append(variant)
+        return ordered
+
+    return _dedupe_variants(same_level), _dedupe_variants(adjacent_level)
+
+
 def _candidate_public_identity_slug(data: dict) -> str:
     profile_data = data.get("profile_data") or {}
     slug = profile_data.get("public_identity_slug")
@@ -309,19 +560,48 @@ def _merge_company_public_identity_slugs(
     preferred_status: str | None = None,
 ) -> None:
     merged = {slug for slug in (company.public_identity_slugs or []) if slug}
+    accepted_slugs: set[str] = set()
     for slug in slugs:
         clean = (slug or "").strip().lower()
-        if clean and is_compatible_public_identity_slug(company_name, clean):
+        effective_existing = effective_public_identity_slugs(
+            company_name,
+            list(merged),
+            identity_hints=company.identity_hints if isinstance(company.identity_hints, dict) else None,
+        )
+        if clean and (
+            is_compatible_public_identity_slug(company_name, clean)
+            or matches_public_company_identity(
+                f"https://theorg.com/org/{clean}",
+                company_name,
+                effective_existing,
+            )
+        ):
             merged.add(clean)
-    company.public_identity_slugs = sorted(merged)
-
+            accepted_slugs.add(clean)
     hints = company.identity_hints if isinstance(company.identity_hints, dict) else {}
+    company.public_identity_slugs = effective_public_identity_slugs(
+        company_name,
+        sorted(merged),
+        identity_hints=hints,
+    )
+
     theorg_hints = hints.setdefault("theorg", {})
-    if preferred_slug:
-        theorg_hints["preferred_org_slug"] = preferred_slug
-    if preferred_slug and preferred_status:
+    clean_preferred = (preferred_slug or "").strip().lower()
+    preferred_allowed = bool(clean_preferred) and (
+        clean_preferred in accepted_slugs
+        or clean_preferred in set(company.public_identity_slugs or [])
+        or is_compatible_public_identity_slug(company_name, clean_preferred)
+        or matches_public_company_identity(
+            f"https://theorg.com/org/{clean_preferred}",
+            company_name,
+            company.public_identity_slugs,
+        )
+    )
+    if clean_preferred and preferred_status == "validated" and preferred_allowed:
+        theorg_hints["preferred_org_slug"] = clean_preferred
+    if clean_preferred and preferred_status and preferred_allowed:
         slug_status = theorg_hints.setdefault("slug_status", {})
-        slug_status[preferred_slug] = preferred_status
+        slug_status[clean_preferred] = preferred_status
     company.identity_hints = hints
 
 
@@ -351,12 +631,16 @@ def _linkedin_backfill_metadata(
     *,
     status: str,
     confidence: int | None = None,
+    source: str = "search_router",
+    strategy: str | None = None,
 ) -> dict:
     profile_data = dict(data.get("profile_data") or {})
     profile_data["linkedin_backfill_status"] = status
-    profile_data["linkedin_backfill_source"] = "brave_search"
+    profile_data["linkedin_backfill_source"] = source
     if confidence is not None:
         profile_data["linkedin_backfill_confidence"] = confidence
+    if strategy:
+        profile_data["linkedin_backfill_strategy"] = strategy
     return profile_data
 
 
@@ -396,10 +680,19 @@ def _recover_title_from_snippet(
 async def _recover_title_from_theorg_page(
     data: dict,
     *,
+    company: Company,
     company_name: str,
 ) -> tuple[str, int, str, str] | None:
     public_url = _public_profile_url(data)
     if not public_url:
+        return None
+
+    trusted_slugs = effective_public_identity_slugs(
+        company.name,
+        company.public_identity_slugs,
+        identity_hints=company.identity_hints if isinstance(company.identity_hints, dict) else None,
+    )
+    if not matches_public_company_identity(public_url, company_name, trusted_slugs):
         return None
 
     page = await theorg_client.fetch_page(public_url, timeout_seconds=20)
@@ -467,6 +760,7 @@ async def _recover_candidate_titles(
             else:
                 recovered_from_theorg = await _recover_title_from_theorg_page(
                     data,
+                    company=company,
                     company_name=company_name,
                 )
                 if recovered_from_theorg:
@@ -511,6 +805,116 @@ def _linkedin_role_match(candidate: dict, *, bucket: str) -> bool:
     return person_type == "peer"
 
 
+def _linkedin_title_match_score(
+    candidate: dict,
+    match: dict,
+    *,
+    company_name: str,
+    bucket: str,
+) -> int:
+    candidate_title = candidate.get("title", "") or ""
+    profile_data = match.get("profile_data") or {}
+    result_title = profile_data.get("linkedin_result_title", "") or ""
+    texts = [match.get("title", "") or "", result_title, match.get("snippet", "") or ""]
+
+    if candidate_title and not _title_is_weak(candidate_title, company_name):
+        normalized_candidate = _normalize_identity(candidate_title)
+        if any(normalized_candidate and normalized_candidate in _normalize_identity(text) for text in texts if text):
+            return 4
+
+        candidate_tokens = {
+            token
+            for token in _identity_tokens(candidate_title)
+            if token not in {"senior", "staff", "principal", "global", "technical"}
+        }
+        if candidate_tokens:
+            best_overlap = 0
+            for text in texts:
+                text_tokens = set(_identity_tokens(text))
+                if not text_tokens:
+                    continue
+                best_overlap = max(best_overlap, len(candidate_tokens & text_tokens))
+            if best_overlap >= 2:
+                return 3
+
+    if bucket == "recruiters" and any(_is_recruiter_like(text) for text in texts):
+        return 2
+    if bucket == "hiring_managers" and any(_is_manager_like(text) for text in texts):
+        return 2
+    if bucket == "peers" and any(_classify_person(str(text), snippet=match.get("snippet", "")) == "peer" for text in texts if text):
+        return 1
+    return 0
+
+
+def _linkedin_backfill_search_titles(candidate: dict, *, bucket: str, company_name: str) -> list[str]:
+    titles: list[str] = []
+    current_title = (candidate.get("title") or "").strip()
+    if current_title and not _title_is_weak(current_title, company_name):
+        titles.append(current_title)
+
+    if bucket == "recruiters":
+        titles.extend(
+            [
+                "talent acquisition partner",
+                "technical recruiter",
+                "recruiter",
+            ]
+        )
+    elif bucket == "hiring_managers":
+        titles.extend(
+            [
+                "engineering manager",
+                "software engineering manager",
+                "director engineering",
+                "senior director engineering",
+            ]
+        )
+    elif bucket == "peers":
+        titles.extend(["software engineer", "senior software engineer"])
+
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for title in titles:
+        normalized = _normalize_identity(title)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        ordered.append(title)
+    return ordered[:4]
+
+
+def _linkedin_backfill_team_keywords(candidate: dict, *, bucket: str) -> list[str]:
+    profile_data = candidate.get("profile_data") or {}
+    keywords: list[str] = []
+
+    team_name = str(profile_data.get("theorg_team_name") or "").strip()
+    if team_name:
+        keywords.append(team_name)
+
+    team_slug = str(profile_data.get("theorg_team_slug") or "").replace("-", " ").strip()
+    if team_slug:
+        keywords.append(team_slug)
+
+    relationship = str(profile_data.get("theorg_relationship") or "").strip()
+    if relationship:
+        keywords.append(relationship.replace("_", " "))
+
+    if bucket == "recruiters":
+        keywords.extend(["talent acquisition", "recruiting", "early careers"])
+    elif bucket == "hiring_managers":
+        keywords.extend(["engineering", "software", "platform"])
+
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for keyword in keywords:
+        normalized = _normalize_identity(keyword)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        ordered.append(keyword)
+    return ordered[:3]
+
+
 def _choose_linkedin_backfill_match(
     candidate: dict,
     matches: list[dict],
@@ -518,7 +922,7 @@ def _choose_linkedin_backfill_match(
     company_name: str,
     bucket: str,
 ) -> tuple[dict | None, int | None, str]:
-    scored_matches: list[tuple[int, dict]] = []
+    scored_matches: list[tuple[int, int, dict]] = []
     for match in matches:
         name_score = _name_match_score(candidate.get("full_name"), match.get("full_name"))
         if name_score < 90:
@@ -527,16 +931,33 @@ def _choose_linkedin_backfill_match(
             continue
         if not _linkedin_role_match(match, bucket=bucket):
             continue
-        scored_matches.append((name_score, match))
+        title_score = _linkedin_title_match_score(
+            candidate,
+            match,
+            company_name=company_name,
+            bucket=bucket,
+        )
+        scored_matches.append((name_score, title_score, match))
 
     if not scored_matches:
         return None, None, "no_match"
 
-    scored_matches.sort(key=lambda item: (-item[0], _normalize_identity(item[1].get("full_name"))))
-    best_score, best_match = scored_matches[0]
+    scored_matches.sort(
+        key=lambda item: (
+            -item[0],
+            -item[1],
+            _normalize_identity(item[2].get("full_name")),
+        )
+    )
+    best_score, best_title_score, best_match = scored_matches[0]
     if len(scored_matches) > 1:
-        second_score = scored_matches[1][0]
-        if best_score == second_score or (best_score < 100 and second_score >= best_score - 4):
+        second_score, second_title_score, _ = scored_matches[1]
+        if best_score == second_score:
+            if best_title_score == second_title_score:
+                return None, None, "ambiguous"
+            if best_title_score < 4 and second_title_score >= best_title_score - 1:
+                return None, None, "ambiguous"
+        elif best_score < 100 and second_score >= best_score - 4 and second_title_score >= best_title_score:
             return None, None, "ambiguous"
     return best_match, best_score, "matched"
 
@@ -571,10 +992,28 @@ async def _backfill_linkedin_profiles(
             backfilled.append(data)
             continue
 
-        matches = await brave_search_client.search_exact_linkedin_profile(
+        backfill_strategy = "exact_query"
+        exact_title_hints = _linkedin_backfill_search_titles(
+            data,
+            bucket=bucket,
+            company_name=company_name,
+        )
+        exact_name_variants = (
+            _linkedin_backfill_name_variants(data.get("full_name"))
+            if bucket in {"recruiters", "hiring_managers"}
+            else []
+        )
+        exact_team_keywords = _linkedin_backfill_team_keywords(
+            data,
+            bucket=bucket,
+        )
+        matches = await search_router_client.search_exact_linkedin_profile(
             data.get("full_name", ""),
             company_name,
-            limit=3,
+            name_variants=exact_name_variants,
+            title_hints=exact_title_hints,
+            team_keywords=exact_team_keywords,
+            limit=5,
         )
         chosen, confidence, status = _choose_linkedin_backfill_match(
             data,
@@ -582,10 +1021,32 @@ async def _backfill_linkedin_profiles(
             company_name=company_name,
             bucket=bucket,
         )
+        if not chosen and bucket in {"recruiters", "hiring_managers"}:
+            broad_titles = exact_title_hints
+            if broad_titles:
+                broader_matches = await search_router_client.search_people(
+                    company_name,
+                    titles=broad_titles,
+                    team_keywords=None,
+                    limit=8,
+                    min_results=1,
+                )
+                chosen, confidence, broad_status = _choose_linkedin_backfill_match(
+                    data,
+                    broader_matches,
+                    company_name=company_name,
+                    bucket=bucket,
+                )
+                if chosen:
+                    matches = broader_matches
+                    status = broad_status
+                    backfill_strategy = "broad_company_title_query"
         data["profile_data"] = _linkedin_backfill_metadata(
             data,
             status=status,
             confidence=confidence,
+            source=chosen.get("source", "search_router") if chosen else "search_router",
+            strategy=backfill_strategy,
         )
         if chosen:
             data["linkedin_url"] = chosen.get("linkedin_url", "")
@@ -656,6 +1117,169 @@ def _prioritize_titles_for_search(
     return [title for _, title in sorted((rank(title), title) for title in normalized_titles)]
 
 
+def _broaden_peer_titles_for_retry(context: JobContext | None) -> list[str]:
+    if not context:
+        return []
+
+    prioritized = _prioritize_titles_for_search(
+        context.peer_titles,
+        bucket="peers",
+        context=context,
+    )
+    base_titles: list[str] = []
+    ml_family_context = (
+        "ml" in context.team_keywords
+        or any(
+            term in _normalize_identity(title)
+            for title in prioritized
+            for term in (
+                "machine learning",
+                "ml engineer",
+                "applied scientist",
+                "data scientist",
+                "model training",
+                "research engineer",
+            )
+        )
+    )
+    if context.department == "data_science" or ml_family_context:
+        if "ml" in context.team_keywords or any(
+            term in _normalize_identity(title)
+            for title in prioritized
+            for term in ("machine learning", "ml engineer", "applied scientist", "data scientist", "model training")
+        ):
+            base_titles.extend(
+                [
+                    "Machine Learning Engineer",
+                    "Software Engineer",
+                    "Applied Scientist",
+                    "Research Engineer",
+                    "Data Scientist",
+                    "Model Training Engineer",
+                    "Training Infrastructure Engineer",
+                    "Distributed Systems Engineer",
+                ]
+            )
+        else:
+            base_titles.extend(["Data Scientist", "Research Engineer", "Software Engineer"])
+    elif context.department == "engineering":
+        engineering_family = ["Software Engineer", "Software Developer"]
+        if any(keyword in context.team_keywords for keyword in ("backend", "platform", "cloud", "devops")):
+            engineering_family = [
+                "Backend Engineer",
+                "Platform Engineer",
+                "Infrastructure Engineer",
+                "Distributed Systems Engineer",
+                *engineering_family,
+            ]
+        base_titles.extend(engineering_family)
+
+    same_level_titles: list[str] = []
+    adjacent_titles: list[str] = []
+    seen: set[str] = set()
+    for title in base_titles + prioritized:
+        same_level_variants, adjacent_variants = _peer_title_variants_for_seniority(
+            title,
+            context.seniority,
+        )
+        for variant in same_level_variants + adjacent_variants:
+            normalized = _normalize_identity(variant)
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            if variant in same_level_variants:
+                same_level_titles.append(variant)
+            else:
+                adjacent_titles.append(variant)
+    return same_level_titles + adjacent_titles
+
+
+def _companywide_recruiter_titles(context: JobContext | None) -> list[str]:
+    if context:
+        titles = _prioritize_titles_for_search(
+            context.recruiter_titles
+            + [
+                "Technical Recruiter",
+                "Engineering Recruiter",
+                "Talent Acquisition Partner",
+                "Technical Sourcer",
+                "Recruiting Coordinator",
+                "Recruiter",
+            ],
+            bucket="recruiters",
+            context=context,
+        )
+    else:
+        titles = [
+            "Technical Recruiter",
+            "Engineering Recruiter",
+            "Talent Acquisition Partner",
+            "Technical Sourcer",
+            "Recruiting Coordinator",
+            "Recruiter",
+        ]
+    return list(dict.fromkeys(title for title in titles if title))
+
+
+def _companywide_manager_titles(context: JobContext | None) -> list[str]:
+    if context:
+        titles = _prioritize_titles_for_search(
+            context.manager_titles
+            + [
+                "Engineering Manager",
+                "Software Engineering Manager",
+                "Technical Lead",
+                "Team Lead",
+            ],
+            bucket="hiring_managers",
+            context=context,
+        )
+    else:
+        titles = ["Engineering Manager", "Software Engineering Manager", "Technical Lead", "Team Lead"]
+    return list(dict.fromkeys(title for title in titles if title))
+
+
+def _companywide_peer_titles(context: JobContext | None, fallback_titles: list[str] | None = None) -> list[str]:
+    if context:
+        titles = _broaden_peer_titles_for_retry(context)
+    else:
+        titles = fallback_titles or ["Software Engineer", "Backend Engineer", "Platform Engineer", "Developer"]
+    return list(dict.fromkeys(title for title in titles if title))
+
+
+async def _expand_peer_candidates(
+    company_name: str,
+    existing_candidates: list[dict],
+    *,
+    context: JobContext | None,
+    public_identity_terms: list[str] | None,
+    limit: int,
+    min_results: int,
+) -> list[dict]:
+    if not context or (
+        context.department not in {"engineering", "data_science", "information_technology"}
+        and "ml" not in context.team_keywords
+    ):
+        return existing_candidates
+    if len(existing_candidates) >= min_results:
+        return existing_candidates
+
+    retry_titles = _broaden_peer_titles_for_retry(context)
+    if not retry_titles:
+        return existing_candidates
+
+    retry_candidates = await _search_candidates(
+        company_name,
+        titles=retry_titles,
+        departments=context.apollo_departments,
+        team_keywords=None,
+        public_identity_terms=public_identity_terms,
+        limit=limit,
+        min_results=max(1, min_results),
+    )
+    return _dedupe_candidates(existing_candidates, retry_candidates)
+
+
 def _public_url_matches_company(public_url: str, company_name: str) -> bool:
     if not public_url:
         return False
@@ -701,7 +1325,7 @@ def _candidate_matches_company(
         return False
 
     combined_text = " ".join(part for part in [title, snippet] if part).lower()
-    if data.get("source") == "brave_public_web" and any(term in combined_text for term in PUBLIC_DIRECTORY_TERMS):
+    if data.get("source") in PUBLIC_WEB_SOURCES and any(term in combined_text for term in PUBLIC_DIRECTORY_TERMS):
         return False
 
     return company_mentioned
@@ -806,6 +1430,7 @@ def _candidate_sort_key(data: dict, *, bucket: str, context: JobContext | None) 
         _org_rank(bucket, data.get("_org_level", "ic")),
         _source_rank(data.get("source")),
         _context_rank(data, context),
+        _seniority_fit_rank(data, bucket=bucket, context=context),
         explicit_role_rank,
         1 if data.get("_weak_title") else 0,
         0 if _role_like_title(title) else 1,
@@ -855,7 +1480,7 @@ def _prepare_candidates(
             data["_weak_title"] = weak_title
         if (
             bucket == "peers"
-            and data.get("source") == "brave_public_web"
+            and data.get("source") in PUBLIC_WEB_SOURCES
             and not _trusted_public_match(data, company_name, public_identity_slugs)
         ):
             continue
@@ -869,8 +1494,12 @@ def _prepare_candidates(
             source=data.get("source", ""),
             snippet=snippet,
         )
+        senior_ic_fallback = False
         if person_type != expected_type:
-            continue
+            if bucket == "hiring_managers" and person_type == "peer" and _is_senior_ic_fallback(title):
+                senior_ic_fallback = True
+            else:
+                continue
         if bucket == "recruiters":
             if not (
                 _is_recruiter_like(title)
@@ -898,7 +1527,7 @@ def _prepare_candidates(
             snippet=data.get("snippet", ""),
         )
 
-        if bucket == "hiring_managers" and org_level == "ic":
+        if bucket == "hiring_managers" and org_level == "ic" and not senior_ic_fallback:
             continue
         if bucket == "peers" and org_level == "director_plus":
             continue
@@ -908,10 +1537,13 @@ def _prepare_candidates(
             is_fallback = True
         if bucket == "recruiters" and org_level == "director_plus":
             is_fallback = True
+        if senior_ic_fallback:
+            is_fallback = True
 
         data["_employment_status"] = employment_status
         data["_org_level"] = org_level
         data["_director_fallback"] = is_fallback
+        data["_senior_ic_fallback"] = senior_ic_fallback
 
         if employment_status == "current":
             (current_fallback if is_fallback else current_primary).append(data)
@@ -939,14 +1571,12 @@ def _should_expand_with_theorg(
     current_counts: dict[str, int],
     *,
     context: JobContext | None = None,
-    minimum_per_bucket: int = 2,
+    target_count_per_bucket: int = DEFAULT_TARGET_COUNT_PER_BUCKET,
 ) -> bool:
+    target_count_per_bucket = _clamp_target_count_per_bucket(target_count_per_bucket)
     if is_ambiguous_company_name(company_name):
         return True
-    if context and getattr(context, "early_career", False):
-        targets = {"recruiters": 3, "hiring_managers": 1, "peers": 1}
-        return any(current_counts.get(bucket, 0) < target for bucket, target in targets.items())
-    return any(count < minimum_per_bucket for count in current_counts.values())
+    return any(count < target_count_per_bucket for count in current_counts.values())
 
 
 def _classify_person(title: str, source: str = "", snippet: str = "") -> str:
@@ -974,8 +1604,12 @@ def _compute_match_metadata(
 
     if person_type == "peer" and data.get("_weak_title"):
         return "next_best", "Current employment is verified, but the title specificity is weak."
+    if person_type == "hiring_manager" and data.get("_senior_ic_fallback"):
+        return "next_best", "Senior IC fallback at the target company."
 
     if person_type == "recruiter":
+        if _is_adjacent_recruiter_like(title) or _is_adjacent_recruiter_like(snippet):
+            return "adjacent", "Talent-acquisition contact at the target company."
         if context and context.department in {"engineering", "data_science"}:
             return "direct", "Recruiting title aligned to technical hiring."
         return "direct", "Recruiting title at the target company."
@@ -990,14 +1624,86 @@ def _compute_match_metadata(
             return "direct", f"Matched {department_label} context."
 
         if person_type == "hiring_manager":
-            return "next_best", f"Adjacent {department_label} manager at the target company."
-        return "next_best", f"Adjacent {department_label} teammate at the target company."
+            return "adjacent", f"Adjacent {department_label} manager at the target company."
+        return "adjacent", f"Adjacent {department_label} teammate at the target company."
 
     if person_type == "hiring_manager":
         return "direct", "Relevant manager title at the target company."
     if person_type == "peer":
         return "direct", "Relevant teammate title at the target company."
     return "direct", None
+
+
+def _candidate_bucket_role_fit_rank(bucket: str, data: dict) -> int:
+    title = data.get("title", "") or ""
+    snippet = data.get("snippet", "") or ""
+    if bucket == "recruiters":
+        if _is_recruiter_like(title):
+            return 0
+        if _is_recruiter_like(snippet):
+            return 1
+        return 2
+    if bucket == "hiring_managers":
+        if _is_manager_like(title):
+            return 0
+        if _is_manager_like(snippet):
+            return 1
+        if data.get("_senior_ic_fallback"):
+            return 2
+        return 3
+    if data.get("_senior_ic_fallback"):
+        return 1
+    return 0
+
+
+def _candidate_bucket_assignment_rank(
+    bucket: str,
+    data: dict,
+    *,
+    context: JobContext | None,
+) -> tuple[int, int, int, int, int, str]:
+    person_type = {
+        "recruiters": "recruiter",
+        "hiring_managers": "hiring_manager",
+        "peers": "peer",
+    }[bucket]
+    match_quality, _ = _compute_match_metadata(data, person_type, context)
+    return (
+        _match_rank(match_quality),
+        _candidate_bucket_role_fit_rank(bucket, data),
+        _seniority_fit_rank(data, bucket=bucket, context=context),
+        1 if data.get("_director_fallback") or data.get("_senior_ic_fallback") else 0,
+        0 if data.get("linkedin_url") else 1,
+        _normalize_identity(data.get("full_name")),
+    )
+
+
+def _dedupe_candidate_bucket_groups(
+    bucket_groups: dict[str, list[dict]],
+    *,
+    context: JobContext | None,
+) -> dict[str, list[dict]]:
+    winners: dict[str, tuple[str, tuple[int, int, int, int, int, str]]] = {}
+    for bucket, candidates in bucket_groups.items():
+        for candidate in candidates:
+            key = _candidate_key(candidate)
+            rank = _candidate_bucket_assignment_rank(
+                bucket,
+                candidate,
+                context=context,
+            )
+            current = winners.get(key)
+            if current is None or rank < current[1]:
+                winners[key] = (bucket, rank)
+
+    return {
+        bucket: [
+            candidate
+            for candidate in candidates
+            if winners.get(_candidate_key(candidate), (None, None))[0] == bucket
+        ]
+        for bucket, candidates in bucket_groups.items()
+    }
 
 
 def _dedupe_candidates(*groups: list[dict]) -> list[dict]:
@@ -1027,6 +1733,11 @@ async def _saved_theorg_slug_candidates(
             Person.company_id == company.id,
         )
     )
+    trusted_slugs = effective_public_identity_slugs(
+        company.name,
+        company.public_identity_slugs,
+        identity_hints=company.identity_hints if isinstance(company.identity_hints, dict) else None,
+    )
     candidates: list[str] = []
     for person in result.scalars().all():
         profile_data = person.profile_data if isinstance(person.profile_data, dict) else {}
@@ -1038,17 +1749,29 @@ async def _saved_theorg_slug_candidates(
             raw_slug = profile_data.get("public_identity_slug")
             if isinstance(raw_slug, str):
                 slug = raw_slug.strip().lower()
-        if slug:
+        if slug and matches_public_company_identity(
+            f"https://theorg.com/org/{slug}",
+            company.name,
+            trusted_slugs,
+        ):
             candidates.append(slug)
     return list(dict.fromkeys(candidates))
 
 
-def _candidate_theorg_slug_candidates(*groups: list[dict]) -> list[str]:
+def _candidate_theorg_slug_candidates(
+    *groups: list[dict],
+    company_name: str,
+    trusted_slugs: list[str] | None = None,
+) -> list[str]:
     slugs: list[str] = []
     for group in groups:
         for candidate in group:
             slug = _candidate_public_identity_slug(candidate)
-            if slug:
+            if slug and matches_public_company_identity(
+                f"https://theorg.com/org/{slug}",
+                company_name,
+                trusted_slugs,
+            ):
                 slugs.append(slug)
     return list(dict.fromkeys(slugs))
 
@@ -1064,7 +1787,7 @@ async def _search_candidates(
     limit: int = 5,
     min_results: int = 2,
 ) -> list[dict]:
-    """Run Apollo -> Brave LinkedIn -> Brave public-web search with dedupe."""
+    """Run Apollo plus routed SERP/public search with dedupe."""
     apollo_filtered = await apollo_client.search_people(
         company_name,
         titles=titles,
@@ -1084,22 +1807,24 @@ async def _search_candidates(
     brave_results = []
     merged = _dedupe_candidates(apollo_filtered, apollo_unfiltered)
     if len(merged) < min_results:
-        brave_results = await brave_search_client.search_people(
+        brave_results = await search_router_client.search_people(
             company_name,
             titles=titles,
             team_keywords=team_keywords,
             limit=max(limit, 5),
+            min_results=min_results,
         )
 
     public_results = []
     merged = _dedupe_candidates(merged, brave_results)
     if len(merged) < min_results or is_ambiguous_company_name(company_name) or bool(public_identity_terms):
-        public_results = await brave_search_client.search_public_people(
+        public_results = await search_router_client.search_public_people(
             company_name,
             titles=titles,
             team_keywords=team_keywords,
             public_identity_terms=public_identity_terms,
             limit=max(limit, 5),
+            min_results=min_results,
         )
 
     if is_ambiguous_company_name(company_name) or bool(public_identity_terms):
@@ -1136,6 +1861,7 @@ async def get_or_create_company(
     company_name: str,
     *,
     ats_slug: str | None = None,
+    careers_url: str | None = None,
 ) -> Company:
     """Find existing company or create plus enrich a new one."""
     requested_name = canonical_company_display_name(company_name)
@@ -1165,12 +1891,16 @@ async def get_or_create_company(
             existing_hints=getattr(company, "identity_hints", None),
             ats_slug=ats_slug,
             domain=company.domain,
-            careers_url=getattr(company, "careers_url", None) or (company_data or {}).get("careers_url"),
+            careers_url=careers_url
+            or getattr(company, "careers_url", None)
+            or (company_data or {}).get("careers_url"),
             linkedin_company_url=(company_data or {}).get("linkedin_url"),
         )
         company.public_identity_slugs = identity_bundle.slugs
         company.identity_hints = identity_bundle.hints
-        if company_data and not getattr(company, "careers_url", None):
+        if careers_url:
+            company.careers_url = careers_url
+        elif company_data and not getattr(company, "careers_url", None):
             company.careers_url = company_data.get("careers_url")
         return company
 
@@ -1188,7 +1918,7 @@ async def get_or_create_company(
         requested_name,
         ats_slug=ats_slug,
         domain=trusted_domain or (company_data or {}).get("domain"),
-        careers_url=(company_data or {}).get("careers_url"),
+        careers_url=careers_url or (company_data or {}).get("careers_url"),
         linkedin_company_url=(company_data or {}).get("linkedin_url"),
     )
 
@@ -1203,7 +1933,7 @@ async def get_or_create_company(
         size=str(company_data.get("size", "")) if company_data and use_apollo_enrichment else None,
         industry=company_data.get("industry") if company_data and use_apollo_enrichment else None,
         description=company_data.get("description") if company_data and use_apollo_enrichment else None,
-        careers_url=company_data.get("careers_url") if company_data else None,
+        careers_url=careers_url or (company_data.get("careers_url") if company_data else None),
         enriched_at=datetime.now(timezone.utc) if company_data and use_apollo_enrichment else None,
     )
     db.add(company)
@@ -1360,6 +2090,8 @@ def _apply_match_metadata(
 
     setattr(person, "match_quality", match_quality)
     setattr(person, "match_reason", match_reason)
+    setattr(person, "company_match_confidence", None)
+    setattr(person, "fallback_reason", match_reason if match_quality == "next_best" else None)
     setattr(person, "employment_status", employment_status)
     setattr(person, "org_level", org_level)
 
@@ -1392,11 +2124,149 @@ def _append_bucket(
     bucketed[bucket_name].append(person)
 
 
-def _filter_verified_bucketed(bucketed: dict[str, list[Person]]) -> dict[str, list[Person]]:
-    filtered: dict[str, list[Person]] = {}
+def _company_match_confidence(person: Person) -> str | None:
+    if person.current_company_verified is True:
+        return "verified"
+    if getattr(person, "employment_status", None) == "current":
+        return "strong_signal"
+    if getattr(person, "employment_status", None) == "ambiguous":
+        return "weak_signal"
+    return None
+
+
+def _confidence_rank(value: str | None) -> int:
+    return {
+        "verified": 0,
+        "strong_signal": 1,
+        "weak_signal": 2,
+    }.get(value or "", 3)
+
+
+def _match_rank(value: str | None) -> int:
+    return {
+        "direct": 0,
+        "adjacent": 1,
+        "next_best": 2,
+    }.get(value or "", 3)
+
+
+def _bucket_role_fit_rank(bucket: str, person: Person) -> int:
+    title = person.title or ""
+    if bucket == "recruiters":
+        if _is_recruiter_like(title):
+            return 0
+        if _is_adjacent_recruiter_like(title):
+            return 1
+        return 2
+    if bucket == "hiring_managers":
+        if _is_manager_like(title) or getattr(person, "org_level", None) == "manager":
+            return 0
+        if _is_senior_ic_fallback(title):
+            return 2
+        return 1
+    if _is_senior_ic_fallback(title):
+        return 1
+    return 0 if getattr(person, "org_level", None) == "ic" else 1
+
+
+def _dedupe_bucket_assignments(bucketed: dict[str, list[Person]]) -> dict[str, list[Person]]:
+    winners: dict[uuid.UUID, tuple[str, tuple[int, int, int, int, str]]] = {}
     for bucket, people in bucketed.items():
-        filtered[bucket] = [person for person in people if person.current_company_verified is True]
-    return filtered
+        for person in people:
+            if not person.id:
+                continue
+            rank = (
+                _match_rank(getattr(person, "match_quality", None)),
+                _bucket_role_fit_rank(bucket, person),
+                0 if getattr(person, "company_match_confidence", None) == "verified" else 1,
+                0 if person.linkedin_url else 1,
+                _normalize_identity(person.full_name),
+            )
+            current = winners.get(person.id)
+            if current is None or rank < current[1]:
+                winners[person.id] = (bucket, rank)
+
+    deduped: dict[str, list[Person]] = {}
+    for bucket, people in bucketed.items():
+        deduped[bucket] = [
+            person
+            for person in people
+            if not person.id or winners.get(person.id, (None, None))[0] == bucket
+        ]
+    return deduped
+
+
+def _finalize_bucketed(
+    bucketed: dict[str, list[Person]],
+    *,
+    target_count_per_bucket: int,
+) -> dict[str, list[Person]]:
+    finalized: dict[str, list[Person]] = {}
+    for bucket, people in bucketed.items():
+        ordered: list[Person] = []
+        for person in people:
+            company_match_confidence = _company_match_confidence(person)
+            setattr(person, "company_match_confidence", company_match_confidence)
+
+            if company_match_confidence != "verified":
+                setattr(person, "match_quality", "next_best")
+                if not getattr(person, "fallback_reason", None):
+                    fallback_reason = (
+                        "Strong same-company signal, but current employment is not fully verified."
+                        if company_match_confidence == "strong_signal"
+                        else "Lower-confidence same-company fallback."
+                    )
+                    setattr(person, "fallback_reason", fallback_reason)
+            else:
+                setattr(person, "fallback_reason", None)
+
+            ordered.append(person)
+
+        ordered.sort(
+            key=lambda person: (
+                _confidence_rank(getattr(person, "company_match_confidence", None)),
+                _match_rank(getattr(person, "match_quality", None)),
+                _org_rank(bucket, getattr(person, "org_level", "ic") or "ic"),
+                0 if person.linkedin_url else 1,
+                _normalize_identity(person.full_name),
+            )
+        )
+        finalized[bucket] = ordered
+    deduped = _dedupe_bucket_assignments(finalized)
+    return {
+        bucket: people[:target_count_per_bucket]
+        for bucket, people in deduped.items()
+    }
+
+
+def _backfill_sparse_hiring_manager_bucket(
+    bucketed: dict[str, list[Person]],
+    *,
+    target_count_per_bucket: int,
+) -> None:
+    if len(bucketed.get("hiring_managers", [])) >= target_count_per_bucket:
+        return
+
+    existing_ids = {person.id for person in bucketed.get("hiring_managers", []) if person.id}
+    for person in bucketed.get("peers", []):
+        if person.id in existing_ids:
+            continue
+        confidence = _company_match_confidence(person)
+        if confidence not in {"verified", "strong_signal"}:
+            continue
+        if not (_is_senior_ic_fallback(person.title) or getattr(person, "org_level", None) in {"manager", "director_plus"}):
+            continue
+
+        fallback_person = copy.copy(person)
+        fallback_person.person_type = "hiring_manager"
+        fallback_person.match_quality = "next_best"
+        fallback_person.match_reason = "Senior IC fallback at the target company."
+        fallback_person.fallback_reason = "Senior IC fallback at the target company."
+        fallback_person.org_level = getattr(person, "org_level", None) or "ic"
+        bucketed["hiring_managers"].append(fallback_person)
+        existing_ids.add(fallback_person.id)
+        if len(bucketed["hiring_managers"]) >= target_count_per_bucket:
+            return
 
 
 async def search_people_at_company(
@@ -1405,40 +2275,46 @@ async def search_people_at_company(
     company_name: str,
     roles: list[str] | None = None,
     github_org: str | None = None,
+    target_count_per_bucket: int = DEFAULT_TARGET_COUNT_PER_BUCKET,
 ) -> dict:
     """Find people at a company using company-level search."""
-    company = await get_or_create_company(db, user_id, company_name)
-    public_identity_terms = company.public_identity_slugs or None
+    target_count_per_bucket = _clamp_target_count_per_bucket(target_count_per_bucket)
+    search_limit = _search_limit_for_target(target_count_per_bucket)
+    prepare_limit = _prepare_limit_for_target(target_count_per_bucket)
+    minimum_results = _minimum_results_for_target(target_count_per_bucket)
 
-    recruiter_titles = [
-        "technical recruiter",
-        "engineering recruiter",
-        "talent acquisition",
-        "technical sourcer",
-        "talent acquisition partner",
-        "recruiting coordinator",
-    ]
-    manager_titles = roles or ["engineering manager", "technical lead", "team lead"]
-    peer_titles = roles or ["software engineer", "backend engineer", "developer"]
+    company = await get_or_create_company(db, user_id, company_name)
+    public_identity_terms = effective_public_identity_slugs(
+        company.name,
+        company.public_identity_slugs,
+        identity_hints=company.identity_hints if isinstance(company.identity_hints, dict) else None,
+    ) or None
+
+    recruiter_titles = _companywide_recruiter_titles(None)
+    manager_titles = roles or _companywide_manager_titles(None)
+    peer_titles = roles or _companywide_peer_titles(None)
 
     recruiter_candidates = await _search_candidates(
         company_name,
         titles=recruiter_titles,
         public_identity_terms=public_identity_terms,
-        limit=10,
+        limit=search_limit,
+        min_results=minimum_results,
     )
     manager_candidates = await _search_candidates(
         company_name,
         titles=manager_titles,
         seniority=["manager", "director", "vp"],
         public_identity_terms=public_identity_terms,
-        limit=10,
+        limit=search_limit,
+        min_results=minimum_results,
     )
     peer_candidates = await _search_candidates(
         company_name,
         titles=peer_titles,
         public_identity_terms=public_identity_terms,
-        limit=10,
+        limit=search_limit,
+        min_results=minimum_results,
     )
     saved_slug_candidates = await _saved_theorg_slug_candidates(
         db,
@@ -1452,10 +2328,16 @@ async def search_people_at_company(
             recruiter_candidates,
             manager_candidates,
             peer_candidates,
+            company_name=company_name,
+            trusted_slugs=public_identity_terms,
         )
         + saved_slug_candidates,
     )
-    public_identity_terms = company.public_identity_slugs or None
+    public_identity_terms = effective_public_identity_slugs(
+        company.name,
+        company.public_identity_slugs,
+        identity_hints=company.identity_hints if isinstance(company.identity_hints, dict) else None,
+    ) or None
 
     recruiter_candidates = await _recover_candidate_titles(
         recruiter_candidates,
@@ -1479,7 +2361,7 @@ async def search_people_at_company(
         public_identity_slugs=public_identity_terms,
         bucket="recruiters",
         context=None,
-        limit=5,
+        limit=prepare_limit,
     )
     manager_results = _prepare_candidates(
         manager_candidates,
@@ -1487,7 +2369,7 @@ async def search_people_at_company(
         public_identity_slugs=public_identity_terms,
         bucket="hiring_managers",
         context=None,
-        limit=5,
+        limit=prepare_limit,
     )
     peer_results = _prepare_candidates(
         peer_candidates,
@@ -1495,7 +2377,7 @@ async def search_people_at_company(
         public_identity_slugs=public_identity_terms,
         bucket="peers",
         context=None,
-        limit=5,
+        limit=prepare_limit,
     )
 
     if _should_expand_with_theorg(
@@ -1506,6 +2388,7 @@ async def search_people_at_company(
             "peers": len(peer_results),
         },
         context=None,
+        target_count_per_bucket=target_count_per_bucket,
     ):
         theorg_candidates = await discover_theorg_candidates(
             company,
@@ -1520,6 +2403,8 @@ async def search_people_at_company(
                 recruiter_candidates,
                 manager_candidates,
                 peer_candidates,
+                company_name=company_name,
+                trusted_slugs=public_identity_terms,
             )
             + saved_slug_candidates,
         )
@@ -1529,7 +2414,7 @@ async def search_people_at_company(
             public_identity_slugs=public_identity_terms,
             bucket="recruiters",
             context=None,
-            limit=5,
+            limit=prepare_limit,
         )
         manager_results = _prepare_candidates(
             _dedupe_candidates(manager_candidates, theorg_candidates.get("hiring_managers", [])),
@@ -1537,7 +2422,7 @@ async def search_people_at_company(
             public_identity_slugs=public_identity_terms,
             bucket="hiring_managers",
             context=None,
-            limit=5,
+            limit=prepare_limit,
         )
         peer_results = _prepare_candidates(
             _dedupe_candidates(peer_candidates, theorg_candidates.get("peers", [])),
@@ -1545,7 +2430,7 @@ async def search_people_at_company(
             public_identity_slugs=public_identity_terms,
             bucket="peers",
             context=None,
-            limit=5,
+            limit=prepare_limit,
         )
 
     recruiter_results = await _backfill_linkedin_profiles(
@@ -1567,9 +2452,122 @@ async def search_people_at_company(
         bucket="peers",
     )
 
+    if any(
+        _needs_more_bucket_candidates(results, target_count_per_bucket=target_count_per_bucket)
+        for results in (recruiter_results, manager_results, peer_results)
+    ):
+        if _needs_more_bucket_candidates(recruiter_results, target_count_per_bucket=target_count_per_bucket):
+            recruiter_candidates = _dedupe_candidates(
+                recruiter_candidates,
+                await _search_candidates(
+                    company_name,
+                    titles=_companywide_recruiter_titles(None),
+                    public_identity_terms=public_identity_terms,
+                    limit=search_limit,
+                    min_results=minimum_results,
+                ),
+            )
+            recruiter_candidates = await _recover_candidate_titles(
+                recruiter_candidates,
+                company=company,
+                company_name=company_name,
+            )
+            recruiter_results = _prepare_candidates(
+                recruiter_candidates,
+                company_name=company_name,
+                public_identity_slugs=public_identity_terms,
+                bucket="recruiters",
+                context=None,
+                limit=prepare_limit,
+            )
+            recruiter_results = await _backfill_linkedin_profiles(
+                recruiter_results,
+                company_name=company_name,
+                public_identity_slugs=public_identity_terms,
+                bucket="recruiters",
+            )
+
+        if _needs_more_bucket_candidates(manager_results, target_count_per_bucket=target_count_per_bucket):
+            manager_candidates = _dedupe_candidates(
+                manager_candidates,
+                await _search_candidates(
+                    company_name,
+                    titles=_companywide_manager_titles(None),
+                    seniority=["manager", "director", "vp"],
+                    public_identity_terms=public_identity_terms,
+                    limit=search_limit,
+                    min_results=minimum_results,
+                ),
+            )
+            manager_candidates = await _recover_candidate_titles(
+                manager_candidates,
+                company=company,
+                company_name=company_name,
+            )
+            manager_results = _prepare_candidates(
+                manager_candidates,
+                company_name=company_name,
+                public_identity_slugs=public_identity_terms,
+                bucket="hiring_managers",
+                context=None,
+                limit=prepare_limit,
+            )
+            manager_results = await _backfill_linkedin_profiles(
+                manager_results,
+                company_name=company_name,
+                public_identity_slugs=public_identity_terms,
+                bucket="hiring_managers",
+            )
+
+        if _needs_more_bucket_candidates(peer_results, target_count_per_bucket=target_count_per_bucket):
+            peer_candidates = _dedupe_candidates(
+                peer_candidates,
+                await _search_candidates(
+                    company_name,
+                    titles=_companywide_peer_titles(None, fallback_titles=peer_titles),
+                    public_identity_terms=public_identity_terms,
+                    limit=search_limit,
+                    min_results=minimum_results,
+                ),
+            )
+            peer_candidates = await _recover_candidate_titles(
+                peer_candidates,
+                company=company,
+                company_name=company_name,
+            )
+            peer_results = _prepare_candidates(
+                peer_candidates,
+                company_name=company_name,
+                public_identity_slugs=public_identity_terms,
+                bucket="peers",
+                context=None,
+                limit=prepare_limit,
+            )
+            peer_results = await _backfill_linkedin_profiles(
+                peer_results,
+                company_name=company_name,
+                public_identity_slugs=public_identity_terms,
+                bucket="peers",
+            )
+
+    bucket_candidate_groups = _dedupe_candidate_bucket_groups(
+        {
+            "recruiters": recruiter_results,
+            "hiring_managers": manager_results,
+            "peers": peer_results,
+        },
+        context=None,
+    )
+    recruiter_results = bucket_candidate_groups["recruiters"]
+    manager_results = bucket_candidate_groups["hiring_managers"]
+    peer_results = bucket_candidate_groups["peers"]
+
     github_members: list[dict] = []
     if github_org:
-        github_members = await github_client.search_org_members(github_org, limit=5)
+        github_members = await github_client.search_org_members(
+            github_org,
+            limit=max(5, target_count_per_bucket),
+        )
         for member in github_members:
             repos = await github_client.get_user_repos(member["login"], limit=3)
             languages = list({repo["language"] for repo in repos if repo.get("language")})
@@ -1605,10 +2603,20 @@ async def search_people_at_company(
         bucketed,
         company_name=company_name,
         company_domain=company.domain if company.domain_trusted else None,
-        company_public_identity_slugs=company.public_identity_slugs,
+        company_public_identity_slugs=public_identity_terms,
+    )
+    _backfill_sparse_hiring_manager_bucket(
+        bucketed,
+        target_count_per_bucket=target_count_per_bucket,
     )
     await db.commit()
-    return {"company": company, **_filter_verified_bucketed(bucketed)}
+    return {
+        "company": company,
+        **_finalize_bucketed(
+            bucketed,
+            target_count_per_bucket=target_count_per_bucket,
+        ),
+    }
 
 
 async def search_people_for_job(
@@ -1616,19 +2624,35 @@ async def search_people_for_job(
     user_id: uuid.UUID,
     job_id: uuid.UUID,
     min_relevance_score: int = 1,
+    target_count_per_bucket: int = DEFAULT_TARGET_COUNT_PER_BUCKET,
 ) -> dict:
     """Find people at a company using extracted job context."""
+    target_count_per_bucket = _clamp_target_count_per_bucket(target_count_per_bucket)
+    search_limit = _search_limit_for_target(target_count_per_bucket)
+    prepare_limit = _prepare_limit_for_target(target_count_per_bucket)
+    minimum_results = _minimum_results_for_target(target_count_per_bucket)
+
     result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == user_id))
     job = result.scalar_one_or_none()
     if not job:
         raise ValueError(f"Job not found: {job_id}")
 
     context = extract_job_context(job.title, job.description)
-    company = await get_or_create_company(db, user_id, job.company_name, ats_slug=job.ats_slug)
-    public_identity_terms = company.public_identity_slugs or None
-    recruiter_min_results = 3 if context.early_career else 2
-    manager_min_results = 2
-    peer_min_results = 1 if context.early_career else 2
+    company = await get_or_create_company(
+        db,
+        user_id,
+        job.company_name,
+        ats_slug=job.ats_slug,
+        careers_url=job.url,
+    )
+    public_identity_terms = effective_public_identity_slugs(
+        company.name,
+        company.public_identity_slugs,
+        identity_hints=company.identity_hints if isinstance(company.identity_hints, dict) else None,
+    ) or None
+    recruiter_min_results = minimum_results
+    manager_min_results = minimum_results
+    peer_min_results = minimum_results
     recruiter_titles = _prioritize_titles_for_search(
         context.recruiter_titles,
         bucket="recruiters",
@@ -1651,7 +2675,7 @@ async def search_people_for_job(
         departments=context.apollo_departments,
         team_keywords=context.team_keywords + context.domain_keywords,
         public_identity_terms=public_identity_terms,
-        limit=10,
+        limit=search_limit,
         min_results=recruiter_min_results,
     )
     manager_candidates = await _search_candidates(
@@ -1661,7 +2685,7 @@ async def search_people_for_job(
         seniority=_manager_seniority_filters(context),
         team_keywords=context.team_keywords + context.domain_keywords,
         public_identity_terms=public_identity_terms,
-        limit=10,
+        limit=search_limit,
         min_results=manager_min_results,
     )
     peer_candidates = await _search_candidates(
@@ -1670,14 +2694,15 @@ async def search_people_for_job(
         departments=context.apollo_departments,
         team_keywords=context.team_keywords + context.domain_keywords,
         public_identity_terms=public_identity_terms,
-        limit=10,
+        limit=search_limit,
         min_results=peer_min_results,
     )
-    hiring_team_candidates = await brave_search_client.search_hiring_team(
+    hiring_team_candidates = await search_router_client.search_hiring_team(
         job.company_name,
         job.title,
         team_keywords=context.team_keywords + context.domain_keywords,
-        limit=5,
+        limit=max(5, min(target_count_per_bucket + 2, 8)),
+        min_results=1,
     )
     recruiter_candidates = _dedupe_candidates(
         recruiter_candidates,
@@ -1686,6 +2711,18 @@ async def search_people_for_job(
     manager_candidates = _dedupe_candidates(
         manager_candidates,
         [candidate for candidate in hiring_team_candidates if _classify_person(candidate.get("title", ""), snippet=candidate.get("snippet", ""), source=candidate.get("source", "")) == "hiring_manager"],
+    )
+    peer_candidates = _dedupe_candidates(
+        peer_candidates,
+        [candidate for candidate in hiring_team_candidates if _classify_person(candidate.get("title", ""), snippet=candidate.get("snippet", ""), source=candidate.get("source", "")) == "peer"],
+    )
+    peer_candidates = await _expand_peer_candidates(
+        job.company_name,
+        peer_candidates,
+        context=context,
+        public_identity_terms=public_identity_terms,
+        limit=search_limit,
+        min_results=max(peer_min_results, target_count_per_bucket),
     )
     saved_slug_candidates = await _saved_theorg_slug_candidates(
         db,
@@ -1700,10 +2737,16 @@ async def search_people_for_job(
             manager_candidates,
             peer_candidates,
             hiring_team_candidates,
+            company_name=job.company_name,
+            trusted_slugs=public_identity_terms,
         )
         + saved_slug_candidates,
     )
-    public_identity_terms = company.public_identity_slugs or None
+    public_identity_terms = effective_public_identity_slugs(
+        company.name,
+        company.public_identity_slugs,
+        identity_hints=company.identity_hints if isinstance(company.identity_hints, dict) else None,
+    ) or None
 
     recruiter_candidates = await _recover_candidate_titles(
         recruiter_candidates,
@@ -1719,6 +2762,10 @@ async def search_people_for_job(
         peer_candidates,
         company=company,
         company_name=job.company_name,
+    )
+    manager_candidates = _dedupe_candidates(
+        manager_candidates,
+        [candidate for candidate in peer_candidates if _is_senior_ic_fallback(candidate.get("title"))],
     )
 
     manager_candidates = await _score_contextual_candidates(
@@ -1739,7 +2786,7 @@ async def search_people_for_job(
         public_identity_slugs=public_identity_terms,
         bucket="recruiters",
         context=context,
-        limit=5,
+        limit=prepare_limit,
     )
     manager_results = _prepare_candidates(
         manager_candidates,
@@ -1747,7 +2794,7 @@ async def search_people_for_job(
         public_identity_slugs=public_identity_terms,
         bucket="hiring_managers",
         context=context,
-        limit=5,
+        limit=prepare_limit,
     )
     peer_results = _prepare_candidates(
         peer_candidates,
@@ -1755,7 +2802,7 @@ async def search_people_for_job(
         public_identity_slugs=public_identity_terms,
         bucket="peers",
         context=context,
-        limit=5,
+        limit=prepare_limit,
     )
 
     if _should_expand_with_theorg(
@@ -1766,6 +2813,7 @@ async def search_people_for_job(
             "peers": len(peer_results),
         },
         context=context,
+        target_count_per_bucket=target_count_per_bucket,
     ):
         theorg_candidates = await discover_theorg_candidates(
             company,
@@ -1781,6 +2829,8 @@ async def search_people_for_job(
                 manager_candidates,
                 peer_candidates,
                 hiring_team_candidates,
+                company_name=job.company_name,
+                trusted_slugs=public_identity_terms,
             )
             + saved_slug_candidates,
         )
@@ -1790,7 +2840,7 @@ async def search_people_for_job(
             public_identity_slugs=public_identity_terms,
             bucket="recruiters",
             context=context,
-            limit=5,
+            limit=prepare_limit,
         )
         manager_results = _prepare_candidates(
             _dedupe_candidates(manager_candidates, theorg_candidates.get("hiring_managers", [])),
@@ -1798,7 +2848,7 @@ async def search_people_for_job(
             public_identity_slugs=public_identity_terms,
             bucket="hiring_managers",
             context=context,
-            limit=5,
+            limit=prepare_limit,
         )
         peer_results = _prepare_candidates(
             _dedupe_candidates(peer_candidates, theorg_candidates.get("peers", [])),
@@ -1806,7 +2856,7 @@ async def search_people_for_job(
             public_identity_slugs=public_identity_terms,
             bucket="peers",
             context=context,
-            limit=5,
+            limit=prepare_limit,
         )
 
     recruiter_results = await _backfill_linkedin_profiles(
@@ -1828,12 +2878,194 @@ async def search_people_for_job(
         bucket="peers",
     )
 
-    hiring_team_results = await brave_search_client.search_hiring_team(
+    if any(
+        _needs_more_bucket_candidates(results, target_count_per_bucket=target_count_per_bucket)
+        for results in (recruiter_results, manager_results, peer_results)
+    ):
+        if _needs_more_bucket_candidates(recruiter_results, target_count_per_bucket=target_count_per_bucket):
+            recruiter_candidates = _dedupe_candidates(
+                recruiter_candidates,
+                await _search_candidates(
+                    job.company_name,
+                    titles=_companywide_recruiter_titles(context),
+                    departments=context.apollo_departments,
+                    team_keywords=None,
+                    public_identity_terms=public_identity_terms,
+                    limit=search_limit,
+                    min_results=recruiter_min_results,
+                ),
+            )
+            recruiter_candidates = await _recover_candidate_titles(
+                recruiter_candidates,
+                company=company,
+                company_name=job.company_name,
+            )
+            recruiter_results = _prepare_candidates(
+                recruiter_candidates,
+                company_name=job.company_name,
+                public_identity_slugs=public_identity_terms,
+                bucket="recruiters",
+                context=context,
+                limit=prepare_limit,
+            )
+            recruiter_results = await _backfill_linkedin_profiles(
+                recruiter_results,
+                company_name=job.company_name,
+                public_identity_slugs=public_identity_terms,
+                bucket="recruiters",
+            )
+
+        if _needs_more_bucket_candidates(manager_results, target_count_per_bucket=target_count_per_bucket):
+            manager_candidates = _dedupe_candidates(
+                manager_candidates,
+                await _search_candidates(
+                    job.company_name,
+                    titles=_companywide_manager_titles(context),
+                    departments=context.apollo_departments,
+                    seniority=_manager_seniority_filters(context),
+                    team_keywords=None,
+                    public_identity_terms=public_identity_terms,
+                    limit=search_limit,
+                    min_results=manager_min_results,
+                ),
+            )
+            manager_candidates = await _recover_candidate_titles(
+                manager_candidates,
+                company=company,
+                company_name=job.company_name,
+            )
+            manager_candidates = await _score_contextual_candidates(
+                manager_candidates,
+                job=job,
+                context=context,
+                min_relevance_score=min_relevance_score,
+            )
+            manager_results = _prepare_candidates(
+                manager_candidates,
+                company_name=job.company_name,
+                public_identity_slugs=public_identity_terms,
+                bucket="hiring_managers",
+                context=context,
+                limit=prepare_limit,
+            )
+            manager_results = await _backfill_linkedin_profiles(
+                manager_results,
+                company_name=job.company_name,
+                public_identity_slugs=public_identity_terms,
+                bucket="hiring_managers",
+            )
+
+        if _needs_more_bucket_candidates(peer_results, target_count_per_bucket=target_count_per_bucket):
+            peer_candidates = _dedupe_candidates(
+                peer_candidates,
+                await _search_candidates(
+                    job.company_name,
+                    titles=_companywide_peer_titles(context),
+                    departments=context.apollo_departments,
+                    team_keywords=None,
+                    public_identity_terms=public_identity_terms,
+                    limit=search_limit,
+                    min_results=peer_min_results,
+                ),
+            )
+            peer_candidates = await _recover_candidate_titles(
+                peer_candidates,
+                company=company,
+                company_name=job.company_name,
+            )
+            peer_candidates = await _score_contextual_candidates(
+                peer_candidates,
+                job=job,
+                context=context,
+                min_relevance_score=min_relevance_score,
+            )
+            peer_results = _prepare_candidates(
+                peer_candidates,
+                company_name=job.company_name,
+                public_identity_slugs=public_identity_terms,
+                bucket="peers",
+                context=context,
+                limit=prepare_limit,
+            )
+            peer_results = await _backfill_linkedin_profiles(
+                peer_results,
+                company_name=job.company_name,
+                public_identity_slugs=public_identity_terms,
+                bucket="peers",
+            )
+
+    hiring_team_results = await search_router_client.search_hiring_team(
         job.company_name,
         job.title,
         team_keywords=context.team_keywords + context.domain_keywords,
-        limit=3,
+        limit=max(3, min(target_count_per_bucket + 1, 6)),
+        min_results=1,
     )
+
+    validated_hiring_team_results: list[dict] = []
+    for raw in hiring_team_results:
+        if not _candidate_matches_company(raw, job.company_name, public_identity_terms):
+            continue
+        employment_status = _classify_employment_status(
+            raw,
+            job.company_name,
+            public_identity_terms,
+        )
+        if employment_status == "former":
+            continue
+        annotated = dict(raw)
+        annotated["_employment_status"] = employment_status
+        annotated["_org_level"] = _classify_org_level(
+            annotated.get("title", ""),
+            source=annotated.get("source", ""),
+            snippet=annotated.get("snippet", ""),
+        )
+        validated_hiring_team_results.append(annotated)
+
+    bucket_candidate_groups = _dedupe_candidate_bucket_groups(
+        {
+            "recruiters": _dedupe_candidates(
+                recruiter_results,
+                [
+                    candidate
+                    for candidate in validated_hiring_team_results
+                    if _classify_person(
+                        candidate.get("title", ""),
+                        candidate.get("source", ""),
+                        candidate.get("snippet", ""),
+                    ) == "recruiter"
+                ],
+            ),
+            "hiring_managers": _dedupe_candidates(
+                manager_results,
+                [
+                    candidate
+                    for candidate in validated_hiring_team_results
+                    if _classify_person(
+                        candidate.get("title", ""),
+                        candidate.get("source", ""),
+                        candidate.get("snippet", ""),
+                    ) == "hiring_manager"
+                ],
+            ),
+            "peers": _dedupe_candidates(
+                peer_results,
+                [
+                    candidate
+                    for candidate in validated_hiring_team_results
+                    if _classify_person(
+                        candidate.get("title", ""),
+                        candidate.get("source", ""),
+                        candidate.get("snippet", ""),
+                    ) == "peer"
+                ],
+            ),
+        },
+        context=context,
+    )
+    recruiter_results = bucket_candidate_groups["recruiters"]
+    manager_results = bucket_candidate_groups["hiring_managers"]
+    peer_results = bucket_candidate_groups["peers"]
 
     bucketed = {"recruiters": [], "hiring_managers": [], "peers": []}
     seen = {"recruiters": set(), "hiring_managers": set(), "peers": set()}
@@ -1864,38 +3096,21 @@ async def search_people_for_job(
         person = await _store_person(db, user_id, company, data, "peer")
         _append_bucket(bucketed, seen, person, data, explicit_type="peer", context=context, company_name=job.company_name)
 
-    for data in hiring_team_results:
-        if not _candidate_matches_company(data, job.company_name, public_identity_terms):
-            continue
-        if _classify_employment_status(data, job.company_name, public_identity_terms) == "former":
-            continue
-        data["_employment_status"] = _classify_employment_status(
-            data,
-            job.company_name,
-            public_identity_terms,
-        )
-        data["_org_level"] = _classify_org_level(
-            data.get("title", ""),
-            source=data.get("source", ""),
-            snippet=data.get("snippet", ""),
-        )
-        person = await _store_person(
-            db,
-            user_id,
-            company,
-            data,
-            _classify_person(data.get("title", ""), data.get("source", ""), data.get("snippet", "")),
-        )
-        _append_bucket(bucketed, seen, person, data, context=context, company_name=job.company_name)
-
     await verify_people_current_company(
         bucketed,
         company_name=job.company_name,
         company_domain=company.domain if company.domain_trusted else None,
-        company_public_identity_slugs=company.public_identity_slugs,
+        company_public_identity_slugs=public_identity_terms,
+    )
+    _backfill_sparse_hiring_manager_bucket(
+        bucketed,
+        target_count_per_bucket=target_count_per_bucket,
     )
     await db.commit()
-    filtered_bucketed = _filter_verified_bucketed(bucketed)
+    filtered_bucketed = _finalize_bucketed(
+        bucketed,
+        target_count_per_bucket=target_count_per_bucket,
+    )
     return {
         "company": company,
         **filtered_bucketed,

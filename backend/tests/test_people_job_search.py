@@ -34,6 +34,8 @@ def _mock_person(user_id, **overrides):
     p.apollo_id = overrides.get("apollo_id", None)
     p.match_quality = overrides.get("match_quality", None)
     p.match_reason = overrides.get("match_reason", None)
+    p.company_match_confidence = overrides.get("company_match_confidence", None)
+    p.fallback_reason = overrides.get("fallback_reason", None)
     p.employment_status = overrides.get("employment_status", None)
     p.org_level = overrides.get("org_level", None)
     p.current_company_verified = overrides.get("current_company_verified", None)
@@ -93,6 +95,36 @@ async def test_search_with_job_id(client, mock_user_id):
     assert "backend" in data["job_context"]["team_keywords"]
     assert data["company"]["id"] == str(company.id)
     assert isinstance(data["peers"][0]["id"], str)
+    assert mock_search.await_args.kwargs["target_count_per_bucket"] == 3
+
+
+async def test_search_with_job_id_passes_requested_target_count(client, mock_user_id):
+    company = _mock_company(mock_user_id)
+    mock_result = {
+        "company": company,
+        "recruiters": [],
+        "hiring_managers": [],
+        "peers": [],
+        "job_context": {
+            "department": "engineering",
+            "team_keywords": [],
+            "seniority": "junior",
+        },
+    }
+
+    with patch("app.routers.people.search_people_for_job", new_callable=AsyncMock) as mock_search:
+        mock_search.return_value = mock_result
+        resp = await client.post(
+            "/api/people/search",
+            json={
+                "company_name": "Stripe",
+                "job_id": str(uuid.uuid4()),
+                "target_count_per_bucket": 6,
+            },
+        )
+
+    assert resp.status_code == 200
+    assert mock_search.await_args.kwargs["target_count_per_bucket"] == 6
 
 
 async def test_search_without_job_id_still_works(client, mock_user_id):

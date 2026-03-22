@@ -14,6 +14,12 @@ import {
   getPersonGuessBasis,
   isVerifiedEmailStatus,
 } from '@/lib/emailVerification';
+import {
+  clampPeopleSearchTargetCount,
+  DEFAULT_TARGET_COUNT_PER_BUCKET,
+  getStoredPeopleSearchTargetCount,
+  setStoredPeopleSearchTargetCount,
+} from '@/lib/peopleSearchCount';
 import { toast } from 'sonner';
 import type { EmailFindResult, Person, PeopleSearchResult } from '@/types';
 
@@ -36,19 +42,74 @@ function formatOrgLevel(level: string | null | undefined): string | null {
   return null;
 }
 
+function formatMatchQuality(matchQuality: string | null | undefined): string | null {
+  if (matchQuality === 'direct') return 'Direct Match';
+  if (matchQuality === 'adjacent') return 'Adjacent Match';
+  if (matchQuality === 'next_best') return 'Next Best';
+  return null;
+}
+
+function formatCompanyMatchConfidence(confidence: string | null | undefined): string | null {
+  if (confidence === 'verified') return 'Current company verified';
+  if (confidence === 'strong_signal' || confidence === 'weak_signal') return 'Lower-confidence company match';
+  return null;
+}
+
+type SavedContactsGroup = {
+  key: string;
+  companyName: string;
+  people: Person[];
+};
+
+function groupSavedPeopleByCompany(people: Person[]): SavedContactsGroup[] {
+  const grouped = new Map<string, SavedContactsGroup>();
+
+  for (const person of people) {
+    const companyId = person.company?.id?.trim();
+    const companyName = person.company?.name?.trim() || 'Unknown Company';
+    const key = companyId || `unknown:${companyName.toLowerCase()}`;
+    const existing = grouped.get(key);
+
+    if (existing) {
+      existing.people.push(person);
+      continue;
+    }
+
+    grouped.set(key, {
+      key,
+      companyName,
+      people: [person],
+    });
+  }
+
+  return Array.from(grouped.values()).sort((left, right) => {
+    const leftUnknown = left.companyName === 'Unknown Company';
+    const rightUnknown = right.companyName === 'Unknown Company';
+    if (leftUnknown !== rightUnknown) {
+      return leftUnknown ? 1 : -1;
+    }
+    return left.companyName.localeCompare(right.companyName);
+  });
+}
+
 export function PeoplePage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const jobId = searchParams.get('job_id');
   const jobCompany = searchParams.get('company');
   const jobTitle = searchParams.get('title');
+  const jobTargetCount = searchParams.get('target_count');
 
   const [companyName, setCompanyName] = useState(jobCompany || '');
   const [activeJobId, setActiveJobId] = useState(jobId || '');
   const [githubOrg, setGithubOrg] = useState('');
   const [linkedinUrl, setLinkedinUrl] = useState('');
+  const [targetCountPerBucket, setTargetCountPerBucket] = useState(() =>
+    clampPeopleSearchTargetCount(jobTargetCount ?? getStoredPeopleSearchTargetCount())
+  );
   const [searchResults, setSearchResults] = useState<PeopleSearchResult | null>(null);
   const [selectedPersonIds, setSelectedPersonIds] = useState<string[]>([]);
+  const [savedContactsCompanyFilter, setSavedContactsCompanyFilter] = useState('');
 
   const search = usePeopleSearch();
   const enrich = useEnrichPerson();
@@ -59,10 +120,13 @@ export function PeoplePage() {
   useEffect(() => {
     if (jobId && jobCompany && !autoSearchTriggered.current) {
       autoSearchTriggered.current = true;
+      const resolvedTargetCount = clampPeopleSearchTargetCount(jobTargetCount ?? targetCountPerBucket);
+      setStoredPeopleSearchTargetCount(resolvedTargetCount);
       search
         .mutateAsync({
           company_name: jobCompany,
           job_id: jobId,
+          target_count_per_bucket: resolvedTargetCount,
         })
         .then((result) => {
           setSearchResults(result);
@@ -71,10 +135,17 @@ export function PeoplePage() {
           setSearchParams({}, { replace: true });
         })
         .catch((err) => {
+          setSearchParams({}, { replace: true });
           toast.error(err instanceof Error ? err.message : 'Job-aware search failed');
         });
     }
-  }, [jobId, jobCompany, search, setSearchParams]);
+  }, [jobId, jobCompany, jobTargetCount, search, setSearchParams, targetCountPerBucket]);
+
+  const handleTargetCountChange = (value: string) => {
+    const nextCount = clampPeopleSearchTargetCount(value || DEFAULT_TARGET_COUNT_PER_BUCKET);
+    setTargetCountPerBucket(nextCount);
+    setStoredPeopleSearchTargetCount(nextCount);
+  };
 
   const handleSearch = async (e: FormEvent) => {
     e.preventDefault();
@@ -84,6 +155,7 @@ export function PeoplePage() {
       const result = await search.mutateAsync({
         company_name: companyName.trim(),
         github_org: githubOrg.trim() || undefined,
+        target_count_per_bucket: targetCountPerBucket,
       });
       setSearchResults(result);
     } catch (err) {
@@ -108,6 +180,22 @@ export function PeoplePage() {
     (searchResults?.recruiters.length ?? 0) +
     (searchResults?.hiring_managers.length ?? 0) +
     (searchResults?.peers.length ?? 0);
+  const normalizedSavedContactsCompanyFilter = savedContactsCompanyFilter.trim().toLowerCase();
+  const filteredSavedPeople = (savedPeople ?? []).filter((person) => {
+    if (!normalizedSavedContactsCompanyFilter) {
+      return true;
+    }
+    const companyLabel = person.company?.name?.toLowerCase() || 'unknown company';
+    return companyLabel.includes(normalizedSavedContactsCompanyFilter);
+  });
+  const groupedSavedPeople = groupSavedPeopleByCompany(filteredSavedPeople);
+  const isJobAwareSearchPending = Boolean(jobId && jobCompany && !searchResults);
+  const showSavedContacts = !searchResults && !search.isPending && !isJobAwareSearchPending && (savedPeople?.length ?? 0) > 0;
+  const showSavedContactsEmptyState =
+    !searchResults &&
+    !search.isPending &&
+    !isJobAwareSearchPending &&
+    (savedPeople?.length ?? 0) === 0;
 
   const togglePersonSelection = (personId: string) => {
     setSelectedPersonIds((current) => {
@@ -211,6 +299,21 @@ export function PeoplePage() {
                 />
                 <p className="text-xs text-muted-foreground">
                   Find engineers via their public GitHub contributions.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="target-count-per-bucket">Contacts per category</Label>
+                <Input
+                  id="target-count-per-bucket"
+                  type="number"
+                  min={1}
+                  max={10}
+                  inputMode="numeric"
+                  value={targetCountPerBucket}
+                  onChange={(e) => handleTargetCountChange(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Choose how many recruiters, hiring managers, and peers to try to return per search.
                 </p>
               </div>
               <Button type="submit" className="w-full" disabled={search.isPending}>
@@ -322,23 +425,54 @@ export function PeoplePage() {
       )}
 
       {/* Saved people */}
-      {!searchResults && savedPeople && savedPeople.length > 0 && (
+      {showSavedContacts && (
         <div className="space-y-4">
-          <h2 className="text-xl font-semibold">Saved Contacts ({savedPeople.length})</h2>
-          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-            {savedPeople.map((person) => (
-              <PersonCard
-                key={person.id}
-                person={person}
-                selected={selectedPersonIds.includes(person.id)}
-                onToggleSelect={togglePersonSelection}
-              />
-            ))}
+          <h2 className="text-xl font-semibold">Saved Contacts ({savedPeople?.length ?? 0})</h2>
+          <p className="text-sm text-muted-foreground">
+            Saved contacts are grouped by company so search results do not blur together.
+          </p>
+          <div className="space-y-2">
+            <Label htmlFor="saved-contacts-company-filter">Filter saved contacts by company</Label>
+            <Input
+              id="saved-contacts-company-filter"
+              placeholder="e.g. Uber, Stripe, Apple"
+              value={savedContactsCompanyFilter}
+              onChange={(e) => setSavedContactsCompanyFilter(e.target.value)}
+            />
+            {normalizedSavedContactsCompanyFilter && (
+              <p className="text-xs text-muted-foreground">
+                Showing {filteredSavedPeople.length} of {savedPeople?.length ?? 0} saved contacts.
+              </p>
+            )}
           </div>
+          {groupedSavedPeople.length === 0 ? (
+            <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+              No saved contacts match that company filter.
+            </div>
+          ) : (
+            groupedSavedPeople.map((group) => (
+              <div key={group.key} className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <h3 className="font-medium">{group.companyName}</h3>
+                  <Badge variant="outline">{group.people.length}</Badge>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                  {group.people.map((person) => (
+                    <PersonCard
+                      key={person.id}
+                      person={person}
+                      selected={selectedPersonIds.includes(person.id)}
+                      onToggleSelect={togglePersonSelection}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))
+          )}
         </div>
       )}
 
-      {!searchResults && (!savedPeople || savedPeople.length === 0) && (
+      {showSavedContactsEmptyState && (
         <div className="rounded-lg border border-dashed p-12 text-center">
           <p className="text-muted-foreground">
             Search for a company above to find people to connect with.
@@ -561,6 +695,12 @@ function PersonCard({
           </Badge>
         )}
 
+        {formatCompanyMatchConfidence(person.company_match_confidence) && person.company_match_confidence !== 'verified' && (
+          <Badge variant="outline">
+            {formatCompanyMatchConfidence(person.company_match_confidence)}
+          </Badge>
+        )}
+
         {person.org_level && (
           <Badge variant="outline">
             {formatOrgLevel(person.org_level)}
@@ -569,12 +709,16 @@ function PersonCard({
 
         {person.match_quality && (
           <Badge variant={person.match_quality === 'direct' ? 'secondary' : 'outline'}>
-            {person.match_quality === 'direct' ? 'Direct Match' : 'Next Best'}
+            {formatMatchQuality(person.match_quality)}
           </Badge>
         )}
 
         {person.match_reason && (
           <div className="text-xs text-muted-foreground">{person.match_reason}</div>
+        )}
+
+        {person.fallback_reason && person.fallback_reason !== person.match_reason && (
+          <div className="text-xs text-muted-foreground">{person.fallback_reason}</div>
         )}
 
         {companyVerification.current_company_verification_evidence && (

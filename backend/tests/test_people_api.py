@@ -34,6 +34,8 @@ def _mock_person(user_id, **overrides):
     p.apollo_id = overrides.get("apollo_id", None)
     p.match_quality = overrides.get("match_quality", None)
     p.match_reason = overrides.get("match_reason", None)
+    p.company_match_confidence = overrides.get("company_match_confidence", None)
+    p.fallback_reason = overrides.get("fallback_reason", None)
     p.employment_status = overrides.get("employment_status", None)
     p.org_level = overrides.get("org_level", None)
     p.current_company_verified = overrides.get("current_company_verified", None)
@@ -86,6 +88,53 @@ async def test_search_people(client, mock_user_id):
     assert data["company"]["name"] == "TechCorp"
     assert isinstance(data["company"]["id"], str)
     assert isinstance(data["recruiters"][0]["id"], str)
+    assert mock_search.await_args.kwargs["target_count_per_bucket"] == 3
+
+
+async def test_search_people_passes_requested_target_count(client, mock_user_id):
+    company = _mock_company(mock_user_id)
+    mock_result = {
+        "company": company,
+        "recruiters": [],
+        "hiring_managers": [],
+        "peers": [],
+    }
+
+    with patch("app.routers.people.search_people_at_company", new_callable=AsyncMock) as mock_search:
+        mock_search.return_value = mock_result
+        resp = await client.post(
+            "/api/people/search",
+            json={"company_name": "TechCorp", "target_count_per_bucket": 7},
+        )
+
+    assert resp.status_code == 200
+    assert mock_search.await_args.kwargs["target_count_per_bucket"] == 7
+
+
+async def test_search_people_clamps_target_count(client, mock_user_id):
+    company = _mock_company(mock_user_id)
+    mock_result = {
+        "company": company,
+        "recruiters": [],
+        "hiring_managers": [],
+        "peers": [],
+    }
+
+    with patch("app.routers.people.search_people_at_company", new_callable=AsyncMock) as mock_search:
+        mock_search.return_value = mock_result
+        low_resp = await client.post(
+            "/api/people/search",
+            json={"company_name": "TechCorp", "target_count_per_bucket": 0},
+        )
+        high_resp = await client.post(
+            "/api/people/search",
+            json={"company_name": "TechCorp", "target_count_per_bucket": 99},
+        )
+
+    assert low_resp.status_code == 200
+    assert high_resp.status_code == 200
+    assert mock_search.await_args_list[0].kwargs["target_count_per_bucket"] == 1
+    assert mock_search.await_args_list[1].kwargs["target_count_per_bucket"] == 10
 
 
 async def test_enrich_person(client, mock_user_id):

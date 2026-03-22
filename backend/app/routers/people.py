@@ -94,6 +94,7 @@ async def search_people(
                 user_id=user_id,
                 job_id=job_uuid,
                 min_relevance_score=body.min_relevance_score,
+                target_count_per_bucket=body.target_count_per_bucket,
             )
         except ValueError:
             raise HTTPException(status_code=404, detail="Job not found")
@@ -105,6 +106,7 @@ async def search_people(
         company_name=body.company_name,
         roles=body.roles,
         github_org=body.github_org,
+        target_count_per_bucket=body.target_count_per_bucket,
     )
     return _serialize_people_search_result(result)
 

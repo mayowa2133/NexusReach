@@ -25,6 +25,9 @@ def _person() -> SimpleNamespace:
         domain_trusted=True,
         email_pattern=None,
         email_pattern_confidence=None,
+        name="Affirm",
+        careers_url=None,
+        identity_hints={},
     )
     return SimpleNamespace(
         id=uuid.uuid4(),
@@ -118,8 +121,9 @@ async def test_verified_only_suppresses_low_confidence_suggestion(mock_db):
     assert "pattern_suggestion_low_confidence" in result["failure_reasons"]
 
 
-async def test_untrusted_company_domain_suppresses_pattern_guesses(mock_db):
+async def test_ambiguous_untrusted_company_domain_still_suppresses_pattern_guesses(mock_db):
     person = _person()
+    person.company.name = "Zip"
     person.company.domain = "zip.co"
     person.company.domain_trusted = False
     mock_db.execute.return_value = _ScalarResult(person)
@@ -138,6 +142,39 @@ async def test_untrusted_company_domain_suppresses_pattern_guesses(mock_db):
     assert result["email"] is None
     assert "company_domain_untrusted" in result["failure_reasons"]
     mock_suggest.assert_not_called()
+
+
+async def test_official_company_site_domain_allows_best_guess_without_trusted_domain(mock_db):
+    person = _person()
+    person.company.name = "Xai"
+    person.company.domain = None
+    person.company.domain_trusted = False
+    person.company.careers_url = "http://www.x.ai"
+    person.company.identity_hints = {"careers_host": "www.x.ai", "ats_slug": "xai"}
+    mock_db.execute.return_value = _ScalarResult(person)
+
+    with (
+        patch("app.services.email_finder_service.github_email_client.get_profile_email", new_callable=AsyncMock, return_value=None),
+        patch("app.services.email_finder_service.github_email_client.get_commit_email", new_callable=AsyncMock, return_value=None),
+        patch("app.services.email_finder_service.apollo_client.enrich_person", new_callable=AsyncMock, return_value=None),
+        patch("app.services.email_finder_service.email_suggestion_client.suggest_email", return_value={
+            "email": "alex.lee@x.ai",
+            "confidence": 40,
+            "suggestions": [{"email": "alex.lee@x.ai", "confidence": 40}],
+        }) as mock_suggest,
+        patch("app.services.email_finder_service.gravatar_client.check_gravatar", new_callable=AsyncMock, return_value=False),
+        patch("app.services.email_finder_service.settings") as mock_settings,
+    ):
+        mock_settings.proxycurl_api_key = ""
+        result = await find_email_for_person(mock_db, person.user_id, person.id, mode="best_effort")
+
+    assert result["result_type"] == "best_guess"
+    assert result["best_guess_email"] == "alex.lee@x.ai"
+    assert "company_domain_untrusted" in result["failure_reasons"]
+    assert "missing_company_domain" in result["failure_reasons"]
+    assert "official company site domain fallback" in (result["email_verification_evidence"] or "").lower()
+    mock_suggest.assert_called_once()
+    assert person.work_email is None
 
 
 async def test_untrusted_company_domain_clears_stale_pattern_email(mock_db):

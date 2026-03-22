@@ -358,9 +358,19 @@ def _build_manager_titles(
     return list(dict.fromkeys(title for title in titles if title))
 
 
-def _build_peer_titles(base_title: str, keywords: list[str], seniority: str) -> list[str]:
+def _build_peer_titles(
+    base_title: str,
+    keywords: list[str],
+    seniority: str,
+    department: str,
+) -> list[str]:
     titles: list[str] = []
     core = _extract_core_role(base_title)
+    core_lower = core.lower()
+    ml_like_role = (
+        department == "data_science"
+        and any(term in core_lower for term in ("machine learning", "ml", "ai", "applied scientist", "model training"))
+    ) or ("data scientist" in core_lower) or ("model training" in core_lower)
     if core:
         titles.append(core)
         if "engineer" in core.lower():
@@ -369,8 +379,22 @@ def _build_peer_titles(base_title: str, keywords: list[str], seniority: str) -> 
                 titles.append(core.replace("Engineer", "Software Engineer"))
         elif "developer" in core.lower():
             titles.append(core.replace("Developer", "Engineer"))
+        if ml_like_role:
+            titles.extend(
+                [
+                    "Machine Learning Engineer",
+                    "Software Engineer",
+                    "Applied Scientist",
+                    "Research Engineer",
+                    "Data Scientist",
+                    "Model Training Engineer",
+                    "Training Infrastructure Engineer",
+                ]
+            )
 
     for keyword in keywords[:2]:
+        if ml_like_role and keyword == "security":
+            continue
         label = _keyword_label(keyword)
         titles.extend([
             f"{label} Engineer",
@@ -504,7 +528,7 @@ def extract_job_context(title: str, description: str | None = None) -> JobContex
         seniority = "junior"
     apollo_departments = APOLLO_DEPARTMENT_SLUGS.get(department, ["engineering_technical"])
     manager_titles = _build_manager_titles(department, team_keywords, title, seniority)
-    peer_titles = _build_peer_titles(title, team_keywords, seniority)
+    peer_titles = _build_peer_titles(title, team_keywords, seniority, department)
     recruiter_titles = _build_recruiter_titles(
         department,
         domain_keywords,

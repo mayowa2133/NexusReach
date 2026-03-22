@@ -1,7 +1,7 @@
 from datetime import datetime
 import uuid
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class CompanyResponse(BaseModel):
@@ -41,6 +41,8 @@ class PersonResponse(BaseModel):
     relevance_score: int | None = None
     match_quality: str | None = None
     match_reason: str | None = None
+    company_match_confidence: str | None = None
+    fallback_reason: str | None = None
     employment_status: str | None = None
     org_level: str | None = None
     current_company_verified: bool | None = None
@@ -60,6 +62,16 @@ class PeopleSearchRequest(BaseModel):
     github_org: str | None = None
     job_id: str | None = None
     min_relevance_score: int = 1
+    target_count_per_bucket: int = 3
+
+    @field_validator("target_count_per_bucket", mode="before")
+    @classmethod
+    def clamp_target_count_per_bucket(cls, value: object) -> int:
+        try:
+            parsed = int(value) if value is not None else 3
+        except (TypeError, ValueError):
+            parsed = 3
+        return max(1, min(parsed, 10))
 
 
 class ManualPersonRequest(BaseModel):

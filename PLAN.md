@@ -1,252 +1,119 @@
-# NexusReach — Build Plan
+# NexusReach — Current Plan and Roadmap
 
-## Build Philosophy
+Last updated: 2026-03-22
 
-Ship a working core loop first, then layer features on top. At every phase, the user has something usable — not a half-built system that only works when everything is done.
+This file is no longer a speculative greenfield checklist. It now tracks what is already shipped and what still matters next.
 
----
+## Product status
 
-## Phase 1: Project Skeleton + Auth
-**Goal:** Working frontend + backend with authentication. User can sign up, log in, and see a dashboard shell.
+NexusReach already has a working end-to-end loop:
+1. import or discover a job
+2. find recruiters, hiring-side contacts, and peers
+3. recover LinkedIn/public evidence
+4. find or guess an email safely
+5. draft outreach
+6. track the relationship in CRM views
 
-- [x] Initialize Vite + React + TypeScript frontend
-- [x] Install and configure Shadcn/ui + Tailwind CSS
-- [x] Set up React Router with page shells (Dashboard, Profile, Jobs, People, Messages, Outreach, Settings)
-- [x] Initialize FastAPI backend with project structure
-- [x] Set up SQLAlchemy + Alembic + PostgreSQL connection
-- [x] Implement Supabase Auth integration (signup, login, JWT validation)
-- [x] Create base database models (users, profiles, user_settings)
-- [x] Set up environment variable management (pydantic-settings)
-- [x] Create API client utility on frontend (TanStack Query + auth headers)
-- [x] Zustand store for auth state
-- [x] Protected route wrapper on frontend
+## Completed foundations
 
-**Deliverable:** User can sign up, log in, and see the empty dashboard.
+- [x] Frontend app shell with auth, routing, and protected pages
+- [x] FastAPI backend with SQLAlchemy, Alembic, PostgreSQL, Redis, and Celery
+- [x] Profile setup and resume parsing
+- [x] Job board, tracker, and scoring
+- [x] Outreach CRM and insights dashboard
+- [x] Gmail and Outlook draft staging
+- [x] Multi-provider LLM drafting
 
----
+## Completed people-intelligence milestones
 
-## Phase 2: Profile Setup + Resume Parsing
-**Goal:** User creates their profile — the foundation that feeds every AI-generated message.
+### Early people discovery
+- [x] Apollo company/org enrichment
+- [x] Proxycurl enrichment
+- [x] GitHub engineer enrichment
+- [x] manual LinkedIn enrichment flow
 
-- [x] Build profile setup page (multi-step form)
-- [x] Resume upload component (PDF/DOCX)
-- [x] Backend resume parsing service (extract skills, experience, education, projects)
-- [x] Profile API endpoints (CRUD)
-- [x] Store parsed resume as structured JSONB
-- [x] Bio, goals, tone, target preferences form fields
-- [x] Portfolio links (GitHub, LinkedIn, personal site)
-- [x] Profile completion indicator on dashboard
+### Apollo-free and fallback evolution
+- [x] Apollo free-tier company support
+- [x] Google CSE fallback
+- [x] Brave LinkedIn/public search fallback
 
-**Deliverable:** User has a complete profile that the AI can reference.
+### Job-aware discovery
+- [x] `job_id`-driven people search
+- [x] context extraction from job title + description
+- [x] recruiter / manager / peer targeted search titles
 
----
+### The Org and identity upgrades
+- [x] bounded The Org traversal
+- [x] trusted public-identity slug support
+- [x] The Org slug validation and repair
+- [x] stricter team-page verification
+- [x] LinkedIn backfill for verified public candidates
 
-## Phase 3: People Finder
-**Goal:** User enters a company or job URL and gets relevant people to network with.
+### Contact quality and fallback improvements
+- [x] early-career recruiter-first tuning
+- [x] direct / adjacent / next-best hierarchy
+- [x] same-company fallback ranking
+- [x] `company_match_confidence` and `fallback_reason`
+- [x] safe best-guess emails from approved domain signals
 
-- [x] Apollo.io API client (search by company + title + seniority)
-- [x] Proxycurl API client (enrich by LinkedIn URL)
-- [x] GitHub API client (find engineers by org, get repos/activity)
-- [ ] Company website scraper (team pages, blog authors)
-- [x] People finder service (orchestrates all sources)
-- [x] Person database model + API endpoints
-- [x] Company database model + API endpoints
-- [x] People search UI — enter company name, see results categorized (recruiter / manager / peer)
-- [x] Manual LinkedIn URL input — paste URL, get enriched profile
-- [x] Person detail card (role, background, GitHub activity if available)
+## Completed job-ingestion milestones
 
-**Deliverable:** User can find relevant people at any company.
+- [x] Greenhouse board support
+- [x] Lever board support
+- [x] Ashby board support
+- [x] Workable exact-job support
+- [x] custom exact-job ingestion framework
+- [x] Apple Jobs support
+- [x] Workday exact-job support
+- [x] generic exact-job fallback for metadata-rich proprietary career pages
 
----
+## Completed infrastructure upgrades
 
-## Phase 4: Message Drafting
-**Goal:** The core value — AI drafts personalized messages grounded in real context.
+- [x] free-first public-page retrieval (`httpx -> Crawl4AI -> Firecrawl`)
+- [x] search-provider router
+- [x] Serper integration
+- [x] Tavily integration
+- [x] Redis-backed search result caching
+- [x] provider-order configuration by query family
 
-- [x] Claude API client
-- [x] Message drafting service (assembles context, calls Claude, returns draft + reasoning)
-- [x] Prompt engineering — system prompt with user profile, person profile, job context, goal
-- [x] Message database model + API endpoints
-- [x] Message drafting UI — select person, choose goal, choose channel (LinkedIn/email), see draft
-- [x] Draft editing interface — user can modify before approving
-- [x] AI reasoning display — show why the AI wrote what it wrote
-- [x] Copy to clipboard functionality
-- [x] Re-engagement awareness — detect prior outreach history, adjust draft accordingly
-- [x] All message types: LinkedIn note, LinkedIn message, email, follow-up, thank-you
+## Completed UX/supporting improvements
 
-**Deliverable:** User can draft and copy personalized messages for any contact.
+- [x] saved contacts grouped by company on People
+- [x] saved-contact company filter on People
+- [x] saved-contact company filter on Messages
+- [x] saved-contact company filter on Outreach
+- [x] hide saved contacts during live people-search loading
 
----
+## Current priorities
 
-## Phase 5: Email Layer
-**Goal:** Find work emails and stage drafts in the user's inbox.
+### P1
+- [ ] Improve hiring-manager precision for large engineering orgs
+- [ ] Increase peer recall for broad roles without drifting into noisy adjacent titles
+- [ ] Reduce cross-bucket duplicates when one same-company fallback qualifies for multiple buckets
 
-- [x] Hunter.io API client (email finder + verification)
-- [x] Email finding waterfall service (Apollo → Hunter → Proxycurl → fallback)
-- [x] Gmail OAuth integration (consent flow, token storage)
-- [x] Outlook OAuth integration (consent flow, token storage)
-- [x] Gmail draft staging (create draft via API)
-- [x] Outlook draft staging (create draft via Graph API)
-- [x] Email-specific message formatting (subject line, signature, professional tone)
-- [x] Settings page: connect/disconnect Gmail and Outlook
-- [x] Fallback UI — when no email found, show LinkedIn option instead
+### P2
+- [ ] Add more first-class exact-job host adapters beyond Apple and Workday
+- [ ] Improve company-identity disambiguation for overloaded short brands
+- [ ] Add provider usage telemetry and easier cost/credit visibility
 
-**Deliverable:** User can find work emails and stage personalized drafts in their inbox.
+### P3
+- [ ] Add optional self-hosted search fallback behind the router if vendor-cost pressure remains
+- [ ] Expand company-research surfaces using the existing public-web stack
+- [ ] Revisit background sync/reminder automation once retrieval precision stabilizes
 
----
+## Near-term regression suite to keep healthy
 
-## Phase 6: Job Intelligence
-**Goal:** Comprehensive job monitoring and tracking.
+- [ ] Zip ambiguous-company people search
+- [ ] Whatnot early-career recruiter discovery
+- [ ] Apple exact-job import + people search
+- [ ] Fortune Media vs Fortune Brands identity split
+- [ ] Uber generic exact-job import + hierarchy output
+- [ ] xAI hierarchy + safe best-guess email behavior
 
-- [x] JSearch (RapidAPI) client
-- [x] Adzuna API client
-- [x] ATS clients (Greenhouse, Lever, Ashby)
-- [x] Dice API client
-- [x] Remotive / Jobicy client
-- [x] GitHub SimplifyJobs markdown table parser (New Grad + Internships)
-- [ ] newgrad-jobs.com web scraper
-- [x] Job deduplication service (fingerprint by company + title + location)
-- [x] Opportunity scoring service (compare JD against user profile)
-- [ ] Celery periodic task for job sync (every 6 hours)
-- [x] Job search + filter UI
-- [x] Job detail view (description, match score, linked people, linked outreach)
-- [x] Kanban job tracker (Discovered → Interested → Researching → Networking → Applied → Interviewing → Offer)
-- [ ] Company research panel (size, funding, tech stack, open roles)
+## Guiding principles
 
-**Deliverable:** User has a comprehensive job board with intelligent scoring and tracking.
-
----
-
-## Phase 7: Outreach Tracker (CRM)
-**Goal:** Nothing falls through the cracks.
-
-- [x] Outreach log database model + API endpoints
-- [x] CRM UI — list view + timeline view of all contacts
-- [x] Status tracking per contact (Draft → Sent → Connected → Responded → Met → Following Up → Closed)
-- [x] Notes field per contact
-- [ ] Reminder system — Celery task for follow-up notifications
-- [x] Link outreach records to jobs and companies
-- [x] Response rate tracking per contact
-- [x] Contact history view (always visible before re-engagement, non-toggleable)
-
-**Deliverable:** User has a full personal CRM tracking every networking interaction.
-
----
-
-## Phase 8: Insights Dashboard
-**Goal:** Help users network smarter over time.
-
-- [x] Response rate analytics (by message type, role type, company)
-- [x] Message angle effectiveness (GitHub reference vs shared background vs direct inquiry)
-- [x] Network growth chart over time
-- [x] Network gap analysis (industries/roles not yet reached)
-- [x] Warm path finder (existing connections at target companies)
-- [x] Company openness ranking (based on response rates)
-- [x] Dashboard home page with key metrics summary
-
-**Deliverable:** User sees actionable insights about what's working.
-
----
-
-## Phase 9: Settings + Guardrails
-**Goal:** User control over all configurable behaviours.
-
-- [x] Settings page UI
-- [x] Outreach guardrails toggles (7-day gap, follow-up suggestions, response warnings)
-- [x] Toggle-off modal with risk explanation
-- [x] Persistent "Guardrails: Modified" indicator
-- [x] Email integration management (connect/disconnect)
-- [ ] API key management (user-provided keys for personal use)
-- [ ] Profile editing from settings
-
-**Deliverable:** User has full control over tool behaviour with sensible defaults.
-
----
-
-## Phase 10: Polish + Production
-**Goal:** Production-ready deployment.
-
-- [x] Error boundary components (frontend)
-- [x] Loading states and skeleton screens
-- [x] Mobile responsive design pass
-- [x] Rate limiting on backend endpoints
-- [x] API cost tracking and per-user daily limits
-- [x] Onboarding flow for new users
-- [x] Production environment setup (Vercel + Railway)
-- [x] CI/CD pipeline
-- [x] End-to-end testing for core flows
-
-**Deliverable:** Production-ready NexusReach.
-
----
-
-## Phase 11: Job-Aware People Discovery
-**Goal:** Connect job search and people finder — clicking "Find People" from a saved job automatically searches for people on the same team/department as that role.
-
-- [x] Job context extraction utility (`backend/app/utils/job_context.py`) — pure function that derives department, team keywords, seniority, and targeted search titles from job title + description
-- [x] Apollo client enhancement — add `departments` param to `search_people()` for department-filtered searches
-- [x] Job-aware people service (`search_people_for_job()`) — loads job from DB, extracts context, runs 3 targeted Apollo searches (recruiters, managers, peers) with department filtering and fallback
-- [x] Schema + router updates — `job_id` param on `PeopleSearchRequest`, `JobContextResponse` in response, router dispatches to job-aware search when `job_id` present
-- [x] "Find People" button on job cards — navigates to people page with job context in URL params
-- [x] Job-aware people page — auto-fills company, auto-triggers search, shows job context banner with department/team badges
-- [x] Unit tests for job context extraction + API tests for job-aware search endpoint
-
-**Deliverable:** User can click "Find People" on any saved job and get team-relevant recruiters, managers, and peers — not generic results.
-
----
-
-## Phase 12: Apollo Free Discovery + On-Demand Enrichment
-**Goal:** Switch from credit-consuming people search to Apollo's free discovery endpoint, and add on-demand email enrichment so the app works on Apollo's Free tier (100 emails/month) instead of requiring the $79/month Professional plan.
-
-- [x] Add `apollo_master_api_key` config setting — free endpoint authenticates via header, not JSON body
-- [x] Add `apollo_id` column to Person model + Alembic migration — stores Apollo's person ID for efficient enrichment
-- [x] Refactor Apollo client — switch `search_people()` from `/v1/mixed_people/search` (credits) to `/api/v1/mixed_people/api_search` (free, no emails)
-- [x] Add `enrich_person()` to Apollo client — calls `/v1/people/match` (1 credit) for on-demand email enrichment
-- [x] Update `_store_person()` — handle `apollo_id`, dedup by `apollo_id` when no LinkedIn URL
-- [x] Add Apollo enrichment step to email waterfall — now: Existing → Apollo Enrichment → Hunter → Proxycurl → Hunter Domain → Exhausted
-- [x] Update schemas + types — `apollo_id` field on `PersonResponse` and frontend `Person` type
-- [x] "Get Email" button on person cards — three states: email found, enrichment possible (button), no email available
-- [x] Apollo client unit tests — verify free endpoint, header auth, no emails in search, enrichment flow
-- [x] Updated existing test mocks with `apollo_id`
-
-**Deliverable:** People discovery costs zero Apollo credits. Email enrichment happens on-demand (1 credit per "Get Email" click). App works on Apollo Free tier.
-
----
-
-## Phase 13: Multi-Provider LLM Support
-**Goal:** Allow message drafting with any major LLM provider — not just Anthropic Claude. Users set `NEXUSREACH_LLM_PROVIDER` env var to switch globally between Anthropic, OpenAI, Google Gemini, and Groq.
-
-- [x] Add `openai`, `google-genai`, `groq` dependencies to `requirements.txt`
-- [x] Add config fields — `llm_provider`, `openai_api_key`, `google_api_key`, `groq_api_key`; rename `daily_claude_token_limit` → `daily_llm_token_limit`
-- [x] Create `backend/app/clients/llm_client.py` — provider abstraction with `_resolve_provider()`, four `_generate_*()` implementations, single `generate_message()` public API
-- [x] Delete `backend/app/clients/claude_client.py` — replaced by `llm_client.py`
-- [x] Update `message_service.py` — import `llm_client`, use `ai_result["provider"]` for usage tracking
-- [x] Update `api_usage_service.py` — use `daily_llm_token_limit`
-- [x] Unit tests for `llm_client.py` — `_parse_reasoning`, `_resolve_provider`, all four provider generators, dispatch logic
-- [x] Documentation updates — env vars in `CLAUDE.md`, phase in `PLAN.md`
-
-**Deliverable:** Message drafting works with Anthropic, OpenAI, Gemini, or Groq — auto-falls back to whichever provider has a key configured.
-
----
-
-## Phase 14: Apollo Free-Tier Fix + Google CSE Fallback
-**Goal:** Fix people discovery for Apollo free-tier users. Apollo people search returns 403 on the free plan, so add Google Custom Search API as a fallback for LinkedIn X-ray people discovery. Keep Apollo code intact so upgrading restores full functionality automatically.
-
-**Tasks:**
-- [x] Create `backend/app/clients/google_search_client.py` — LinkedIn X-ray search via Google CSE (`site:linkedin.com/in "company" "title"`)
-- [x] Add `google_cse_id` to `backend/app/config.py`
-- [x] Update `backend/app/clients/apollo_client.py` — add 403 graceful handling (return `[]`/`None` instead of raising), migrate `search_company` to `/api/v1/organizations/search` (header auth), add `enrich_company()` for free-tier org enrichment
-- [x] Update `backend/app/services/people_service.py` — cascading discovery: Apollo first → Google CSE fallback for all three categories (recruiters, managers, peers)
-- [x] Verify email waterfall resilience — Apollo `enrich_person()` already handles 403 gracefully, no changes needed
-- [x] Rewrite `backend/tests/test_apollo_client.py` — add 403 tests, update company search for new endpoint/auth, add `enrich_company` tests
-- [x] Create `backend/tests/test_google_search_client.py` — parse LinkedIn results, search query construction, error handling
-- [x] Update `.env.example`, `CLAUDE.md` (gotcha #9 + #10), `PLAN.md`
-
-**Deliverable:** People discovery works on Apollo free tier via Google CSE fallback. Upgrading Apollo auto-enables native people search with no code changes.
-
----
-
-## Current Status
-
-**Phase:** Phase 14 complete — Apollo Free-Tier Fix + Google CSE Fallback shipped!
-
-**Completed:** Phase 1 (Skeleton + Auth), Phase 2 (Profile Setup + Resume Parsing), Phase 3 (People Finder), Phase 4 (Message Drafting), Phase 5 (Email Layer), Phase 6 (Job Intelligence), Phase 7 (Outreach Tracker CRM), Phase 8 (Insights Dashboard), Phase 9 (Settings + Guardrails), Phase 10 (Polish + Production), Phase 11 (Job-Aware People Discovery), Phase 12 (Apollo Free Discovery + On-Demand Enrichment), Phase 13 (Multi-Provider LLM Support), Phase 14 (Apollo Free-Tier Fix + Google CSE Fallback)
+1. Keep humans in the loop. Draft and stage; never auto-send.
+2. Prefer explicit same-company hierarchy over empty buckets.
+3. Keep public identity trust separate from email-domain trust.
+4. Reserve expensive providers for the narrowest, highest-value tasks.
+5. Optimize for truthful output over aggressive guessing.

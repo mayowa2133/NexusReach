@@ -32,11 +32,31 @@ SAFE_AMBIGUOUS_SLUG_SUFFIXES = {
     "jobs",
     "careers",
 }
+SAFE_PUBLIC_IDENTITY_VARIANT_TOKENS = LEGAL_SUFFIX_TOKENS | SAFE_AMBIGUOUS_SLUG_SUFFIXES | {
+    "career",
+    "careers",
+    "jobs",
+    "media",
+    "magazine",
+    "news",
+    "digital",
+    "press",
+    "live",
+    "studios",
+    "studio",
+}
 TRUSTED_PUBLIC_SLUG_HOSTS = {
     "theorg.com",
     "www.theorg.com",
     "linkedin.com",
     "www.linkedin.com",
+}
+GENERIC_CAREERS_HOST_ROOTS = {
+    "greenhouse",
+    "lever",
+    "ashbyhq",
+    "workable",
+    "myworkdayjobs",
 }
 
 
@@ -78,6 +98,42 @@ def is_ambiguous_company_name(value: str | None) -> bool:
         return False
     tokens = normalized.split()
     return len(tokens) == 1 and len(tokens[0]) <= 4
+
+
+def _slug_tokens(value: str | None) -> list[str]:
+    return [token for token in (value or "").strip().lower().split("-") if token]
+
+
+def _slug_variant_matches(base_slug: str | None, candidate_slug: str | None) -> bool:
+    base_tokens = _slug_tokens(base_slug)
+    candidate_tokens = _slug_tokens(candidate_slug)
+    if not base_tokens or not candidate_tokens:
+        return False
+    if candidate_tokens == base_tokens:
+        return True
+
+    base_compact = "".join(base_tokens)
+    candidate_compact = "".join(candidate_tokens)
+    if not base_compact or not candidate_compact:
+        return False
+
+    if len(base_tokens) == 1:
+        if candidate_tokens[0] == base_tokens[0]:
+            extra_tokens = candidate_tokens[1:]
+            return bool(extra_tokens) and all(
+                token in SAFE_PUBLIC_IDENTITY_VARIANT_TOKENS for token in extra_tokens
+            )
+        if candidate_compact.startswith(base_compact):
+            suffix = candidate_compact[len(base_compact):]
+            return bool(suffix) and suffix in SAFE_AMBIGUOUS_SLUG_SUFFIXES
+        return False
+
+    if candidate_tokens[:len(base_tokens)] == base_tokens:
+        extra_tokens = candidate_tokens[len(base_tokens):]
+        return bool(extra_tokens) and all(
+            token in SAFE_PUBLIC_IDENTITY_VARIANT_TOKENS for token in extra_tokens
+        )
+    return False
 
 
 def domain_root(value: str | None) -> str:
@@ -167,21 +223,15 @@ def is_compatible_public_identity_slug(company_name: str, candidate_slug: str | 
     if not slug:
         return False
 
-    expected = slugify_company_name(company_name).replace("-", "")
+    expected_slug = slugify_company_name(company_name)
+    expected = expected_slug.replace("-", "")
     candidate_compact = slug.replace("-", "")
-    if not expected:
+    if not expected_slug or not expected:
         return False
     if candidate_compact == expected:
         return True
 
-    if not is_ambiguous_company_name(company_name):
-        return expected in candidate_compact
-
-    if not candidate_compact.startswith(expected):
-        return False
-
-    suffix = candidate_compact[len(expected):]
-    return suffix in SAFE_AMBIGUOUS_SLUG_SUFFIXES
+    return _slug_variant_matches(expected_slug, slug)
 
 
 def _merge_slug(slugs: set[str], slug: str | None, *, company_name: str) -> None:
@@ -190,6 +240,40 @@ def _merge_slug(slugs: set[str], slug: str | None, *, company_name: str) -> None
         return
     if is_compatible_public_identity_slug(company_name, clean):
         slugs.add(clean)
+
+
+def effective_public_identity_slugs(
+    company_name: str,
+    public_identity_slugs: list[str] | None = None,
+    *,
+    identity_hints: dict | None = None,
+) -> list[str]:
+    hints = dict(identity_hints or {})
+    official_aliases = {
+        slugify_company_name(company_name),
+        (hints.get("normalized_slug") or "").strip().lower(),
+        (hints.get("ats_slug") or "").strip().lower(),
+        (hints.get("linkedin_company_slug") or "").strip().lower(),
+        (hints.get("domain_root") or "").strip().lower(),
+    }
+    careers_host = (hints.get("careers_host") or "").strip().lower()
+    if careers_host:
+        careers_root = domain_root(careers_host)
+        if careers_root and careers_root not in GENERIC_CAREERS_HOST_ROOTS:
+            official_aliases.add(careers_root)
+
+    aliases = {alias for alias in official_aliases if alias}
+    filtered: set[str] = set(aliases)
+    for raw_slug in public_identity_slugs or []:
+        slug = (raw_slug or "").strip().lower()
+        if not slug:
+            continue
+        if slug in aliases or is_compatible_public_identity_slug(company_name, slug):
+            filtered.add(slug)
+            continue
+        if any(_slug_variant_matches(alias, slug) for alias in aliases):
+            filtered.add(slug)
+    return sorted(filtered)
 
 
 def build_public_identity_hints(
@@ -213,8 +297,10 @@ def build_public_identity_hints(
             slugs.add(f"{base_slug}hq")
 
     if ats_slug:
-        _merge_slug(slugs, ats_slug, company_name=company_name)
-        hints["ats_slug"] = ats_slug.lower()
+        clean_ats_slug = ats_slug.strip().lower()
+        if clean_ats_slug:
+            slugs.add(clean_ats_slug)
+            hints["ats_slug"] = clean_ats_slug
 
     domain_slug = domain_root(domain)
     if domain_slug:
@@ -234,7 +320,14 @@ def build_public_identity_hints(
         _merge_slug(slugs, linkedin_slug, company_name=company_name)
         hints["linkedin_company_slug"] = linkedin_slug
 
-    return PublicIdentityHints(slugs=sorted(slugs), hints=hints)
+    return PublicIdentityHints(
+        slugs=effective_public_identity_slugs(
+            company_name,
+            sorted(slugs),
+            identity_hints=hints,
+        ),
+        hints=hints,
+    )
 
 
 def trusted_public_identity_slugs(
@@ -270,12 +363,18 @@ def matches_public_company_identity(
         return False
 
     slug = slug.lower()
-    trusted = {item.lower() for item in trusted_slugs or [] if item}
+    trusted_raw = {item.lower() for item in trusted_slugs or [] if item}
+    trusted = trusted_raw | set(
+        effective_public_identity_slugs(
+            company_name,
+            list(trusted_raw),
+        )
+    )
     if trusted and slug in trusted:
         return True
 
-    if trusted and is_ambiguous_company_name(company_name):
-        return is_compatible_public_identity_slug(company_name, slug)
+    if trusted and any(_slug_variant_matches(trusted_slug, slug) for trusted_slug in trusted):
+        return True
 
     if trusted:
         return False

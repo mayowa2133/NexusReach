@@ -1,73 +1,145 @@
 # NexusReach Handoff
 
-## Completed in this pass
-- Added exact-job Workable ATS support.
-  - `parse_ats_job_url()` now recognizes `apply.workable.com/<company>/j/<shortcode>` URLs
-  - ATS search can import a pasted Workable posting through the public `api/v2/accounts/{company}/jobs/{shortcode}` endpoint
-  - normalized jobs are stored as `ats="workable"` and use the returned canonical Workable shortcode URL
-- Added a generic free-first public page fetch layer.
-  - Strategy is now direct `httpx` fetch first, then Crawl4AI, then Firecrawl only if configured.
-  - Public-web employment verification no longer bails out when Firecrawl env is missing.
-  - New public-web verification writes use `current_company_verification_source="public_web"` while old `firecrawl_public_web` rows remain readable.
-- Added Firecrawl-backed The Org graph traversal for people discovery.
-  - Resolves a trusted The Org org slug from `Company.public_identity_slugs`
-  - Traverses company org pages, relevant team pages, and selected manager person pages
-  - Harvests recruiter, hiring-manager, and peer candidates with `source="theorg_traversal"`
-- The Org candidates now carry richer public metadata in `profile_data`.
-  - `public_url`, `public_host`, `public_identity_slug`, `public_page_type`
-  - `theorg_origin_url`, `theorg_team_slug`, `theorg_team_name`
-  - `theorg_relationship`, `theorg_parent_name`, `theorg_parent_title`
-- People discovery now uses The Org as a second-stage expansion when buckets are underfilled or the company name is ambiguous.
-  - Existing Apollo + Brave + hiring-team search stays in place
-  - The Org candidates are merged into the existing `_prepare_candidates()` path before storage/ranking
-- Current-company verification is stricter for public pages.
-  - direct trusted-slug shortcut now only applies to The Org person pages
-  - team-page verification now requires the trusted company slug plus the candidate’s name and title on the scraped team page
-- Added backend config for bounded traversal and cache TTL in `backend/.env.example`.
+Last updated: 2026-03-22
 
-## Files changed in this pass
-- `backend/app/clients/firecrawl_client.py`
+## Current state
+
+NexusReach is past the original MVP. The app now supports:
+- board-backed ATS search plus exact-job URL ingestion
+- job-aware people discovery
+- bounded The Org traversal and slug repair
+- LinkedIn backfill for verified public candidates
+- same-company contact hierarchy (`direct`, `adjacent`, `next_best`)
+- safe best-guess emails from approved domain signals
+- multi-provider search routing with Redis caching
+- multi-provider LLM drafting
+- saved-contact company filtering across People, Messages, and Outreach
+
+## Major capabilities that are live
+
+### Job import
+- Board-backed ATS:
+  - Greenhouse
+  - Lever
+  - Ashby
+- Exact-job ingestion:
+  - Workable
+  - Apple Jobs
+  - Workday exact-job URLs
+  - generic exact-job hosts when structured metadata is available
+
+### People discovery
+- Search stack:
+  - Serper for primary bulk discovery
+  - Brave for exact LinkedIn backfill and fallback
+  - Tavily for employment corroboration and fallback public discovery
+  - Google CSE as optional legacy fallback
+- The Org traversal:
+  - resolves trusted org slugs from `public_identity_slugs`
+  - validates and repairs stale slugs
+  - traverses org/team/person pages with bounded budgets
+- LinkedIn backfill:
+  - second-pass exact-name/company x-ray for verified The Org/public-web candidates
+  - strict name/company/role matching before attaching a profile
+
+### Verification and ranking
+- `current_company_verified` is tracked separately from role fit.
+- Public verification source now writes `public_web`.
+- Stored legacy `firecrawl_public_web` values remain readable.
+- Final buckets are ranked as:
+  - `direct`
+  - `adjacent`
+  - `next_best`
+- Lower-confidence same-company fallbacks are explicitly labeled instead of being dropped.
+
+### Email behavior
+- Email lookup can return:
+  - `verified`
+  - `best_guess`
+  - `not_found`
+- Best guesses are allowed only from safe signals:
+  - trusted domain
+  - official careers/site host
+  - learned company pattern
+- Ambiguous-company protections still block unsafe domains.
+
+## Latest infrastructure direction
+
+### Search routing
+- Brave is preserved, but not used as the default bulk provider anymore.
+- Current default routing:
+  - bulk people: `Serper -> Brave -> Google CSE`
+  - exact LinkedIn backfill: `Brave -> Serper -> Google CSE`
+  - hiring-team search: `Serper -> Brave`
+  - public people: `Serper -> Brave -> Tavily`
+  - employment corroboration: `Tavily -> Serper -> Brave`
+- Redis caches raw search results by query family.
+
+### Public-page retrieval
+- Free-first retrieval order:
+  - direct `httpx`
+  - Crawl4AI
+  - Firecrawl optional fallback
+
+## Important files to understand first
+
+### Backend
 - `backend/app/clients/ats_client.py`
-- `backend/app/clients/public_page_client.py`
+- `backend/app/clients/search_router_client.py`
+- `backend/app/clients/serper_search_client.py`
+- `backend/app/clients/tavily_search_client.py`
 - `backend/app/clients/theorg_client.py`
-- `backend/app/clients/crawl4ai_client.py`
-- `backend/app/config.py`
 - `backend/app/services/job_service.py`
-- `backend/app/services/employment_verification_service.py`
 - `backend/app/services/people_service.py`
-- `backend/app/services/theorg_discovery_service.py`
+- `backend/app/services/employment_verification_service.py`
+- `backend/app/services/email_finder_service.py`
 - `backend/app/utils/company_identity.py`
-- `backend/tests/test_ats_client.py`
-- `backend/tests/test_employment_verification_service.py`
-- `backend/tests/test_job_service_ats.py`
-- `backend/tests/test_theorg_client.py`
-- `backend/tests/test_theorg_discovery_service.py`
-- `backend/.env.example`
-- `HANDOFF.md`
-- `lessons.md`
+- `backend/app/utils/job_context.py`
 
-## Verification completed
-- `cd backend && ruff check app tests conftest.py`
-- `cd backend && pytest`
-  - result: `517 passed`
-- Targeted The Org / verification checks:
-  - `cd backend && pytest tests/test_public_page_client.py tests/test_theorg_client.py tests/test_theorg_discovery_service.py tests/test_employment_verification_service.py tests/test_people_utils.py -q`
-  - result: `39 passed`
+### Frontend
+- `frontend/src/pages/JobsPage.tsx`
+- `frontend/src/pages/PeoplePage.tsx`
+- `frontend/src/pages/MessagesPage.tsx`
+- `frontend/src/pages/OutreachPage.tsx`
+- `frontend/src/types/index.ts`
 
-## Remaining caveats
-- Firecrawl is now an optional fallback, but self-hosted or hosted Firecrawl can still help on harder public pages where direct fetch and Crawl4AI both underperform.
-- Workable support currently covers the pasted job URL flow. Full Workable company-board crawling from `company_slug + ats_type` alone is still not implemented.
-- This pass improves contact recall only. It does not change email-domain trust, email guessing safety, or the verified-only final bucket rule.
-- The traversal is intentionally bounded:
-  - up to 3 team pages
-  - up to 3 manager person pages
-  - up to 25 harvested candidates before normal prep/ranking
+## Current known limitations
 
-## Suggested next manual check
-- Run the Zip Ashby posting again with Firecrawl configured and confirm the People buckets recover:
-  - recruiters from the HR / Talent team
-  - engineering managers from the Software Development and Engineering team
-  - peers from engineering team members and manager direct reports
-- Then run one non-ambiguous company and confirm:
-  - The Org traversal does not overrun already-good results
-  - email lookup still withholds guesses when `company.domain_trusted` is false
+1. Manager precision is still weaker than recruiter and peer precision at large companies.
+2. Some company identities still need manual tuning when a short brand overlaps with another company or common first name.
+3. Workday support is first-class for exact-job URLs, but live upstream maintenance/outage pages still block import and should fail honestly.
+4. LinkedIn backfill intentionally favors precision over recall, so a human may still find a valid LinkedIn that the tool refuses to attach.
+5. Search cache smoke scripts can print async Redis shutdown warnings at interpreter exit. The request path still works.
+
+## Good regression fixtures
+
+- Zip Ashby roles: ambiguous-company and The Org slug/verification regression
+- Whatnot Ashby new-grad roles: recruiter-first early-career discovery
+- Apple exact-job URLs: first-class proprietary exact-job ingestion
+- Fortune Workday role: Fortune Media vs Fortune Brands identity split
+- Uber proprietary jobs: generic exact-job ingestion + same-company ranking
+- xAI Greenhouse role: hierarchy fallback and safe best-guess email behavior
+
+## Last meaningful verification snapshot
+
+- Backend:
+  - `cd backend && ruff check app tests conftest.py`
+  - `cd backend && pytest`
+- Frontend:
+  - `cd frontend && npx eslint .`
+  - `cd frontend && npx tsc -b`
+  - `cd frontend && npm run test`
+  - `cd frontend && npm run build`
+
+The most recent code pass before this doc sync also included live smoke checks for:
+- Serper bulk people discovery
+- Brave exact LinkedIn backfill
+- Tavily employment corroboration
+- Redis search-cache hits
+
+## Suggested next product-level improvements
+
+1. Improve hiring-manager precision for large engineering orgs.
+2. Expand exact-job host coverage beyond the current Apple/Workday/Workable set.
+3. Tighten duplicate suppression across buckets so the same person is less likely to appear as both manager and peer fallback.
+4. Add clearer provider/cost observability in the UI or admin tooling.

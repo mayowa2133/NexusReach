@@ -6,6 +6,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OutreachPage } from '../OutreachPage';
@@ -117,7 +118,7 @@ describe('OutreachPage — basic rendering', () => {
 
   it('renders the filter section', () => {
     renderOutreach();
-    expect(screen.getByText(/filter/i)).toBeInTheDocument();
+    expect(screen.getByText(/^Filter$/i)).toBeInTheDocument();
   });
 });
 
@@ -172,6 +173,36 @@ describe('OutreachPage — create form', () => {
     renderOutreach();
     expect(screen.getByText(/Alice Green/)).toBeInTheDocument();
     expect(screen.getByText(/Bob Blue/)).toBeInTheDocument();
+  });
+
+  it('filters the person dropdown by company name', async () => {
+    mockSavedPeople = {
+      data: [
+        { id: '1', full_name: 'Alice Green', title: 'PM', company: { name: 'Uber' } },
+        { id: '2', full_name: 'Bob Blue', title: 'SWE', company: { name: 'Stripe' } },
+      ],
+    };
+
+    renderOutreach();
+
+    await userEvent.type(screen.getByLabelText(/filter contacts by company/i), 'stripe');
+
+    expect(screen.getByRole('option', { name: /Bob Blue/i })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /Alice Green/i })).not.toBeInTheDocument();
+  });
+
+  it('shows an empty-state message when the company filter has no matches', async () => {
+    mockSavedPeople = {
+      data: [
+        { id: '1', full_name: 'Alice Green', title: 'PM', company: { name: 'Uber' } },
+      ],
+    };
+
+    renderOutreach();
+
+    await userEvent.type(screen.getByLabelText(/filter contacts by company/i), 'apple');
+
+    expect(screen.getByText(/no saved contacts match that company filter/i)).toBeInTheDocument();
   });
 
   it('renders jobs in linked job dropdown', () => {

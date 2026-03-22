@@ -8,6 +8,11 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useJobSearch, useATSSearch, useJobs, useUpdateJobStage, useToggleJobStar } from '@/hooks/useJobs';
+import {
+  clampPeopleSearchTargetCount,
+  getStoredPeopleSearchTargetCount,
+  setStoredPeopleSearchTargetCount,
+} from '@/lib/peopleSearchCount';
 import { toast } from 'sonner';
 import type { Job, JobStage } from '@/types';
 
@@ -62,6 +67,7 @@ const SOURCE_LABELS: Record<string, string> = {
   ashby: 'Ashby',
   workable: 'Workable',
   apple_jobs: 'Apple Jobs',
+  workday: 'Workday',
 };
 
 export function JobsPage() {
@@ -74,6 +80,9 @@ export function JobsPage() {
   const [starredFilter, setStarredFilter] = useState(false);
   const [sortBy, setSortBy] = useState('score');
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
+  const [targetCountPerBucket, setTargetCountPerBucket] = useState(() =>
+    getStoredPeopleSearchTargetCount()
+  );
 
   const navigate = useNavigate();
   const search = useJobSearch();
@@ -207,7 +216,7 @@ export function JobsPage() {
           <CardHeader>
             <CardTitle>Search Company Career Page</CardTitle>
             <CardDescription>
-              Paste a job posting URL from Apple Jobs, Greenhouse, Lever, Ashby, Workable, or a similar careers page, or enter a supported board ID.
+              Paste a job posting URL from Apple Jobs, Greenhouse, Lever, Ashby, Workable, Workday, or a similar careers page, or enter a supported board ID.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -326,8 +335,15 @@ export function JobsPage() {
                   job_id: job.id,
                   company: job.company_name,
                   title: job.title,
+                  target_count: String(targetCountPerBucket),
                 });
                 navigate(`/people?${params.toString()}`);
+              }}
+              targetCountPerBucket={targetCountPerBucket}
+              onTargetCountChange={(value) => {
+                const nextCount = clampPeopleSearchTargetCount(value);
+                setTargetCountPerBucket(nextCount);
+                setStoredPeopleSearchTargetCount(nextCount);
               }}
             />
           ) : (
@@ -409,11 +425,15 @@ function JobDetail({
   onStageChange,
   onToggleStar,
   onFindPeople,
+  targetCountPerBucket,
+  onTargetCountChange,
 }: {
   job: Job;
   onStageChange: (jobId: string, stage: JobStage) => void;
   onToggleStar: (starred: boolean) => void;
   onFindPeople: (job: Job) => void;
+  targetCountPerBucket: number;
+  onTargetCountChange: (value: number) => void;
 }) {
   return (
     <Card>
@@ -504,7 +524,24 @@ function JobDetail({
         </div>
 
         {/* Actions */}
-        <div className="flex gap-2">
+        <div className="space-y-3">
+          <div className="space-y-2">
+            <Label htmlFor="job-target-count" className="text-sm">Contacts per category</Label>
+            <Input
+              id="job-target-count"
+              type="number"
+              min={1}
+              max={10}
+              inputMode="numeric"
+              value={targetCountPerBucket}
+              onChange={(e) => onTargetCountChange(Number(e.target.value))}
+              className="max-w-32"
+            />
+            <p className="text-xs text-muted-foreground">
+              Used when finding recruiters, hiring managers, and peers for this job.
+            </p>
+          </div>
+          <div className="flex gap-2">
           <Button
             variant="default"
             size="sm"
@@ -521,6 +558,7 @@ function JobDetail({
               <Button variant="outline" size="sm">View Posting</Button>
             </a>
           )}
+        </div>
         </div>
 
         {/* Description */}

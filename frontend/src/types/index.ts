@@ -87,8 +87,10 @@ export interface Person {
   github_data: GitHubData | null;
   source: string | null;
   apollo_id: string | null;
-  match_quality?: 'direct' | 'next_best' | null;
+  match_quality?: 'direct' | 'adjacent' | 'next_best' | null;
   match_reason?: string | null;
+  company_match_confidence?: 'verified' | 'strong_signal' | 'weak_signal' | null;
+  fallback_reason?: string | null;
   employment_status?: 'current' | 'ambiguous' | 'former' | null;
   org_level?: 'ic' | 'manager' | 'director_plus' | null;
   current_company_verified?: boolean | null;

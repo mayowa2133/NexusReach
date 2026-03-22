@@ -65,6 +65,8 @@ def _mock_person(**overrides):
     p.relevance_score = overrides.get("relevance_score", None)
     p.match_quality = overrides.get("match_quality", "next_best")
     p.match_reason = overrides.get("match_reason", "Adjacent teammate.")
+    p.company_match_confidence = overrides.get("company_match_confidence", None)
+    p.fallback_reason = overrides.get("fallback_reason", None)
     p.employment_status = overrides.get("employment_status", "current")
     p.org_level = overrides.get("org_level", "ic")
     p.current_company_verified = overrides.get("current_company_verified", True)

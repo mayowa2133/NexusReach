@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from app.clients import theorg_client
 from app.config import settings
 from app.models.company import Company
-from app.utils.company_identity import is_compatible_public_identity_slug
+from app.utils.company_identity import effective_public_identity_slugs, matches_public_company_identity
 from app.utils.job_context import JobContext
 
 RECRUITER_TITLE_KEYWORDS = (
@@ -138,12 +138,20 @@ def _is_useful_org_page(parsed: dict | None) -> bool:
 
 
 def _ordered_public_identity_slugs(company: Company, slugs: list[str] | None = None) -> list[str]:
-    candidates = list(company.public_identity_slugs or [])
+    candidates = effective_public_identity_slugs(
+        company.name,
+        company.public_identity_slugs,
+        identity_hints=company.identity_hints if isinstance(company.identity_hints, dict) else None,
+    )
     if slugs:
         candidates.extend(
             slug
             for slug in slugs
-            if is_compatible_public_identity_slug(company.name, slug)
+            if matches_public_company_identity(
+                f"https://theorg.com/org/{slug}",
+                company.name,
+                candidates,
+            )
         )
     cache = _theorg_cache(company)
     preferred_slug = cache.get("preferred_org_slug")

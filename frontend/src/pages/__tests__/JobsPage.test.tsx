@@ -1,13 +1,19 @@
-/**
- * Tests for JobsPage — Phase 6.
- *
- * Verifies the jobs search forms and empty state render correctly.
- */
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { JobsPage } from '../JobsPage';
+
+const mockNavigate = vi.fn();
+
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
+  return {
+    ...actual,
+    useNavigate: () => mockNavigate,
+  };
+});
 
 // Mock Supabase
 vi.mock('@supabase/supabase-js', () => ({
@@ -35,7 +41,8 @@ vi.mock('@/stores/auth', () => ({
   ),
 }));
 
-// Mock the job hooks
+let mockSavedJobs: Array<Record<string, unknown>> | undefined;
+
 vi.mock('@/hooks/useJobs', () => ({
   useJobSearch: () => ({
     mutateAsync: vi.fn(),
@@ -46,7 +53,7 @@ vi.mock('@/hooks/useJobs', () => ({
     isPending: false,
   }),
   useJobs: () => ({
-    data: undefined,
+    data: mockSavedJobs,
     isLoading: false,
   }),
   useUpdateJobStage: () => ({
@@ -70,6 +77,12 @@ function renderJobs() {
     </QueryClientProvider>
   );
 }
+
+beforeEach(() => {
+  window.localStorage.clear();
+  mockNavigate.mockReset();
+  mockSavedJobs = undefined;
+});
 
 describe('JobsPage', () => {
   it('renders the page heading', () => {
@@ -115,5 +128,63 @@ describe('JobsPage', () => {
   it('renders location input', () => {
     renderJobs();
     expect(screen.getByPlaceholderText(/new york/i)).toBeInTheDocument();
+  });
+
+  it('renders a contacts-per-category control on the selected job detail', async () => {
+    mockSavedJobs = [
+      {
+        id: 'job-1',
+        title: 'Backend Engineer',
+        company_name: 'AppLovin',
+        location: 'Palo Alto, CA',
+        remote: false,
+        employment_type: 'full_time',
+        source: 'greenhouse',
+        department: 'engineering',
+        description: '<p>Role details</p>',
+        stage: 'discovered',
+        match_score: 72,
+        score_breakdown: {},
+        starred: false,
+        url: 'https://example.com/job',
+      },
+    ];
+
+    renderJobs();
+    await userEvent.click(screen.getByText('Backend Engineer'));
+
+    expect(screen.getByLabelText(/contacts per category/i)).toBeInTheDocument();
+  });
+
+  it('navigates to People with the selected target count', async () => {
+    mockSavedJobs = [
+      {
+        id: 'job-1',
+        title: 'Backend Engineer',
+        company_name: 'AppLovin',
+        location: 'Palo Alto, CA',
+        remote: false,
+        employment_type: 'full_time',
+        source: 'greenhouse',
+        department: 'engineering',
+        description: '<p>Role details</p>',
+        stage: 'discovered',
+        match_score: 72,
+        score_breakdown: {},
+        starred: false,
+        url: 'https://example.com/job',
+      },
+    ];
+
+    renderJobs();
+    await userEvent.click(screen.getByText('Backend Engineer'));
+    const countInput = screen.getByLabelText(/contacts per category/i);
+    fireEvent.change(countInput, { target: { value: '5' } });
+    await userEvent.click(screen.getByRole('button', { name: /^find people$/i }));
+
+    expect(mockNavigate).toHaveBeenCalledWith(
+      '/people?job_id=job-1&company=AppLovin&title=Backend+Engineer&target_count=5'
+    );
+    expect(window.localStorage.getItem('nexusreach-target-count-per-bucket')).toBe('5');
   });
 });

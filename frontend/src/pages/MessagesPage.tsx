@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
@@ -214,6 +215,7 @@ export function MessagesPage() {
 function SingleMessagesView() {
   const [selectedPersonId, setSelectedPersonId] = useState<string>('');
   const [selectedJobId, setSelectedJobId] = useState<string>('');
+  const [savedPeopleCompanyFilter, setSavedPeopleCompanyFilter] = useState('');
   const [channel, setChannel] = useState<MessageChannel>('linkedin_message');
   const [goal, setGoal] = useState<MessageGoal>('warm_intro');
   const [activeDraft, setActiveDraft] = useState<Message | null>(null);
@@ -234,6 +236,14 @@ function SingleMessagesView() {
   const { data: emailStatus } = useEmailConnectionStatus();
 
   const selectedPerson = savedPeople?.find((person) => person.id === selectedPersonId);
+  const normalizedSavedPeopleCompanyFilter = savedPeopleCompanyFilter.trim().toLowerCase();
+  const filteredSavedPeople = (savedPeople ?? []).filter((person) => {
+    if (!normalizedSavedPeopleCompanyFilter) {
+      return true;
+    }
+    const companyLabel = person.company?.name?.toLowerCase() || 'unknown company';
+    return companyLabel.includes(normalizedSavedPeopleCompanyFilter);
+  });
   const selectedStrategy = normalizeRecipientStrategy(selectedPerson?.person_type);
   const relevantJobs: Job[] = (() => {
     if (!jobs) {
@@ -402,6 +412,16 @@ function SingleMessagesView() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
+                <Label htmlFor="person-company-filter">Filter contacts by company</Label>
+                <Input
+                  id="person-company-filter"
+                  value={savedPeopleCompanyFilter}
+                  onChange={(e) => setSavedPeopleCompanyFilter(e.target.value)}
+                  placeholder="e.g. Uber, Stripe, Apple"
+                />
+              </div>
+
+              <div className="space-y-2">
                 <Label htmlFor="person-select">Person</Label>
                 <select
                   id="person-select"
@@ -416,12 +436,17 @@ function SingleMessagesView() {
                   className="flex h-9 w-full rounded-lg border border-input bg-transparent px-3 py-1 text-sm transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
                 >
                   <option value="">Select a person...</option>
-                  {savedPeople?.map((person) => (
+                  {filteredSavedPeople.map((person) => (
                     <option key={person.id} value={person.id}>
                       {person.full_name || 'Unknown'} — {person.title || 'No title'}
                     </option>
                   ))}
                 </select>
+                {normalizedSavedPeopleCompanyFilter && filteredSavedPeople.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No saved contacts match that company filter.
+                  </p>
+                ) : null}
               </div>
 
               {selectedPerson && (

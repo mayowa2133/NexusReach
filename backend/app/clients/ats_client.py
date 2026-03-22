@@ -11,7 +11,7 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 
-from app.clients import public_page_client
+from app.clients import crawl4ai_client, firecrawl_client
 
 JSON_LD_RE = re.compile(
     r"<script[^>]+type=[\"']application/ld\+json[\"'][^>]*>(?P<payload>.*?)</script>",
@@ -23,9 +23,27 @@ STATIC_ROUTER_RE = re.compile(
 )
 TITLE_RE = re.compile(r"<title>(?P<title>.*?)</title>", flags=re.IGNORECASE | re.DOTALL)
 HEADING_RE = re.compile(r"<h1[^>]*>(?P<title>.*?)</h1>", flags=re.IGNORECASE | re.DOTALL)
+CANONICAL_LINK_RE = re.compile(
+    r"<link\b[^>]*rel=[\"']canonical[\"'][^>]*href=[\"'](?P<href>[^\"']+)[\"']",
+    flags=re.IGNORECASE,
+)
 TAG_RE = re.compile(r"<[^>]+>")
 WHITESPACE_RE = re.compile(r"\s+")
 COMMON_SUBDOMAINS = {"jobs", "careers", "apply", "app", "www"}
+WORKDAY_JOB_TOKEN_RE = re.compile(r"_(?P<token>JR[A-Za-z0-9-]+)$")
+WORKDAY_COMPANY_NOISE_TOKENS = {
+    "inc",
+    "incorporated",
+    "corp",
+    "corporation",
+    "company",
+    "co",
+    "llc",
+    "ltd",
+    "limited",
+    "usa",
+    "us",
+}
 
 
 @dataclass(frozen=True)
@@ -96,6 +114,16 @@ def _extract_meta_content(html: str, key: str) -> str:
     return ""
 
 
+def _extract_canonical_link(html: str) -> str | None:
+    match = CANONICAL_LINK_RE.search(html or "")
+    if not match:
+        return None
+    href = unescape(match.group("href")).strip()
+    if not href:
+        return None
+    return _clean_url(href)
+
+
 def _domain_root(host: str | None) -> str:
     parts = [part for part in (host or "").lower().split(".") if part]
     if not parts:
@@ -111,6 +139,21 @@ def _host_ats_label(host: str) -> str:
     root = _domain_root(host)
     label = re.sub(r"[^a-z0-9]+", "_", root).strip("_")
     return f"{label}_jobs" if label else "custom_jobs"
+
+
+def _display_company_slug(company_slug: str | None, *, raw_name: str | None = None) -> str:
+    if not company_slug:
+        return ""
+
+    normalized_slug = company_slug.replace("-", " ").strip()
+    if raw_name:
+        pattern = r"[-\s]+".join(re.escape(part) for part in normalized_slug.split() if part)
+        if pattern:
+            match = re.search(rf"\b{pattern}\b", raw_name, flags=re.IGNORECASE)
+            if match:
+                return match.group(0).replace("-", " ")
+
+    return " ".join(part.capitalize() for part in normalized_slug.split())
 
 
 def _job_posting_candidates(payload: object) -> list[dict]:
@@ -239,6 +282,42 @@ def _normalize_json_ld_job(parsed: ParsedATSJobURL, job_posting: dict) -> dict |
         "source": ats_label,
         "ats": ats_label,
         "ats_slug": parsed.company_slug or _domain_root(parsed.host),
+    }
+
+
+def _normalize_exact_page(
+    *,
+    url: str,
+    title: str,
+    html: str,
+    markdown: str,
+    content: str,
+    retrieval_method: str,
+    fallback_used: bool,
+    allow_empty_content: bool,
+) -> dict | None:
+    normalized_html = (html or "").strip()
+    normalized_markdown = (markdown or "").strip()
+    normalized_content = _normalize_text(content or "")
+
+    if not normalized_content and normalized_markdown:
+        normalized_content = _normalize_text(normalized_markdown)
+    if not normalized_content and normalized_html:
+        normalized_content = _normalize_text(_strip_tags(normalized_html))
+
+    if not normalized_html and not normalized_markdown and not normalized_content:
+        return None
+    if not normalized_content and not allow_empty_content:
+        return None
+
+    return {
+        "url": url,
+        "title": title.strip(),
+        "content": normalized_content,
+        "html": normalized_html,
+        "markdown": normalized_markdown,
+        "retrieval_method": retrieval_method,
+        "fallback_used": fallback_used,
     }
 
 
@@ -385,11 +464,271 @@ def _normalize_apple_job(parsed: ParsedATSJobURL, page: dict) -> dict | None:
     }
 
 
-async def _fetch_exact_page(parsed: ParsedATSJobURL) -> dict:
-    page = await public_page_client.fetch_page(parsed.canonical_url or "", timeout_seconds=20)
-    if not page:
+def _workday_company_slug(host: str) -> str | None:
+    host_parts = [part for part in (host or "").lower().split(".") if part]
+    if len(host_parts) >= 4 and host_parts[-2:] == ["myworkdayjobs", "com"]:
+        return host_parts[0]
+    return _domain_root(host) or None
+
+
+def _workday_page_matches(parsed: ParsedATSJobURL, page: dict) -> bool:
+    page_url = str(page.get("url") or "").strip()
+    page_host = urlparse(page_url).netloc.lower() if page_url else ""
+    html = page.get("html") or ""
+    canonical_url = _extract_canonical_link(html)
+    canonical_host = urlparse(canonical_url).netloc.lower() if canonical_url else ""
+    if canonical_host.endswith(".myworkdayjobs.com"):
+        return True
+
+    return page_host.endswith(".myworkdayjobs.com") and _extract_json_ld_job(html) is not None
+
+
+def _workday_company_name(raw_name: str | None, parsed: ParsedATSJobURL) -> str:
+    brand_name = _display_company_slug(parsed.company_slug, raw_name=raw_name)
+    if raw_name and brand_name:
+        cleaned_raw = raw_name.strip()
+        if cleaned_raw and cleaned_raw.lower() == brand_name.lower():
+            return cleaned_raw
+        raw_tokens = [
+            token
+            for token in re.findall(r"[a-z0-9]+", cleaned_raw.lower())
+            if not token.isdigit() and token not in WORKDAY_COMPANY_NOISE_TOKENS
+        ]
+        normalized_raw = " ".join(raw_tokens).strip()
+        normalized_brand = re.sub(r"[^a-z0-9]+", " ", brand_name.lower()).strip()
+        if normalized_brand:
+            brand_tokens = normalized_brand.split()
+            if normalized_raw == normalized_brand:
+                return brand_name
+            if raw_tokens[:len(brand_tokens)] == brand_tokens and len(raw_tokens) > len(brand_tokens):
+                return " ".join(token.capitalize() for token in raw_tokens)
+            if normalized_brand in normalized_raw:
+                return brand_name
+
+    return raw_name.strip() if raw_name else brand_name
+
+
+def _workday_location_from_json_ld(job_posting: dict) -> str | None:
+    raw_locations = job_posting.get("jobLocation")
+    if not raw_locations:
+        return None
+
+    if not isinstance(raw_locations, list):
+        raw_locations = [raw_locations]
+
+    formatted: list[str] = []
+    for location in raw_locations:
+        if not isinstance(location, dict):
+            continue
+        address = location.get("address")
+        if not isinstance(address, dict):
+            continue
+
+        locality = str(address.get("addressLocality") or "").strip()
+        region = str(address.get("addressRegion") or "").strip()
+        country = str(address.get("addressCountry") or "").strip()
+
+        city = locality
+        if locality:
+            locality_parts = [part.strip() for part in locality.split(",") if part.strip()]
+            if len(locality_parts) >= 3 and len(locality_parts[0]) <= 3:
+                city = locality_parts[-1]
+                if not region:
+                    region = locality_parts[-2]
+            elif len(locality_parts) == 2:
+                city = locality_parts[-1]
+                if not region:
+                    region = locality_parts[0]
+
+        if country == "United States of America":
+            country = "United States"
+
+        parts = [city, region, country]
+        joined = ", ".join(part for part in parts if part)
+        if joined:
+            formatted.append(joined)
+
+    return " | ".join(dict.fromkeys(formatted)) or None
+
+
+def _normalize_workday_job(parsed: ParsedATSJobURL, page: dict) -> dict | None:
+    if not _workday_page_matches(parsed, page):
+        return None
+
+    html = page.get("html") or ""
+    canonical_url = _extract_canonical_link(html) or parsed.canonical_url
+    json_ld = _extract_json_ld_job(html)
+
+    if json_ld:
+        raw_company_name = _json_ld_company(json_ld, parsed.host)
+        title = _normalize_text(json_ld.get("title"))
+        company_name = _workday_company_name(raw_company_name, parsed)
+        description = _normalize_text(_strip_tags(str(json_ld.get("description") or "")))
+        employment_type = json_ld.get("employmentType")
+        if isinstance(employment_type, list):
+            employment_type_value = ", ".join(
+                str(item).strip() for item in employment_type if str(item).strip()
+            )
+        else:
+            employment_type_value = str(employment_type).strip() if employment_type else None
+
+        identifier = json_ld.get("identifier")
+        identifier_value = identifier.get("value") if isinstance(identifier, dict) else None
+        external_id = parsed.external_id or (f"wd_{identifier_value}" if identifier_value else None)
+
+        if title and company_name and canonical_url:
+            return {
+                "external_id": external_id,
+                "title": title,
+                "company_name": company_name,
+                "location": _workday_location_from_json_ld(json_ld),
+                "remote": str(json_ld.get("jobLocationType") or "").upper() == "TELECOMMUTE"
+                or "remote" in f"{title} {description}".lower(),
+                "url": canonical_url,
+                "description": description or None,
+                "employment_type": employment_type_value,
+                "posted_at": _coerce_posted_at(json_ld.get("datePosted")),
+                "source": "workday",
+                "ats": "workday",
+                "ats_slug": parsed.company_slug or _workday_company_slug(parsed.host),
+            }
+
+    company_name = _workday_company_name(None, parsed)
+    raw_title = _extract_meta_content(html, "og:title") or page.get("title") or _extract_heading(html)
+    title = _cleanup_generic_title(raw_title, company_name=company_name)
+    if not title or not company_name or not canonical_url:
+        return None
+
+    description = _normalize_text(
+        _extract_meta_content(html, "description")
+        or _extract_meta_content(html, "og:description")
+        or (page.get("content") or "")[:4000]
+    )
+
+    return {
+        "external_id": parsed.external_id,
+        "title": title,
+        "company_name": company_name,
+        "location": None,
+        "remote": "remote" in f"{title} {description}".lower(),
+        "url": canonical_url,
+        "description": description or None,
+        "employment_type": None,
+        "posted_at": None,
+        "source": "workday",
+        "ats": "workday",
+        "ats_slug": parsed.company_slug or _workday_company_slug(parsed.host),
+    }
+
+
+async def _fetch_direct_exact_page(
+    url: str,
+    *,
+    timeout_seconds: int = 20,
+    allow_empty_content: bool = False,
+) -> dict | None:
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        )
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True) as client:
+            resp = await client.get(url, headers=headers)
+            resp.raise_for_status()
+    except httpx.HTTPError:
+        return None
+
+    body = resp.text
+    content_type = (resp.headers.get("content-type") or "").lower()
+    html = body if "html" in content_type or "<html" in body.lower() else ""
+
+    return _normalize_exact_page(
+        url=str(resp.url),
+        title=_extract_title(html) if html else "",
+        html=html,
+        markdown="",
+        content="" if html else body.strip(),
+        retrieval_method="direct",
+        fallback_used=False,
+        allow_empty_content=allow_empty_content,
+    )
+
+
+async def _fetch_exact_page_candidates(
+    parsed: ParsedATSJobURL,
+    *,
+    allow_empty_content: bool = False,
+) -> list[dict]:
+    url = parsed.canonical_url or ""
+    pages: list[dict] = []
+
+    direct_page = await _fetch_direct_exact_page(
+        url,
+        timeout_seconds=20,
+        allow_empty_content=allow_empty_content,
+    )
+    if direct_page:
+        pages.append(direct_page)
+
+    crawl4ai_page = await crawl4ai_client.fetch_url(url, timeout_seconds=20)
+    if crawl4ai_page:
+        crawl4ai_page["fallback_used"] = bool(pages)
+        pages.append(crawl4ai_page)
+
+    firecrawl_page = await firecrawl_client.scrape_url(url, timeout_seconds=20)
+    if firecrawl_page:
+        firecrawl_page["fallback_used"] = bool(pages)
+        pages.append(firecrawl_page)
+
+    return pages
+
+
+async def _probe_workday_job_redirect(parsed: ParsedATSJobURL) -> str | None:
+    url = parsed.canonical_url or ""
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        )
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
+            resp = await client.get(url, headers=headers)
+    except httpx.HTTPError:
+        return None
+
+    if resp.status_code not in {301, 302, 303, 307, 308}:
+        return None
+
+    location = str(resp.headers.get("location") or "").strip().lower()
+    if not location:
+        return "redirected"
+    if "wday/drs/outage" in location or "community.workday.com/maintenance-page" in location:
+        return "outage"
+    return "redirected"
+
+
+async def _fetch_exact_job_with_normalizer(
+    parsed: ParsedATSJobURL,
+    *,
+    normalizer: Callable[[ParsedATSJobURL, dict], dict | None],
+    error_message: str,
+    allow_empty_content: bool = False,
+) -> list[dict]:
+    pages = await _fetch_exact_page_candidates(parsed, allow_empty_content=allow_empty_content)
+    if not pages:
         raise ExactJobFetchError("Could not read the job posting page.")
-    return page
+
+    for page in pages:
+        job = normalizer(parsed, page)
+        if job:
+            return [job]
+
+    raise ExactJobFetchError(error_message)
 
 
 async def _fetch_workable_exact_job(parsed: ParsedATSJobURL) -> list[dict]:
@@ -402,19 +741,43 @@ async def _fetch_workable_exact_job(parsed: ParsedATSJobURL) -> list[dict]:
 
 
 async def _fetch_apple_exact_job(parsed: ParsedATSJobURL) -> list[dict]:
-    page = await _fetch_exact_page(parsed)
-    job = _normalize_apple_job(parsed, page)
-    if not job:
-        raise ExactJobFetchError("We found the Apple job page, but couldn't extract enough job details from it.")
-    return [job]
+    return await _fetch_exact_job_with_normalizer(
+        parsed,
+        normalizer=_normalize_apple_job,
+        error_message="We found the Apple job page, but couldn't extract enough job details from it.",
+        allow_empty_content=True,
+    )
+
+
+async def _fetch_workday_exact_job(parsed: ParsedATSJobURL) -> list[dict]:
+    redirect_status = await _probe_workday_job_redirect(parsed)
+    pages = await _fetch_exact_page_candidates(parsed, allow_empty_content=True)
+    candidate_pages = [page for page in pages if _workday_page_matches(parsed, page)]
+
+    if not candidate_pages:
+        if redirect_status == "outage":
+            raise ExactJobFetchError("Workday is currently unavailable for this job posting.")
+        if redirect_status == "redirected":
+            raise ExactJobFetchError(
+                "Workday redirected away from the job details, so we couldn't extract the posting."
+            )
+        raise ExactJobFetchError("Could not read the job posting page.")
+
+    for page in candidate_pages:
+        job = _normalize_workday_job(parsed, page)
+        if job:
+            return [job]
+
+    raise ExactJobFetchError("We found the Workday job page, but couldn't extract enough job details from it.")
 
 
 async def _fetch_generic_exact_job(parsed: ParsedATSJobURL) -> list[dict]:
-    page = await _fetch_exact_page(parsed)
-    job = _normalize_generic_exact_job(page, parsed)
-    if not job:
-        raise ExactJobFetchError("We found the page, but couldn't extract enough job details from it.")
-    return [job]
+    return await _fetch_exact_job_with_normalizer(
+        parsed,
+        normalizer=lambda parsed_job, page: _normalize_generic_exact_job(page, parsed_job),
+        error_message="We found the page, but couldn't extract enough job details from it.",
+        allow_empty_content=True,
+    )
 
 
 def _parse_greenhouse_url(job_url: str) -> ParsedATSJobURL | None:
@@ -529,6 +892,34 @@ def _parse_apple_jobs_url(job_url: str) -> ParsedATSJobURL | None:
         ats_type="apple_jobs",
         company_slug="apple",
         external_id=f"apple_{raw_job_id}" if raw_job_id else None,
+        canonical_url=_clean_url(job_url),
+        host=host,
+        exact_url_only=True,
+    )
+
+
+def _parse_workday_url(job_url: str) -> ParsedATSJobURL | None:
+    parsed = urlparse((job_url or "").strip())
+    host = parsed.netloc.lower()
+    if not host.endswith(".myworkdayjobs.com"):
+        return None
+
+    path_parts = [part for part in parsed.path.split("/") if part]
+    if "job" not in path_parts or not path_parts:
+        return None
+
+    company_slug = _workday_company_slug(host)
+    if not company_slug:
+        return None
+
+    job_segment = path_parts[-1]
+    token_match = WORKDAY_JOB_TOKEN_RE.search(job_segment)
+    token = token_match.group("token") if token_match else None
+
+    return ParsedATSJobURL(
+        ats_type="workday",
+        company_slug=company_slug,
+        external_id=f"wd_{token}" if token else None,
         canonical_url=_clean_url(job_url),
         host=host,
         exact_url_only=True,
@@ -703,6 +1094,7 @@ ATS_ADAPTERS = (
     ATSAdapter("ashby", _parse_ashby_url, search_board=search_ashby),
     ATSAdapter("workable", _parse_workable_url, fetch_exact=_fetch_workable_exact_job),
     ATSAdapter("apple_jobs", _parse_apple_jobs_url, fetch_exact=_fetch_apple_exact_job),
+    ATSAdapter("workday", _parse_workday_url, fetch_exact=_fetch_workday_exact_job),
     ATSAdapter("generic_exact", _parse_generic_exact_url, fetch_exact=_fetch_generic_exact_job),
 )
 ATS_ADAPTERS_BY_TYPE = {adapter.ats_type: adapter for adapter in ATS_ADAPTERS}

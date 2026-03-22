@@ -236,6 +236,44 @@ describe('MessagesPage', () => {
     });
   });
 
+  it('filters the person dropdown by company name', async () => {
+    mockSavedPeople = [
+      {
+        id: 'p1',
+        full_name: 'Alex Lee',
+        title: 'Software Engineer II',
+        person_type: 'peer',
+        work_email: null,
+        email_verified: false,
+        company: { id: 'c1', name: 'Affirm' },
+      },
+      {
+        id: 'p2',
+        full_name: 'Taylor Reed',
+        title: 'Technical Recruiter',
+        person_type: 'recruiter',
+        work_email: null,
+        email_verified: false,
+        company: { id: 'c2', name: 'Stripe' },
+      },
+    ];
+
+    renderMessages();
+
+    await userEvent.type(screen.getByLabelText(/filter contacts by company/i), 'stripe');
+
+    expect(screen.getByRole('option', { name: /Taylor Reed/i })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /Alex Lee/i })).not.toBeInTheDocument();
+  });
+
+  it('shows an empty-state message when the company filter has no matches', async () => {
+    renderMessages();
+
+    await userEvent.type(screen.getByLabelText(/filter contacts by company/i), 'uber');
+
+    expect(screen.getByText(/no saved contacts match that company filter/i)).toBeInTheDocument();
+  });
+
   it('loads batch mode from query params and stages selected ready drafts', async () => {
     mockEmailConnectionStatus = { gmail_connected: true, outlook_connected: false };
     mockSavedPeople = [

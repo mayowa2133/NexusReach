@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -83,14 +83,14 @@ vi.mock('sonner', () => ({
   },
 }));
 
-function renderPeople() {
+function renderPeople(initialEntries: string[] = ['/people']) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={initialEntries}>
         <PeoplePage />
       </MemoryRouter>
     </QueryClientProvider>
@@ -98,7 +98,9 @@ function renderPeople() {
 }
 
 beforeEach(() => {
+  window.localStorage.clear();
   mockNavigate.mockReset();
+  mockPeopleSearch.isPending = false;
   mockSavedPeople = [
     {
       id: 'p1',
@@ -126,6 +128,8 @@ beforeEach(() => {
       current_company_verification_confidence: null,
       current_company_verification_evidence: 'Not shortlisted for verification.',
       current_company_verified_at: null,
+      company_match_confidence: 'strong_signal',
+      fallback_reason: 'Strong same-company signal, but current employment is not fully verified.',
       company: {
         id: 'c1',
         name: 'Affirm',
@@ -140,6 +144,13 @@ beforeEach(() => {
   ];
   mockFindEmail.mutateAsync.mockReset();
   mockPeopleSearch.mutateAsync.mockReset();
+  mockPeopleSearch.mutateAsync.mockResolvedValue({
+    company: null,
+    recruiters: [],
+    hiring_managers: [],
+    peers: [],
+    job_context: null,
+  });
   mockVerifyEmail.mutateAsync.mockReset();
   mockVerifyCurrentCompany.mutateAsync.mockReset();
 });
@@ -228,6 +239,146 @@ describe('PeoplePage', () => {
     expect(screen.getByText(/currently at affirm/i)).toBeInTheDocument();
   });
 
+  it('renders adjacent and lower-confidence badges when present', () => {
+    mockSavedPeople = [
+      {
+        ...mockSavedPeople[0],
+        match_quality: 'adjacent',
+        match_reason: 'Adjacent engineering teammate at the target company.',
+        company_match_confidence: 'strong_signal',
+        fallback_reason: 'Strong same-company signal, but current employment is not fully verified.',
+      },
+    ];
+
+    renderPeople();
+
+    expect(screen.getByText(/adjacent match/i)).toBeInTheDocument();
+    expect(screen.getByText(/lower-confidence company match/i)).toBeInTheDocument();
+    expect(screen.getByText(/strong same-company signal, but current employment is not fully verified\./i)).toBeInTheDocument();
+  });
+
+  it('groups saved contacts by company', () => {
+    mockSavedPeople = [
+      ...mockSavedPeople,
+      {
+        id: 'p2',
+        full_name: 'Jordan Miles',
+        title: 'Technical Recruiter',
+        department: 'Talent',
+        seniority: 'mid',
+        linkedin_url: 'https://linkedin.com/in/jordanmiles',
+        github_url: null,
+        work_email: null,
+        email_verified: false,
+        email_confidence: null,
+        person_type: 'recruiter',
+        profile_data: null,
+        github_data: null,
+        source: 'brave_search',
+        apollo_id: null,
+        match_quality: 'direct',
+        match_reason: 'Recruiting title at the target company.',
+        employment_status: 'current',
+        org_level: 'ic',
+        current_company_verified: true,
+        current_company_verification_status: 'verified',
+        current_company_verification_source: 'public_web',
+        current_company_verification_confidence: 90,
+        current_company_verification_evidence:
+          'Trusted public org/company slug matched the target company identity.',
+        current_company_verified_at: null,
+        company_match_confidence: 'verified',
+        fallback_reason: null,
+        company: {
+          id: 'c2',
+          name: 'Uber',
+          domain: 'uber.com',
+          size: '10000',
+          industry: 'Transportation',
+          description: null,
+          careers_url: null,
+          starred: false,
+        },
+      },
+    ];
+
+    renderPeople();
+
+    expect(screen.getByRole('heading', { name: /saved contacts \(2\)/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Affirm' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Uber' })).toBeInTheDocument();
+    expect(screen.getByText('Alex Lee')).toBeInTheDocument();
+    expect(screen.getByText('Jordan Miles')).toBeInTheDocument();
+  });
+
+  it('filters saved contacts by company name', async () => {
+    mockSavedPeople = [
+      ...mockSavedPeople,
+      {
+        id: 'p2',
+        full_name: 'Jordan Miles',
+        title: 'Technical Recruiter',
+        department: 'Talent',
+        seniority: 'mid',
+        linkedin_url: 'https://linkedin.com/in/jordanmiles',
+        github_url: null,
+        work_email: null,
+        email_verified: false,
+        email_confidence: null,
+        person_type: 'recruiter',
+        profile_data: null,
+        github_data: null,
+        source: 'brave_search',
+        apollo_id: null,
+        match_quality: 'direct',
+        match_reason: 'Recruiting title at the target company.',
+        employment_status: 'current',
+        org_level: 'ic',
+        current_company_verified: true,
+        current_company_verification_status: 'verified',
+        current_company_verification_source: 'public_web',
+        current_company_verification_confidence: 90,
+        current_company_verification_evidence:
+          'Trusted public org/company slug matched the target company identity.',
+        current_company_verified_at: null,
+        company_match_confidence: 'verified',
+        fallback_reason: null,
+        company: {
+          id: 'c2',
+          name: 'Uber',
+          domain: 'uber.com',
+          size: '10000',
+          industry: 'Transportation',
+          description: null,
+          careers_url: null,
+          starred: false,
+        },
+      },
+    ];
+
+    renderPeople();
+
+    await userEvent.type(
+      screen.getByLabelText(/filter saved contacts by company/i),
+      'uber'
+    );
+
+    expect(screen.getByRole('heading', { name: 'Uber' })).toBeInTheDocument();
+    expect(screen.getByText('Jordan Miles')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Affirm' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Alex Lee')).not.toBeInTheDocument();
+  });
+
+  it('hides saved contacts while a people search is pending', () => {
+    mockPeopleSearch.isPending = true;
+
+    renderPeople();
+
+    expect(screen.queryByRole('heading', { name: /saved contacts/i })).not.toBeInTheDocument();
+    expect(screen.queryByText('Alex Lee')).not.toBeInTheDocument();
+    expect(screen.queryByText('Jordan Miles')).not.toBeInTheDocument();
+  });
+
   it('renders verified-first empty state copy for empty recruiter buckets', async () => {
     mockPeopleSearch.mutateAsync.mockResolvedValue({
       company: {
@@ -261,5 +412,38 @@ describe('PeoplePage', () => {
     await userEvent.click(screen.getByRole('button', { name: /create batch email drafts/i }));
 
     expect(mockNavigate).toHaveBeenCalledWith('/messages?mode=batch&person_ids=p1');
+  });
+
+  it('sends the selected target count with direct company search and persists it', async () => {
+    renderPeople();
+
+    const countInput = screen.getByLabelText(/contacts per category/i);
+    fireEvent.change(countInput, { target: { value: '4' } });
+    await userEvent.type(screen.getByLabelText(/company name/i), 'Uber');
+    await userEvent.click(screen.getByRole('button', { name: /^find people$/i }));
+
+    await waitFor(() =>
+      expect(mockPeopleSearch.mutateAsync).toHaveBeenCalledWith({
+        company_name: 'Uber',
+        github_org: undefined,
+        target_count_per_bucket: 4,
+      })
+    );
+    expect(window.localStorage.getItem('nexusreach-target-count-per-bucket')).toBe('4');
+  });
+
+  it('uses target_count from the job query params for auto-search', async () => {
+    renderPeople([
+      '/people?job_id=job-123&company=AppLovin&title=Backend%20Engineer&target_count=5',
+    ]);
+
+    await waitFor(() =>
+      expect(mockPeopleSearch.mutateAsync).toHaveBeenCalledWith({
+        company_name: 'AppLovin',
+        job_id: 'job-123',
+        target_count_per_bucket: 5,
+      })
+    );
+    expect(window.localStorage.getItem('nexusreach-target-count-per-bucket')).toBe('5');
   });
 });

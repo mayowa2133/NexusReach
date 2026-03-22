@@ -236,6 +236,130 @@ async def test_search_ats_jobs_dispatches_apple_exact_job_lookup():
     assert jobs[0].title == "Software Engineer - Core OS Telemetry"
 
 
+async def test_search_ats_jobs_dispatches_workday_exact_job_lookup():
+    user_id = uuid.uuid4()
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=_ScalarResult(None))
+    db.add = MagicMock()
+    db.commit = AsyncMock()
+
+    adapter = MagicMock()
+    adapter.fetch_exact = AsyncMock()
+    adapter.search_board = None
+    workday_job = {
+        "external_id": "wd_JR2015144-1",
+        "title": "Senior Systems Software Engineer - New College Grad 2026",
+        "company_name": "NVIDIA",
+        "location": "Hillsboro, OR, United States",
+        "remote": False,
+        "url": (
+            "https://nvidia.wd5.myworkdayjobs.com/en-US/NVIDIAExternalCareerSite/job/"
+            "Senior-Systems-Software-Engineer---New-College-Grad-2026_JR2015144-1"
+        ),
+        "description": "Build software systems.",
+        "source": "workday",
+        "ats": "workday",
+        "ats_slug": "nvidia",
+        "posted_at": "2026-03-20",
+    }
+
+    with (
+        patch("app.services.job_service.ats_client.get_adapter", return_value=adapter),
+        patch(
+            "app.services.job_service.ats_client.fetch_exact_job",
+            new_callable=AsyncMock,
+        ) as mock_fetch_exact,
+    ):
+        mock_fetch_exact.return_value = [workday_job]
+        jobs = await search_ats_jobs(
+            db,
+            user_id,
+            None,
+            None,
+            job_url=(
+                "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite/job/US-OR-Hillsboro/"
+                "Senior-Systems-Software-Engineer---New-College-Grad-2026_JR2015144-1"
+                "?jr_id=69bd8442b106024562826cc8"
+            ),
+        )
+
+    mock_fetch_exact.assert_awaited_once()
+    assert len(jobs) == 1
+    assert jobs[0].ats == "workday"
+    assert jobs[0].title == "Senior Systems Software Engineer - New College Grad 2026"
+
+
+async def test_search_ats_jobs_refreshes_existing_exact_job_metadata():
+    user_id = uuid.uuid4()
+    existing_job = MagicMock()
+    existing_job.id = uuid.uuid4()
+    existing_job.external_id = "wd_JR100020"
+    existing_job.url = (
+        "https://fortune.wd108.myworkdayjobs.com/en-US/Fortune/job/Full-Stack-Software-Engineer-Nextjs_JR100020"
+    )
+    existing_job.title = "Full Stack Software Engineer Next.js"
+    existing_job.company_name = "Fortune"
+    existing_job.location = "New York City, United States"
+    existing_job.remote = False
+    existing_job.description = "Old description"
+    existing_job.source = "workday"
+    existing_job.ats = "workday"
+    existing_job.ats_slug = "fortune"
+    existing_job.department = None
+    existing_job.employment_type = None
+
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=_ScalarResult(None))
+    db.add = MagicMock()
+    db.commit = AsyncMock()
+
+    adapter = MagicMock()
+    adapter.fetch_exact = AsyncMock()
+    adapter.search_board = None
+    refreshed_job = {
+        "external_id": "wd_JR100020",
+        "title": "Full Stack Software Engineer Next.js",
+        "company_name": "Fortune Media",
+        "location": "New York City, United States",
+        "remote": False,
+        "url": "https://fortune.wd108.myworkdayjobs.com/en-US/Fortune/job/Full-Stack-Software-Engineer-Nextjs_JR100020",
+        "description": "At Fortune Media, we are reinventing digital business journalism.",
+        "source": "workday",
+        "ats": "workday",
+        "ats_slug": "fortune",
+        "employment_type": "FULL_TIME",
+    }
+
+    with (
+        patch("app.services.job_service.ats_client.get_adapter", return_value=adapter),
+        patch(
+            "app.services.job_service.ats_client.fetch_exact_job",
+            new_callable=AsyncMock,
+            return_value=[refreshed_job],
+        ),
+        patch(
+            "app.services.job_service._find_existing_job",
+            new_callable=AsyncMock,
+            return_value=existing_job,
+        ),
+    ):
+        jobs = await search_ats_jobs(
+            db,
+            user_id,
+            None,
+            None,
+            job_url=(
+                "https://fortune.wd108.myworkdayjobs.com/en-US/Fortune/job/New-York-City/"
+                "Full-Stack-Software-Engineer-Nextjs_JR100020?source=LinkedIn"
+            ),
+        )
+
+    assert jobs == [existing_job]
+    assert existing_job.company_name == "Fortune Media"
+    assert existing_job.description == "At Fortune Media, we are reinventing digital business journalism."
+    db.add.assert_not_called()
+
+
 async def test_search_ats_jobs_dispatches_generic_exact_job_lookup():
     user_id = uuid.uuid4()
     db = MagicMock()
@@ -279,3 +403,53 @@ async def test_search_ats_jobs_dispatches_generic_exact_job_lookup():
     assert len(jobs) == 1
     assert jobs[0].ats == "example_jobs"
     assert jobs[0].company_name == "Example"
+
+
+async def test_search_ats_jobs_allows_exact_job_without_location():
+    user_id = uuid.uuid4()
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=_ScalarResult(None))
+    db.add = MagicMock()
+    db.commit = AsyncMock()
+
+    adapter = MagicMock()
+    adapter.fetch_exact = AsyncMock()
+    adapter.search_board = None
+    workday_job = {
+        "external_id": "wd_JR2015144-1",
+        "title": "Senior Systems Software Engineer - New College Grad 2026",
+        "company_name": "NVIDIA",
+        "location": None,
+        "remote": False,
+        "url": (
+            "https://nvidia.wd5.myworkdayjobs.com/en-US/NVIDIAExternalCareerSite/job/"
+            "Senior-Systems-Software-Engineer---New-College-Grad-2026_JR2015144-1"
+        ),
+        "description": "Build software systems.",
+        "source": "workday",
+        "ats": "workday",
+        "ats_slug": "nvidia",
+    }
+
+    with (
+        patch("app.services.job_service.ats_client.get_adapter", return_value=adapter),
+        patch(
+            "app.services.job_service.ats_client.fetch_exact_job",
+            new_callable=AsyncMock,
+        ) as mock_fetch_exact,
+    ):
+        mock_fetch_exact.return_value = [workday_job]
+        jobs = await search_ats_jobs(
+            db,
+            user_id,
+            None,
+            None,
+            job_url=(
+                "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite/job/US-OR-Hillsboro/"
+                "Senior-Systems-Software-Engineer---New-College-Grad-2026_JR2015144-1"
+            ),
+        )
+
+    mock_fetch_exact.assert_awaited_once()
+    assert len(jobs) == 1
+    assert jobs[0].location is None

@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 import logging
 import uuid
+from urllib.parse import urlparse
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +22,7 @@ from app.config import settings
 from app.models.person import Person
 from app.services import api_usage_service
 from app.services.smtp_domain_service import is_domain_blocked, record_smtp_result
+from app.utils.company_identity import is_ambiguous_company_name, slugify_company_name
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,13 @@ DOMAIN_DEPENDENT_EMAIL_SOURCES = {
     "pattern_suggestion",
     "pattern_suggestion_learned",
 }
+KNOWN_BOARD_HOST_FRAGMENTS = (
+    "greenhouse.io",
+    "lever.co",
+    "ashbyhq.com",
+    "workable.com",
+    "myworkdayjobs.com",
+)
 
 
 def _split_name(full_name: str) -> tuple[str, str]:
@@ -108,6 +117,49 @@ def _guess_basis_from_source(source: str | None) -> str | None:
         return "learned_company_pattern"
     if source == "pattern_suggestion":
         return "generic_pattern"
+    return None
+
+
+def _normalized_host(url_or_host: str | None) -> str:
+    raw = (url_or_host or "").strip().lower()
+    if not raw:
+        return ""
+    parsed = urlparse(raw if "://" in raw else f"https://{raw}")
+    host = parsed.netloc.lower() or raw.split("/")[0].lower()
+    return host[4:] if host.startswith("www.") else host
+
+
+def _is_board_host(host: str | None) -> bool:
+    normalized = _normalized_host(host)
+    return any(fragment in normalized for fragment in KNOWN_BOARD_HOST_FRAGMENTS)
+
+
+def _official_company_domain(person: Person) -> str | None:
+    company = getattr(person, "company", None)
+    if not company:
+        return None
+
+    candidates = [
+        getattr(company, "careers_url", None),
+    ]
+    hints = getattr(company, "identity_hints", None) or {}
+    company_slug = slugify_company_name(getattr(company, "name", None))
+    official_slug_match = False
+    if isinstance(hints, dict):
+        candidates.append(hints.get("careers_host"))
+        official_slug_match = any(
+            (hints.get(key) or "").strip().lower() == company_slug
+            for key in ("ats_slug", "linkedin_company_slug", "normalized_slug")
+        )
+
+    if is_ambiguous_company_name(getattr(company, "name", None)) and not official_slug_match:
+        return None
+
+    for candidate in candidates:
+        host = _normalized_host(candidate)
+        if not host or _is_board_host(host):
+            continue
+        return host
     return None
 
 
@@ -429,18 +481,24 @@ async def find_email_for_person(
         _append_reason(failure_reasons, "missing_person_name")
 
     company_domain = None
+    suggestion_domain = None
     learned_pattern = None
     learned_confidence = None
     if _company_domain_is_trusted(person):
         company_domain = person.company.domain
+        suggestion_domain = company_domain
         learned_pattern = person.company.email_pattern
         learned_confidence = person.company.email_pattern_confidence
     elif person.company and getattr(person.company, "domain_trusted", False) is False:
         _append_reason(failure_reasons, "company_domain_untrusted")
         if not getattr(person.company, "domain", None):
             _append_reason(failure_reasons, "missing_company_domain")
+        suggestion_domain = _official_company_domain(person)
+        learned_pattern = person.company.email_pattern
+        learned_confidence = person.company.email_pattern_confidence
     else:
         _append_reason(failure_reasons, "missing_company_domain")
+        suggestion_domain = _official_company_domain(person)
 
     fallback_suggestion: dict | None = None
     fallback_confidence: int | None = None
@@ -634,11 +692,13 @@ async def find_email_for_person(
                             tried.append("hunter_pattern_learning_skipped")
                             _append_reason(failure_reasons, "hunter_pattern_no_pattern_found")
 
+    suggestion_domain = suggestion_domain or company_domain
+    if first_name and last_name and suggestion_domain:
         tried.append("pattern_suggestion")
         suggestion = email_suggestion_client.suggest_email(
             first_name,
             last_name,
-            company_domain,
+            suggestion_domain,
             preferred_format=learned_pattern,
             preferred_confidence=learned_confidence,
         )
@@ -750,7 +810,20 @@ async def find_email_for_person(
 
     tried.append("exhausted")
     if mode == "best_effort" and fallback_suggestion:
-        if fallback_confidence and fallback_confidence >= LOW_CONFIDENCE_PERSIST_THRESHOLD:
+        fallback_evidence = (
+            "Best guess derived from a learned company email pattern."
+            if fallback_suggestion["guess_basis"] == "learned_company_pattern"
+            else (
+                "Best guess derived from the official company site domain fallback."
+                if suggestion_domain and suggestion_domain != company_domain
+                else "Best guess derived from the generic email pattern fallback."
+            )
+        )
+        if (
+            fallback_confidence
+            and fallback_confidence >= LOW_CONFIDENCE_PERSIST_THRESHOLD
+            and suggestion_domain == company_domain
+        ):
             person.work_email = fallback_suggestion["email"]
             person.email_source = (
                 "pattern_suggestion_learned"
@@ -764,11 +837,7 @@ async def find_email_for_person(
                 status="best_guess",
                 method="none",
                 guess_basis=fallback_suggestion["guess_basis"],
-                evidence=(
-                    "Best guess derived from a learned company email pattern."
-                    if fallback_suggestion["guess_basis"] == "learned_company_pattern"
-                    else "Best guess derived from the generic email pattern fallback."
-                ),
+                evidence=fallback_evidence,
             )
             await _learn_company_pattern(
                 person,
@@ -807,11 +876,7 @@ async def find_email_for_person(
             email_verification_evidence=(
                 person.email_verification_evidence
                 if person.work_email == fallback_suggestion["email"]
-                else (
-                    "Best guess derived from a learned company email pattern."
-                    if fallback_suggestion["guess_basis"] == "learned_company_pattern"
-                    else "Best guess derived from the generic email pattern fallback."
-                )
+                else fallback_evidence
             ),
             email_verified_at=getattr(person, "email_verified_at", None),
         )

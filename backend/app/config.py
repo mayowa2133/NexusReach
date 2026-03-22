@@ -39,8 +39,16 @@ class Settings(BaseSettings):
     google_cse_id: str = ""
     groq_api_key: str = ""
     brave_api_key: str = ""
+    serper_api_key: str = ""
+    tavily_api_key: str = ""
     firecrawl_base_url: str = ""
     firecrawl_api_key: str = ""
+    search_cache_ttl_seconds: int = 86_400
+    search_linkedin_provider_order: str = "serper,brave,google_cse"
+    search_exact_linkedin_provider_order: str = "brave,serper,google_cse"
+    search_hiring_team_provider_order: str = "serper,brave"
+    search_public_provider_order: str = "serper,brave,tavily"
+    search_employment_provider_order: str = "tavily,serper,brave"
     theorg_traversal_enabled: bool = True
     theorg_cache_ttl_hours: int = 24
     theorg_max_team_pages: int = 3

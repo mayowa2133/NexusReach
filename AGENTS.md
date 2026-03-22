@@ -1,8 +1,8 @@
-# NexusReach — Claude Context
+# NexusReach — AI Agent Context
 
 Last updated: 2026-03-22
 
-This file mirrors `AGENTS.md` so Claude and Codex see the same project state. If these files ever drift, update both together.
+This file is the current AI-facing project snapshot for NexusReach. It is intended for Codex, Claude, and other repo-aware assistants. `CLAUDE.md` intentionally mirrors the same project story so different tools inherit the same context.
 
 ## What this product is
 

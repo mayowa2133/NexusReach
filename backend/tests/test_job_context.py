@@ -35,6 +35,23 @@ def test_ml_engineer():
     assert "engineering_technical" in ctx.apollo_departments or "data" in ctx.apollo_departments
 
 
+def test_machine_learning_engineer_broadens_peer_titles_without_security_overfit():
+    ctx = extract_job_context(
+        "Machine Learning Engineer",
+        description=(
+            "Build machine learning systems for threat detection and security analytics. "
+            "Partner with the security team to deploy models safely."
+        ),
+    )
+
+    assert ctx.department == "data_science"
+    assert "ml" in ctx.team_keywords
+    assert "Machine Learning Engineer" in ctx.peer_titles
+    assert "Software Engineer" in ctx.peer_titles
+    assert "Applied Scientist" in ctx.peer_titles
+    assert "Security Engineer" not in ctx.peer_titles
+
+
 def test_junior_frontend_developer():
     ctx = extract_job_context("Junior Frontend Developer")
     assert ctx.department == "engineering"

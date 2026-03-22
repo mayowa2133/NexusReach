@@ -197,6 +197,60 @@ class TestSearchPeople:
 
         assert results == []
 
+    async def test_search_exact_linkedin_profile_tries_title_hint_query(self):
+        mock_resp = _mock_httpx_response(
+            {
+                "web": {
+                    "results": [
+                        {
+                            "title": "Lauren Tyson - Research Recruiter at Apple | LinkedIn",
+                            "url": "https://www.linkedin.com/in/laurentyson",
+                            "description": "Research Recruiter at Apple.",
+                        }
+                    ]
+                }
+            }
+        )
+        mock_client = _mock_client_with(mock_resp)
+
+        with (
+            patch("app.clients.brave_search_client.httpx.AsyncClient", return_value=mock_client),
+            patch("app.clients.brave_search_client.settings") as s,
+        ):
+            s.brave_api_key = "brave-key"
+            await search_exact_linkedin_profile(
+                "Lauren Tyson",
+                "Apple",
+                title_hints=["research recruiter"],
+                team_keywords=["talent acquisition"],
+                limit=3,
+            )
+
+        queries = [call.kwargs["params"]["q"] for call in mock_client.get.await_args_list]
+        assert 'site:linkedin.com/in "Lauren Tyson" "Apple"' in queries[0]
+        assert any('"research recruiter"' in query for query in queries)
+        assert any('"talent acquisition"' in query for query in queries)
+
+    async def test_search_exact_linkedin_profile_tries_name_variants(self):
+        mock_resp = _mock_httpx_response({"web": {"results": []}})
+        mock_client = _mock_client_with(mock_resp)
+
+        with (
+            patch("app.clients.brave_search_client.httpx.AsyncClient", return_value=mock_client),
+            patch("app.clients.brave_search_client.settings") as s,
+        ):
+            s.brave_api_key = "brave-key"
+            await search_exact_linkedin_profile(
+                "Xu, Ting",
+                "AppLovin",
+                name_variants=["Ting Xu"],
+                limit=3,
+            )
+
+        queries = [call.kwargs["params"]["q"] for call in mock_client.get.await_args_list]
+        assert 'site:linkedin.com/in "Xu, Ting" "AppLovin"' in queries[0]
+        assert any(query == 'site:linkedin.com/in "Ting Xu" "AppLovin"' for query in queries)
+
     async def test_filters_non_profile_results(self):
         mock_resp = _mock_httpx_response({
             "web": {
@@ -239,6 +293,7 @@ class TestSearchPeople:
         assert '"a"' in query
         assert '"b"' in query
         assert '"c"' not in query
+        assert '("a" OR "b")' in query
 
     async def test_team_keywords_appended_to_query(self):
         """Team keywords are added to the search query."""
@@ -336,6 +391,15 @@ class TestPublicPeople:
             "title": "Courtney Cronin's Email & Phone - Zip Staff Directory",
             "url": "https://www.contactout.com/courtney",
             "description": "Staff directory and contact information for Zip.",
+        }
+
+        assert _parse_public_people_result(item, "Zip") is None
+
+    def test_parse_public_people_result_rejects_theorg_team_page(self):
+        item = {
+            "title": "Human Resources and Talent Acquisition - Zip - The Org",
+            "url": "https://theorg.com/org/ziphq/teams/human-resources-and-talent-acquisition",
+            "description": "Zip's human resources and talent acquisition team.",
         }
 
         assert _parse_public_people_result(item, "Zip") is None

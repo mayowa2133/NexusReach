@@ -15,9 +15,13 @@ from app.models.search_preference import SearchPreference
 
 # --- Deduplication ---
 
-def _fingerprint(company_name: str, title: str, location: str) -> str:
+def _fingerprint(company_name: str | None, title: str | None, location: str | None) -> str:
     """Create a fingerprint for deduplication based on company + title + location."""
-    raw = f"{company_name.lower().strip()}|{title.lower().strip()}|{location.lower().strip()}"
+    raw = (
+        f"{(company_name or '').lower().strip()}|"
+        f"{(title or '').lower().strip()}|"
+        f"{(location or '').lower().strip()}"
+    )
     return hashlib.md5(raw.encode()).hexdigest()
 
 
@@ -41,6 +45,32 @@ def _result_first(result) -> Job | None:
     if callable(scalars):
         return scalars().first()
     return result.scalar_one_or_none()
+
+
+def _refresh_existing_exact_job(
+    job: Job,
+    data: dict,
+    *,
+    fingerprint: str,
+    score: float,
+    breakdown: dict,
+) -> None:
+    job.external_id = data.get("external_id") or job.external_id
+    job.title = data.get("title") or job.title
+    job.company_name = data.get("company_name") or job.company_name
+    job.location = data.get("location")
+    job.remote = data.get("remote", job.remote)
+    job.url = data.get("url") or job.url
+    job.description = data.get("description")
+    job.source = data.get("source", job.source)
+    job.ats = data.get("ats", job.ats)
+    job.ats_slug = data.get("ats_slug", job.ats_slug)
+    job.posted_at = data.get("posted_at")
+    job.match_score = score
+    job.score_breakdown = breakdown
+    job.fingerprint = fingerprint
+    job.department = data.get("department")
+    job.employment_type = data.get("employment_type")
 
 
 async def _find_existing_job(
@@ -319,7 +349,9 @@ async def search_ats_jobs(
             raw_jobs = await ats_client.fetch_exact_job(parsed_job_url)
         except ats_client.ExactJobFetchError as exc:
             raise ValueError(str(exc)) from exc
+        exact_job_lookup = True
     else:
+        exact_job_lookup = False
         if not company_slug or adapter.search_board is None:
             raise ValueError("This job platform currently requires a direct job posting URL.")
         raw_jobs = await adapter.search_board(company_slug, limit)
@@ -342,6 +374,7 @@ async def search_ats_jobs(
 
         job_ats = data.get("ats", ats_type)
         job_ats_slug = data.get("ats_slug", company_slug)
+        score, breakdown = _score_job(data, profile)
         existing_job = await _find_existing_job(
             db,
             user_id=user_id,
@@ -351,10 +384,16 @@ async def search_ats_jobs(
             fingerprint=fp,
         )
         if existing_job:
+            if exact_job_lookup:
+                _refresh_existing_exact_job(
+                    existing_job,
+                    data,
+                    fingerprint=fp,
+                    score=score,
+                    breakdown=breakdown,
+                )
             board_jobs.append(existing_job)
             continue
-
-        score, breakdown = _score_job(data, profile)
 
         job = Job(
             user_id=user_id,

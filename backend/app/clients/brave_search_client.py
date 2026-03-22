@@ -32,6 +32,15 @@ def _clean_profile_url(url: str) -> str:
     return re.split(r"[?#]", url or "")[0].rstrip("/")
 
 
+def _quoted_or_clause(terms: list[str] | None, *, limit: int) -> str:
+    filtered = [f'"{term}"' for term in (terms or []) if term][:limit]
+    if not filtered:
+        return ""
+    if len(filtered) == 1:
+        return filtered[0]
+    return f'({" OR ".join(filtered)})'
+
+
 def _public_role_hint(titles: list[str] | None) -> str:
     normalized = " ".join(title.lower() for title in (titles or []) if title)
     if any(keyword in normalized for keyword in ("recruit", "talent acquisition", "sourcer", "campus", "university", "early careers", "early talent")):
@@ -170,6 +179,8 @@ def _parse_public_people_result(item: dict, company_name: str) -> dict | None:
     source = "brave_public_web"
     public_url = _clean_profile_url(url)
     public_identity = extract_public_identity_hints(public_url)
+    if public_identity.get("page_type") in {"team", "org"}:
+        return None
 
     return {
         "full_name": full_name,
@@ -214,11 +225,8 @@ async def search_people(
         Returns ``[]`` if the Brave API key is not configured.
     """
     # Build search query
-    title_part = ""
-    if titles:
-        # Use first 2 titles to keep query focused
-        quoted = [f'"{t}"' for t in titles[:2]]
-        title_part = " " + " OR ".join(quoted)
+    title_clause = _quoted_or_clause(titles, limit=2)
+    title_part = f" {title_clause}" if title_clause else ""
 
     team_part = ""
     if team_keywords:
@@ -241,24 +249,59 @@ async def search_exact_linkedin_profile(
     full_name: str,
     company_name: str,
     *,
+    name_variants: list[str] | None = None,
+    title_hints: list[str] | None = None,
+    team_keywords: list[str] | None = None,
     limit: int = 3,
 ) -> list[dict]:
     """Search Brave for one person's LinkedIn profile at a target company."""
     if not full_name or not company_name:
         return []
 
-    query = f'site:linkedin.com/in "{full_name}" "{company_name}"'
-    items = await _run_brave_query(query, max(1, min(limit, 5)))
-    results: list[dict] = []
-    for item in items:
-        person = _parse_linkedin_result(item, company_name)
-        if not person:
+    ordered_names: list[str] = []
+    seen_names: set[str] = set()
+    for name in [full_name, *(name_variants or [])]:
+        clean_name = (name or "").strip()
+        if not clean_name or clean_name in seen_names:
             continue
-        profile_data = dict(person.get("profile_data") or {})
-        profile_data["linkedin_backfill_query"] = query
-        profile_data["linkedin_backfill_result_url"] = person.get("linkedin_url")
-        person["profile_data"] = profile_data
-        results.append(person)
+        seen_names.add(clean_name)
+        ordered_names.append(clean_name)
+
+    queries: list[str] = [f'site:linkedin.com/in "{name}" "{company_name}"' for name in ordered_names]
+    title_clause = _quoted_or_clause(title_hints, limit=2)
+    if title_clause:
+        queries.extend(
+            f'site:linkedin.com/in "{name}" "{company_name}" {title_clause}'
+            for name in ordered_names
+        )
+
+    keyword_clause = _quoted_or_clause(team_keywords, limit=2)
+    if keyword_clause:
+        queries.extend(
+            f'site:linkedin.com/in "{name}" "{company_name}" {keyword_clause}'
+            for name in ordered_names
+        )
+
+    results: list[dict] = []
+    seen_urls: set[str] = set()
+    for query in queries:
+        items = await _run_brave_query(query, max(1, min(limit, 5)))
+        for item in items:
+            person = _parse_linkedin_result(item, company_name)
+            if not person:
+                continue
+            linkedin_url = person.get("linkedin_url") or ""
+            if linkedin_url and linkedin_url in seen_urls:
+                continue
+            profile_data = dict(person.get("profile_data") or {})
+            profile_data["linkedin_backfill_query"] = query
+            profile_data["linkedin_backfill_result_url"] = linkedin_url
+            person["profile_data"] = profile_data
+            results.append(person)
+            if linkedin_url:
+                seen_urls.add(linkedin_url)
+        if len(results) >= limit:
+            break
     return results[:limit]
 
 
@@ -270,10 +313,8 @@ async def search_public_people(
     limit: int = 5,
 ) -> list[dict]:
     """Search public web sources such as org charts and recruiter posts."""
-    title_part = ""
-    if titles:
-        quoted = [f'"{title}"' for title in titles[:2]]
-        title_part = " " + " OR ".join(quoted)
+    title_clause = _quoted_or_clause(titles, limit=2)
+    title_part = f" {title_clause}" if title_clause else ""
 
     team_part = ""
     if team_keywords:
