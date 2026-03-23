@@ -76,6 +76,7 @@ async def search_people(
     titles: list[str] | None = None,
     team_keywords: list[str] | None = None,
     limit: int = 10,
+    company_domain: str | None = None,
 ) -> list[dict]:
     """Search for people at a company via Google CSE LinkedIn X-ray search.
 
@@ -87,6 +88,7 @@ async def search_people(
         titles: Job title keywords to search for.
         team_keywords: Unused placeholder for interface compatibility.
         limit: Max results (capped at 10 per Google CSE limits).
+        company_domain: Optional domain for disambiguating ambiguous company names.
 
     Returns:
         List of person dicts compatible with _store_person().
@@ -102,33 +104,46 @@ async def search_people(
         quoted = [f'"{t}"' for t in titles[:2]]
         title_part = " " + " OR ".join(quoted)
 
-    query = f'site:linkedin.com/in "{company_name}"{title_part}'
+    domain_part = f' "{company_domain}"' if company_domain else ""
 
+    queries: list[str] = []
+    if company_domain:
+        queries.append(f'site:linkedin.com/in "at {company_name}"{title_part}')
+        queries.append(f'"{company_name}" "{company_domain}" site:linkedin.com/in{title_part}')
+    queries.append(f'site:linkedin.com/in "{company_name}"{domain_part}{title_part}')
+
+    results: list[dict] = []
+    seen_urls: set[str] = set()
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(
-                GOOGLE_CSE_URL,
-                params={
-                    "q": query,
-                    "key": settings.google_api_key,
-                    "cx": settings.google_cse_id,
-                    "num": min(limit, 10),
-                },
-            )
-            if resp.status_code in (403, 429):
-                # Quota exceeded or forbidden
-                return []
-            resp.raise_for_status()
-            data = resp.json()
+            for query in dict.fromkeys(queries):
+                resp = await client.get(
+                    GOOGLE_CSE_URL,
+                    params={
+                        "q": query,
+                        "key": settings.google_api_key,
+                        "cx": settings.google_cse_id,
+                        "num": min(limit, 10),
+                    },
+                )
+                if resp.status_code in (403, 429):
+                    return results
+                resp.raise_for_status()
+                data = resp.json()
+                for item in data.get("items", []):
+                    person = _parse_linkedin_result(item, company_name)
+                    if not person:
+                        continue
+                    url = person.get("linkedin_url") or ""
+                    if url and url in seen_urls:
+                        continue
+                    if url:
+                        seen_urls.add(url)
+                    results.append(person)
+                if len(results) >= limit:
+                    break
     except httpx.HTTPError:
-        return []
-
-    items = data.get("items", [])
-    results = []
-    for item in items:
-        person = _parse_linkedin_result(item, company_name)
-        if person:
-            results.append(person)
+        return results
 
     return results[:limit]
 

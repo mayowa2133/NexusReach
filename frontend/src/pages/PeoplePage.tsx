@@ -717,6 +717,14 @@ function PersonCard({
           <div className="text-xs text-muted-foreground">{person.match_reason}</div>
         )}
 
+        {person.usefulness_score != null && person.usefulness_score > 0 && (
+          <Badge
+            variant={person.usefulness_score >= 70 ? 'secondary' : 'outline'}
+          >
+            Usefulness: {person.usefulness_score}%
+          </Badge>
+        )}
+
         {person.fallback_reason && person.fallback_reason !== person.match_reason && (
           <div className="text-xs text-muted-foreground">{person.fallback_reason}</div>
         )}

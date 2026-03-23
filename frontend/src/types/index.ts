@@ -87,6 +87,7 @@ export interface Person {
   github_data: GitHubData | null;
   source: string | null;
   apollo_id: string | null;
+  usefulness_score?: number | null;
   match_quality?: 'direct' | 'adjacent' | 'next_best' | null;
   match_reason?: string | null;
   company_match_confidence?: 'verified' | 'strong_signal' | 'weak_signal' | null;

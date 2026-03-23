@@ -60,20 +60,38 @@ async def search_people(
     titles: list[str] | None = None,
     team_keywords: list[str] | None = None,
     limit: int = 10,
+    company_domain: str | None = None,
 ) -> list[dict]:
     title_clause = brave_search_client._quoted_or_clause(titles, limit=2)
     title_part = f" {title_clause}" if title_clause else ""
     team_part = f' "{team_keywords[0]}"' if team_keywords else ""
-    query = f'site:linkedin.com/in "{company_name}"{title_part}{team_part}'
+    domain_part = f' "{company_domain}"' if company_domain else ""
+
+    queries: list[str] = []
+    if company_domain:
+        # For ambiguous names, use "at Company" pattern and domain term
+        queries.append(f'site:linkedin.com/in "at {company_name}"{title_part}{team_part}')
+        queries.append(f'"{company_name}" "{company_domain}" site:linkedin.com/in{title_part}')
+    queries.append(f'site:linkedin.com/in "{company_name}"{domain_part}{title_part}{team_part}')
 
     results: list[dict] = []
-    for item in await _run_serper_query(query, limit):
-        parsed = brave_search_client._parse_linkedin_result(
-            _serper_item_to_brave_item(item),
-            company_name,
-        )
-        if parsed:
+    seen_urls: set[str] = set()
+    for query in dict.fromkeys(queries):
+        for item in await _run_serper_query(query, limit):
+            parsed = brave_search_client._parse_linkedin_result(
+                _serper_item_to_brave_item(item),
+                company_name,
+            )
+            if not parsed:
+                continue
+            url = parsed.get("linkedin_url") or ""
+            if url and url in seen_urls:
+                continue
+            if url:
+                seen_urls.add(url)
             results.append(_relabel_result(parsed, source="serper_search"))
+        if len(results) >= limit:
+            break
     return results[:limit]
 
 

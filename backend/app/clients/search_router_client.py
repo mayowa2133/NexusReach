@@ -172,6 +172,7 @@ async def search_people(
     team_keywords: list[str] | None = None,
     limit: int = 10,
     min_results: int = 1,
+    company_domain: str | None = None,
 ) -> list[dict]:
     providers: dict[str, ProviderFetcher] = {
         "serper": serper_search_client.search_people,
@@ -194,6 +195,7 @@ async def search_people(
             "titles": titles,
             "team_keywords": team_keywords,
             "limit": limit,
+            "company_domain": company_domain,
         },
     )
 

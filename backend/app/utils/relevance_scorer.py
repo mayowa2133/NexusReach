@@ -122,13 +122,17 @@ async def score_candidate_relevance(
         if isinstance(idx, int) and isinstance(score, int) and 0 <= idx < len(candidates):
             score_map[idx] = score
 
-    # Attach scores to all candidates
+    # Attach scores to all candidates (only first 15 are scored by LLM)
     for i, candidate in enumerate(candidates[:15]):
         candidate["relevance_score"] = score_map.get(i, MIN_RELEVANCE_SCORE)
 
+    # Candidates beyond index 15 get a default score so they aren't silently dropped
+    for candidate in candidates[15:]:
+        candidate.setdefault("relevance_score", MIN_RELEVANCE_SCORE)
+
     # Filter by the caller's threshold
     filtered = [
-        c for c in candidates[:15]
+        c for c in candidates
         if c.get("relevance_score", 0) >= min_score
     ]
 

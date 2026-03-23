@@ -321,6 +321,16 @@ def _build_manager_titles(
 ) -> list[str]:
     titles: list[str] = []
     core = _extract_core_role(base_title)
+
+    # Team-specific titles first (highest precision at large orgs)
+    for keyword in keywords[:2]:
+        label = _keyword_label(keyword)
+        titles.extend([
+            f"{label} Engineering Manager",
+            f"{label} Lead",
+            f"{label} Team Lead",
+        ])
+
     if core:
         if "engineer" in core.lower():
             engineering_core = re.sub(r"Engineer\b", "Engineering", core, flags=re.IGNORECASE)
@@ -347,13 +357,6 @@ def _build_manager_titles(
         "Team Lead",
         "Tech Lead",
     ])
-
-    for keyword in keywords[:2]:
-        label = _keyword_label(keyword)
-        titles.extend([
-            f"{label} Engineering Manager",
-            f"{label} Lead",
-        ])
 
     return list(dict.fromkeys(title for title in titles if title))
 
@@ -401,10 +404,28 @@ def _build_peer_titles(
             f"{label} Software Engineer",
         ])
 
+    # Seniority-adjacent variants for broader recall
+    seniority_prefix_titles: list[str] = []
     if seniority in {"senior", "staff", "lead", "principal"}:
-        titles.extend([
+        seniority_prefix_titles.extend([
             f"Senior {title}" for title in titles[:3] if title and not title.startswith("Senior ")
         ])
+    if seniority in {"junior", "mid", "intern"}:
+        seniority_prefix_titles.extend([
+            f"Junior {title}" for title in titles[:2] if title and not title.startswith("Junior ")
+        ])
+        seniority_prefix_titles.extend([
+            f"Associate {title}" for title in titles[:2] if title and not title.startswith("Associate ")
+        ])
+
+    titles.extend(seniority_prefix_titles)
+
+    # For broad engineering roles, add generic peer titles to improve recall
+    if department == "engineering" and not ml_like_role:
+        broad_peers = ["Software Engineer", "Software Developer"]
+        for bp in broad_peers:
+            if bp not in titles:
+                titles.append(bp)
 
     return list(dict.fromkeys(title for title in titles if title))
 

@@ -206,6 +206,7 @@ async def search_people(
     titles: list[str] | None = None,
     team_keywords: list[str] | None = None,
     limit: int = 10,
+    company_domain: str | None = None,
 ) -> list[dict]:
     """Search for people at a company via Brave Web Search LinkedIn X-ray.
 
@@ -233,15 +234,29 @@ async def search_people(
         # Use only first keyword to avoid over-constraining
         team_part = f' "{team_keywords[0]}"'
 
-    query = f'site:linkedin.com/in "{company_name}"{title_part}{team_part}'
+    domain_part = f' "{company_domain}"' if company_domain else ""
 
-    items = await _run_brave_query(query, limit)
-    results = []
-    for item in items:
-        person = _parse_linkedin_result(item, company_name)
-        if person:
+    queries: list[str] = []
+    if company_domain:
+        queries.append(f'site:linkedin.com/in "at {company_name}"{title_part}{team_part}')
+        queries.append(f'"{company_name}" "{company_domain}" site:linkedin.com/in{title_part}')
+    queries.append(f'site:linkedin.com/in "{company_name}"{domain_part}{title_part}{team_part}')
+
+    results: list[dict] = []
+    seen_urls: set[str] = set()
+    for query in dict.fromkeys(queries):
+        for item in await _run_brave_query(query, limit):
+            person = _parse_linkedin_result(item, company_name)
+            if not person:
+                continue
+            url = person.get("linkedin_url") or ""
+            if url and url in seen_urls:
+                continue
+            if url:
+                seen_urls.add(url)
             results.append(person)
-
+        if len(results) >= limit:
+            break
     return results[:limit]
 
 

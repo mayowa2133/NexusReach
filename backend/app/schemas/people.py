@@ -39,6 +39,7 @@ class PersonResponse(BaseModel):
     source: str | None
     apollo_id: str | None = None
     relevance_score: int | None = None
+    usefulness_score: int | None = None
     match_quality: str | None = None
     match_reason: str | None = None
     company_match_confidence: str | None = None
