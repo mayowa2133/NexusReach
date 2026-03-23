@@ -497,7 +497,7 @@ def _seniority_fit_rank(data: dict, *, bucket: str, context: JobContext | None) 
             return 2
         return 0 if candidate_rank >= SENIORITY_ORDER["manager"] else 1
 
-    target_level = "junior" if context.early_career else context.seniority
+    target_level = context.seniority if context.seniority in SENIORITY_ORDER else ("junior" if context.early_career else "mid")
     target_rank = SENIORITY_ORDER.get(target_level, 2)
     distance = abs(candidate_rank - target_rank)
     if distance == 0:
@@ -2488,6 +2488,65 @@ def _backfill_sparse_hiring_manager_bucket(
             return
 
 
+def _build_roles_context(roles: list[str] | None) -> JobContext | None:
+    """Build a lightweight JobContext from user-provided roles for ranking.
+
+    Extracts team keywords from role titles (e.g. "Engineering Manager" → "engineering")
+    so that candidate ranking can prefer relevant managers over random directors.
+    """
+    if not roles:
+        return None
+
+    # Extract meaningful keywords from role titles
+    STOP_WORDS = {
+        "manager", "director", "lead", "head", "senior", "junior", "staff",
+        "principal", "vp", "vice", "president", "chief", "officer", "coordinator",
+        "specialist", "analyst", "associate", "assistant", "intern", "new", "grad",
+        "program", "the", "a", "an", "at", "of", "for", "and", "or",
+    }
+    team_keywords: list[str] = []
+    seen: set[str] = set()
+    early_career = False
+    for role in roles:
+        lower = role.lower()
+        if any(kw in lower for kw in ("intern", "new grad", "early career", "university", "campus", "emerging talent")):
+            early_career = True
+        for word in re.split(r"[\s/,]+", lower):
+            word = word.strip()
+            if word and word not in STOP_WORDS and len(word) > 2 and word not in seen:
+                seen.add(word)
+                team_keywords.append(word)
+
+    if not team_keywords:
+        return None
+
+    # Guess department from keywords
+    department = "engineering"
+    if any(kw in team_keywords for kw in ("product", "design", "ux")):
+        department = "product_management"
+    elif any(kw in team_keywords for kw in ("data", "science", "analytics")):
+        department = "data_science"
+    elif any(kw in team_keywords for kw in ("marketing", "growth")):
+        department = "marketing"
+
+    # Determine appropriate seniority level
+    seniority = "mid"
+    if early_career:
+        has_intern = any("intern" in r.lower() for r in roles)
+        seniority = "intern" if has_intern else "junior"
+
+    return JobContext(
+        department=department,
+        team_keywords=team_keywords,
+        domain_keywords=[],
+        seniority=seniority,
+        early_career=early_career,
+        manager_titles=[r for r in roles if _is_manager_like(r)],
+        peer_titles=[r for r in roles if not _is_manager_like(r) and not _is_recruiter_like(r)],
+        recruiter_titles=[r for r in roles if _is_recruiter_like(r)],
+    )
+
+
 async def search_people_at_company(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -2502,6 +2561,8 @@ async def search_people_at_company(
     prepare_limit = _prepare_limit_for_target(target_count_per_bucket)
     minimum_results = _minimum_results_for_target(target_count_per_bucket)
 
+    roles_context = _build_roles_context(roles)
+
     company = await get_or_create_company(db, user_id, company_name)
     public_identity_terms = effective_public_identity_slugs(
         company.name,
@@ -2509,14 +2570,14 @@ async def search_people_at_company(
         identity_hints=company.identity_hints if isinstance(company.identity_hints, dict) else None,
     ) or None
 
-    recruiter_titles = _companywide_recruiter_titles(None)
+    recruiter_titles = _companywide_recruiter_titles(roles_context)
     if roles:
         # Merge user-provided roles that look recruiter-like into recruiter search
         extra_recruiter = [r for r in roles if _is_recruiter_like(r)]
         if extra_recruiter:
             recruiter_titles = list(dict.fromkeys(extra_recruiter + recruiter_titles))
-    manager_titles = roles or _companywide_manager_titles(None)
-    peer_titles = roles or _companywide_peer_titles(None)
+    manager_titles = roles or _companywide_manager_titles(roles_context)
+    peer_titles = roles or _companywide_peer_titles(roles_context)
 
     recruiter_candidates = await _search_candidates(
         company_name,
@@ -2540,6 +2601,25 @@ async def search_people_at_company(
         limit=search_limit,
         min_results=minimum_results,
     )
+    # For early-career searches, run additional queries with common intern/new-grad
+    # phrasing since LinkedIn profiles use varied title formats (e.g. "SWE Intern",
+    # "Software Engineer Intern", "Incoming SWE Intern") and a single query batch
+    # often returns mostly former interns or posts rather than current profiles.
+    if roles_context and roles_context.early_career:
+        early_career_titles = [
+            "SWE Intern",
+            "Software Engineer",
+            "Production Engineer",
+            "New Grad",
+        ]
+        extra_peers = await _search_candidates(
+            company_name,
+            titles=early_career_titles,
+            public_identity_terms=public_identity_terms,
+            limit=search_limit,
+            min_results=minimum_results,
+        )
+        peer_candidates = _dedupe_candidates(peer_candidates, extra_peers)
     saved_slug_candidates = await _saved_theorg_slug_candidates(
         db,
         user_id=user_id,
@@ -2584,7 +2664,7 @@ async def search_people_at_company(
         company_name=company_name,
         public_identity_slugs=public_identity_terms,
         bucket="recruiters",
-        context=None,
+        context=roles_context,
         limit=prepare_limit,
     )
     manager_results = _prepare_candidates(
@@ -2592,7 +2672,7 @@ async def search_people_at_company(
         company_name=company_name,
         public_identity_slugs=public_identity_terms,
         bucket="hiring_managers",
-        context=None,
+        context=roles_context,
         limit=prepare_limit,
     )
     peer_results = _prepare_candidates(
@@ -2600,7 +2680,7 @@ async def search_people_at_company(
         company_name=company_name,
         public_identity_slugs=public_identity_terms,
         bucket="peers",
-        context=None,
+        context=roles_context,
         limit=prepare_limit,
     )
 
@@ -2611,13 +2691,13 @@ async def search_people_at_company(
             "hiring_managers": len(manager_results),
             "peers": len(peer_results),
         },
-        context=None,
+        context=roles_context,
         target_count_per_bucket=target_count_per_bucket,
     ):
         theorg_candidates = await discover_theorg_candidates(
             company,
             company_name=company_name,
-            context=None,
+            context=roles_context,
             current_counts={
                 "recruiters": len(recruiter_results),
                 "hiring_managers": len(manager_results),
@@ -2637,7 +2717,7 @@ async def search_people_at_company(
             company_name=company_name,
             public_identity_slugs=public_identity_terms,
             bucket="recruiters",
-            context=None,
+            context=roles_context,
             limit=prepare_limit,
         )
         manager_results = _prepare_candidates(
@@ -2645,7 +2725,7 @@ async def search_people_at_company(
             company_name=company_name,
             public_identity_slugs=public_identity_terms,
             bucket="hiring_managers",
-            context=None,
+            context=roles_context,
             limit=prepare_limit,
         )
         peer_results = _prepare_candidates(
@@ -2653,7 +2733,7 @@ async def search_people_at_company(
             company_name=company_name,
             public_identity_slugs=public_identity_terms,
             bucket="peers",
-            context=None,
+            context=roles_context,
             limit=prepare_limit,
         )
 
@@ -2685,7 +2765,7 @@ async def search_people_at_company(
                 recruiter_candidates,
                 await _search_candidates(
                     company_name,
-                    titles=_companywide_recruiter_titles(None),
+                    titles=_companywide_recruiter_titles(roles_context),
                     public_identity_terms=public_identity_terms,
                     limit=search_limit,
                     min_results=minimum_results,
@@ -2701,7 +2781,7 @@ async def search_people_at_company(
                 company_name=company_name,
                 public_identity_slugs=public_identity_terms,
                 bucket="recruiters",
-                context=None,
+                context=roles_context,
                 limit=prepare_limit,
             )
             recruiter_results = await _backfill_linkedin_profiles(
@@ -2716,7 +2796,7 @@ async def search_people_at_company(
                 manager_candidates,
                 await _search_candidates(
                     company_name,
-                    titles=_companywide_manager_titles(None),
+                    titles=_companywide_manager_titles(roles_context),
                     seniority=["manager", "director", "vp"],
                     public_identity_terms=public_identity_terms,
                     limit=search_limit,
@@ -2733,7 +2813,7 @@ async def search_people_at_company(
                 company_name=company_name,
                 public_identity_slugs=public_identity_terms,
                 bucket="hiring_managers",
-                context=None,
+                context=roles_context,
                 limit=prepare_limit,
             )
             manager_results = await _backfill_linkedin_profiles(
@@ -2748,7 +2828,7 @@ async def search_people_at_company(
                 peer_candidates,
                 await _search_candidates(
                     company_name,
-                    titles=_companywide_peer_titles(None, fallback_titles=peer_titles),
+                    titles=_companywide_peer_titles(roles_context, fallback_titles=peer_titles),
                     public_identity_terms=public_identity_terms,
                     limit=search_limit,
                     min_results=minimum_results,
@@ -2764,7 +2844,7 @@ async def search_people_at_company(
                 company_name=company_name,
                 public_identity_slugs=public_identity_terms,
                 bucket="peers",
-                context=None,
+                context=roles_context,
                 limit=prepare_limit,
             )
             peer_results = await _backfill_linkedin_profiles(
@@ -2780,7 +2860,7 @@ async def search_people_at_company(
             "hiring_managers": manager_results,
             "peers": peer_results,
         },
-        context=None,
+        context=roles_context,
         company_name=company_name,
         public_identity_slugs=public_identity_terms,
     )
@@ -2805,7 +2885,7 @@ async def search_people_at_company(
 
     for data in recruiter_results:
         person = await _store_person(db, user_id, company, data, "recruiter")
-        _append_bucket(bucketed, seen, person, data, explicit_type="recruiter", company_name=company_name, public_identity_slugs=public_identity_terms)
+        _append_bucket(bucketed, seen, person, data, explicit_type="recruiter", context=roles_context, company_name=company_name, public_identity_slugs=public_identity_terms)
 
     for data in manager_results:
         person = await _store_person(
@@ -2815,15 +2895,15 @@ async def search_people_at_company(
             data,
             _classify_person(data.get("title", "")),
         )
-        _append_bucket(bucketed, seen, person, data, company_name=company_name, public_identity_slugs=public_identity_terms)
+        _append_bucket(bucketed, seen, person, data, context=roles_context, company_name=company_name, public_identity_slugs=public_identity_terms)
 
     for data in peer_results:
         person = await _store_person(db, user_id, company, data, "peer")
-        _append_bucket(bucketed, seen, person, data, explicit_type="peer", company_name=company_name, public_identity_slugs=public_identity_terms)
+        _append_bucket(bucketed, seen, person, data, explicit_type="peer", context=roles_context, company_name=company_name, public_identity_slugs=public_identity_terms)
 
     for data in github_members:
         person = await _store_person(db, user_id, company, data, "peer")
-        _append_bucket(bucketed, seen, person, data, explicit_type="peer", company_name=company_name)
+        _append_bucket(bucketed, seen, person, data, explicit_type="peer", context=roles_context, company_name=company_name)
 
     await verify_people_current_company(
         bucketed,

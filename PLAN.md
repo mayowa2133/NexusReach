@@ -87,9 +87,10 @@ NexusReach already has a working end-to-end loop:
 ## Current priorities
 
 ### P1
-- [ ] Improve hiring-manager precision for large engineering orgs
-- [ ] Increase peer recall for broad roles without drifting into noisy adjacent titles
-- [ ] Reduce cross-bucket duplicates when one same-company fallback qualifies for multiple buckets
+- [x] Improve hiring-manager precision for large engineering orgs
+- [x] Increase peer recall for broad roles without drifting into noisy adjacent titles
+- [x] Reduce cross-bucket duplicates when one same-company fallback qualifies for multiple buckets
+- [x] Add usefulness_score (0-100) combining team, title, level, rank, company, and source signals
 
 ### P2
 - [ ] Add more first-class exact-job host adapters beyond Apple and Workday
