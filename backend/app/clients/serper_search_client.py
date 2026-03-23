@@ -55,6 +55,25 @@ async def _run_serper_query(query: str, num: int) -> list[dict]:
     return data.get("organic", []) or []
 
 
+def _title_batches(
+    titles: list[str] | None,
+    batch_size: int = 2,
+    max_batches: int = 3,
+) -> list[list[str]]:
+    """Split titles into groups of *batch_size* for query expansion.
+
+    Returns at most *max_batches* groups to keep API calls reasonable.
+    """
+    if not titles:
+        return [[]]
+    batches: list[list[str]] = []
+    for i in range(0, len(titles), batch_size):
+        batches.append(titles[i : i + batch_size])
+        if len(batches) >= max_batches:
+            break
+    return batches or [[]]
+
+
 async def search_people(
     company_name: str,
     titles: list[str] | None = None,
@@ -62,17 +81,18 @@ async def search_people(
     limit: int = 10,
     company_domain: str | None = None,
 ) -> list[dict]:
-    title_clause = brave_search_client._quoted_or_clause(titles, limit=2)
-    title_part = f" {title_clause}" if title_clause else ""
     team_part = f' "{team_keywords[0]}"' if team_keywords else ""
     domain_part = f' "{company_domain}"' if company_domain else ""
 
+    # Build queries for each batch of titles so we cover the full list
     queries: list[str] = []
-    if company_domain:
-        # For ambiguous names, use "at Company" pattern and domain term
-        queries.append(f'site:linkedin.com/in "at {company_name}"{title_part}{team_part}')
-        queries.append(f'"{company_name}" "{company_domain}" site:linkedin.com/in{title_part}')
-    queries.append(f'site:linkedin.com/in "{company_name}"{domain_part}{title_part}{team_part}')
+    for batch in _title_batches(titles, batch_size=2):
+        title_clause = brave_search_client._quoted_or_clause(batch, limit=2)
+        title_part = f" {title_clause}" if title_clause else ""
+        if company_domain:
+            queries.append(f'site:linkedin.com/in "at {company_name}"{title_part}{team_part}')
+            queries.append(f'"{company_name}" "{company_domain}" site:linkedin.com/in{title_part}')
+        queries.append(f'site:linkedin.com/in "{company_name}"{domain_part}{title_part}{team_part}')
 
     results: list[dict] = []
     seen_urls: set[str] = set()
@@ -163,8 +183,6 @@ async def search_public_people(
     public_identity_terms: list[str] | None = None,
     limit: int = 5,
 ) -> list[dict]:
-    title_clause = brave_search_client._quoted_or_clause(titles, limit=2)
-    title_part = f" {title_clause}" if title_clause else ""
     team_part = f' "{team_keywords[0]}"' if team_keywords else ""
 
     identity_part = ""
@@ -179,16 +197,26 @@ async def search_public_people(
         clean_slug = (slug or "").strip().lower()
         if not clean_slug:
             continue
-        scoped_hint = role_hint or title_part.strip()
+        scoped_hint = role_hint or ""
+        if not scoped_hint:
+            # Use first batch of titles as fallback hint
+            first_clause = brave_search_client._quoted_or_clause(
+                (titles or [])[:2], limit=2,
+            )
+            scoped_hint = first_clause
         if scoped_hint:
             queries.append(f'site:theorg.com/org/{clean_slug} "{company_name}" {scoped_hint}')
         else:
             queries.append(f'site:theorg.com/org/{clean_slug} "{company_name}"')
 
-    queries.append(
-        f'("{company_name}"{title_part}{team_part}{identity_part}) '
-        '(site:theorg.com OR site:linkedin.com/posts OR site:clay.earth OR site:contactout.com)'
-    )
+    # Build one public-web query per title batch to cover the full list
+    for batch in _title_batches(titles, batch_size=2):
+        title_clause = brave_search_client._quoted_or_clause(batch, limit=2)
+        title_part = f" {title_clause}" if title_clause else ""
+        queries.append(
+            f'("{company_name}"{title_part}{team_part}{identity_part}) '
+            '(site:theorg.com OR site:linkedin.com/posts OR site:clay.earth OR site:contactout.com)'
+        )
 
     items: list[dict] = []
     seen_urls: set[str] = set()

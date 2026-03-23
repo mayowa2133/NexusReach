@@ -225,9 +225,7 @@ async def search_people(
         List of person dicts compatible with ``_store_person()``.
         Returns ``[]`` if the Brave API key is not configured.
     """
-    # Build search query
-    title_clause = _quoted_or_clause(titles, limit=2)
-    title_part = f" {title_clause}" if title_clause else ""
+    from app.clients.serper_search_client import _title_batches
 
     team_part = ""
     if team_keywords:
@@ -236,11 +234,15 @@ async def search_people(
 
     domain_part = f' "{company_domain}"' if company_domain else ""
 
+    # Build queries for each batch of titles so the full list is covered
     queries: list[str] = []
-    if company_domain:
-        queries.append(f'site:linkedin.com/in "at {company_name}"{title_part}{team_part}')
-        queries.append(f'"{company_name}" "{company_domain}" site:linkedin.com/in{title_part}')
-    queries.append(f'site:linkedin.com/in "{company_name}"{domain_part}{title_part}{team_part}')
+    for batch in _title_batches(titles, batch_size=2):
+        title_clause = _quoted_or_clause(batch, limit=2)
+        title_part = f" {title_clause}" if title_clause else ""
+        if company_domain:
+            queries.append(f'site:linkedin.com/in "at {company_name}"{title_part}{team_part}')
+            queries.append(f'"{company_name}" "{company_domain}" site:linkedin.com/in{title_part}')
+        queries.append(f'site:linkedin.com/in "{company_name}"{domain_part}{title_part}{team_part}')
 
     results: list[dict] = []
     seen_urls: set[str] = set()
@@ -328,8 +330,7 @@ async def search_public_people(
     limit: int = 5,
 ) -> list[dict]:
     """Search public web sources such as org charts and recruiter posts."""
-    title_clause = _quoted_or_clause(titles, limit=2)
-    title_part = f" {title_clause}" if title_clause else ""
+    from app.clients.serper_search_client import _title_batches
 
     team_part = ""
     if team_keywords:
@@ -347,16 +348,23 @@ async def search_public_people(
         clean_slug = (slug or "").strip().lower()
         if not clean_slug:
             continue
-        scoped_hint = role_hint or title_part.strip()
+        scoped_hint = role_hint or ""
+        if not scoped_hint:
+            first_clause = _quoted_or_clause((titles or [])[:2], limit=2)
+            scoped_hint = first_clause
         if scoped_hint:
             queries.append(f'site:theorg.com/org/{clean_slug} "{company_name}" {scoped_hint}')
         else:
             queries.append(f'site:theorg.com/org/{clean_slug} "{company_name}"')
 
-    queries.append(
-        f'("{company_name}"{title_part}{team_part}{identity_part}) '
-        '(site:theorg.com OR site:linkedin.com/posts OR site:clay.earth OR site:contactout.com)'
-    )
+    # Build one public-web query per title batch to cover the full list
+    for batch in _title_batches(titles, batch_size=2):
+        title_clause = _quoted_or_clause(batch, limit=2)
+        title_part = f" {title_clause}" if title_clause else ""
+        queries.append(
+            f'("{company_name}"{title_part}{team_part}{identity_part}) '
+            '(site:theorg.com OR site:linkedin.com/posts OR site:clay.earth OR site:contactout.com)'
+        )
 
     items: list[dict] = []
     seen_urls: set[str] = set()

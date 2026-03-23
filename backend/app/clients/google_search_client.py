@@ -97,20 +97,19 @@ async def search_people(
     if not settings.google_api_key or not settings.google_cse_id:
         return []
 
-    # Build search query
-    title_part = ""
-    if titles:
-        # Use first 2 titles to keep query focused
-        quoted = [f'"{t}"' for t in titles[:2]]
-        title_part = " " + " OR ".join(quoted)
+    from app.clients.serper_search_client import _title_batches
 
     domain_part = f' "{company_domain}"' if company_domain else ""
 
+    # Build queries for each batch of titles so the full list is covered
     queries: list[str] = []
-    if company_domain:
-        queries.append(f'site:linkedin.com/in "at {company_name}"{title_part}')
-        queries.append(f'"{company_name}" "{company_domain}" site:linkedin.com/in{title_part}')
-    queries.append(f'site:linkedin.com/in "{company_name}"{domain_part}{title_part}')
+    for batch in _title_batches(titles, batch_size=2):
+        quoted = [f'"{t}"' for t in batch if t]
+        title_part = (" " + " OR ".join(quoted)) if quoted else ""
+        if company_domain:
+            queries.append(f'site:linkedin.com/in "at {company_name}"{title_part}')
+            queries.append(f'"{company_name}" "{company_domain}" site:linkedin.com/in{title_part}')
+        queries.append(f'site:linkedin.com/in "{company_name}"{domain_part}{title_part}')
 
     results: list[dict] = []
     seen_urls: set[str] = set()

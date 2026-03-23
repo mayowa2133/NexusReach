@@ -1457,11 +1457,19 @@ def _candidate_matches_company(
 
     title = data.get("title", "") or ""
     snippet = data.get("snippet", "") or ""
+    # The LinkedIn result parser strips "@ Company" from the title for clean
+    # display, but the original search result title still holds the company
+    # reference.  Check it so that "Emerging Talent Recruiter @ Meta" still
+    # matches even though the cleaned title is "Emerging Talent Recruiter".
+    linkedin_result_title = (
+        (data.get("profile_data") or {}).get("linkedin_result_title", "")
+    )
     public_url = _public_profile_url(data)
     host = _public_profile_host(data)
     company_mentioned = (
         _mentions_company(title, company_name)
         or _mentions_company(snippet, company_name)
+        or _mentions_company(linkedin_result_title, company_name)
         or _trusted_public_match(data, company_name, public_identity_slugs)
         or (
             not is_ambiguous_company_name(company_name)
@@ -1522,6 +1530,14 @@ def _classify_employment_status(
         return "current"
 
     if _mentions_company(title, company_name):
+        return "current"
+
+    # The LinkedIn parser strips "@ Company" from the display title, but the
+    # original search result title retains it.  Use it for employment signal.
+    linkedin_result_title = (
+        (data.get("profile_data") or {}).get("linkedin_result_title", "")
+    )
+    if linkedin_result_title and _mentions_company(linkedin_result_title, company_name):
         return "current"
 
     if _mentions_company(snippet, company_name):
@@ -2570,14 +2586,24 @@ async def search_people_at_company(
         identity_hints=company.identity_hints if isinstance(company.identity_hints, dict) else None,
     ) or None
 
+    # Split user-provided roles into the correct buckets instead of dumping
+    # all roles into every search.  Recruiter-like roles feed the recruiter
+    # search, manager-like roles feed the manager search, and everything else
+    # feeds the peer search.  Buckets always fall back to companywide defaults
+    # so that we never search for "University Recruiter" in the manager bucket.
     recruiter_titles = _companywide_recruiter_titles(roles_context)
+    manager_titles = _companywide_manager_titles(roles_context)
+    peer_titles = _companywide_peer_titles(roles_context)
     if roles:
-        # Merge user-provided roles that look recruiter-like into recruiter search
         extra_recruiter = [r for r in roles if _is_recruiter_like(r)]
+        extra_manager = [r for r in roles if _is_manager_like(r) and not _is_recruiter_like(r)]
+        extra_peer = [r for r in roles if not _is_recruiter_like(r) and not _is_manager_like(r)]
         if extra_recruiter:
             recruiter_titles = list(dict.fromkeys(extra_recruiter + recruiter_titles))
-    manager_titles = roles or _companywide_manager_titles(roles_context)
-    peer_titles = roles or _companywide_peer_titles(roles_context)
+        if extra_manager:
+            manager_titles = list(dict.fromkeys(extra_manager + manager_titles))
+        if extra_peer:
+            peer_titles = list(dict.fromkeys(extra_peer + peer_titles))
 
     recruiter_candidates = await _search_candidates(
         company_name,
