@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -33,10 +34,13 @@ export function DashboardPage() {
   const { percentage, missing } = getProfileCompletion(profile);
   const { data: insights, isLoading: insightsLoading } = useInsightsDashboard();
   const { data: recentLogsData } = useOutreachLogs();
-  const { data: allJobsData } = useJobs(undefined, 'match_score');
+  const { data: allJobsData } = useJobs({ sortBy: 'score' });
   const { data: guardrails } = useGuardrails();
   const { shouldShow: showOnboarding } = useOnboarding();
 
+  const [lastVisited] = useState<string | null>(
+    () => window.localStorage.getItem('nexusreach-jobs-last-visited')
+  );
   const topJobs = allJobsData?.items?.slice(0, 5) ?? [];
   const guardrailsModified = guardrails && (
     !guardrails.min_message_gap_enabled ||
@@ -164,28 +168,38 @@ export function DashboardPage() {
           <CardContent>
             {topJobs.length > 0 ? (
               <div className="space-y-3">
-                {topJobs.map((job) => (
-                  <div
-                    key={job.id}
-                    className="flex items-center justify-between text-sm"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="font-medium truncate">{job.title}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {job.company_name}
-                        {job.location && ` — ${job.location}`}
+                {topJobs.map((job) => {
+                  const isNew = !!lastVisited && job.created_at > lastVisited;
+                  return (
+                    <div
+                      key={job.id}
+                      className="flex items-center justify-between text-sm"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <div className="font-medium truncate">{job.title}</div>
+                          {isNew && (
+                            <Badge variant="default" className="text-[9px] px-1 py-0 bg-blue-600 hover:bg-blue-600 shrink-0">
+                              NEW
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {job.company_name}
+                          {job.location && ` — ${job.location}`}
+                        </div>
                       </div>
+                      {job.match_score != null && (
+                        <Badge
+                          variant={job.match_score >= 60 ? 'default' : 'outline'}
+                          className="text-xs ml-2"
+                        >
+                          {Math.round(job.match_score)}%
+                        </Badge>
+                      )}
                     </div>
-                    {job.match_score != null && (
-                      <Badge
-                        variant={job.match_score >= 60 ? 'default' : 'outline'}
-                        className="text-xs ml-2"
-                      >
-                        {Math.round(job.match_score)}%
-                      </Badge>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
                 <Link
                   to="/jobs"
                   className="text-sm text-primary hover:underline inline-block mt-2"

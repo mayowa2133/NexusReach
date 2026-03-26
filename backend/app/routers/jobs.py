@@ -115,12 +115,18 @@ async def list_jobs(
     stage: str | None = None,
     sort_by: str = "score",
     starred: bool | None = None,
+    employment_type: str | None = None,
+    salary_min: float | None = None,
+    remote: bool | None = None,
+    search: str | None = None,
     limit: int | None = None,
     offset: int = 0,
 ):
     """List saved jobs with optional filtering and pagination."""
     jobs, total = await get_jobs(
         db, user_id, stage=stage, sort_by=sort_by, starred=starred,
+        employment_type=employment_type, salary_min=salary_min,
+        remote=remote, search=search,
         limit=limit, offset=offset,
     )
     return {

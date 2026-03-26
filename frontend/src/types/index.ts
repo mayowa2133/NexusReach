@@ -357,6 +357,16 @@ export interface ATSSearchRequest {
   job_url?: string;
 }
 
+export interface SearchPreference {
+  id: string;
+  query: string;
+  location: string | null;
+  remote_only: boolean;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 // Outreach Tracker types
 export type OutreachStatus = 'draft' | 'sent' | 'connected' | 'responded' | 'met' | 'following_up' | 'closed';
 export type OutreachChannel = 'linkedin_note' | 'linkedin_message' | 'email' | 'phone' | 'in_person' | 'other';

@@ -465,6 +465,10 @@ async def get_jobs(
     sort_by: str = "score",
     starred: bool | None = None,
     *,
+    employment_type: str | None = None,
+    salary_min: float | None = None,
+    remote: bool | None = None,
+    search: str | None = None,
     limit: int | None = None,
     offset: int = 0,
 ) -> tuple[list[Job], int]:
@@ -479,6 +483,17 @@ async def get_jobs(
         query = query.where(Job.stage == stage)
     if starred is not None:
         query = query.where(Job.starred == starred)
+    if employment_type:
+        query = query.where(Job.employment_type == employment_type)
+    if salary_min is not None:
+        query = query.where(Job.salary_max >= salary_min)
+    if remote is not None:
+        query = query.where(Job.remote == remote)
+    if search:
+        term = f"%{search}%"
+        query = query.where(
+            Job.title.ilike(term) | Job.company_name.ilike(term)
+        )
 
     if sort_by == "score":
         query = query.order_by(Job.match_score.desc().nullslast())

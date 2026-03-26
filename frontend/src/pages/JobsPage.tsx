@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,7 +7,16 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Checkbox } from '@/components/ui/checkbox';
-import { useJobSearch, useATSSearch, useJobs, useUpdateJobStage, useToggleJobStar } from '@/hooks/useJobs';
+import {
+  useJobSearch,
+  useATSSearch,
+  useJobs,
+  useUpdateJobStage,
+  useToggleJobStar,
+  useSavedSearches,
+  useToggleSavedSearch,
+  useDeleteSavedSearch,
+} from '@/hooks/useJobs';
 import {
   clampPeopleSearchTargetCount,
   getStoredPeopleSearchTargetCount,
@@ -16,6 +25,16 @@ import {
 import { toast } from 'sonner';
 import { sanitizeHTML } from '@/lib/sanitize';
 import type { Job, JobStage } from '@/types';
+
+const LAST_VISITED_KEY = 'nexusreach-jobs-last-visited';
+
+function getJobsLastVisited(): string | null {
+  return window.localStorage.getItem(LAST_VISITED_KEY);
+}
+
+function setJobsLastVisited(): void {
+  window.localStorage.setItem(LAST_VISITED_KEY, new Date().toISOString());
+}
 
 function StarIcon({ filled, className }: { filled: boolean; className?: string }) {
   return (
@@ -71,6 +90,15 @@ const SOURCE_LABELS: Record<string, string> = {
   workday: 'Workday',
 };
 
+const EMPLOYMENT_TYPES = [
+  { value: '', label: 'All types' },
+  { value: 'full-time', label: 'Full-time' },
+  { value: 'part-time', label: 'Part-time' },
+  { value: 'contract', label: 'Contract' },
+  { value: 'internship', label: 'Internship' },
+  { value: 'temporary', label: 'Temporary' },
+];
+
 export function JobsPage() {
   const [query, setQuery] = useState('');
   const [location, setLocation] = useState('');
@@ -85,13 +113,42 @@ export function JobsPage() {
     getStoredPeopleSearchTargetCount()
   );
 
+  // Advanced filters
+  const [searchFilter, setSearchFilter] = useState('');
+  const [employmentTypeFilter, setEmploymentTypeFilter] = useState('');
+  const [remoteFilter, setRemoteFilter] = useState(false);
+  const [salaryMinFilter, setSalaryMinFilter] = useState('');
+
+  // "New jobs" tracking
+  const [lastVisited] = useState<string | null>(() => getJobsLastVisited());
+  useEffect(() => {
+    setJobsLastVisited();
+  }, []);
+
   const navigate = useNavigate();
   const search = useJobSearch();
   const atsSearch = useATSSearch();
-  const { data: savedJobsData } = useJobs(stageFilter || undefined, sortBy, starredFilter ? true : undefined);
+  const { data: savedJobsData } = useJobs({
+    stage: stageFilter || undefined,
+    sortBy,
+    starred: starredFilter ? true : undefined,
+    employmentType: employmentTypeFilter || undefined,
+    salaryMin: salaryMinFilter ? Number(salaryMinFilter) : undefined,
+    remote: remoteFilter ? true : undefined,
+    search: searchFilter || undefined,
+  });
   const savedJobs = savedJobsData?.items;
   const updateStage = useUpdateJobStage();
   const toggleStar = useToggleJobStar();
+
+  // Saved searches
+  const { data: savedSearches } = useSavedSearches();
+  const toggleSavedSearch = useToggleSavedSearch();
+  const deleteSavedSearch = useDeleteSavedSearch();
+
+  const newJobCount = savedJobs && lastVisited
+    ? savedJobs.filter((j) => j.created_at > lastVisited).length
+    : 0;
 
   const handleSearch = async (e: FormEvent) => {
     e.preventDefault();
@@ -257,47 +314,160 @@ export function JobsPage() {
         </Card>
       </div>
 
+      {/* Saved Searches */}
+      {savedSearches && savedSearches.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Saved Searches</CardTitle>
+            <CardDescription>
+              Enabled searches auto-refresh hourly and create notifications for new matches.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {savedSearches.map((pref) => (
+                <div
+                  key={pref.id}
+                  className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 ${
+                    pref.enabled ? 'bg-background' : 'bg-muted/30 opacity-60'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <span className="text-sm font-medium truncate">{pref.query}</span>
+                    {pref.location && (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">
+                        {pref.location}
+                      </Badge>
+                    )}
+                    {pref.remote_only && (
+                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0 shrink-0">
+                        Remote
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <label className="flex items-center gap-1.5 cursor-pointer" aria-label={`Toggle ${pref.query} auto-refresh`}>
+                      <span className="text-xs text-muted-foreground">{pref.enabled ? 'On' : 'Off'}</span>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={pref.enabled}
+                        aria-label={`Toggle ${pref.query} auto-refresh`}
+                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                          pref.enabled ? 'bg-primary' : 'bg-muted-foreground/30'
+                        }`}
+                        onClick={() => toggleSavedSearch.mutate({ id: pref.id, enabled: !pref.enabled })}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-background shadow-sm ring-0 transition-transform ${
+                            pref.enabled ? 'translate-x-4' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
+                    </label>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                      aria-label={`Delete saved search ${pref.query}`}
+                      onClick={() => deleteSavedSearch.mutate(pref.id)}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                        <path fillRule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 10.23 1.482l.149-.022.841 10.518A2.75 2.75 0 007.596 19h4.807a2.75 2.75 0 002.742-2.53l.841-10.519.149.023a.75.75 0 00.23-1.482A41.03 41.03 0 0014 4.193V3.75A2.75 2.75 0 0011.25 1h-2.5zM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4zM8.58 7.72a.75.75 0 00-1.5.06l.3 7.5a.75.75 0 101.5-.06l-.3-7.5zm4.34.06a.75.75 0 10-1.5-.06l-.3 7.5a.75.75 0 101.5.06l.3-7.5z" clipRule="evenodd" />
+                      </svg>
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Filters and sort */}
       {savedJobs && savedJobs.length > 0 && (
         <>
           <Separator />
-          <div className="flex items-center gap-4 flex-wrap">
-            <div className="flex items-center gap-2">
-              <Label className="text-sm">Stage:</Label>
-              <select
-                value={stageFilter}
-                onChange={(e) => setStageFilter(e.target.value)}
-                className="h-8 rounded-lg border border-input bg-transparent px-2 text-sm outline-none"
+          <div className="space-y-3">
+            <div className="flex items-center gap-3 flex-wrap">
+              <Input
+                placeholder="Search saved jobs..."
+                value={searchFilter}
+                onChange={(e) => setSearchFilter(e.target.value)}
+                className="h-8 w-48 text-sm"
+                aria-label="Search saved jobs"
+              />
+              <div className="flex items-center gap-2">
+                <Label className="text-sm">Stage:</Label>
+                <select
+                  value={stageFilter}
+                  onChange={(e) => setStageFilter(e.target.value)}
+                  className="h-8 rounded-lg border border-input bg-transparent px-2 text-sm outline-none"
+                >
+                  <option value="">All stages</option>
+                  {STAGES.map((s) => (
+                    <option key={s.value} value={s.value}>{s.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <Label className="text-sm">Type:</Label>
+                <select
+                  value={employmentTypeFilter}
+                  onChange={(e) => setEmploymentTypeFilter(e.target.value)}
+                  className="h-8 rounded-lg border border-input bg-transparent px-2 text-sm outline-none"
+                  aria-label="Employment type filter"
+                >
+                  {EMPLOYMENT_TYPES.map((t) => (
+                    <option key={t.value} value={t.value}>{t.label}</option>
+                  ))}
+                </select>
+              </div>
+              <Button
+                variant={starredFilter ? 'default' : 'outline'}
+                size="sm"
+                className="h-8 text-xs gap-1"
+                onClick={() => setStarredFilter(!starredFilter)}
               >
-                <option value="">All stages</option>
-                {STAGES.map((s) => (
-                  <option key={s.value} value={s.value}>{s.label}</option>
-                ))}
-              </select>
-            </div>
-            <Button
-              variant={starredFilter ? 'default' : 'outline'}
-              size="sm"
-              className="h-8 text-xs gap-1"
-              onClick={() => setStarredFilter(!starredFilter)}
-            >
-              <StarIcon filled={starredFilter} className="h-3.5 w-3.5" />
-              Starred
-            </Button>
-            <div className="flex items-center gap-2">
-              <Label className="text-sm">Sort:</Label>
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="h-8 rounded-lg border border-input bg-transparent px-2 text-sm outline-none"
+                <StarIcon filled={starredFilter} className="h-3.5 w-3.5" />
+                Starred
+              </Button>
+              <Button
+                variant={remoteFilter ? 'default' : 'outline'}
+                size="sm"
+                className="h-8 text-xs"
+                onClick={() => setRemoteFilter(!remoteFilter)}
               >
-                <option value="score">Match Score</option>
-                <option value="date">Newest First</option>
-              </select>
+                Remote
+              </Button>
+              <div className="flex items-center gap-1.5">
+                <Label className="text-sm whitespace-nowrap">Min salary:</Label>
+                <Input
+                  type="number"
+                  placeholder="e.g. 80000"
+                  value={salaryMinFilter}
+                  onChange={(e) => setSalaryMinFilter(e.target.value)}
+                  className="h-8 w-28 text-sm"
+                  aria-label="Minimum salary filter"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Label className="text-sm">Sort:</Label>
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value)}
+                  className="h-8 rounded-lg border border-input bg-transparent px-2 text-sm outline-none"
+                >
+                  <option value="score">Match Score</option>
+                  <option value="date">Newest First</option>
+                </select>
+              </div>
+              <span className="text-sm text-muted-foreground ml-auto">
+                {savedJobs.length} jobs{newJobCount > 0 && (
+                  <span className="text-blue-600 dark:text-blue-400 font-medium"> ({newJobCount} new)</span>
+                )}
+              </span>
             </div>
-            <span className="text-sm text-muted-foreground ml-auto">
-              {savedJobs.length} jobs
-            </span>
           </div>
         </>
       )}
@@ -312,6 +482,7 @@ export function JobsPage() {
                 key={job.id}
                 job={job}
                 isSelected={selectedJob?.id === job.id}
+                isNew={!!lastVisited && job.created_at > lastVisited}
                 onClick={() => setSelectedJob(job)}
                 onToggleStar={(starred) => handleToggleStar(job.id, starred)}
               />
@@ -364,11 +535,13 @@ export function JobsPage() {
 function JobListCard({
   job,
   isSelected,
+  isNew,
   onClick,
   onToggleStar,
 }: {
   job: Job;
   isSelected: boolean;
+  isNew: boolean;
   onClick: () => void;
   onToggleStar: (starred: boolean) => void;
 }) {
@@ -380,7 +553,14 @@ function JobListCard({
       <CardContent className="pt-3 pb-3 space-y-1">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
-            <div className="font-medium text-sm truncate">{job.title}</div>
+            <div className="flex items-center gap-1.5">
+              <div className="font-medium text-sm truncate">{job.title}</div>
+              {isNew && (
+                <Badge variant="default" className="text-[9px] px-1 py-0 bg-blue-600 hover:bg-blue-600 shrink-0">
+                  NEW
+                </Badge>
+              )}
+            </div>
             <div className="text-xs text-muted-foreground">{job.company_name}</div>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
