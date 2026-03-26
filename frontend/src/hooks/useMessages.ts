@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import type { BatchDraftRequest, BatchDraftResponse, DraftRequest, DraftResponse, Message } from '@/types';
+import type { BatchDraftRequest, BatchDraftResponse, DraftRequest, DraftResponse, Message, PaginatedResponse } from '@/types';
 
 export function useDraftMessage() {
   const queryClient = useQueryClient();
@@ -56,7 +56,7 @@ export function useMessages(personId?: string) {
     queryKey: ['messages', personId],
     queryFn: () => {
       const params = personId ? `?person_id=${personId}` : '';
-      return api.get<Message[]>(`/api/messages${params}`);
+      return api.get<PaginatedResponse<Message>>(`/api/messages${params}`);
     },
   });
 }

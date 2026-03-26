@@ -77,23 +77,32 @@ async def create_outreach(
     return _to_response(log)
 
 
-@router.get("", response_model=list[OutreachResponse])
+@router.get("")
 async def list_outreach(
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
     status: str | None = None,
     person_id: str | None = None,
     job_id: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
 ):
-    """List outreach logs with optional filters."""
-    logs = await get_outreach_logs(
+    """List outreach logs with optional filters and pagination."""
+    logs, total = await get_outreach_logs(
         db,
         user_id,
         status=status,
         person_id=uuid.UUID(person_id) if person_id else None,
         job_id=uuid.UUID(job_id) if job_id else None,
+        limit=limit,
+        offset=offset,
     )
-    return [_to_response(log) for log in logs]
+    return {
+        "items": [_to_response(log) for log in logs],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @router.get("/stats", response_model=OutreachStats)

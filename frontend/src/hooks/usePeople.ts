@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import type { Person, PeopleSearchResult } from '@/types';
+import type { Person, PeopleSearchResult, PaginatedResponse } from '@/types';
 
 export function usePeopleSearch() {
   const queryClient = useQueryClient();
@@ -36,7 +36,7 @@ export function useSavedPeople(companyId?: string) {
     queryKey: ['people', companyId],
     queryFn: () => {
       const params = companyId ? `?company_id=${companyId}` : '';
-      return api.get<Person[]>(`/api/people${params}`);
+      return api.get<PaginatedResponse<Person>>(`/api/people${params}`);
     },
   });
 }

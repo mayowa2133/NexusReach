@@ -32,18 +32,18 @@ export function DashboardPage() {
   const { data: profile, isLoading: profileLoading } = useProfile();
   const { percentage, missing } = getProfileCompletion(profile);
   const { data: insights, isLoading: insightsLoading } = useInsightsDashboard();
-  const { data: recentLogs } = useOutreachLogs();
-  const { data: allJobs } = useJobs(undefined, 'match_score');
+  const { data: recentLogsData } = useOutreachLogs();
+  const { data: allJobsData } = useJobs(undefined, 'match_score');
   const { data: guardrails } = useGuardrails();
   const { shouldShow: showOnboarding } = useOnboarding();
 
-  const topJobs = allJobs?.slice(0, 5) ?? [];
+  const topJobs = allJobsData?.items?.slice(0, 5) ?? [];
   const guardrailsModified = guardrails && (
     !guardrails.min_message_gap_enabled ||
     !guardrails.follow_up_suggestion_enabled ||
     !guardrails.response_rate_warnings_enabled
   );
-  const recentOutreach = recentLogs?.slice(0, 5) ?? [];
+  const recentOutreach = recentLogsData?.items?.slice(0, 5) ?? [];
 
   return (
     <div className="space-y-6">

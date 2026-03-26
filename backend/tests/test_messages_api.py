@@ -263,11 +263,13 @@ async def test_list_messages(client, mock_user_id):
     msg = _mock_message(mock_user_id)
 
     with patch("app.routers.messages.get_messages", new_callable=AsyncMock) as mock_get:
-        mock_get.return_value = [msg]
+        mock_get.return_value = ([msg], 1)
         resp = await client.get("/api/messages")
 
     assert resp.status_code == 200
-    assert len(resp.json()) == 1
+    data = resp.json()
+    assert len(data["items"]) == 1
+    assert data["total"] == 1
 
 
 async def test_get_single_message(client, mock_user_id):

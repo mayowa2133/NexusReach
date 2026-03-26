@@ -113,7 +113,8 @@ export function PeoplePage() {
 
   const search = usePeopleSearch();
   const enrich = useEnrichPerson();
-  const { data: savedPeople } = useSavedPeople();
+  const { data: savedPeopleData } = useSavedPeople();
+  const savedPeople = savedPeopleData?.items;
 
   // Auto-trigger job-aware search when arriving from a job card
   const autoSearchTriggered = useRef(false);

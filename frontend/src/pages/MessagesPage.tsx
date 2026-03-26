@@ -230,9 +230,12 @@ function SingleMessagesView() {
   const findEmail = useFindEmail();
   const verifyEmail = useVerifyEmail();
   const stageDraft = useStageDraft();
-  const { data: savedPeople } = useSavedPeople();
-  const { data: jobs } = useJobs();
-  const { data: messages } = useMessages();
+  const { data: savedPeopleData } = useSavedPeople();
+  const savedPeople = savedPeopleData?.items;
+  const { data: jobsData } = useJobs();
+  const jobs = jobsData?.items;
+  const { data: messagesData } = useMessages();
+  const messages = messagesData?.items;
   const { data: emailStatus } = useEmailConnectionStatus();
 
   const selectedPerson = savedPeople?.find((person) => person.id === selectedPersonId);
@@ -776,8 +779,10 @@ function BatchMessagesView({
   initialJobId: string;
 }) {
   const [, setSearchParams] = useSearchParams();
-  const { data: savedPeople } = useSavedPeople();
-  const { data: jobs } = useJobs();
+  const { data: savedPeopleData } = useSavedPeople();
+  const savedPeople = savedPeopleData?.items;
+  const { data: jobsData } = useJobs();
+  const jobs = jobsData?.items;
   const { data: emailStatus } = useEmailConnectionStatus();
   const batchDraft = useBatchDraftMessages();
   const edit = useEditMessage();

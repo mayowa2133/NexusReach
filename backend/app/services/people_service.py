@@ -3564,15 +3564,22 @@ async def get_saved_people(
     db: AsyncSession,
     user_id: uuid.UUID,
     company_id: uuid.UUID | None = None,
-) -> list[Person]:
-    """Get all saved people for a user, optionally filtered by company."""
+    *,
+    limit: int | None = None,
+    offset: int = 0,
+) -> tuple[list[Person], int]:
+    """Get saved people for a user with optional filtering and pagination.
+
+    Returns ``(people, total_count)``.
+    """
+    from app.utils.pagination import paginate
+
     query = select(Person).options(selectinload(Person.company)).where(Person.user_id == user_id)
     if company_id:
         query = query.where(Person.company_id == company_id)
     query = query.order_by(Person.created_at.desc())
 
-    result = await db.execute(query)
-    people = list(result.scalars().all())
+    people, total = await paginate(db, query, limit=limit, offset=offset)
     for person in people:
         company_name = person.company.name if person.company else None
         data = {
@@ -3588,4 +3595,4 @@ async def get_saved_people(
             context=None,
             company_name=company_name,
         )
-    return people
+    return people, total

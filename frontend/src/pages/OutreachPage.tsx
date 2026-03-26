@@ -58,11 +58,14 @@ export function OutreachPage() {
   const [followUpDate, setFollowUpDate] = useState('');
   const [timelinePersonId, setTimelinePersonId] = useState<string | null>(null);
 
-  const { data: logs, isLoading } = useOutreachLogs(filterStatus || undefined);
+  const { data: logsData, isLoading } = useOutreachLogs(filterStatus || undefined);
+  const logs = logsData?.items;
   const { data: stats } = useOutreachStats();
   const { data: timeline } = useOutreachTimeline(timelinePersonId || '');
-  const { data: savedPeople } = useSavedPeople();
-  const { data: jobs } = useJobs();
+  const { data: savedPeopleData } = useSavedPeople();
+  const savedPeople = savedPeopleData?.items;
+  const { data: jobsData } = useJobs();
+  const jobs = jobsData?.items;
   const createOutreach = useCreateOutreach();
   const updateOutreach = useUpdateOutreach();
   const deleteOutreach = useDeleteOutreach();

@@ -108,17 +108,27 @@ async def search_ats(
     return [_to_response(j) for j in jobs]
 
 
-@router.get("", response_model=list[JobResponse])
+@router.get("")
 async def list_jobs(
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
     stage: str | None = None,
     sort_by: str = "score",
     starred: bool | None = None,
+    limit: int | None = None,
+    offset: int = 0,
 ):
-    """List all saved jobs, optionally filtered by kanban stage and starred."""
-    jobs = await get_jobs(db, user_id, stage=stage, sort_by=sort_by, starred=starred)
-    return [_to_response(j) for j in jobs]
+    """List saved jobs with optional filtering and pagination."""
+    jobs, total = await get_jobs(
+        db, user_id, stage=stage, sort_by=sort_by, starred=starred,
+        limit=limit, offset=offset,
+    )
+    return {
+        "items": [_to_response(j) for j in jobs],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @router.get("/{job_id}", response_model=JobResponse)

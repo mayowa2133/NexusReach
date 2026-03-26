@@ -57,7 +57,7 @@ const mockVerifyCurrentCompany = {
   isPending: false,
 };
 
-let mockSavedPeople: Array<Record<string, unknown>> = [];
+let mockSavedPeopleItems: Array<Record<string, unknown>> = [];
 
 vi.mock('@/hooks/usePeople', () => ({
   usePeopleSearch: () => mockPeopleSearch,
@@ -66,7 +66,7 @@ vi.mock('@/hooks/usePeople', () => ({
     isPending: false,
   }),
   useSavedPeople: () => ({
-    data: mockSavedPeople,
+    data: { items: mockSavedPeopleItems, total: mockSavedPeopleItems.length, limit: null, offset: 0 },
   }),
   useVerifyCurrentCompany: () => mockVerifyCurrentCompany,
 }));
@@ -101,7 +101,7 @@ beforeEach(() => {
   window.localStorage.clear();
   mockNavigate.mockReset();
   mockPeopleSearch.isPending = false;
-  mockSavedPeople = [
+  mockSavedPeopleItems = [
     {
       id: 'p1',
       full_name: 'Alex Lee',
@@ -219,7 +219,7 @@ describe('PeoplePage', () => {
 
   it('renders current-company verification state and allows manual refresh', async () => {
     mockVerifyCurrentCompany.mutateAsync.mockResolvedValue({
-      ...mockSavedPeople[0],
+      ...mockSavedPeopleItems[0],
       current_company_verified: true,
       current_company_verification_status: 'verified',
       current_company_verification_source: 'crawl4ai_linkedin',
@@ -240,9 +240,9 @@ describe('PeoplePage', () => {
   });
 
   it('renders adjacent and lower-confidence badges when present', () => {
-    mockSavedPeople = [
+    mockSavedPeopleItems = [
       {
-        ...mockSavedPeople[0],
+        ...mockSavedPeopleItems[0],
         match_quality: 'adjacent',
         match_reason: 'Adjacent engineering teammate at the target company.',
         company_match_confidence: 'strong_signal',
@@ -258,8 +258,8 @@ describe('PeoplePage', () => {
   });
 
   it('groups saved contacts by company', () => {
-    mockSavedPeople = [
-      ...mockSavedPeople,
+    mockSavedPeopleItems = [
+      ...mockSavedPeopleItems,
       {
         id: 'p2',
         full_name: 'Jordan Miles',
@@ -312,8 +312,8 @@ describe('PeoplePage', () => {
   });
 
   it('filters saved contacts by company name', async () => {
-    mockSavedPeople = [
-      ...mockSavedPeople,
+    mockSavedPeopleItems = [
+      ...mockSavedPeopleItems,
       {
         id: 'p2',
         full_name: 'Jordan Miles',
@@ -392,7 +392,7 @@ describe('PeoplePage', () => {
       },
       recruiters: [],
       hiring_managers: [],
-      peers: [mockSavedPeople[0]],
+      peers: [mockSavedPeopleItems[0]],
       job_context: null,
     });
 

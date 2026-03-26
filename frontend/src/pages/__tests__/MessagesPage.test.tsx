@@ -58,8 +58,8 @@ const mockStageDrafts = {
   isPending: false,
 };
 
-let mockSavedPeople: unknown[] = [];
-let mockJobs: unknown[] = [];
+let mockSavedPeople: { items: unknown[]; total: number; limit: null; offset: 0 } = { items: [], total: 0, limit: null, offset: 0 };
+let mockJobs: { items: unknown[]; total: number; limit: null; offset: 0 } = { items: [], total: 0, limit: null, offset: 0 };
 let mockEmailConnectionStatus = { gmail_connected: false, outlook_connected: false };
 
 vi.mock('@/hooks/usePeople', () => ({
@@ -75,7 +75,7 @@ vi.mock('@/hooks/useMessages', () => ({
   useBatchDraftMessages: () => mockBatchDraft,
   useEditMessage: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useMarkCopied: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  useMessages: () => ({ data: [] }),
+  useMessages: () => ({ data: { items: [], total: 0, limit: null, offset: 0 } }),
 }));
 
 vi.mock('@/hooks/useEmail', () => ({
@@ -109,24 +109,34 @@ beforeEach(() => {
   mockFindEmail.mutateAsync.mockReset();
   mockVerifyEmail.mutateAsync.mockReset();
   mockEmailConnectionStatus = { gmail_connected: false, outlook_connected: false };
-  mockSavedPeople = [
-    {
-      id: 'p1',
-      full_name: 'Alex Lee',
-      title: 'Software Engineer II',
-      person_type: 'peer',
-      work_email: null,
-      email_verified: false,
-      company: { id: 'c1', name: 'Affirm' },
-    },
-  ];
-  mockJobs = [
-    {
-      id: 'job-1',
-      title: 'Software Engineer, Backend',
-      company_name: 'Affirm',
-    },
-  ];
+  mockSavedPeople = {
+    items: [
+      {
+        id: 'p1',
+        full_name: 'Alex Lee',
+        title: 'Software Engineer II',
+        person_type: 'peer',
+        work_email: null,
+        email_verified: false,
+        company: { id: 'c1', name: 'Affirm' },
+      },
+    ],
+    total: 1,
+    limit: null,
+    offset: 0,
+  };
+  mockJobs = {
+    items: [
+      {
+        id: 'job-1',
+        title: 'Software Engineer, Backend',
+        company_name: 'Affirm',
+      },
+    ],
+    total: 1,
+    limit: null,
+    offset: 0,
+  };
 });
 
 describe('MessagesPage', () => {
@@ -169,17 +179,20 @@ describe('MessagesPage', () => {
   });
 
   it('defaults recruiter messaging to interview path and shows the recruiter strategy hint', async () => {
-    mockSavedPeople = [
-      {
-        id: 'p2',
-        full_name: 'Taylor Reed',
-        title: 'Technical Recruiter',
-        person_type: 'recruiter',
-        work_email: null,
-        email_verified: false,
-        company: { id: 'c2', name: 'Affirm' },
-      },
-    ];
+    mockSavedPeople = {
+      items: [
+        {
+          id: 'p2',
+          full_name: 'Taylor Reed',
+          title: 'Technical Recruiter',
+          person_type: 'recruiter',
+          work_email: null,
+          email_verified: false,
+          company: { id: 'c2', name: 'Affirm' },
+        },
+      ],
+      total: 1, limit: null, offset: 0,
+    };
 
     renderMessages();
 
@@ -237,26 +250,29 @@ describe('MessagesPage', () => {
   });
 
   it('filters the person dropdown by company name', async () => {
-    mockSavedPeople = [
-      {
-        id: 'p1',
-        full_name: 'Alex Lee',
-        title: 'Software Engineer II',
-        person_type: 'peer',
-        work_email: null,
-        email_verified: false,
-        company: { id: 'c1', name: 'Affirm' },
-      },
-      {
-        id: 'p2',
-        full_name: 'Taylor Reed',
-        title: 'Technical Recruiter',
-        person_type: 'recruiter',
-        work_email: null,
-        email_verified: false,
-        company: { id: 'c2', name: 'Stripe' },
-      },
-    ];
+    mockSavedPeople = {
+      items: [
+        {
+          id: 'p1',
+          full_name: 'Alex Lee',
+          title: 'Software Engineer II',
+          person_type: 'peer',
+          work_email: null,
+          email_verified: false,
+          company: { id: 'c1', name: 'Affirm' },
+        },
+        {
+          id: 'p2',
+          full_name: 'Taylor Reed',
+          title: 'Technical Recruiter',
+          person_type: 'recruiter',
+          work_email: null,
+          email_verified: false,
+          company: { id: 'c2', name: 'Stripe' },
+        },
+      ],
+      total: 2, limit: null, offset: 0,
+    };
 
     renderMessages();
 
@@ -276,28 +292,31 @@ describe('MessagesPage', () => {
 
   it('loads batch mode from query params and stages selected ready drafts', async () => {
     mockEmailConnectionStatus = { gmail_connected: true, outlook_connected: false };
-    mockSavedPeople = [
-      {
-        id: 'p1',
-        full_name: 'Alex Lee',
-        title: 'Software Engineer II',
-        person_type: 'peer',
-        work_email: 'alex.lee@affirm.com',
-        email_verified: true,
-        email_verification_status: 'verified',
-        email_verification_method: 'smtp_pattern',
-        company: { id: 'c1', name: 'Affirm', domain: 'affirm.com' },
-      },
-      {
-        id: 'p2',
-        full_name: 'Taylor Reed',
-        title: 'Software Engineer II',
-        person_type: 'peer',
-        work_email: null,
-        email_verified: false,
-        company: { id: 'c1', name: 'Affirm', domain: 'affirm.com' },
-      },
-    ];
+    mockSavedPeople = {
+      items: [
+        {
+          id: 'p1',
+          full_name: 'Alex Lee',
+          title: 'Software Engineer II',
+          person_type: 'peer',
+          work_email: 'alex.lee@affirm.com',
+          email_verified: true,
+          email_verification_status: 'verified',
+          email_verification_method: 'smtp_pattern',
+          company: { id: 'c1', name: 'Affirm', domain: 'affirm.com' },
+        },
+        {
+          id: 'p2',
+          full_name: 'Taylor Reed',
+          title: 'Software Engineer II',
+          person_type: 'peer',
+          work_email: null,
+          email_verified: false,
+          company: { id: 'c1', name: 'Affirm', domain: 'affirm.com' },
+        },
+      ],
+      total: 2, limit: null, offset: 0,
+    };
     mockBatchDraft.mutateAsync.mockResolvedValue({
       requested_count: 2,
       ready_count: 1,

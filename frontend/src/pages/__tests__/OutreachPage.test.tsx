@@ -165,10 +165,13 @@ describe('OutreachPage — create form', () => {
 
   it('renders saved people in person dropdown', () => {
     mockSavedPeople = {
-      data: [
-        { id: '1', full_name: 'Alice Green', title: 'PM' },
-        { id: '2', full_name: 'Bob Blue', title: 'SWE' },
-      ],
+      data: {
+        items: [
+          { id: '1', full_name: 'Alice Green', title: 'PM' },
+          { id: '2', full_name: 'Bob Blue', title: 'SWE' },
+        ],
+        total: 2, limit: null, offset: 0,
+      },
     };
     renderOutreach();
     expect(screen.getByText(/Alice Green/)).toBeInTheDocument();
@@ -177,10 +180,13 @@ describe('OutreachPage — create form', () => {
 
   it('filters the person dropdown by company name', async () => {
     mockSavedPeople = {
-      data: [
-        { id: '1', full_name: 'Alice Green', title: 'PM', company: { name: 'Uber' } },
-        { id: '2', full_name: 'Bob Blue', title: 'SWE', company: { name: 'Stripe' } },
-      ],
+      data: {
+        items: [
+          { id: '1', full_name: 'Alice Green', title: 'PM', company: { name: 'Uber' } },
+          { id: '2', full_name: 'Bob Blue', title: 'SWE', company: { name: 'Stripe' } },
+        ],
+        total: 2, limit: null, offset: 0,
+      },
     };
 
     renderOutreach();
@@ -193,9 +199,12 @@ describe('OutreachPage — create form', () => {
 
   it('shows an empty-state message when the company filter has no matches', async () => {
     mockSavedPeople = {
-      data: [
-        { id: '1', full_name: 'Alice Green', title: 'PM', company: { name: 'Uber' } },
-      ],
+      data: {
+        items: [
+          { id: '1', full_name: 'Alice Green', title: 'PM', company: { name: 'Uber' } },
+        ],
+        total: 1, limit: null, offset: 0,
+      },
     };
 
     renderOutreach();
@@ -207,9 +216,12 @@ describe('OutreachPage — create form', () => {
 
   it('renders jobs in linked job dropdown', () => {
     mockJobs = {
-      data: [
-        { id: 'j1', title: 'Frontend Dev', company_name: 'Acme' },
-      ],
+      data: {
+        items: [
+          { id: 'j1', title: 'Frontend Dev', company_name: 'Acme' },
+        ],
+        total: 1, limit: null, offset: 0,
+      },
     };
     renderOutreach();
     expect(screen.getByText(/Frontend Dev at Acme/)).toBeInTheDocument();
@@ -229,8 +241,8 @@ describe('OutreachPage — empty states', () => {
   });
 
   it('shows "log your first outreach" when people exist but no logs', () => {
-    mockSavedPeople = { data: [{ id: '1', full_name: 'Test', title: 'Dev' }] };
-    mockLogs = { data: [], isLoading: false };
+    mockSavedPeople = { data: { items: [{ id: '1', full_name: 'Test', title: 'Dev' }], total: 1, limit: null, offset: 0 } };
+    mockLogs = { data: { items: [], total: 0, limit: null, offset: 0 }, isLoading: false };
     renderOutreach();
     expect(screen.getByText(/log your first outreach/i)).toBeInTheDocument();
   });
@@ -318,20 +330,20 @@ describe('OutreachPage — outreach cards', () => {
   ];
 
   it('renders outreach cards when logs exist', () => {
-    mockLogs = { data: sampleLogs, isLoading: false };
+    mockLogs = { data: { items: sampleLogs, total: sampleLogs.length, limit: null, offset: 0 }, isLoading: false };
     renderOutreach();
     expect(screen.getByText('Jane Doe')).toBeInTheDocument();
     expect(screen.getByText('John Smith')).toBeInTheDocument();
   });
 
   it('renders person title on cards', () => {
-    mockLogs = { data: sampleLogs, isLoading: false };
+    mockLogs = { data: { items: sampleLogs, total: sampleLogs.length, limit: null, offset: 0 }, isLoading: false };
     renderOutreach();
     expect(screen.getByText('Engineering Manager')).toBeInTheDocument();
   });
 
   it('renders status badges on cards', () => {
-    mockLogs = { data: sampleLogs, isLoading: false };
+    mockLogs = { data: { items: sampleLogs, total: sampleLogs.length, limit: null, offset: 0 }, isLoading: false };
     renderOutreach();
     // "Sent" and "Responded" also appear in the filter dropdown options,
     // so use getAllByText and verify at least 2 matches (dropdown + card badge).
@@ -340,7 +352,7 @@ describe('OutreachPage — outreach cards', () => {
   });
 
   it('renders channel badges on cards', () => {
-    mockLogs = { data: sampleLogs, isLoading: false };
+    mockLogs = { data: { items: sampleLogs, total: sampleLogs.length, limit: null, offset: 0 }, isLoading: false };
     renderOutreach();
     // "LinkedIn Message" and "Email" also appear in the channel dropdown,
     // so use getAllByText and verify at least 2 matches (dropdown + card).
@@ -349,7 +361,7 @@ describe('OutreachPage — outreach cards', () => {
   });
 
   it('renders "Replied" badge when response_received is true', () => {
-    mockLogs = { data: sampleLogs, isLoading: false };
+    mockLogs = { data: { items: sampleLogs, total: sampleLogs.length, limit: null, offset: 0 }, isLoading: false };
     renderOutreach();
     // Only one log has response_received=true, but getAllis safer
     const replied = screen.getAllByText('Replied');
@@ -357,25 +369,25 @@ describe('OutreachPage — outreach cards', () => {
   });
 
   it('renders company name on card', () => {
-    mockLogs = { data: sampleLogs, isLoading: false };
+    mockLogs = { data: { items: sampleLogs, total: sampleLogs.length, limit: null, offset: 0 }, isLoading: false };
     renderOutreach();
     expect(screen.getByText(/at TechCorp/)).toBeInTheDocument();
   });
 
   it('renders linked job reference on card', () => {
-    mockLogs = { data: sampleLogs, isLoading: false };
+    mockLogs = { data: { items: sampleLogs, total: sampleLogs.length, limit: null, offset: 0 }, isLoading: false };
     renderOutreach();
     expect(screen.getByText(/Re: Senior SWE/)).toBeInTheDocument();
   });
 
   it('renders follow-up date on card', () => {
-    mockLogs = { data: sampleLogs, isLoading: false };
+    mockLogs = { data: { items: sampleLogs, total: sampleLogs.length, limit: null, offset: 0 }, isLoading: false };
     renderOutreach();
     expect(screen.getByText(/Follow up:/)).toBeInTheDocument();
   });
 
   it('renders truncated notes on collapsed card', () => {
-    mockLogs = { data: sampleLogs, isLoading: false };
+    mockLogs = { data: { items: sampleLogs, total: sampleLogs.length, limit: null, offset: 0 }, isLoading: false };
     renderOutreach();
     expect(screen.getByText('Sent connection request')).toBeInTheDocument();
   });

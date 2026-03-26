@@ -128,16 +128,23 @@ async def enrich_person(
     return _serialize_person(person)
 
 
-@router.get("", response_model=list[PersonResponse])
+@router.get("")
 async def list_people(
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
     company_id: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
 ):
-    """List all saved people for the current user."""
+    """List saved people with optional filtering and pagination."""
     cid = uuid.UUID(company_id) if company_id else None
-    people = await get_saved_people(db, user_id, cid)
-    return [_serialize_person(person) for person in people]
+    people, total = await get_saved_people(db, user_id, cid, limit=limit, offset=offset)
+    return {
+        "items": [_serialize_person(person) for person in people],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @router.post("/verify-current-company/{person_id}", response_model=PersonResponse)

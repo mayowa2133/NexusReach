@@ -239,16 +239,21 @@ describe('DashboardPage — recent outreach', () => {
 
   it('shows outreach entries when data exists', () => {
     mockLogs = {
-      data: [
-        {
-          id: '1',
-          person_name: 'Alice Green',
-          company_name: 'TechCorp',
-          status: 'sent',
-          channel: 'email',
-          created_at: '2024-03-01T00:00:00Z',
-        },
-      ],
+      data: {
+        items: [
+          {
+            id: '1',
+            person_name: 'Alice Green',
+            company_name: 'TechCorp',
+            status: 'sent',
+            channel: 'email',
+            created_at: '2024-03-01T00:00:00Z',
+          },
+        ],
+        total: 1,
+        limit: null,
+        offset: 0,
+      },
       isLoading: false,
     };
     renderDashboard();
@@ -258,7 +263,7 @@ describe('DashboardPage — recent outreach', () => {
 
   it('shows "View all outreach" link', () => {
     mockLogs = {
-      data: [{ id: '1', person_name: 'Test', status: 'draft', created_at: '2024-01-01' }],
+      data: { items: [{ id: '1', person_name: 'Test', status: 'draft', created_at: '2024-01-01' }], total: 1, limit: null, offset: 0 },
       isLoading: false,
     };
     renderDashboard();
@@ -278,15 +283,20 @@ describe('DashboardPage — top opportunities', () => {
 
   it('shows job entries when data exists', () => {
     mockJobs = {
-      data: [
-        {
-          id: 'j1',
-          title: 'Senior SWE',
-          company_name: 'Acme',
-          location: 'Remote',
-          match_score: 85,
-        },
-      ],
+      data: {
+        items: [
+          {
+            id: 'j1',
+            title: 'Senior SWE',
+            company_name: 'Acme',
+            location: 'Remote',
+            match_score: 85,
+          },
+        ],
+        total: 1,
+        limit: null,
+        offset: 0,
+      },
       isLoading: false,
     };
     renderDashboard();
@@ -296,7 +306,7 @@ describe('DashboardPage — top opportunities', () => {
 
   it('shows "View all jobs" link', () => {
     mockJobs = {
-      data: [{ id: 'j1', title: 'Test', company_name: 'Co', match_score: 50 }],
+      data: { items: [{ id: 'j1', title: 'Test', company_name: 'Co', match_score: 50 }], total: 1, limit: null, offset: 0 },
       isLoading: false,
     };
     renderDashboard();

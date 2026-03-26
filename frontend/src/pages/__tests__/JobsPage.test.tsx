@@ -41,7 +41,7 @@ vi.mock('@/stores/auth', () => ({
   ),
 }));
 
-let mockSavedJobs: Array<Record<string, unknown>> | undefined;
+let mockSavedJobs: { items: Array<Record<string, unknown>>; total: number; limit: null; offset: 0 } | undefined;
 
 vi.mock('@/hooks/useJobs', () => ({
   useJobSearch: () => ({
@@ -131,24 +131,29 @@ describe('JobsPage', () => {
   });
 
   it('renders a contacts-per-category control on the selected job detail', async () => {
-    mockSavedJobs = [
-      {
-        id: 'job-1',
-        title: 'Backend Engineer',
-        company_name: 'AppLovin',
-        location: 'Palo Alto, CA',
-        remote: false,
-        employment_type: 'full_time',
-        source: 'greenhouse',
-        department: 'engineering',
-        description: '<p>Role details</p>',
-        stage: 'discovered',
-        match_score: 72,
-        score_breakdown: {},
-        starred: false,
-        url: 'https://example.com/job',
-      },
-    ];
+    mockSavedJobs = {
+      items: [
+        {
+          id: 'job-1',
+          title: 'Backend Engineer',
+          company_name: 'AppLovin',
+          location: 'Palo Alto, CA',
+          remote: false,
+          employment_type: 'full_time',
+          source: 'greenhouse',
+          department: 'engineering',
+          description: '<p>Role details</p>',
+          stage: 'discovered',
+          match_score: 72,
+          score_breakdown: {},
+          starred: false,
+          url: 'https://example.com/job',
+        },
+      ],
+      total: 1,
+      limit: null,
+      offset: 0,
+    };
 
     renderJobs();
     await userEvent.click(screen.getByText('Backend Engineer'));
@@ -157,24 +162,29 @@ describe('JobsPage', () => {
   });
 
   it('navigates to People with the selected target count', async () => {
-    mockSavedJobs = [
-      {
-        id: 'job-1',
-        title: 'Backend Engineer',
-        company_name: 'AppLovin',
-        location: 'Palo Alto, CA',
-        remote: false,
-        employment_type: 'full_time',
-        source: 'greenhouse',
-        department: 'engineering',
-        description: '<p>Role details</p>',
-        stage: 'discovered',
-        match_score: 72,
-        score_breakdown: {},
-        starred: false,
-        url: 'https://example.com/job',
-      },
-    ];
+    mockSavedJobs = {
+      items: [
+        {
+          id: 'job-1',
+          title: 'Backend Engineer',
+          company_name: 'AppLovin',
+          location: 'Palo Alto, CA',
+          remote: false,
+          employment_type: 'full_time',
+          source: 'greenhouse',
+          department: 'engineering',
+          description: '<p>Role details</p>',
+          stage: 'discovered',
+          match_score: 72,
+          score_breakdown: {},
+          starred: false,
+          url: 'https://example.com/job',
+        },
+      ],
+      total: 1,
+      limit: null,
+      offset: 0,
+    };
 
     renderJobs();
     await userEvent.click(screen.getByText('Backend Engineer'));

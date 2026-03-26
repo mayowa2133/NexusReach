@@ -464,8 +464,16 @@ async def get_jobs(
     stage: str | None = None,
     sort_by: str = "score",
     starred: bool | None = None,
-) -> list[Job]:
-    """Get all saved jobs for a user, optionally filtered by stage and starred."""
+    *,
+    limit: int | None = None,
+    offset: int = 0,
+) -> tuple[list[Job], int]:
+    """Get saved jobs for a user with optional filtering and pagination.
+
+    Returns ``(jobs, total_count)``.
+    """
+    from app.utils.pagination import paginate
+
     query = select(Job).where(Job.user_id == user_id)
     if stage:
         query = query.where(Job.stage == stage)
@@ -479,8 +487,7 @@ async def get_jobs(
     else:
         query = query.order_by(Job.created_at.desc())
 
-    result = await db.execute(query)
-    return list(result.scalars().all())
+    return await paginate(db, query, limit=limit, offset=offset)
 
 
 async def update_job_stage(

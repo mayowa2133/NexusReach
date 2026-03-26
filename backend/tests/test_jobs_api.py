@@ -174,12 +174,13 @@ async def test_list_jobs(client, mock_user_id):
     job2 = _mock_job(mock_user_id, match_score=60.0, title="Frontend Dev")
 
     with patch("app.routers.jobs.get_jobs", new_callable=AsyncMock) as mock_get:
-        mock_get.return_value = [job1, job2]
+        mock_get.return_value = ([job1, job2], 2)
         resp = await client.get("/api/jobs")
 
     assert resp.status_code == 200
     data = resp.json()
-    assert len(data) == 2
+    assert len(data["items"]) == 2
+    assert data["total"] == 2
 
 
 async def test_list_jobs_with_stage_filter(client, mock_user_id):
@@ -187,7 +188,7 @@ async def test_list_jobs_with_stage_filter(client, mock_user_id):
     job = _mock_job(mock_user_id, stage="applied")
 
     with patch("app.routers.jobs.get_jobs", new_callable=AsyncMock) as mock_get:
-        mock_get.return_value = [job]
+        mock_get.return_value = ([job], 1)
         resp = await client.get("/api/jobs", params={"stage": "applied"})
 
     assert resp.status_code == 200

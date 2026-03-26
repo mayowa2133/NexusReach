@@ -183,22 +183,25 @@ async def test_list_outreach(client, mock_user_id):
     log2 = _mock_outreach_log(mock_user_id, status="connected")
 
     with patch("app.routers.outreach.get_outreach_logs", new_callable=AsyncMock) as m:
-        m.return_value = [log1, log2]
+        m.return_value = ([log1, log2], 2)
         resp = await client.get("/api/outreach")
 
     assert resp.status_code == 200
     data = resp.json()
-    assert len(data) == 2
+    assert len(data["items"]) == 2
+    assert data["total"] == 2
 
 
 async def test_list_outreach_empty(client, mock_user_id):
     """GET /api/outreach returns empty list when no logs."""
     with patch("app.routers.outreach.get_outreach_logs", new_callable=AsyncMock) as m:
-        m.return_value = []
+        m.return_value = ([], 0)
         resp = await client.get("/api/outreach")
 
     assert resp.status_code == 200
-    assert resp.json() == []
+    data = resp.json()
+    assert data["items"] == []
+    assert data["total"] == 0
 
 
 async def test_list_outreach_with_status_filter(client, mock_user_id):
@@ -206,7 +209,7 @@ async def test_list_outreach_with_status_filter(client, mock_user_id):
     log = _mock_outreach_log(mock_user_id, status="sent")
 
     with patch("app.routers.outreach.get_outreach_logs", new_callable=AsyncMock) as m:
-        m.return_value = [log]
+        m.return_value = ([log], 1)
         resp = await client.get("/api/outreach", params={"status": "sent"})
 
     assert resp.status_code == 200
@@ -221,7 +224,7 @@ async def test_list_outreach_with_person_filter(client, mock_user_id):
     log = _mock_outreach_log(mock_user_id, person_id=pid)
 
     with patch("app.routers.outreach.get_outreach_logs", new_callable=AsyncMock) as m:
-        m.return_value = [log]
+        m.return_value = ([log], 1)
         resp = await client.get("/api/outreach", params={"person_id": str(pid)})
 
     assert resp.status_code == 200
@@ -235,7 +238,7 @@ async def test_list_outreach_with_job_filter(client, mock_user_id):
     log = _mock_outreach_log(mock_user_id, job_id=jid)
 
     with patch("app.routers.outreach.get_outreach_logs", new_callable=AsyncMock) as m:
-        m.return_value = [log]
+        m.return_value = ([log], 1)
         resp = await client.get("/api/outreach", params={"job_id": str(jid)})
 
     assert resp.status_code == 200

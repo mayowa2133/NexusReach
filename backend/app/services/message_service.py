@@ -746,15 +746,22 @@ async def get_messages(
     db: AsyncSession,
     user_id: uuid.UUID,
     person_id: uuid.UUID | None = None,
-) -> list[Message]:
-    """Get all messages for a user, optionally filtered by person."""
+    *,
+    limit: int | None = None,
+    offset: int = 0,
+) -> tuple[list[Message], int]:
+    """Get messages for a user with optional filtering and pagination.
+
+    Returns ``(messages, total_count)``.
+    """
+    from app.utils.pagination import paginate
+
     query = select(Message).where(Message.user_id == user_id)
     if person_id:
         query = query.where(Message.person_id == person_id)
     query = query.order_by(Message.created_at.desc())
 
-    result = await db.execute(query)
-    return list(result.scalars().all())
+    return await paginate(db, query, limit=limit, offset=offset)
 
 
 async def get_message(

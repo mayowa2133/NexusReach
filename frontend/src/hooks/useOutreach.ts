@@ -5,6 +5,7 @@ import type {
   OutreachStats,
   CreateOutreachRequest,
   UpdateOutreachRequest,
+  PaginatedResponse,
 } from '@/types';
 
 export function useOutreachLogs(status?: string, personId?: string) {
@@ -15,7 +16,7 @@ export function useOutreachLogs(status?: string, personId?: string) {
 
   return useQuery({
     queryKey: ['outreach', status, personId],
-    queryFn: () => api.get<OutreachLog[]>(`/api/outreach${qs ? `?${qs}` : ''}`),
+    queryFn: () => api.get<PaginatedResponse<OutreachLog>>(`/api/outreach${qs ? `?${qs}` : ''}`),
   });
 }
 

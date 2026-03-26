@@ -14,6 +14,7 @@ import {
   setStoredPeopleSearchTargetCount,
 } from '@/lib/peopleSearchCount';
 import { toast } from 'sonner';
+import { sanitizeHTML } from '@/lib/sanitize';
 import type { Job, JobStage } from '@/types';
 
 function StarIcon({ filled, className }: { filled: boolean; className?: string }) {
@@ -87,7 +88,8 @@ export function JobsPage() {
   const navigate = useNavigate();
   const search = useJobSearch();
   const atsSearch = useATSSearch();
-  const { data: savedJobs } = useJobs(stageFilter || undefined, sortBy, starredFilter ? true : undefined);
+  const { data: savedJobsData } = useJobs(stageFilter || undefined, sortBy, starredFilter ? true : undefined);
+  const savedJobs = savedJobsData?.items;
   const updateStage = useUpdateJobStage();
   const toggleStar = useToggleJobStar();
 
@@ -568,7 +570,7 @@ function JobDetail({
             <div className="text-sm font-medium">Description</div>
             <div
               className="text-sm text-muted-foreground max-h-[400px] overflow-y-auto prose prose-sm dark:prose-invert"
-              dangerouslySetInnerHTML={{ __html: job.description.slice(0, 3000) }}
+              dangerouslySetInnerHTML={{ __html: sanitizeHTML(job.description.slice(0, 3000)) }}
             />
           </div>
         )}

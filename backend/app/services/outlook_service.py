@@ -1,6 +1,7 @@
 """Outlook/Microsoft integration — OAuth consent flow and draft staging via Graph API."""
 
 import uuid
+from urllib.parse import urlencode
 
 import httpx
 from sqlalchemy import select
@@ -25,8 +26,7 @@ def get_auth_url(redirect_uri: str, state: str = "") -> str:
         "response_mode": "query",
         "state": state,
     }
-    query = "&".join(f"{k}={v}" for k, v in params.items())
-    return f"{MS_AUTH_URL}?{query}"
+    return f"{MS_AUTH_URL}?{urlencode(params)}"
 
 
 async def exchange_code(code: str, redirect_uri: str) -> dict:
@@ -49,19 +49,24 @@ async def exchange_code(code: str, redirect_uri: str) -> dict:
 
 async def refresh_access_token(refresh_token: str) -> str:
     """Refresh an expired access token."""
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.post(
-            MS_TOKEN_URL,
-            data={
-                "client_id": settings.microsoft_client_id,
-                "client_secret": settings.microsoft_client_secret,
-                "refresh_token": refresh_token,
-                "grant_type": "refresh_token",
-                "scope": SCOPES,
-            },
-        )
-        resp.raise_for_status()
-        return resp.json()["access_token"]
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                MS_TOKEN_URL,
+                data={
+                    "client_id": settings.microsoft_client_id,
+                    "client_secret": settings.microsoft_client_secret,
+                    "refresh_token": refresh_token,
+                    "grant_type": "refresh_token",
+                    "scope": SCOPES,
+                },
+            )
+            resp.raise_for_status()
+            return resp.json()["access_token"]
+    except httpx.HTTPStatusError as exc:
+        raise ValueError(
+            "Outlook session expired. Please reconnect Outlook in Settings."
+        ) from exc
 
 
 async def connect_outlook(
@@ -157,5 +162,6 @@ async def create_draft(
 
     return {
         "draft_id": draft_data.get("id", ""),
+        "message_id": draft_data.get("id", ""),
         "provider": "outlook",
     }

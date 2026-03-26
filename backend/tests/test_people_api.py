@@ -159,14 +159,15 @@ async def test_list_people(client, mock_user_id):
     person = _mock_person(mock_user_id, company=company)
 
     with patch("app.routers.people.get_saved_people", new_callable=AsyncMock) as mock_get:
-        mock_get.return_value = [person]
+        mock_get.return_value = ([person], 1)
         resp = await client.get("/api/people")
 
     assert resp.status_code == 200
     data = resp.json()
-    assert len(data) == 1
-    assert data[0]["full_name"] == "Jane Doe"
-    assert data[0]["company"]["id"] == str(company.id)
+    assert len(data["items"]) == 1
+    assert data["total"] == 1
+    assert data["items"][0]["full_name"] == "Jane Doe"
+    assert data["items"][0]["company"]["id"] == str(company.id)
 
 
 async def test_verify_current_company(client, mock_user_id):

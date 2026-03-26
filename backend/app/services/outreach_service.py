@@ -90,8 +90,16 @@ async def get_outreach_logs(
     status: str | None = None,
     person_id: uuid.UUID | None = None,
     job_id: uuid.UUID | None = None,
-) -> list[OutreachLog]:
-    """List outreach logs with optional filters."""
+    *,
+    limit: int | None = None,
+    offset: int = 0,
+) -> tuple[list[OutreachLog], int]:
+    """List outreach logs with optional filters and pagination.
+
+    Returns ``(logs, total_count)``.
+    """
+    from app.utils.pagination import paginate
+
     query = (
         select(OutreachLog)
         .where(OutreachLog.user_id == user_id)
@@ -106,8 +114,7 @@ async def get_outreach_logs(
     if job_id:
         query = query.where(OutreachLog.job_id == job_id)
 
-    result = await db.execute(query)
-    return list(result.scalars().all())
+    return await paginate(db, query, limit=limit, offset=offset)
 
 
 async def get_outreach_log(

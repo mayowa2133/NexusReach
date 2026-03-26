@@ -173,16 +173,23 @@ async def copy_message(
     return _to_response(msg)
 
 
-@router.get("", response_model=list[MessageResponse])
+@router.get("")
 async def list_messages(
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
     person_id: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
 ):
-    """List all messages, optionally filtered by person."""
+    """List messages with optional filtering and pagination."""
     pid = uuid.UUID(person_id) if person_id else None
-    messages = await get_messages(db, user_id, pid)
-    return [_to_response(m) for m in messages]
+    messages, total = await get_messages(db, user_id, pid, limit=limit, offset=offset)
+    return {
+        "items": [_to_response(m) for m in messages],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @router.get("/{message_id}", response_model=MessageResponse)

@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import type { ATSSearchRequest, Job, JobSearchRequest, JobStage } from '@/types';
+import type { ATSSearchRequest, Job, JobSearchRequest, JobStage, PaginatedResponse } from '@/types';
 
 export function useJobSearch() {
   const queryClient = useQueryClient();
@@ -35,7 +35,7 @@ export function useJobs(stage?: string, sortBy?: string, starred?: boolean) {
 
   return useQuery({
     queryKey: ['jobs', stage, sortBy, starred],
-    queryFn: () => api.get<Job[]>(`/api/jobs${qs ? `?${qs}` : ''}`),
+    queryFn: () => api.get<PaginatedResponse<Job>>(`/api/jobs${qs ? `?${qs}` : ''}`),
   });
 }
 
