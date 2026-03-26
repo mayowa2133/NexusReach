@@ -1,5 +1,6 @@
 """People discovery service for company and job-aware search."""
 
+import asyncio
 import copy
 import re
 import unicodedata
@@ -2601,6 +2602,11 @@ async def search_people_at_company(
     target_count_per_bucket: int = DEFAULT_TARGET_COUNT_PER_BUCKET,
 ) -> dict:
     """Find people at a company using company-level search."""
+    import time as _time
+
+    from app.models.search_log import SearchLog
+
+    _t0 = _time.monotonic()
     target_count_per_bucket = _clamp_target_count_per_bucket(target_count_per_bucket)
     search_limit = _search_limit_for_target(target_count_per_bucket)
     prepare_limit = _prepare_limit_for_target(target_count_per_bucket)
@@ -2634,27 +2640,30 @@ async def search_people_at_company(
         if extra_peer:
             peer_titles = list(dict.fromkeys(extra_peer + peer_titles))
 
-    recruiter_candidates = await _search_candidates(
-        company_name,
-        titles=recruiter_titles,
-        public_identity_terms=public_identity_terms,
-        limit=search_limit,
-        min_results=minimum_results,
-    )
-    manager_candidates = await _search_candidates(
-        company_name,
-        titles=manager_titles,
-        seniority=["manager", "director", "vp"],
-        public_identity_terms=public_identity_terms,
-        limit=search_limit,
-        min_results=minimum_results,
-    )
-    peer_candidates = await _search_candidates(
-        company_name,
-        titles=peer_titles,
-        public_identity_terms=public_identity_terms,
-        limit=search_limit,
-        min_results=minimum_results,
+    # Run all three bucket searches concurrently for ~3x faster initial discovery
+    recruiter_candidates, manager_candidates, peer_candidates = await asyncio.gather(
+        _search_candidates(
+            company_name,
+            titles=recruiter_titles,
+            public_identity_terms=public_identity_terms,
+            limit=search_limit,
+            min_results=minimum_results,
+        ),
+        _search_candidates(
+            company_name,
+            titles=manager_titles,
+            seniority=["manager", "director", "vp"],
+            public_identity_terms=public_identity_terms,
+            limit=search_limit,
+            min_results=minimum_results,
+        ),
+        _search_candidates(
+            company_name,
+            titles=peer_titles,
+            public_identity_terms=public_identity_terms,
+            limit=search_limit,
+            min_results=minimum_results,
+        ),
     )
     # For early-career searches, run additional queries with common intern/new-grad
     # phrasing since LinkedIn profiles use varied title formats (e.g. "SWE Intern",
@@ -2698,20 +2707,10 @@ async def search_people_at_company(
         identity_hints=company.identity_hints if isinstance(company.identity_hints, dict) else None,
     ) or None
 
-    recruiter_candidates = await _recover_candidate_titles(
-        recruiter_candidates,
-        company=company,
-        company_name=company_name,
-    )
-    manager_candidates = await _recover_candidate_titles(
-        manager_candidates,
-        company=company,
-        company_name=company_name,
-    )
-    peer_candidates = await _recover_candidate_titles(
-        peer_candidates,
-        company=company,
-        company_name=company_name,
+    recruiter_candidates, manager_candidates, peer_candidates = await asyncio.gather(
+        _recover_candidate_titles(recruiter_candidates, company=company, company_name=company_name),
+        _recover_candidate_titles(manager_candidates, company=company, company_name=company_name),
+        _recover_candidate_titles(peer_candidates, company=company, company_name=company_name),
     )
 
     recruiter_results = _prepare_candidates(
@@ -2792,23 +2791,19 @@ async def search_people_at_company(
             limit=prepare_limit,
         )
 
-    recruiter_results = await _backfill_linkedin_profiles(
-        recruiter_results,
-        company_name=company_name,
-        public_identity_slugs=public_identity_terms,
-        bucket="recruiters",
-    )
-    manager_results = await _backfill_linkedin_profiles(
-        manager_results,
-        company_name=company_name,
-        public_identity_slugs=public_identity_terms,
-        bucket="hiring_managers",
-    )
-    peer_results = await _backfill_linkedin_profiles(
-        peer_results,
-        company_name=company_name,
-        public_identity_slugs=public_identity_terms,
-        bucket="peers",
+    recruiter_results, manager_results, peer_results = await asyncio.gather(
+        _backfill_linkedin_profiles(
+            recruiter_results, company_name=company_name,
+            public_identity_slugs=public_identity_terms, bucket="recruiters",
+        ),
+        _backfill_linkedin_profiles(
+            manager_results, company_name=company_name,
+            public_identity_slugs=public_identity_terms, bucket="hiring_managers",
+        ),
+        _backfill_linkedin_profiles(
+            peer_results, company_name=company_name,
+            public_identity_slugs=public_identity_terms, bucket="peers",
+        ),
     )
 
     if any(
@@ -2970,14 +2965,24 @@ async def search_people_at_company(
         bucketed,
         target_count_per_bucket=target_count_per_bucket,
     )
+    finalized = _finalize_bucketed(bucketed, target_count_per_bucket=target_count_per_bucket)
+
+    # Record search in audit log
+    elapsed = _time.monotonic() - _t0
+    search_log = SearchLog(
+        user_id=user_id,
+        company_id=company.id,
+        company_name=company_name,
+        search_type="company",
+        recruiter_count=len(finalized["recruiters"]),
+        manager_count=len(finalized["hiring_managers"]),
+        peer_count=len(finalized["peers"]),
+        duration_seconds=round(elapsed, 2),
+    )
+    db.add(search_log)
     await db.commit()
-    return {
-        "company": company,
-        **_finalize_bucketed(
-            bucketed,
-            target_count_per_bucket=target_count_per_bucket,
-        ),
-    }
+
+    return {"company": company, **finalized}
 
 
 async def search_people_for_job(
@@ -3624,3 +3629,20 @@ async def get_saved_people(
             company_name=company_name,
         )
     return people, total
+
+
+async def get_search_history(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    limit: int = 20,
+) -> list:
+    """Return recent search logs for a user."""
+    from app.models.search_log import SearchLog
+
+    result = await db.execute(
+        select(SearchLog)
+        .where(SearchLog.user_id == user_id)
+        .order_by(SearchLog.created_at.desc())
+        .limit(limit)
+    )
+    return list(result.scalars().all())

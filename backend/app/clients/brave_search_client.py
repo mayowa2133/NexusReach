@@ -99,6 +99,68 @@ async def _run_brave_query(query: str, count: int) -> list[dict]:
     return data.get("web", {}).get("results", [])
 
 
+_CORPORATE_SUFFIXES = re.compile(
+    r"\s*,?\s*\b(?:inc\.?|corp\.?|corporation|ltd\.?|llc|co\.?|limited|group|plc)\s*$",
+    re.IGNORECASE,
+)
+
+# Separators commonly used in LinkedIn headlines before/after a company name
+_SEPARATOR_CHARS = r"[@·|,\-]"
+
+
+def _normalize_company_for_match(name: str) -> str:
+    """Strip corporate suffixes and normalize whitespace for matching."""
+    name = _CORPORATE_SUFFIXES.sub("", name).strip()
+    return re.sub(r"\s+", " ", name).lower()
+
+
+def _company_name_in_title(company_name: str, title_raw: str) -> bool:
+    """Check if the company name appears in a LinkedIn result title.
+
+    Handles common headline patterns beyond plain substring matching:
+    - "at Figma", "@ Figma"
+    - "· Figma", "| Figma", ", Figma", "- Figma"
+    - "Figma Inc", "Figma, Inc."
+    - Just "Figma" anywhere in the title
+
+    For short company names (≤3 chars), enforces word boundaries to avoid
+    false positives (e.g. "Zip" matching "Ziprecruiter").
+    """
+    title_lower = title_raw.lower()
+    company_normalized = _normalize_company_for_match(company_name)
+
+    if not company_normalized:
+        return False
+
+    # Fast path: exact substring match (covers most cases)
+    if company_normalized in title_lower:
+        # For short names, enforce word boundary
+        if len(company_normalized) <= 3:
+            pattern = rf"\b{re.escape(company_normalized)}\b"
+            return bool(re.search(pattern, title_lower))
+        return True
+
+    # Try after normalizing the title too (strips suffixes like "Inc")
+    title_normalized = _normalize_company_for_match(title_raw)
+    if company_normalized in title_normalized:
+        if len(company_normalized) <= 3:
+            pattern = rf"\b{re.escape(company_normalized)}\b"
+            return bool(re.search(pattern, title_normalized))
+        return True
+
+    # Check separator patterns: "@ Company", "· Company", "| Company", etc.
+    sep_pattern = rf"(?:{_SEPARATOR_CHARS})\s*{re.escape(company_normalized)}"
+    if re.search(sep_pattern, title_lower):
+        return True
+
+    # Check reverse: "Company |", "Company ·", "Company -"
+    rev_pattern = rf"{re.escape(company_normalized)}\s*(?:{_SEPARATOR_CHARS})"
+    if re.search(rev_pattern, title_lower):
+        return True
+
+    return False
+
+
 def _parse_linkedin_result(item: dict, company_name: str) -> dict | None:
     """Parse a Brave Search result into a person data dict.
 
@@ -147,8 +209,7 @@ def _parse_linkedin_result(item: dict, company_name: str) -> dict | None:
     # unreliable — it can mention a company from posts or activity.  Skip
     # results where the company name doesn't appear in the title at all,
     # as they are very likely wrong-company noise from broad SERP queries.
-    company_lower = company_name.lower()
-    if company_lower not in title_raw.lower():
+    if not _company_name_in_title(company_name, title_raw):
         return None
 
     return {

@@ -85,9 +85,29 @@ class JobContextResponse(BaseModel):
     seniority: str
 
 
+class SearchErrorDetail(BaseModel):
+    provider: str
+    error_code: str
+    message: str
+    bucket: str | None = None
+
+
 class PeopleSearchResponse(BaseModel):
     company: CompanyResponse | None
     recruiters: list[PersonResponse]
     hiring_managers: list[PersonResponse]
     peers: list[PersonResponse]
     job_context: JobContextResponse | None = None
+    errors: list[SearchErrorDetail] | None = None
+
+
+class SearchLogResponse(BaseModel):
+    id: str
+    company_name: str
+    search_type: str
+    recruiter_count: int
+    manager_count: int
+    peer_count: int
+    errors: dict | None = None
+    duration_seconds: float | None = None
+    created_at: str

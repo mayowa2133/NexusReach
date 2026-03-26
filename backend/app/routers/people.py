@@ -16,12 +16,15 @@ from app.schemas.people import (
     PeopleSearchResponse,
     ManualPersonRequest,
     PersonResponse,
+    SearchErrorDetail,
+    SearchLogResponse,
 )
 from app.services.people_service import (
     search_people_at_company,
     search_people_for_job,
     enrich_person_from_linkedin,
     get_saved_people,
+    get_search_history,
 )
 from app.services.employment_verification_service import verify_current_company_for_person
 
@@ -62,12 +65,19 @@ def _serialize_person(person) -> PersonResponse:
 
 
 def _serialize_people_search_result(result: dict) -> PeopleSearchResponse:
+    raw_errors = result.get("errors")
+    errors = (
+        [SearchErrorDetail(**e) for e in raw_errors]
+        if raw_errors
+        else None
+    )
     return PeopleSearchResponse(
         company=_serialize_company(result.get("company")),
         recruiters=[_serialize_person(person) for person in result.get("recruiters", [])],
         hiring_managers=[_serialize_person(person) for person in result.get("hiring_managers", [])],
         peers=[_serialize_person(person) for person in result.get("peers", [])],
         job_context=result.get("job_context"),
+        errors=errors,
     )
 
 
@@ -173,3 +183,27 @@ async def verify_current_company(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return _serialize_person(person)
+
+
+@router.get("/search/history", response_model=list[SearchLogResponse])
+async def search_history(
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: int = 20,
+):
+    """Return recent people discovery searches for the current user."""
+    logs = await get_search_history(db, user_id, limit=min(limit, 50))
+    return [
+        SearchLogResponse(
+            id=str(log.id),
+            company_name=log.company_name,
+            search_type=log.search_type,
+            recruiter_count=log.recruiter_count,
+            manager_count=log.manager_count,
+            peer_count=log.peer_count,
+            errors=log.errors,
+            duration_seconds=log.duration_seconds,
+            created_at=log.created_at.isoformat() if log.created_at else "",
+        )
+        for log in logs
+    ]

@@ -30,8 +30,14 @@ class ApiClient {
     });
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: 'Request failed' }));
-      throw new Error(error.detail || `HTTP ${response.status}`);
+      const errorBody = await response.json().catch(() => null);
+      // Support both NexusReach format {"error": {"code", "message"}} and
+      // FastAPI default {"detail": "..."} used by slowapi/rate-limiter.
+      const message =
+        errorBody?.error?.message ||
+        errorBody?.detail ||
+        `HTTP ${response.status}`;
+      throw new Error(message);
     }
 
     if (response.status === 204) {

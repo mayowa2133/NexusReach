@@ -135,12 +135,32 @@ export interface JobContext {
   seniority: string;
 }
 
+export interface SearchLogEntry {
+  id: string;
+  company_name: string;
+  search_type: string;
+  recruiter_count: number;
+  manager_count: number;
+  peer_count: number;
+  errors: Record<string, unknown> | null;
+  duration_seconds: number | null;
+  created_at: string;
+}
+
+export interface SearchErrorDetail {
+  provider: string;
+  error_code: string;
+  message: string;
+  bucket: string | null;
+}
+
 export interface PeopleSearchResult {
   company: Company | null;
   recruiters: Person[];
   hiring_managers: Person[];
   peers: Person[];
   job_context: JobContext | null;
+  errors?: SearchErrorDetail[] | null;
 }
 
 // Message Drafting types

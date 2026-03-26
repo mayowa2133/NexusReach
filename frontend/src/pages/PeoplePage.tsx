@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { usePeopleSearch, useEnrichPerson, useSavedPeople, useVerifyCurrentCompany } from '@/hooks/usePeople';
+import { usePeopleSearch, useEnrichPerson, useSavedPeople, useVerifyCurrentCompany, useSearchHistory } from '@/hooks/usePeople';
 import { useFindEmail, useVerifyEmail } from '@/hooks/useEmail';
 import {
   formatEmailVerificationLabel,
@@ -115,6 +115,7 @@ export function PeoplePage() {
   const enrich = useEnrichPerson();
   const { data: savedPeopleData } = useSavedPeople();
   const savedPeople = savedPeopleData?.items;
+  const { data: searchHistory } = useSearchHistory();
 
   // Auto-trigger job-aware search when arriving from a job card
   const autoSearchTriggered = useRef(false);
@@ -388,6 +389,31 @@ export function PeoplePage() {
             </div>
           )}
 
+          {/* Partial-failure warning */}
+          {searchResults.errors && searchResults.errors.length > 0 && (
+            <div className="rounded-lg border border-yellow-300 bg-yellow-50 p-4 dark:border-yellow-700 dark:bg-yellow-950">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-medium text-yellow-800 dark:text-yellow-200">
+                    Some search providers were unavailable
+                  </p>
+                  <p className="mt-1 text-sm text-yellow-700 dark:text-yellow-300">
+                    Results may be incomplete.{' '}
+                    {searchResults.errors.map((e) => e.provider).filter((v, i, a) => a.indexOf(v) === i).join(', ')}{' '}
+                    {searchResults.errors.length === 1 ? 'was' : 'were'} unreachable.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="shrink-0 rounded-md bg-yellow-200 px-3 py-1.5 text-sm font-medium text-yellow-900 hover:bg-yellow-300 dark:bg-yellow-800 dark:text-yellow-100 dark:hover:bg-yellow-700"
+                  onClick={handleSearch as unknown as React.MouseEventHandler}
+                >
+                  Retry Search
+                </button>
+              </div>
+            </div>
+          )}
+
           {totalResults === 0 ? (
             <div className="rounded-lg border border-dashed p-8 text-center">
               <p className="text-muted-foreground">
@@ -422,6 +448,39 @@ export function PeoplePage() {
               />
             </div>
           )}
+        </div>
+      )}
+
+      {/* Recent searches */}
+      {!searchResults && !search.isPending && searchHistory && searchHistory.length > 0 && (
+        <div className="space-y-3">
+          <h3 className="text-lg font-semibold">Recent Searches</h3>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {searchHistory.slice(0, 6).map((log) => (
+              <Card key={log.id} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => {
+                setCompanyName(log.company_name);
+              }}>
+                <CardContent className="p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-sm truncate">{log.company_name}</span>
+                    <span className="text-xs text-muted-foreground shrink-0">
+                      {new Date(log.created_at).toLocaleDateString()}
+                    </span>
+                  </div>
+                  <div className="mt-1 flex gap-2 text-xs text-muted-foreground">
+                    <span>{log.recruiter_count} recruiters</span>
+                    <span>·</span>
+                    <span>{log.manager_count} managers</span>
+                    <span>·</span>
+                    <span>{log.peer_count} peers</span>
+                  </div>
+                  {log.duration_seconds != null && (
+                    <span className="text-xs text-muted-foreground">{log.duration_seconds}s</span>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
         </div>
       )}
 

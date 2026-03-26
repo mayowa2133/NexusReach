@@ -68,6 +68,7 @@ vi.mock('@/hooks/usePeople', () => ({
   useSavedPeople: () => ({
     data: { items: mockSavedPeopleItems, total: mockSavedPeopleItems.length, limit: null, offset: 0 },
   }),
+  useSearchHistory: () => ({ data: [] }),
   useVerifyCurrentCompany: () => mockVerifyCurrentCompany,
 }));
 
