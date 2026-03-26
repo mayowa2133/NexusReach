@@ -185,7 +185,7 @@ class TestSearchPeople:
         assert results[0]["full_name"] == "Jane Doe"
 
     async def test_limits_title_keywords(self):
-        """Only first 2 titles are used to keep query focused."""
+        """Each query batch uses at most 2 titles."""
         mock_client = _mock_client_with(_mock_httpx_response({"items": []}))
 
         with (
@@ -196,7 +196,11 @@ class TestSearchPeople:
             s.google_cse_id = "cse-id"
             await search_people("Google", titles=["a", "b", "c", "d"])
 
-        query = mock_client.get.call_args[1]["params"]["q"]
-        assert '"a"' in query
-        assert '"b"' in query
-        assert '"c"' not in query
+        queries = [call[1]["params"]["q"] for call in mock_client.get.call_args_list]
+        # Both batches should appear across queries
+        assert any('"a"' in q and '"b"' in q for q in queries)
+        assert any('"c"' in q and '"d"' in q for q in queries)
+        # No single query should contain more than 2 title terms
+        for q in queries:
+            title_count = sum(1 for t in ["a", "b", "c", "d"] if f'"{t}"' in q)
+            assert title_count <= 2, f"Query has {title_count} titles: {q}"

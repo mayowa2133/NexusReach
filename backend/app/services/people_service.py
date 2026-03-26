@@ -34,10 +34,13 @@ from app.utils.relevance_scorer import score_candidate_relevance
 RECRUITER_TITLE_KEYWORDS = (
     "recruiter",
     "hiring coordinator",
+    "hiring",
     "recruiting",
     "recruiting coordinator",
     "recruiting partner",
+    "recruitment",
     "talent acquisition",
+    "talent operations",
     "talent partner",
     "sourcer",
     "technical sourcer",
@@ -148,11 +151,13 @@ WEAK_TITLE_PLACEHOLDERS = {
 }
 RECRUITER_ADJACENT_KEYWORDS = (
     "talent acquisition",
+    "talent operations",
     "talent partner",
     "early talent",
     "early careers",
     "university programs",
     "recruiting coordinator",
+    "recruitment",
 )
 SENIOR_IC_FALLBACK_KEYWORDS = (
     "staff engineer",
@@ -418,7 +423,7 @@ def _is_recruiter_like(text: str | None) -> bool:
     if not _contains_any_keyword(normalized, RECRUITER_TITLE_KEYWORDS):
         return False
     generic_only = _contains_any_keyword(normalized, GENERIC_PEOPLE_TITLE_KEYWORDS) and not any(
-        keyword in normalized for keyword in ("recruit", "talent acquisition", "talent partner", "sourcer", "early talent", "early careers", "emerging talent", "university")
+        keyword in normalized for keyword in ("recruit", "talent acquisition", "talent operations", "talent partner", "sourcer", "early talent", "early careers", "emerging talent", "university", "hiring")
     )
     return not generic_only
 
@@ -1352,6 +1357,9 @@ def _companywide_recruiter_titles(context: JobContext | None) -> list[str]:
                 "Talent Acquisition Partner",
                 "Technical Sourcer",
                 "Recruiting Coordinator",
+                "Recruitment Coordinator",
+                "Talent Operations",
+                "Early Career Programs",
                 "Recruiter",
                 "University Recruiter",
                 "Campus Recruiter",
@@ -1368,6 +1376,9 @@ def _companywide_recruiter_titles(context: JobContext | None) -> list[str]:
             "Talent Acquisition Partner",
             "Technical Sourcer",
             "Recruiting Coordinator",
+            "Recruitment Coordinator",
+            "Talent Operations",
+            "Early Career Programs",
             "Recruiter",
             "University Recruiter",
             "Campus Recruiter",

@@ -11,6 +11,7 @@ import re
 
 import httpx
 
+from app.clients import brave_search_client
 from app.config import settings
 
 GOOGLE_CSE_URL = "https://www.googleapis.com/customsearch/v1"
@@ -101,8 +102,9 @@ async def search_people(
 
     domain_part = f' "{company_domain}"' if company_domain else ""
 
-    # Build queries for each batch of titles so the full list is covered
-    queries: list[str] = []
+    # Broad role-family queries first — they catch non-standard titles
+    queries: list[str] = brave_search_client._broad_role_queries(company_name, titles)
+    # Then title-specific queries for each batch
     for batch in _title_batches(titles, batch_size=2):
         quoted = [f'"{t}"' for t in batch if t]
         title_part = (" " + " OR ".join(quoted)) if quoted else ""

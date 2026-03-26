@@ -1,22 +1,35 @@
-"""Serper SERP client for LinkedIn x-ray and public-web discovery."""
+"""SearXNG search client for LinkedIn x-ray and public-web discovery.
+
+Completely free, unlimited. Queries a self-hosted SearXNG instance via its
+JSON API.  No external API key required — only a running SearXNG container.
+
+Quick start:
+    docker run -d --name searxng -p 8888:8080 searxng/searxng
+
+Then enable JSON format in /etc/searxng/settings.yml:
+    search:
+      formats:
+        - html
+        - json
+"""
 
 from __future__ import annotations
 
+import asyncio
 import re
 
 import httpx
 
 from app.clients import brave_search_client
+from app.clients.serper_search_client import _title_batches
 from app.config import settings
 
-SERPER_SEARCH_URL = "https://google.serper.dev/search"
 
-
-def _serper_item_to_brave_item(item: dict) -> dict:
+def _searxng_item_to_brave_item(item: dict) -> dict:
     return {
         "title": item.get("title", ""),
-        "url": item.get("link", ""),
-        "description": item.get("snippet", ""),
+        "url": item.get("url", ""),
+        "description": item.get("content", ""),
     }
 
 
@@ -26,52 +39,29 @@ def _relabel_result(result: dict, *, source: str) -> dict:
     return updated
 
 
-async def _run_serper_query(query: str, num: int) -> list[dict]:
-    if not settings.serper_api_key:
+async def _run_searxng_query(query: str, num: int) -> list[dict]:
+    if not settings.searxng_base_url:
         return []
 
-    payload = {
+    params = {
         "q": query,
-        "num": min(max(num, 1), 10),
-    }
-    headers = {
-        "X-API-KEY": settings.serper_api_key,
-        "Content-Type": "application/json",
+        "format": "json",
+        "pageno": 1,
     }
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
-                SERPER_SEARCH_URL,
-                headers=headers,
-                json=payload,
+            resp = await client.get(
+                f"{settings.searxng_base_url.rstrip('/')}/search",
+                params=params,
             )
-            if resp.status_code in (401, 403, 429):
+            if resp.status_code != 200:
                 return []
-            resp.raise_for_status()
             data = resp.json()
-    except httpx.HTTPError:
+    except (httpx.HTTPError, ValueError):
         return []
 
-    return data.get("organic", []) or []
-
-
-def _title_batches(
-    titles: list[str] | None,
-    batch_size: int = 2,
-    max_batches: int = 5,
-) -> list[list[str]]:
-    """Split titles into groups of *batch_size* for query expansion.
-
-    Returns at most *max_batches* groups to keep API calls reasonable.
-    """
-    if not titles:
-        return [[]]
-    batches: list[list[str]] = []
-    for i in range(0, len(titles), batch_size):
-        batches.append(titles[i : i + batch_size])
-        if len(batches) >= max_batches:
-            break
-    return batches or [[]]
+    results = data.get("results") or []
+    return results[:min(max(num, 1), 30)]
 
 
 async def search_people(
@@ -97,10 +87,14 @@ async def search_people(
 
     results: list[dict] = []
     seen_urls: set[str] = set()
+    first_query = True
     for query in dict.fromkeys(queries):
-        for item in await _run_serper_query(query, limit):
+        if not first_query:
+            await asyncio.sleep(0.5)
+        first_query = False
+        for item in await _run_searxng_query(query, limit):
             parsed = brave_search_client._parse_linkedin_result(
-                _serper_item_to_brave_item(item),
+                _searxng_item_to_brave_item(item),
                 company_name,
             )
             if not parsed:
@@ -110,7 +104,7 @@ async def search_people(
                 continue
             if url:
                 seen_urls.add(url)
-            results.append(_relabel_result(parsed, source="serper_search"))
+            results.append(_relabel_result(parsed, source="searxng_search"))
         if len(results) >= limit:
             break
     return results[:limit]
@@ -154,10 +148,14 @@ async def search_exact_linkedin_profile(
 
     results: list[dict] = []
     seen_urls: set[str] = set()
+    first_query = True
     for query in queries:
-        for item in await _run_serper_query(query, max(1, min(limit, 5))):
+        if not first_query:
+            await asyncio.sleep(0.5)
+        first_query = False
+        for item in await _run_searxng_query(query, max(1, min(limit, 5))):
             parsed = brave_search_client._parse_linkedin_result(
-                _serper_item_to_brave_item(item),
+                _searxng_item_to_brave_item(item),
                 company_name,
             )
             if not parsed:
@@ -169,7 +167,7 @@ async def search_exact_linkedin_profile(
             profile_data["linkedin_backfill_query"] = query
             profile_data["linkedin_backfill_result_url"] = linkedin_url
             parsed["profile_data"] = profile_data
-            results.append(_relabel_result(parsed, source="serper_search"))
+            results.append(_relabel_result(parsed, source="searxng_search"))
             if linkedin_url:
                 seen_urls.add(linkedin_url)
         if len(results) >= limit:
@@ -200,7 +198,6 @@ async def search_public_people(
             continue
         scoped_hint = role_hint or ""
         if not scoped_hint:
-            # Use first batch of titles as fallback hint
             first_clause = brave_search_client._quoted_or_clause(
                 (titles or [])[:2], limit=2,
             )
@@ -210,7 +207,6 @@ async def search_public_people(
         else:
             queries.append(f'site:theorg.com/org/{clean_slug} "{company_name}"')
 
-    # Build one public-web query per title batch to cover the full list
     for batch in _title_batches(titles, batch_size=2):
         title_clause = brave_search_client._quoted_or_clause(batch, limit=2)
         title_part = f" {title_clause}" if title_clause else ""
@@ -221,10 +217,14 @@ async def search_public_people(
 
     items: list[dict] = []
     seen_urls: set[str] = set()
+    first_query = True
     for query in dict.fromkeys(queries):
-        for item in await _run_serper_query(query, limit):
-            clean_url = brave_search_client._clean_profile_url(item.get("link", ""))
-            key = clean_url or f'{item.get("title", "")}|{item.get("snippet", "")}'
+        if not first_query:
+            await asyncio.sleep(0.5)
+        first_query = False
+        for item in await _run_searxng_query(query, limit):
+            clean_url = brave_search_client._clean_profile_url(item.get("url", ""))
+            key = clean_url or f'{item.get("title", "")}|{item.get("content", "")}'
             if key in seen_urls:
                 continue
             seen_urls.add(key)
@@ -233,11 +233,11 @@ async def search_public_people(
     results: list[dict] = []
     for item in items:
         parsed = brave_search_client._parse_public_people_result(
-            _serper_item_to_brave_item(item),
+            _searxng_item_to_brave_item(item),
             company_name,
         )
         if parsed:
-            results.append(_relabel_result(parsed, source="serper_public_web"))
+            results.append(_relabel_result(parsed, source="searxng_public_web"))
     return results[:limit]
 
 
@@ -251,13 +251,13 @@ async def search_hiring_team(
     query = f'site:linkedin.com/jobs "{company_name}" "{job_title}"{team_part}'
 
     results: list[dict] = []
-    for item in await _run_serper_query(query, 5):
+    for item in await _run_searxng_query(query, 5):
         parsed_results = brave_search_client._parse_hiring_team_result(
-            _serper_item_to_brave_item(item),
+            _searxng_item_to_brave_item(item),
             company_name,
         )
         for parsed in parsed_results:
-            results.append(_relabel_result(parsed, source="serper_hiring_team"))
+            results.append(_relabel_result(parsed, source="searxng_hiring_team"))
     return results[:limit]
 
 
@@ -284,16 +284,16 @@ async def search_employment_sources(
         f'site:substack.com OR site:dev.to{company_site})'
     )
     results: list[dict] = []
-    for item in await _run_serper_query(query, limit):
-        url = (item.get("link") or "").strip()
+    for item in await _run_searxng_query(query, limit):
+        url = (item.get("url") or "").strip()
         if not url:
             continue
         results.append(
             {
                 "url": re.split(r"[?#]", url)[0].rstrip("/"),
                 "title": (item.get("title") or "").strip(),
-                "description": (item.get("snippet") or "").strip(),
-                "source": "serper_public_web",
+                "description": (item.get("content") or "").strip(),
+                "source": "searxng_public_web",
             }
         )
     return results[:limit]

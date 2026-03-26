@@ -53,19 +53,26 @@ class TestParseLinkedInResult:
         assert result["full_name"] == "John Smith"
         assert result["title"] == "Senior Recruiter"
 
-    def test_name_only(self):
+    def test_name_only_with_company(self):
         item = {
-            "title": "Alice Johnson | LinkedIn",
+            "title": "Alice Johnson - Google | LinkedIn",
             "url": "https://www.linkedin.com/in/alicejohnson",
         }
         result = _parse_linkedin_result(item, "Google")
         assert result is not None
         assert result["full_name"] == "Alice Johnson"
-        assert result["title"] == ""
+
+    def test_name_only_without_company_rejected(self):
+        item = {
+            "title": "Alice Johnson | LinkedIn",
+            "url": "https://www.linkedin.com/in/alicejohnson",
+        }
+        result = _parse_linkedin_result(item, "Google")
+        assert result is None
 
     def test_strips_query_params_from_url(self):
         item = {
-            "title": "Bob Lee - Engineer | LinkedIn",
+            "title": "Bob Lee - Engineer - Google | LinkedIn",
             "url": "https://www.linkedin.com/in/boblee?trk=public_profile",
         }
         result = _parse_linkedin_result(item, "Google")
@@ -86,7 +93,7 @@ class TestParseLinkedInResult:
 
     def test_captures_snippet(self):
         item = {
-            "title": "Jane Doe - Engineer | LinkedIn",
+            "title": "Jane Doe - Engineer at Stripe | LinkedIn",
             "url": "https://www.linkedin.com/in/janedoe",
             "description": "Jane works on the payments team at Stripe.",
         }
@@ -96,7 +103,7 @@ class TestParseLinkedInResult:
 
     def test_snippet_defaults_to_empty(self):
         item = {
-            "title": "Jane Doe - Engineer | LinkedIn",
+            "title": "Jane Doe - Engineer - Stripe | LinkedIn",
             "url": "https://www.linkedin.com/in/janedoe",
         }
         result = _parse_linkedin_result(item, "Stripe")
@@ -256,12 +263,16 @@ class TestSearchPeople:
             "web": {
                 "results": [
                     {
-                        "title": "Jane Doe - Engineer | LinkedIn",
+                        "title": "Jane Doe - Engineer at Google | LinkedIn",
                         "url": "https://www.linkedin.com/in/janedoe",
                     },
                     {
                         "title": "Google | LinkedIn",
                         "url": "https://www.linkedin.com/company/google",
+                    },
+                    {
+                        "title": "Bob Smith - Engineer at Meta | LinkedIn",
+                        "url": "https://www.linkedin.com/in/bobsmith",
                     },
                 ]
             }
@@ -275,11 +286,12 @@ class TestSearchPeople:
             s.brave_api_key = "key"
             results = await search_people("Google")
 
+        # Company page and wrong-company profile should be filtered
         assert len(results) == 1
         assert results[0]["full_name"] == "Jane Doe"
 
     async def test_limits_title_keywords(self):
-        """Only first 2 titles are used to keep query focused."""
+        """Each query batch uses at most 2 titles."""
         mock_client = _mock_client_with(_mock_httpx_response({"web": {"results": []}}))
 
         with (
@@ -289,11 +301,14 @@ class TestSearchPeople:
             s.brave_api_key = "key"
             await search_people("Google", titles=["a", "b", "c", "d"])
 
-        query = mock_client.get.call_args[1]["params"]["q"]
-        assert '"a"' in query
-        assert '"b"' in query
-        assert '"c"' not in query
-        assert '("a" OR "b")' in query
+        queries = [call[1]["params"]["q"] for call in mock_client.get.call_args_list]
+        # First batch should contain ("a" OR "b"), second batch ("c" OR "d")
+        assert any('("a" OR "b")' in q for q in queries)
+        assert any('("c" OR "d")' in q for q in queries)
+        # No single query should contain more than 2 title terms
+        for q in queries:
+            title_count = sum(1 for t in ["a", "b", "c", "d"] if f'"{t}"' in q)
+            assert title_count <= 2, f"Query has {title_count} titles: {q}"
 
     async def test_team_keywords_appended_to_query(self):
         """Team keywords are added to the search query."""

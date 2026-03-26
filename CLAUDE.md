@@ -53,13 +53,14 @@ The human is always in the loop. Nothing is ever sent automatically.
   - `company_match_confidence` = verified vs strong/weak company signal
 
 ### Search-provider routing
-- Brave is still used, but it is no longer the default bulk search engine.
+- SearXNG is the default primary search provider (free, self-hosted, unlimited).
+- Brave and Serper are retained as fallbacks if re-funded.
 - Current router behavior:
-  - bulk LinkedIn people discovery: `Serper -> Brave -> Google CSE`
-  - exact LinkedIn backfill: `Brave -> Serper -> Google CSE`
-  - hiring-team search: `Serper -> Brave`
-  - public-web people discovery: `Serper -> Brave -> Tavily`
-  - employment corroboration: `Tavily -> Serper -> Brave`
+  - bulk LinkedIn people discovery: `SearXNG -> Serper -> Brave -> Google CSE`
+  - exact LinkedIn backfill: `SearXNG -> Brave -> Serper -> Google CSE`
+  - hiring-team search: `SearXNG -> Serper -> Brave`
+  - public-web people discovery: `SearXNG -> Serper -> Brave -> Tavily`
+  - employment corroboration: `Tavily -> SearXNG -> Serper -> Brave`
 - Raw provider results are cached in Redis for 24 hours by normalized query family.
 - Provider/debug metadata is stored in `profile_data` or result metadata:
   - `search_provider`
@@ -129,10 +130,11 @@ The human is always in the loop. Nothing is ever sent automatically.
 ### External services in the live architecture
 - Supabase: auth + hosted Postgres
 - Apollo: company/org enrichment, optional person enrichment
-- Serper: primary bulk SERP provider
-- Brave Search: exact LinkedIn backfill + fallback search
+- SearXNG: primary free search provider (self-hosted, unlimited)
+- Serper: fallback bulk SERP provider (paid)
+- Brave Search: fallback search (paid)
 - Tavily: employment corroboration + fallback public discovery
-- Google CSE: optional legacy fallback
+- Google CSE: optional legacy fallback (100 free/day)
 - Proxycurl: LinkedIn enrichment
 - Hunter: email finder + verifier
 - GitHub API: engineer/public profile context
@@ -245,15 +247,16 @@ NEXUSREACH_GOOGLE_CSE_ID=...
 NEXUSREACH_GROQ_API_KEY=...
 NEXUSREACH_LLM_PROVIDER=anthropic
 
+NEXUSREACH_SEARXNG_BASE_URL=http://localhost:8888
 NEXUSREACH_BRAVE_API_KEY=...
 NEXUSREACH_SERPER_API_KEY=...
 NEXUSREACH_TAVILY_API_KEY=...
 NEXUSREACH_SEARCH_CACHE_TTL_SECONDS=86400
-NEXUSREACH_SEARCH_LINKEDIN_PROVIDER_ORDER=serper,brave,google_cse
-NEXUSREACH_SEARCH_EXACT_LINKEDIN_PROVIDER_ORDER=brave,serper,google_cse
-NEXUSREACH_SEARCH_HIRING_TEAM_PROVIDER_ORDER=serper,brave
-NEXUSREACH_SEARCH_PUBLIC_PROVIDER_ORDER=serper,brave,tavily
-NEXUSREACH_SEARCH_EMPLOYMENT_PROVIDER_ORDER=tavily,serper,brave
+NEXUSREACH_SEARCH_LINKEDIN_PROVIDER_ORDER=searxng,serper,brave,google_cse
+NEXUSREACH_SEARCH_EXACT_LINKEDIN_PROVIDER_ORDER=searxng,brave,serper,google_cse
+NEXUSREACH_SEARCH_HIRING_TEAM_PROVIDER_ORDER=searxng,serper,brave
+NEXUSREACH_SEARCH_PUBLIC_PROVIDER_ORDER=searxng,serper,brave,tavily
+NEXUSREACH_SEARCH_EMPLOYMENT_PROVIDER_ORDER=tavily,searxng,serper,brave
 
 NEXUSREACH_FIRECRAWL_BASE_URL=
 NEXUSREACH_FIRECRAWL_API_KEY=
@@ -285,8 +288,8 @@ VITE_SUPABASE_ANON_KEY=...
 
 1. `backend/.env` is loaded relative to the current working directory. Running scripts from the repo root can miss backend config.
 2. Apollo free-tier company endpoints are useful; person search is still not something to depend on blindly.
-3. Brave is intentionally preserved for exact LinkedIn backfill, not bulk search.
-4. Serper is now the default bulk LinkedIn/public people provider.
+3. SearXNG is the default primary search provider (free, self-hosted). It queries a local SearXNG instance via JSON API.
+4. Brave and Serper are retained as paid fallbacks but are no longer the default primary providers.
 5. Tavily is primarily for employment corroboration and fallback public-web discovery, not main LinkedIn x-ray.
 6. Firecrawl is optional and should be treated as a last-resort page-fetch provider.
 7. The Org slug resolution must validate real org pages. Do not assume the first slug candidate is correct.

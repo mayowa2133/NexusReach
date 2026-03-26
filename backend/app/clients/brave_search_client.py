@@ -50,6 +50,34 @@ def _public_role_hint(titles: list[str] | None) -> str:
     return ""
 
 
+def _broad_role_queries(company_name: str, titles: list[str] | None) -> list[str]:
+    """Generate broad role-family queries that catch title variations.
+
+    Exact-title queries miss people with non-standard titles like
+    "Recruiting @ Figma" or "Talent Operations at Figma".  These broad
+    queries use role-family keywords instead.
+    """
+    if not titles:
+        return []
+    normalized = " ".join(t.lower() for t in titles if t)
+    queries: list[str] = []
+    if any(kw in normalized for kw in ("recruit", "talent", "sourcer")):
+        queries.append(f'site:linkedin.com/in "at {company_name}" "Recruiter"')
+        queries.append(f'site:linkedin.com/in "at {company_name}" "Recruiting"')
+        queries.append(f'site:linkedin.com/in "at {company_name}" "Talent Acquisition"')
+    if any(kw in normalized for kw in ("manager", "director", "lead", "head", "vp", "cto", "cpo")):
+        queries.append(f'site:linkedin.com/in "at {company_name}" "Engineering Manager"')
+        queries.append(f'site:linkedin.com/in "at {company_name}" "Director of Engineering"')
+        queries.append(f'site:linkedin.com/in "at {company_name}" "VP of Engineering"')
+    if any(kw in normalized for kw in ("product manager", "director of product", "head of product", "vp of product", "cpo")):
+        queries.append(f'site:linkedin.com/in "at {company_name}" "Product Manager"')
+        queries.append(f'site:linkedin.com/in "at {company_name}" "Head of Product"')
+    if any(kw in normalized for kw in ("design manager", "head of design", "vp of design")):
+        queries.append(f'site:linkedin.com/in "at {company_name}" "Design Manager"')
+        queries.append(f'site:linkedin.com/in "at {company_name}" "Head of Design"')
+    return queries
+
+
 async def _run_brave_query(query: str, count: int) -> list[dict]:
     if not settings.brave_api_key:
         return []
@@ -112,6 +140,15 @@ def _parse_linkedin_result(item: dict, company_name: str) -> dict | None:
 
     # Skip if the "name" looks like a company page or generic result
     if not full_name or full_name.lower() == company_name.lower():
+        return None
+
+    # LinkedIn search result titles almost always mention the current employer
+    # ("… at Figma", "Name - Figma | LinkedIn", "@ Figma").  The snippet is
+    # unreliable — it can mention a company from posts or activity.  Skip
+    # results where the company name doesn't appear in the title at all,
+    # as they are very likely wrong-company noise from broad SERP queries.
+    company_lower = company_name.lower()
+    if company_lower not in title_raw.lower():
         return None
 
     return {
@@ -234,8 +271,9 @@ async def search_people(
 
     domain_part = f' "{company_domain}"' if company_domain else ""
 
-    # Build queries for each batch of titles so the full list is covered
-    queries: list[str] = []
+    # Broad role-family queries first — they catch non-standard titles
+    queries: list[str] = _broad_role_queries(company_name, titles)
+    # Then title-specific queries for each batch
     for batch in _title_batches(titles, batch_size=2):
         title_clause = _quoted_or_clause(batch, limit=2)
         title_part = f" {title_clause}" if title_clause else ""

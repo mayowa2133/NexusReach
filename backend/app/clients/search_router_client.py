@@ -10,6 +10,7 @@ from typing import Any
 
 from app.clients import (
     brave_search_client,
+    searxng_search_client,
     google_search_client,
     search_cache_client,
     serper_search_client,
@@ -175,6 +176,7 @@ async def search_people(
     company_domain: str | None = None,
 ) -> list[dict]:
     providers: dict[str, ProviderFetcher] = {
+        "searxng": searxng_search_client.search_people,
         "serper": serper_search_client.search_people,
         "brave": brave_search_client.search_people,
         "google_cse": google_search_client.search_people,
@@ -182,7 +184,7 @@ async def search_people(
     order = _provider_order(
         settings.search_linkedin_provider_order,
         allowed=set(providers),
-        default=["serper", "brave", "google_cse"],
+        default=["searxng", "serper", "brave", "google_cse"],
     )
     return await _run_family(
         "search_people",
@@ -210,6 +212,7 @@ async def search_exact_linkedin_profile(
     limit: int = 3,
 ) -> list[dict]:
     providers: dict[str, ProviderFetcher] = {
+        "searxng": searxng_search_client.search_exact_linkedin_profile,
         "brave": brave_search_client.search_exact_linkedin_profile,
         "serper": serper_search_client.search_exact_linkedin_profile,
         "google_cse": google_search_client.search_exact_linkedin_profile,
@@ -217,7 +220,7 @@ async def search_exact_linkedin_profile(
     order = _provider_order(
         settings.search_exact_linkedin_provider_order,
         allowed=set(providers),
-        default=["brave", "serper", "google_cse"],
+        default=["searxng", "brave", "serper", "google_cse"],
     )
     return await _run_family(
         "search_exact_linkedin_profile",
@@ -245,6 +248,7 @@ async def search_public_people(
     min_results: int = 1,
 ) -> list[dict]:
     providers: dict[str, ProviderFetcher] = {
+        "searxng": searxng_search_client.search_public_people,
         "serper": serper_search_client.search_public_people,
         "brave": brave_search_client.search_public_people,
         "tavily": tavily_search_client.search_public_people,
@@ -252,7 +256,7 @@ async def search_public_people(
     order = _provider_order(
         settings.search_public_provider_order,
         allowed=set(providers),
-        default=["serper", "brave", "tavily"],
+        default=["searxng", "serper", "brave", "tavily"],
     )
     return await _run_family(
         "search_public_people",
@@ -278,13 +282,14 @@ async def search_hiring_team(
     min_results: int = 1,
 ) -> list[dict]:
     providers: dict[str, ProviderFetcher] = {
+        "searxng": searxng_search_client.search_hiring_team,
         "serper": serper_search_client.search_hiring_team,
         "brave": brave_search_client.search_hiring_team,
     }
     order = _provider_order(
         settings.search_hiring_team_provider_order,
         allowed=set(providers),
-        default=["serper", "brave"],
+        default=["searxng", "serper", "brave"],
     )
     return await _run_family(
         "search_hiring_team",
@@ -312,13 +317,14 @@ async def search_employment_sources(
 ) -> list[dict]:
     providers: dict[str, ProviderFetcher] = {
         "tavily": tavily_search_client.search_employment_sources,
+        "searxng": searxng_search_client.search_employment_sources,
         "serper": serper_search_client.search_employment_sources,
         "brave": brave_search_client.search_employment_sources,
     }
     order = _provider_order(
         settings.search_employment_provider_order,
         allowed=set(providers),
-        default=["tavily", "serper", "brave"],
+        default=["tavily", "searxng", "serper", "brave"],
     )
     return await _run_family(
         "search_employment_sources",
