@@ -9,6 +9,7 @@ from sqlalchemy.orm.attributes import NO_VALUE
 from app.database import get_db
 from app.dependencies import get_current_user_id
 from app.middleware.rate_limit import limiter
+from app.utils.discovery_rate_limit import check_discovery_rate_limit
 from app.schemas.people import (
     CompanyResponse,
     PeopleSearchRequest,
@@ -77,6 +78,7 @@ async def search_people(
     body: PeopleSearchRequest,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    _rate_check: Annotated[None, Depends(check_discovery_rate_limit)],
 ):
     """Search for people at a company using Apollo + GitHub.
 
@@ -118,6 +120,7 @@ async def enrich_person(
     body: ManualPersonRequest,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    _rate_check: Annotated[None, Depends(check_discovery_rate_limit)],
 ):
     """Enrich a person from their LinkedIn URL (manual input)."""
     person = await enrich_person_from_linkedin(

@@ -22,6 +22,10 @@ celery_app.conf.update(
             "task": "app.tasks.jobs.refresh_all_job_feeds",
             "schedule": crontab(minute=0),  # every hour
         },
+        "reverify-stale-contacts": {
+            "task": "app.tasks.reverify.reverify_stale_contacts",
+            "schedule": crontab(minute=30, hour="*/6"),  # every 6 hours
+        },
     },
 )
 

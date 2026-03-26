@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -2172,7 +2172,10 @@ async def _store_person(
     person_type: str,
 ) -> Person:
     """Create or update a Person record from API data."""
-    linkedin = data.get("linkedin_url", "")
+    from app.utils.linkedin import normalize_linkedin_url
+
+    raw_linkedin = data.get("linkedin_url", "")
+    linkedin = normalize_linkedin_url(raw_linkedin) or raw_linkedin or ""
     apollo_id = data.get("apollo_id", "")
     company_id = company.id if company else None
     profile_data = data.get("profile_data") if isinstance(data.get("profile_data"), dict) else {}
@@ -2250,19 +2253,34 @@ async def _store_person(
                 existing.company = company
             return existing
 
-    if not linkedin and not apollo_id and data.get("full_name") and data.get("title"):
+    # Name + company dedup (case-insensitive) — catches cross-source duplicates
+    if not linkedin and not apollo_id and data.get("full_name") and company_id:
+        normalized_name = data["full_name"].strip().lower()
         result = await db.execute(
             select(Person).where(
                 Person.user_id == user_id,
                 Person.company_id == company_id,
-                Person.full_name == data.get("full_name"),
-                Person.title == data.get("title"),
+                func.lower(func.trim(Person.full_name)) == normalized_name,
             )
         )
         existing = result.scalars().first()
         if existing:
+            if (
+                data.get("title")
+                and (
+                    not existing.title
+                    or (_title_is_weak(existing.title, company.name if company else "") and not _title_is_weak(data.get("title"), company.name if company else ""))
+                )
+            ):
+                existing.title = data.get("title")
+            if linkedin and not existing.linkedin_url:
+                existing.linkedin_url = linkedin
             if company:
                 existing.company = company
+            if profile_data:
+                merged_profile_data = existing.profile_data if isinstance(existing.profile_data, dict) else {}
+                merged_profile_data.update(profile_data)
+                existing.profile_data = merged_profile_data
             return existing
 
     person = Person(
@@ -3526,10 +3544,20 @@ async def enrich_person_from_linkedin(
     linkedin_url: str,
 ) -> Person:
     """Enrich a single person from LinkedIn via Proxycurl."""
+    from app.utils.linkedin import normalize_linkedin_url
+
+    normalized = normalize_linkedin_url(linkedin_url) or linkedin_url
+
+    # Try normalized URL first, fall back to raw URL
     result = await db.execute(
-        select(Person).where(Person.user_id == user_id, Person.linkedin_url == linkedin_url)
+        select(Person).where(Person.user_id == user_id, Person.linkedin_url == normalized)
     )
     existing = result.scalar_one_or_none()
+    if not existing and normalized != linkedin_url:
+        result = await db.execute(
+            select(Person).where(Person.user_id == user_id, Person.linkedin_url == linkedin_url)
+        )
+        existing = result.scalar_one_or_none()
     if existing and existing.profile_data:
         return existing
 
@@ -3549,7 +3577,7 @@ async def enrich_person_from_linkedin(
         user_id=user_id,
         full_name=profile.get("full_name") if profile else None,
         title=profile.get("title") if profile else None,
-        linkedin_url=linkedin_url,
+        linkedin_url=normalized,
         person_type=person_type,
         profile_data=profile,
         source="proxycurl" if profile else "manual",

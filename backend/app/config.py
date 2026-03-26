@@ -79,5 +79,13 @@ class Settings(BaseSettings):
     employment_verify_timeout_seconds: int = 20
     employment_verify_enabled: bool = True
 
+    # Discovery rate limiting
+    discovery_rate_limit: str = "10/minute"
+    discovery_daily_limit: int = 100
+
+    # Stale contact re-verification
+    reverify_stale_days: int = 14
+    reverify_batch_size: int = 20
+
 
 settings = Settings()

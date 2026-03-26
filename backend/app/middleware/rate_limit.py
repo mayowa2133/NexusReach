@@ -9,6 +9,8 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from starlette.requests import Request
 
+from app.config import settings
+
 
 def _get_user_key(request: Request) -> str:
     """Extract rate-limit key: JWT sub claim if present, else remote IP."""
@@ -24,4 +26,4 @@ def _get_user_key(request: Request) -> str:
     return get_remote_address(request)
 
 
-limiter = Limiter(key_func=_get_user_key)
+limiter = Limiter(key_func=_get_user_key, storage_uri=settings.redis_url)
