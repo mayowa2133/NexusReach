@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import uuid
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 
@@ -16,8 +17,9 @@ from app.services.notification_service import create_notification
 logger = logging.getLogger(__name__)
 
 
-async def _refresh_user_feeds(user_id: uuid.UUID) -> None:
+async def _refresh_user_feeds(user_id: uuid.UUID) -> int:
     """Re-run all enabled search preferences for a user and create notifications."""
+    total_new = 0
     async with async_session() as db:
         # Fetch enabled search preferences
         stmt = select(SearchPreference).where(
@@ -28,7 +30,7 @@ async def _refresh_user_feeds(user_id: uuid.UUID) -> None:
         preferences = list(result.scalars().all())
 
         if not preferences:
-            return
+            return 0
 
         # Fetch starred companies for this user
         starred_stmt = select(Company).where(
@@ -49,6 +51,12 @@ async def _refresh_user_feeds(user_id: uuid.UUID) -> None:
                     location=pref.location,
                     remote_only=pref.remote_only,
                 )
+
+                # Record refresh metadata
+                pref.last_refreshed_at = datetime.now(timezone.utc)
+                pref.new_jobs_found = len(new_jobs)
+                total_new += len(new_jobs)
+                await db.commit()
 
                 for job in new_jobs:
                     company_lower = job.company_name.lower().strip()
@@ -80,6 +88,14 @@ async def _refresh_user_feeds(user_id: uuid.UUID) -> None:
                     user_id,
                     pref.query,
                 )
+
+    return total_new
+
+
+async def refresh_user_feeds(user_id: uuid.UUID) -> int:
+    """Public wrapper for refreshing a single user's feeds. Returns new job count."""
+    count = await _refresh_user_feeds(user_id)
+    return count
 
 
 async def _refresh_all() -> None:

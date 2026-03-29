@@ -15,6 +15,7 @@ from app.schemas.jobs import (
     JobResponse,
     SearchPreferenceResponse,
     SearchPreferenceToggle,
+    RefreshResponse,
 )
 from app.services.job_service import (
     search_jobs,
@@ -29,6 +30,7 @@ from app.services.search_preference_service import (
     toggle_search_preference,
     delete_search_preference,
 )
+from app.tasks.jobs import refresh_user_feeds
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -191,6 +193,19 @@ async def star_job(
     return _to_response(job)
 
 
+# --- Refresh ---
+
+@router.post("/refresh", response_model=RefreshResponse)
+@limiter.limit("3/minute")
+async def refresh_feeds(
+    request: Request,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+):
+    """Manually trigger a refresh of all enabled saved searches."""
+    new_count = await refresh_user_feeds(user_id)
+    return RefreshResponse(new_jobs_found=new_count)
+
+
 # --- Saved Searches ---
 
 def _pref_to_response(pref) -> SearchPreferenceResponse:
@@ -200,6 +215,8 @@ def _pref_to_response(pref) -> SearchPreferenceResponse:
         location=pref.location,
         remote_only=pref.remote_only,
         enabled=pref.enabled,
+        last_refreshed_at=pref.last_refreshed_at.isoformat() if pref.last_refreshed_at else None,
+        new_jobs_found=pref.new_jobs_found or 0,
         created_at=pref.created_at.isoformat(),
         updated_at=pref.updated_at.isoformat(),
     )

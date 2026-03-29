@@ -58,6 +58,8 @@ class SearchPreferenceResponse(BaseModel):
     location: str | None
     remote_only: bool
     enabled: bool
+    last_refreshed_at: str | None = None
+    new_jobs_found: int = 0
     created_at: str
     updated_at: str
 
@@ -66,3 +68,7 @@ class SearchPreferenceResponse(BaseModel):
 
 class SearchPreferenceToggle(BaseModel):
     enabled: bool
+
+
+class RefreshResponse(BaseModel):
+    new_jobs_found: int

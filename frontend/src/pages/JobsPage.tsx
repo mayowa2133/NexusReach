@@ -16,6 +16,7 @@ import {
   useSavedSearches,
   useToggleSavedSearch,
   useDeleteSavedSearch,
+  useRefreshJobs,
 } from '@/hooks/useJobs';
 import {
   clampPeopleSearchTargetCount,
@@ -145,6 +146,7 @@ export function JobsPage() {
   const { data: savedSearches } = useSavedSearches();
   const toggleSavedSearch = useToggleSavedSearch();
   const deleteSavedSearch = useDeleteSavedSearch();
+  const refreshJobs = useRefreshJobs();
 
   const newJobCount = savedJobs && lastVisited
     ? savedJobs.filter((j) => j.created_at > lastVisited).length
@@ -318,10 +320,29 @@ export function JobsPage() {
       {savedSearches && savedSearches.length > 0 && (
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Saved Searches</CardTitle>
-            <CardDescription>
-              Enabled searches auto-refresh hourly and create notifications for new matches.
-            </CardDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-base">Saved Searches</CardTitle>
+                <CardDescription>
+                  Enabled searches auto-refresh hourly and create notifications for new matches.
+                </CardDescription>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={refreshJobs.isPending}
+                onClick={() => {
+                  refreshJobs.mutate(undefined, {
+                    onSuccess: (data) => {
+                      toast.success(`Refresh complete: ${data.new_jobs_found} new job${data.new_jobs_found === 1 ? '' : 's'} found`);
+                    },
+                    onError: () => toast.error('Refresh failed — try again later'),
+                  });
+                }}
+              >
+                {refreshJobs.isPending ? 'Refreshing...' : 'Refresh Now'}
+              </Button>
+            </div>
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
@@ -332,17 +353,25 @@ export function JobsPage() {
                     pref.enabled ? 'bg-background' : 'bg-muted/30 opacity-60'
                   }`}
                 >
-                  <div className="flex items-center gap-2 min-w-0 flex-1">
-                    <span className="text-sm font-medium truncate">{pref.query}</span>
-                    {pref.location && (
-                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">
-                        {pref.location}
-                      </Badge>
-                    )}
-                    {pref.remote_only && (
-                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0 shrink-0">
-                        Remote
-                      </Badge>
+                  <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium truncate">{pref.query}</span>
+                      {pref.location && (
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">
+                          {pref.location}
+                        </Badge>
+                      )}
+                      {pref.remote_only && (
+                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0 shrink-0">
+                          Remote
+                        </Badge>
+                      )}
+                    </div>
+                    {pref.last_refreshed_at && (
+                      <span className="text-[11px] text-muted-foreground">
+                        Last refreshed {new Date(pref.last_refreshed_at).toLocaleString()}
+                        {pref.new_jobs_found > 0 && ` — ${pref.new_jobs_found} new`}
+                      </span>
                     )}
                   </div>
                   <div className="flex items-center gap-2 shrink-0">

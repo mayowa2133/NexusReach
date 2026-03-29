@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, String, DateTime, ForeignKey, func
+from sqlalchemy import Boolean, Integer, String, DateTime, ForeignKey, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -25,6 +25,10 @@ class SearchPreference(Base):
 
     # Whether this preference is active for auto-refresh
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # Auto-refresh metadata
+    last_refreshed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    new_jobs_found: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { useProfile, getProfileCompletion } from '@/hooks/useProfile';
 import { useInsightsDashboard } from '@/hooks/useInsights';
 import { useOutreachLogs } from '@/hooks/useOutreach';
-import { useJobs } from '@/hooks/useJobs';
+import { useJobs, useRefreshJobs, useSavedSearches } from '@/hooks/useJobs';
 import { useGuardrails } from '@/hooks/useSettings';
 import { useOnboarding } from '@/hooks/useOnboarding';
 import { OnboardingDialog } from '@/components/onboarding/OnboardingDialog';
@@ -35,6 +35,9 @@ export function DashboardPage() {
   const { data: insights, isLoading: insightsLoading } = useInsightsDashboard();
   const { data: recentLogsData } = useOutreachLogs();
   const { data: allJobsData } = useJobs({ sortBy: 'score' });
+  const { data: latestJobsData } = useJobs({ sortBy: 'date' });
+  const { data: savedSearches } = useSavedSearches();
+  const refreshJobs = useRefreshJobs();
   const { data: guardrails } = useGuardrails();
   const { shouldShow: showOnboarding } = useOnboarding();
 
@@ -42,6 +45,8 @@ export function DashboardPage() {
     () => window.localStorage.getItem('nexusreach-jobs-last-visited')
   );
   const topJobs = allJobsData?.items?.slice(0, 5) ?? [];
+  const latestJobs = latestJobsData?.items?.slice(0, 5) ?? [];
+  const enabledSearchCount = savedSearches?.filter(s => s.enabled).length ?? 0;
   const guardrailsModified = guardrails && (
     !guardrails.min_message_gap_enabled ||
     !guardrails.follow_up_suggestion_enabled ||
@@ -113,6 +118,96 @@ export function DashboardPage() {
         <WarmPathsCard paths={insights?.warm_paths ?? []} />
         <NetworkGapsCard gaps={insights?.network_gaps ?? []} />
       </div>
+
+      {/* Job Feed: Latest Jobs + Refresh */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Latest Jobs</CardTitle>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                {enabledSearchCount > 0
+                  ? `${enabledSearchCount} saved search${enabledSearchCount === 1 ? '' : 'es'} auto-refreshing hourly`
+                  : 'Set up your profile to auto-discover jobs'}
+              </p>
+            </div>
+            {enabledSearchCount > 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={refreshJobs.isPending}
+                onClick={() => refreshJobs.mutate()}
+              >
+                {refreshJobs.isPending ? 'Refreshing...' : 'Refresh Now'}
+              </Button>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent>
+          {latestJobs.length > 0 ? (
+            <div className="space-y-3">
+              {latestJobs.map((job) => {
+                const isNew = !!lastVisited && job.created_at > lastVisited;
+                return (
+                  <div
+                    key={job.id}
+                    className="flex items-center justify-between text-sm"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <div className="font-medium truncate">{job.title}</div>
+                        {isNew && (
+                          <Badge variant="default" className="text-[9px] px-1 py-0 bg-blue-600 hover:bg-blue-600 shrink-0">
+                            NEW
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {job.company_name}
+                        {job.location && ` — ${job.location}`}
+                      </div>
+                    </div>
+                    {job.match_score != null && (
+                      <Badge
+                        variant={job.match_score >= 60 ? 'default' : 'outline'}
+                        className="text-xs ml-2"
+                      >
+                        {Math.round(job.match_score)}%
+                      </Badge>
+                    )}
+                  </div>
+                );
+              })}
+              <Link
+                to="/jobs"
+                className="text-sm text-primary hover:underline inline-block mt-2"
+              >
+                View all jobs
+              </Link>
+            </div>
+          ) : enabledSearchCount > 0 ? (
+            <div className="text-center py-4">
+              <p className="text-sm text-muted-foreground mb-3">
+                No jobs found yet. Click Refresh Now to run your saved searches.
+              </p>
+              <Button
+                size="sm"
+                disabled={refreshJobs.isPending}
+                onClick={() => refreshJobs.mutate()}
+              >
+                {refreshJobs.isPending ? 'Refreshing...' : 'Refresh Now'}
+              </Button>
+            </div>
+          ) : (
+            <div className="text-sm text-muted-foreground">
+              <p>
+                <Link to="/profile" className="text-primary hover:underline">Complete your profile</Link> with target roles
+                and locations to auto-discover matching jobs.
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Row 4: Recent Outreach + Top Opportunities */}
       <div className="grid gap-4 md:grid-cols-2">

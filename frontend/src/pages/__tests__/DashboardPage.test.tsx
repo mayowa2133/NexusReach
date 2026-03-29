@@ -58,6 +58,8 @@ vi.mock('@/hooks/useOutreach', () => ({
 
 vi.mock('@/hooks/useJobs', () => ({
   useJobs: () => mockJobs,
+  useRefreshJobs: () => ({ mutate: vi.fn(), isPending: false }),
+  useSavedSearches: () => ({ data: [] }),
 }));
 
 // Mock recharts to avoid SVG rendering issues in jsdom
@@ -300,8 +302,8 @@ describe('DashboardPage — top opportunities', () => {
       isLoading: false,
     };
     renderDashboard();
-    expect(screen.getByText('Senior SWE')).toBeInTheDocument();
-    expect(screen.getByText('85%')).toBeInTheDocument();
+    expect(screen.getAllByText('Senior SWE').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('85%').length).toBeGreaterThanOrEqual(1);
   });
 
   it('shows "View all jobs" link', () => {
@@ -310,7 +312,7 @@ describe('DashboardPage — top opportunities', () => {
       isLoading: false,
     };
     renderDashboard();
-    expect(screen.getByText(/view all jobs/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/view all jobs/i).length).toBeGreaterThanOrEqual(1);
   });
 });
 

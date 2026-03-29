@@ -363,6 +363,8 @@ export interface SearchPreference {
   location: string | null;
   remote_only: boolean;
   enabled: boolean;
+  last_refreshed_at: string | null;
+  new_jobs_found: number;
   created_at: string;
   updated_at: string;
 }

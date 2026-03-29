@@ -8,10 +8,43 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.dependencies import get_current_user_id
 from app.models.profile import Profile
+from app.models.search_preference import SearchPreference
 from app.schemas.profile import ProfileResponse, ProfileUpdate
 from app.services.resume_parser import parse_resume
 
 router = APIRouter(prefix="/profile", tags=["profile"])
+
+
+async def _seed_saved_searches(
+    db: AsyncSession, user_id: uuid.UUID, profile: Profile,
+) -> None:
+    """Create saved searches from profile target_roles x target_locations if none exist."""
+    result = await db.execute(
+        select(SearchPreference).where(SearchPreference.user_id == user_id).limit(1)
+    )
+    if result.scalar_one_or_none() is not None:
+        return  # User already has saved searches — don't overwrite
+
+    roles = profile.target_roles or []
+    locations = profile.target_locations or []
+
+    if not roles:
+        return
+
+    if locations:
+        for role in roles[:3]:
+            for loc in locations[:2]:
+                db.add(SearchPreference(
+                    user_id=user_id, query=role, location=loc, remote_only=False,
+                ))
+    else:
+        for role in roles[:5]:
+            db.add(SearchPreference(
+                user_id=user_id, query=role, remote_only=False,
+            ))
+
+    await db.commit()
+
 
 ALLOWED_CONTENT_TYPES = {
     "application/pdf",
@@ -48,6 +81,11 @@ async def update_profile(
 
     await db.commit()
     await db.refresh(profile)
+
+    # Auto-seed saved searches if profile now has target roles
+    if "target_roles" in update_data or "target_locations" in update_data:
+        await _seed_saved_searches(db, user_id, profile)
+
     return profile
 
 

@@ -79,6 +79,21 @@ export function useUpdateJobStage() {
   });
 }
 
+// --- Refresh ---
+
+export function useRefreshJobs() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () =>
+      api.post<{ new_jobs_found: number }>('/api/jobs/refresh', {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      queryClient.invalidateQueries({ queryKey: ['saved-searches'] });
+    },
+  });
+}
+
 // --- Saved Searches ---
 
 export function useSavedSearches() {
