@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 from sqlalchemy import func as sa_func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.clients import jsearch_client, adzuna_client, ats_client, remote_jobs_client
+from app.clients import jsearch_client, adzuna_client, ats_client, remote_jobs_client, newgrad_jobs_client
 from app.models.job import Job
 from app.models.profile import Profile
 from app.models.search_preference import SearchPreference
@@ -207,9 +207,9 @@ async def search_jobs(
 
     Args:
         sources: List of sources to search. None = all.
-                 Options: jsearch, adzuna, remotive, jobicy, dice, simplify
+                 Options: jsearch, adzuna, remotive, jobicy, dice, simplify, newgrad
     """
-    all_sources = sources or ["jsearch", "adzuna", "remotive", "dice"]
+    all_sources = sources or ["jsearch", "adzuna", "remotive", "dice", "newgrad"]
 
     # Load user profile for scoring
     result = await db.execute(
@@ -236,6 +236,10 @@ async def search_jobs(
         raw_jobs.extend(await remote_jobs_client.search_dice(query, location=location, limit=limit))
     if "simplify" in all_sources:
         raw_jobs.extend(await remote_jobs_client.fetch_simplify_jobs(limit=limit))
+    if "newgrad" in all_sources:
+        raw_jobs.extend(await newgrad_jobs_client.search_newgrad_jobs(
+            query=query, limit=limit,
+        ))
 
     # Deduplicate and store
     stored_jobs: list[Job] = []

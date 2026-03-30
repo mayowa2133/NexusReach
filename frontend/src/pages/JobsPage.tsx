@@ -237,7 +237,7 @@ export function JobsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Search Jobs</CardTitle>
-            <CardDescription>Search across JSearch, Adzuna, Remotive, and more.</CardDescription>
+            <CardDescription>Search across JSearch, Adzuna, Remotive, Dice, newgrad-jobs.com, and more.</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSearch} className="space-y-3">
@@ -326,7 +326,7 @@ export function JobsPage() {
             <div>
               <div className="font-medium">Discover Jobs</div>
               <p className="text-sm text-muted-foreground">
-                One-click search across multiple roles using free sources (JSearch, Adzuna, Remotive).
+                One-click search across multiple roles using free sources (Dice, Remotive, newgrad-jobs.com, and more).
               </p>
             </div>
             <Button
