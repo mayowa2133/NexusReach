@@ -70,5 +70,9 @@ class SearchPreferenceToggle(BaseModel):
     enabled: bool
 
 
+class DiscoverRequest(BaseModel):
+    queries: list[str] | None = None
+
+
 class RefreshResponse(BaseModel):
     new_jobs_found: int

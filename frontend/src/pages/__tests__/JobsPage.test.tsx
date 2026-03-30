@@ -71,6 +71,7 @@ vi.mock('@/hooks/useJobs', () => ({
   useToggleSavedSearch: () => mockToggleSavedSearch,
   useDeleteSavedSearch: () => mockDeleteSavedSearch,
   useRefreshJobs: () => ({ mutate: vi.fn(), isPending: false }),
+  useDiscoverJobs: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 vi.mock('sonner', () => ({

@@ -15,6 +15,7 @@ from app.schemas.jobs import (
     JobResponse,
     SearchPreferenceResponse,
     SearchPreferenceToggle,
+    DiscoverRequest,
     RefreshResponse,
 )
 from app.services.job_service import (
@@ -25,6 +26,7 @@ from app.services.job_service import (
     update_job_stage,
     toggle_job_starred,
     seed_default_feeds,
+    discover_jobs,
 )
 from app.services.search_preference_service import (
     get_search_preferences,
@@ -149,6 +151,26 @@ async def seed_defaults_endpoint(
 ):
     """Seed default job searches for first-time users. Idempotent."""
     new_count = await seed_default_feeds(db, user_id)
+    return RefreshResponse(new_jobs_found=new_count)
+
+
+# --- Discover ---
+
+@router.post("/discover", response_model=RefreshResponse)
+@limiter.limit("3/minute")
+async def discover_jobs_endpoint(
+    request: Request,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    body: DiscoverRequest | None = None,
+):
+    """Run a batch of job searches across free sources.
+
+    Accepts an optional list of custom search queries.  Falls back to
+    built-in defaults covering common roles when omitted.
+    """
+    queries = body.queries if body else None
+    new_count = await discover_jobs(db, user_id, queries=queries)
     return RefreshResponse(new_jobs_found=new_count)
 
 

@@ -17,6 +17,7 @@ import {
   useToggleSavedSearch,
   useDeleteSavedSearch,
   useRefreshJobs,
+  useDiscoverJobs,
 } from '@/hooks/useJobs';
 import {
   clampPeopleSearchTargetCount,
@@ -148,6 +149,7 @@ export function JobsPage() {
   const toggleSavedSearch = useToggleSavedSearch();
   const deleteSavedSearch = useDeleteSavedSearch();
   const refreshJobs = useRefreshJobs();
+  const discoverJobs = useDiscoverJobs();
 
   const newJobCount = savedJobs && lastVisited
     ? savedJobs.filter((j) => j.created_at > lastVisited).length
@@ -316,6 +318,36 @@ export function JobsPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Quick Discover */}
+      <Card>
+        <CardContent className="pt-5 pb-5">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div>
+              <div className="font-medium">Discover Jobs</div>
+              <p className="text-sm text-muted-foreground">
+                One-click search across multiple roles using free sources (JSearch, Adzuna, Remotive).
+              </p>
+            </div>
+            <Button
+              disabled={discoverJobs.isPending}
+              onClick={() => {
+                discoverJobs.mutate(undefined, {
+                  onSuccess: (data) => {
+                    toast.success(`Discovered ${data.new_jobs_found} new jobs`);
+                  },
+                  onError: (err) => {
+                    toast.error(err instanceof Error ? err.message : 'Discovery failed');
+                  },
+                });
+              }}
+              className="shrink-0"
+            >
+              {discoverJobs.isPending ? 'Discovering...' : 'Discover Jobs'}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Saved Searches */}
       {savedSearches && savedSearches.length > 0 && (

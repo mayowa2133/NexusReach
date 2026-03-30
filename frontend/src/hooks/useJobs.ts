@@ -109,6 +109,21 @@ export function useSeedDefaultJobs() {
   });
 }
 
+// --- Discover Jobs ---
+
+export function useDiscoverJobs() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (queries?: string[]) =>
+      api.post<{ new_jobs_found: number }>('/api/jobs/discover', queries ? { queries } : {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      queryClient.invalidateQueries({ queryKey: ['saved-searches'] });
+    },
+  });
+}
+
 // --- Saved Searches ---
 
 export function useSavedSearches() {

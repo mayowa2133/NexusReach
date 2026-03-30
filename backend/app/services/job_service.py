@@ -590,3 +590,54 @@ async def seed_default_feeds(
 
     logger.info("Seeded %d default jobs for user %s", total_new, user_id)
     return total_new
+
+
+# Broader discovery queries spanning multiple roles and industries
+DISCOVER_QUERIES = [
+    {"query": "Software Engineer", "location": None, "remote_only": False},
+    {"query": "Frontend Developer", "location": None, "remote_only": False},
+    {"query": "Backend Developer", "location": None, "remote_only": False},
+    {"query": "Full Stack Developer", "location": None, "remote_only": False},
+    {"query": "Data Scientist", "location": None, "remote_only": False},
+    {"query": "Product Manager", "location": None, "remote_only": False},
+    {"query": "New Grad Software", "location": None, "remote_only": False},
+]
+
+
+async def discover_jobs(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    queries: list[str] | None = None,
+) -> int:
+    """Run a batch of job searches across free sources.
+
+    Unlike seed_default_feeds this always runs — it is the manual
+    "Discover Jobs" action.  Deduplication is handled by search_jobs,
+    so repeat runs are safe and will only store genuinely new results.
+
+    Args:
+        queries: Optional custom list of search terms.  Falls back to
+                 DISCOVER_QUERIES when not supplied.
+    """
+    search_list = (
+        [{"query": q, "location": None, "remote_only": False} for q in queries]
+        if queries
+        else DISCOVER_QUERIES
+    )
+
+    total_new = 0
+    for seed in search_list:
+        try:
+            stored = await search_jobs(
+                db,
+                user_id,
+                query=seed["query"],  # type: ignore[arg-type]
+                location=seed["location"],  # type: ignore[arg-type]
+                remote_only=seed["remote_only"],  # type: ignore[arg-type]
+            )
+            total_new += len(stored)
+        except Exception:
+            logger.exception("Discover failed for query: %s", seed["query"])
+
+    logger.info("Discovered %d new jobs for user %s", total_new, user_id)
+    return total_new
