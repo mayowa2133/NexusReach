@@ -15,7 +15,7 @@ async def search_dice(query: str, location: str | None = None, limit: int = 10) 
         "radiusUnit": "mi",
         "page": "1",
         "pageSize": str(min(limit, 20)),
-        "fields": "id|jobId|guid|summary|title|postedDate|modifiedDate|jobLocation.displayName|detailsPageUrl|salary|clientBrandId|companyPageUrl|isRemote|employerType",
+        "fields": "id|jobId|guid|summary|title|postedDate|modifiedDate|jobLocation.displayName|detailsPageUrl|salary|clientBrandId|companyPageUrl|companyName|isRemote|employerType",
     }
     if location:
         params["location"] = location
@@ -48,7 +48,11 @@ async def search_dice(query: str, location: str | None = None, limit: int = 10) 
 
 
 async def search_remotive(query: str, limit: int = 10) -> list[dict]:
-    """Search Remotive for remote jobs."""
+    """Search Remotive for remote jobs.
+
+    Remotive's search is very literal — "Software Engineer" often returns 0.
+    We try the full query first, then fall back to the first keyword.
+    """
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.get(
             "https://remotive.com/api/remote-jobs",
@@ -58,7 +62,20 @@ async def search_remotive(query: str, limit: int = 10) -> list[dict]:
             return []
         data = resp.json()
 
-    jobs = data.get("jobs", [])[:limit]
+    jobs = data.get("jobs", [])
+
+    # Fallback: try first keyword if full query returned nothing
+    if not jobs and " " in query:
+        first_keyword = query.split()[0]
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                "https://remotive.com/api/remote-jobs",
+                params={"search": first_keyword, "limit": min(limit, 50)},
+            )
+            if resp.status_code == 200:
+                jobs = resp.json().get("jobs", [])
+
+    jobs = jobs[:limit]
     return [
         {
             "external_id": f"remotive_{j.get('id', '')}",

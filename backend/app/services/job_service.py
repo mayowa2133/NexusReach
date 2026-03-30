@@ -209,7 +209,7 @@ async def search_jobs(
         sources: List of sources to search. None = all.
                  Options: jsearch, adzuna, remotive, jobicy, dice, simplify
     """
-    all_sources = sources or ["jsearch", "adzuna", "remotive"]
+    all_sources = sources or ["jsearch", "adzuna", "remotive", "dice"]
 
     # Load user profile for scoring
     result = await db.execute(
