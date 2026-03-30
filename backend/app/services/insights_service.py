@@ -1,11 +1,10 @@
 """Insights dashboard service — analytics from existing data (Phase 8)."""
 
-import asyncio
 import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
 
-from sqlalchemy import select, func as sa_func
+from sqlalchemy import Integer, cast, select, func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.outreach import OutreachLog
@@ -70,7 +69,7 @@ async def get_dashboard_summary(
     follow_ups_r = await db.execute(
         select(sa_func.count()).where(
             OutreachLog.user_id == user_id,
-            OutreachLog.next_follow_up_at.isnot(None),
+            OutreachLog.next_follow_up_at.is_not(None),
             OutreachLog.next_follow_up_at >= now,
             OutreachLog.status.notin_(["closed"]),
         )
@@ -109,7 +108,7 @@ async def get_response_rate_by_channel(
             OutreachLog.channel,
             sa_func.count().label("sent"),
             sa_func.sum(
-                sa_func.cast(OutreachLog.response_received, sa_func.literal_column("INTEGER"))
+                cast(OutreachLog.response_received, Integer)
             ).label("responded"),
         )
         .where(OutreachLog.user_id == user_id, OutreachLog.status != "draft")
@@ -136,7 +135,7 @@ async def get_response_rate_by_role(
             Person.person_type,
             sa_func.count().label("sent"),
             sa_func.sum(
-                sa_func.cast(OutreachLog.response_received, sa_func.literal_column("INTEGER"))
+                cast(OutreachLog.response_received, Integer)
             ).label("responded"),
         )
         .join(Person, OutreachLog.person_id == Person.id)
@@ -164,7 +163,7 @@ async def get_response_rate_by_company(
             Company.name,
             sa_func.count().label("sent"),
             sa_func.sum(
-                sa_func.cast(OutreachLog.response_received, sa_func.literal_column("INTEGER"))
+                cast(OutreachLog.response_received, Integer)
             ).label("responded"),
         )
         .join(Person, OutreachLog.person_id == Person.id)
@@ -197,7 +196,7 @@ async def get_angle_effectiveness(
             Message.goal,
             sa_func.count().label("sent"),
             sa_func.sum(
-                sa_func.cast(OutreachLog.response_received, sa_func.literal_column("INTEGER"))
+                cast(OutreachLog.response_received, Integer)
             ).label("responded"),
         )
         .join(OutreachLog, OutreachLog.message_id == Message.id)
@@ -273,7 +272,7 @@ async def get_network_gaps(
             select(sa_func.distinct(Company.industry))
             .join(Person, Person.company_id == Company.id)
             .join(OutreachLog, OutreachLog.person_id == Person.id)
-            .where(OutreachLog.user_id == user_id, Company.industry.isnot(None))
+            .where(OutreachLog.user_id == user_id, Company.industry.is_not(None))
         )
         contacted_industries = {r[0].lower() for r in contacted_r.all() if r[0]}
 
@@ -287,7 +286,7 @@ async def get_network_gaps(
         contacted_roles_r = await db.execute(
             select(sa_func.distinct(Person.department))
             .join(OutreachLog, OutreachLog.person_id == Person.id)
-            .where(OutreachLog.user_id == user_id, Person.department.isnot(None))
+            .where(OutreachLog.user_id == user_id, Person.department.is_not(None))
         )
         contacted_roles = {r[0].lower() for r in contacted_roles_r.all() if r[0]}
 
@@ -350,7 +349,7 @@ async def get_company_openness(
             Company.name,
             sa_func.count().label("total"),
             sa_func.sum(
-                sa_func.cast(OutreachLog.response_received, sa_func.literal_column("INTEGER"))
+                cast(OutreachLog.response_received, Integer)
             ).label("responses"),
         )
         .join(Person, OutreachLog.person_id == Person.id)
@@ -384,28 +383,20 @@ async def get_company_openness(
 async def get_full_dashboard(
     db: AsyncSession, user_id: uuid.UUID
 ) -> dict:
-    """Fetch all dashboard data in parallel."""
-    (
-        summary,
-        by_channel,
-        by_role,
-        by_company,
-        angles,
-        growth,
-        gaps,
-        warm,
-        openness,
-    ) = await asyncio.gather(
-        get_dashboard_summary(db, user_id),
-        get_response_rate_by_channel(db, user_id),
-        get_response_rate_by_role(db, user_id),
-        get_response_rate_by_company(db, user_id),
-        get_angle_effectiveness(db, user_id),
-        get_network_growth(db, user_id),
-        get_network_gaps(db, user_id),
-        get_warm_paths(db, user_id),
-        get_company_openness(db, user_id),
-    )
+    """Fetch all dashboard data.
+
+    Runs sequentially because async SQLAlchemy sessions do not support
+    concurrent operations from asyncio.gather on a single connection.
+    """
+    summary = await get_dashboard_summary(db, user_id)
+    by_channel = await get_response_rate_by_channel(db, user_id)
+    by_role = await get_response_rate_by_role(db, user_id)
+    by_company = await get_response_rate_by_company(db, user_id)
+    angles = await get_angle_effectiveness(db, user_id)
+    growth = await get_network_growth(db, user_id)
+    gaps = await get_network_gaps(db, user_id)
+    warm = await get_warm_paths(db, user_id)
+    openness = await get_company_openness(db, user_id)
 
     return {
         "summary": summary,

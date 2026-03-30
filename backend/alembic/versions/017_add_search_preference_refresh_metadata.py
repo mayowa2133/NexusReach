@@ -8,8 +8,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "017"
-down_revision = "016"
+revision = "017_add_search_preference_refresh_metadata"
+down_revision = "016_add_search_logs"
 branch_labels = None
 depends_on = None
 

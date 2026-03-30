@@ -184,7 +184,7 @@ async def get_outreach_stats(
     follow_up_result = await db.execute(
         select(sa_func.count()).where(
             OutreachLog.user_id == user_id,
-            OutreachLog.next_follow_up_at.isnot(None),
+            OutreachLog.next_follow_up_at.is_not(None),
             OutreachLog.next_follow_up_at >= now,
             OutreachLog.status.notin_(["closed"]),
         )
