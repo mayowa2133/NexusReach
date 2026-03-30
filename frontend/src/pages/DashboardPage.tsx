@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -7,8 +7,9 @@ import { Button } from '@/components/ui/button';
 import { useProfile, getProfileCompletion } from '@/hooks/useProfile';
 import { useInsightsDashboard } from '@/hooks/useInsights';
 import { useOutreachLogs } from '@/hooks/useOutreach';
-import { useJobs, useRefreshJobs, useSavedSearches } from '@/hooks/useJobs';
+import { useJobs, useRefreshJobs, useSavedSearches, useSeedDefaultJobs } from '@/hooks/useJobs';
 import { useGuardrails } from '@/hooks/useSettings';
+import { formatRelativeDate } from '@/lib/dateUtils';
 import { useOnboarding } from '@/hooks/useOnboarding';
 import { OnboardingDialog } from '@/components/onboarding/OnboardingDialog';
 import { MetricCards } from '@/components/dashboard/MetricCards';
@@ -38,8 +39,27 @@ export function DashboardPage() {
   const { data: latestJobsData } = useJobs({ sortBy: 'date' });
   const { data: savedSearches } = useSavedSearches();
   const refreshJobs = useRefreshJobs();
+  const seedDefaults = useSeedDefaultJobs();
   const { data: guardrails } = useGuardrails();
   const { shouldShow: showOnboarding } = useOnboarding();
+
+  // Auto-seed default job feeds for first-time users
+  useEffect(() => {
+    const alreadySeeded = window.localStorage.getItem('nexusreach-default-feed-seeded');
+    if (alreadySeeded) return;
+    // Wait for both queries to have loaded
+    if (latestJobsData === undefined || savedSearches === undefined) return;
+    const hasNoJobs = (latestJobsData?.items?.length ?? 0) === 0;
+    const hasNoSearches = (savedSearches?.length ?? 0) === 0;
+    if (hasNoJobs && hasNoSearches && !seedDefaults.isPending) {
+      seedDefaults.mutate(undefined, {
+        onSuccess: () => {
+          window.localStorage.setItem('nexusreach-default-feed-seeded', '1');
+        },
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [latestJobsData, savedSearches]);
 
   const [lastVisited] = useState<string | null>(
     () => window.localStorage.getItem('nexusreach-jobs-last-visited')
@@ -165,6 +185,9 @@ export function DashboardPage() {
                       <div className="text-xs text-muted-foreground">
                         {job.company_name}
                         {job.location && ` — ${job.location}`}
+                        {formatRelativeDate(job.posted_at) && (
+                          <span className="opacity-70"> · {formatRelativeDate(job.posted_at)}</span>
+                        )}
                       </div>
                     </div>
                     {job.match_score != null && (
@@ -184,6 +207,12 @@ export function DashboardPage() {
               >
                 View all jobs
               </Link>
+            </div>
+          ) : seedDefaults.isPending ? (
+            <div className="text-center py-4">
+              <p className="text-sm text-muted-foreground">
+                Loading your first batch of jobs...
+              </p>
             </div>
           ) : enabledSearchCount > 0 ? (
             <div className="text-center py-4">
@@ -282,6 +311,9 @@ export function DashboardPage() {
                         <div className="text-xs text-muted-foreground">
                           {job.company_name}
                           {job.location && ` — ${job.location}`}
+                          {formatRelativeDate(job.posted_at) && (
+                            <span className="opacity-70"> · {formatRelativeDate(job.posted_at)}</span>
+                          )}
                         </div>
                       </div>
                       {job.match_score != null && (

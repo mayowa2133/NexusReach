@@ -25,6 +25,7 @@ import {
 } from '@/lib/peopleSearchCount';
 import { toast } from 'sonner';
 import { sanitizeHTML } from '@/lib/sanitize';
+import { formatRelativeDate } from '@/lib/dateUtils';
 import type { Job, JobStage } from '@/types';
 
 const LAST_VISITED_KEY = 'nexusreach-jobs-last-visited';
@@ -590,7 +591,12 @@ function JobListCard({
                 </Badge>
               )}
             </div>
-            <div className="text-xs text-muted-foreground">{job.company_name}</div>
+            <div className="text-xs text-muted-foreground">
+              {job.company_name}
+              {formatRelativeDate(job.posted_at) && (
+                <span className="opacity-70"> · {formatRelativeDate(job.posted_at)}</span>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
             <button
@@ -683,6 +689,9 @@ function JobDetail({
           {job.employment_type && <Badge variant="outline">{job.employment_type}</Badge>}
           <Badge variant="outline">{SOURCE_LABELS[job.source] || job.source}</Badge>
           {job.department && <Badge variant="outline">{job.department}</Badge>}
+          {formatRelativeDate(job.posted_at) && (
+            <Badge variant="outline">Posted {formatRelativeDate(job.posted_at)!.toLowerCase()}</Badge>
+          )}
         </div>
 
         {/* Salary */}

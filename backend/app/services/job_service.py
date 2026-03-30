@@ -1,16 +1,19 @@
 """Job intelligence service — aggregates, deduplicates, scores, and tracks jobs."""
 
 import hashlib
+import logging
 import uuid
 from urllib.parse import urlparse
 
-from sqlalchemy import select
+from sqlalchemy import func as sa_func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients import jsearch_client, adzuna_client, ats_client, remote_jobs_client
 from app.models.job import Job
 from app.models.profile import Profile
 from app.models.search_preference import SearchPreference
+
+logger = logging.getLogger(__name__)
 
 
 # --- Deduplication ---
@@ -538,3 +541,52 @@ async def get_job(
         select(Job).where(Job.id == job_id, Job.user_id == user_id)
     )
     return result.scalar_one_or_none()
+
+
+# --- Default Seed Feeds ---
+
+DEFAULT_SEED_SEARCHES = [
+    {"query": "Software Engineer", "location": None, "remote_only": False},
+    {"query": "New Grad Software", "location": None, "remote_only": False},
+]
+
+
+async def seed_default_feeds(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+) -> int:
+    """Seed default job searches for a brand-new user.
+
+    Idempotent: does nothing if the user already has any jobs or search
+    preferences.  Returns the total number of new jobs stored.
+    """
+    job_count_r = await db.execute(
+        select(sa_func.count()).select_from(Job).where(Job.user_id == user_id)
+    )
+    if (job_count_r.scalar() or 0) > 0:
+        return 0
+
+    pref_count_r = await db.execute(
+        select(sa_func.count())
+        .select_from(SearchPreference)
+        .where(SearchPreference.user_id == user_id)
+    )
+    if (pref_count_r.scalar() or 0) > 0:
+        return 0
+
+    total_new = 0
+    for seed in DEFAULT_SEED_SEARCHES:
+        try:
+            stored = await search_jobs(
+                db,
+                user_id,
+                query=seed["query"],  # type: ignore[arg-type]
+                location=seed["location"],  # type: ignore[arg-type]
+                remote_only=seed["remote_only"],  # type: ignore[arg-type]
+            )
+            total_new += len(stored)
+        except Exception:
+            logger.exception("Failed to seed default feed: %s", seed["query"])
+
+    logger.info("Seeded %d default jobs for user %s", total_new, user_id)
+    return total_new

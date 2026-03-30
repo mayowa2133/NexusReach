@@ -24,6 +24,7 @@ from app.services.job_service import (
     get_job,
     update_job_stage,
     toggle_job_starred,
+    seed_default_feeds,
 )
 from app.services.search_preference_service import (
     get_search_preferences,
@@ -137,6 +138,18 @@ async def list_jobs(
         "limit": limit,
         "offset": offset,
     }
+
+
+# --- Seed Defaults ---
+
+@router.post("/seed-defaults", response_model=RefreshResponse)
+async def seed_defaults_endpoint(
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Seed default job searches for first-time users. Idempotent."""
+    new_count = await seed_default_feeds(db, user_id)
+    return RefreshResponse(new_jobs_found=new_count)
 
 
 # --- Refresh ---

@@ -59,6 +59,7 @@ vi.mock('@/hooks/useOutreach', () => ({
 vi.mock('@/hooks/useJobs', () => ({
   useJobs: () => mockJobs,
   useRefreshJobs: () => ({ mutate: vi.fn(), isPending: false }),
+  useSeedDefaultJobs: () => ({ mutate: vi.fn(), isPending: false }),
   useSavedSearches: () => ({ data: [] }),
 }));
 
