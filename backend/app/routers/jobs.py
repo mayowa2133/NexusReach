@@ -139,60 +139,6 @@ async def list_jobs(
     }
 
 
-@router.get("/{job_id}", response_model=JobResponse)
-async def get_single_job(
-    job_id: str,
-    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-):
-    """Get a single job by ID."""
-    job = await get_job(db, user_id, uuid.UUID(job_id))
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    return _to_response(job)
-
-
-@router.put("/{job_id}/stage", response_model=JobResponse)
-async def update_stage(
-    job_id: str,
-    body: JobStageUpdate,
-    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-):
-    """Update a job's kanban stage."""
-    try:
-        job = await update_job_stage(
-            db=db,
-            user_id=user_id,
-            job_id=uuid.UUID(job_id),
-            stage=body.stage,
-            notes=body.notes,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    return _to_response(job)
-
-
-@router.put("/{job_id}/star", response_model=JobResponse)
-async def star_job(
-    job_id: str,
-    body: JobStarToggle,
-    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-):
-    """Toggle a job's starred status."""
-    try:
-        job = await toggle_job_starred(
-            db=db,
-            user_id=user_id,
-            job_id=uuid.UUID(job_id),
-            starred=body.starred,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    return _to_response(job)
-
-
 # --- Refresh ---
 
 @router.post("/refresh", response_model=RefreshResponse)
@@ -207,6 +153,7 @@ async def refresh_feeds(
 
 
 # --- Saved Searches ---
+# These must be registered before /{job_id} to avoid path parameter capture.
 
 def _pref_to_response(pref) -> SearchPreferenceResponse:
     return SearchPreferenceResponse(
@@ -259,3 +206,59 @@ async def remove_saved_search(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     return {"ok": True}
+
+
+# --- Single Job & Mutations (path-param routes last) ---
+
+@router.get("/{job_id}", response_model=JobResponse)
+async def get_single_job(
+    job_id: str,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get a single job by ID."""
+    job = await get_job(db, user_id, uuid.UUID(job_id))
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return _to_response(job)
+
+
+@router.put("/{job_id}/stage", response_model=JobResponse)
+async def update_stage(
+    job_id: str,
+    body: JobStageUpdate,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Update a job's kanban stage."""
+    try:
+        job = await update_job_stage(
+            db=db,
+            user_id=user_id,
+            job_id=uuid.UUID(job_id),
+            stage=body.stage,
+            notes=body.notes,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return _to_response(job)
+
+
+@router.put("/{job_id}/star", response_model=JobResponse)
+async def star_job(
+    job_id: str,
+    body: JobStarToggle,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Toggle a job's starred status."""
+    try:
+        job = await toggle_job_starred(
+            db=db,
+            user_id=user_id,
+            job_id=uuid.UUID(job_id),
+            starred=body.starred,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return _to_response(job)
