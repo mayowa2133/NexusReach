@@ -28,6 +28,8 @@ class Job(Base):
     url: Mapped[str | None] = mapped_column(String(1000))
     description: Mapped[str | None] = mapped_column(Text)
     employment_type: Mapped[str | None] = mapped_column(String(50))
+    experience_level: Mapped[str | None] = mapped_column(String(50))  # noqa: F821
+    # intern | new_grad | mid | senior
 
     # Salary
     salary_min: Mapped[float | None] = mapped_column(Float)

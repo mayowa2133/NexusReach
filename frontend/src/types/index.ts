@@ -327,6 +327,7 @@ export interface Job {
   url: string | null;
   description: string | null;
   employment_type: string | null;
+  experience_level: string | null;
   salary_min: number | null;
   salary_max: number | null;
   salary_currency: string | null;

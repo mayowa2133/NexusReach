@@ -32,25 +32,27 @@ export interface JobFilters {
   sortBy?: string;
   starred?: boolean;
   employmentType?: string;
+  experienceLevel?: string;
   salaryMin?: number;
   remote?: boolean;
   search?: string;
 }
 
 export function useJobs(filters: JobFilters = {}) {
-  const { stage, sortBy, starred, employmentType, salaryMin, remote, search } = filters;
+  const { stage, sortBy, starred, employmentType, experienceLevel, salaryMin, remote, search } = filters;
   const params = new URLSearchParams();
   if (stage) params.set('stage', stage);
   if (sortBy) params.set('sort_by', sortBy);
   if (starred !== undefined) params.set('starred', String(starred));
   if (employmentType) params.set('employment_type', employmentType);
+  if (experienceLevel) params.set('experience_level', experienceLevel);
   if (salaryMin !== undefined) params.set('salary_min', String(salaryMin));
   if (remote !== undefined) params.set('remote', String(remote));
   if (search) params.set('search', search);
   const qs = params.toString();
 
   return useQuery({
-    queryKey: ['jobs', stage, sortBy, starred, employmentType, salaryMin, remote, search],
+    queryKey: ['jobs', stage, sortBy, starred, employmentType, experienceLevel, salaryMin, remote, search],
     queryFn: () => api.get<PaginatedResponse<Job>>(`/api/jobs${qs ? `?${qs}` : ''}`),
   });
 }

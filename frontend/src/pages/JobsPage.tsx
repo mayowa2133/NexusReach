@@ -91,6 +91,14 @@ const SOURCE_LABELS: Record<string, string> = {
   workable: 'Workable',
   apple_jobs: 'Apple Jobs',
   workday: 'Workday',
+  newgrad_jobs: 'NewGrad Jobs',
+};
+
+const LEVEL_LABELS: Record<string, string> = {
+  intern: 'Intern',
+  new_grad: 'New Grad',
+  mid: 'Mid-level',
+  senior: 'Senior+',
 };
 
 const EMPLOYMENT_TYPES = [
@@ -100,6 +108,14 @@ const EMPLOYMENT_TYPES = [
   { value: 'contract', label: 'Contract' },
   { value: 'internship', label: 'Internship' },
   { value: 'temporary', label: 'Temporary' },
+];
+
+const EXPERIENCE_LEVELS = [
+  { value: '', label: 'All levels' },
+  { value: 'intern', label: 'Intern' },
+  { value: 'new_grad', label: 'New Grad / Entry' },
+  { value: 'mid', label: 'Mid-level' },
+  { value: 'senior', label: 'Senior+' },
 ];
 
 export function JobsPage() {
@@ -119,6 +135,7 @@ export function JobsPage() {
   // Advanced filters
   const [searchFilter, setSearchFilter] = useState('');
   const [employmentTypeFilter, setEmploymentTypeFilter] = useState('');
+  const [experienceLevelFilter, setExperienceLevelFilter] = useState('');
   const [remoteFilter, setRemoteFilter] = useState(false);
   const [salaryMinFilter, setSalaryMinFilter] = useState('');
 
@@ -136,6 +153,7 @@ export function JobsPage() {
     sortBy,
     starred: starredFilter ? true : undefined,
     employmentType: employmentTypeFilter || undefined,
+    experienceLevel: experienceLevelFilter || undefined,
     salaryMin: salaryMinFilter ? Number(salaryMinFilter) : undefined,
     remote: remoteFilter ? true : undefined,
     search: searchFilter || undefined,
@@ -485,6 +503,19 @@ export function JobsPage() {
                   ))}
                 </select>
               </div>
+              <div className="flex items-center gap-2">
+                <Label className="text-sm">Level:</Label>
+                <select
+                  value={experienceLevelFilter}
+                  onChange={(e) => setExperienceLevelFilter(e.target.value)}
+                  className="h-8 rounded-lg border border-input bg-transparent px-2 text-sm outline-none"
+                  aria-label="Experience level filter"
+                >
+                  {EXPERIENCE_LEVELS.map((l) => (
+                    <option key={l.value} value={l.value}>{l.label}</option>
+                  ))}
+                </select>
+              </div>
               <Button
                 variant={starredFilter ? 'default' : 'outline'}
                 size="sm"
@@ -720,6 +751,9 @@ function JobDetail({
           {job.remote && <Badge variant="secondary">Remote</Badge>}
           {job.employment_type && <Badge variant="outline">{job.employment_type}</Badge>}
           <Badge variant="outline">{SOURCE_LABELS[job.source] || job.source}</Badge>
+          {job.experience_level && (
+            <Badge variant="secondary">{LEVEL_LABELS[job.experience_level] || job.experience_level}</Badge>
+          )}
           {job.department && <Badge variant="outline">{job.department}</Badge>}
           {formatRelativeDate(job.posted_at) && (
             <Badge variant="outline">Posted {formatRelativeDate(job.posted_at)!.toLowerCase()}</Badge>

@@ -29,6 +29,7 @@ class JobResponse(BaseModel):
     url: str | None
     description: str | None
     employment_type: str | None
+    experience_level: str | None
     salary_min: float | None
     salary_max: float | None
     salary_currency: str | None

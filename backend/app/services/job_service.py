@@ -12,6 +12,7 @@ from app.clients import jsearch_client, adzuna_client, ats_client, remote_jobs_c
 from app.models.job import Job
 from app.models.profile import Profile
 from app.models.search_preference import SearchPreference
+from app.utils.experience_level import classify_experience_level
 
 logger = logging.getLogger(__name__)
 
@@ -282,6 +283,7 @@ async def search_jobs(
             url=data.get("url"),
             description=data.get("description"),
             employment_type=data.get("employment_type"),
+            experience_level=classify_experience_level(data["title"]),
             salary_min=data.get("salary_min"),
             salary_max=data.get("salary_max"),
             salary_currency=data.get("salary_currency"),
@@ -473,6 +475,7 @@ async def get_jobs(
     starred: bool | None = None,
     *,
     employment_type: str | None = None,
+    experience_level: str | None = None,
     salary_min: float | None = None,
     remote: bool | None = None,
     search: str | None = None,
@@ -492,6 +495,8 @@ async def get_jobs(
         query = query.where(Job.starred == starred)
     if employment_type:
         query = query.where(Job.employment_type == employment_type)
+    if experience_level:
+        query = query.where(Job.experience_level == experience_level)
     if salary_min is not None:
         query = query.where(Job.salary_max >= salary_min)
     if remote is not None:
