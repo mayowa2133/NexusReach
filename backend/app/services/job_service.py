@@ -5,7 +5,7 @@ import logging
 import uuid
 from urllib.parse import urlparse
 
-from sqlalchemy import func as sa_func, select
+from sqlalchemy import String, func as sa_func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients import jsearch_client, adzuna_client, ats_client, remote_jobs_client, newgrad_jobs_client
@@ -505,9 +505,14 @@ async def get_jobs(
     if sort_by == "score":
         query = query.order_by(Job.match_score.desc().nullslast())
     elif sort_by == "date":
-        query = query.order_by(Job.created_at.desc())
+        # Sort by the actual posting date when available, fall back to created_at
+        query = query.order_by(
+            sa_func.coalesce(Job.posted_at, Job.created_at.cast(String)).desc()
+        )
     else:
-        query = query.order_by(Job.created_at.desc())
+        query = query.order_by(
+            sa_func.coalesce(Job.posted_at, Job.created_at.cast(String)).desc()
+        )
 
     return await paginate(db, query, limit=limit, offset=offset)
 
