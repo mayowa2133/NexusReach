@@ -161,7 +161,7 @@ async def _run_family(
                 "aggregate_count": len(aggregated),
             },
         )
-        if len(aggregated) >= min_results:
+        if len(aggregated) >= limit:
             break
 
     return aggregated[:limit]

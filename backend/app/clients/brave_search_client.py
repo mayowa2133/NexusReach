@@ -204,13 +204,14 @@ def _parse_linkedin_result(item: dict, company_name: str) -> dict | None:
     if not full_name or full_name.lower() == company_name.lower():
         return None
 
-    # LinkedIn search result titles almost always mention the current employer
-    # ("… at Figma", "Name - Figma | LinkedIn", "@ Figma").  The snippet is
-    # unreliable — it can mention a company from posts or activity.  Skip
-    # results where the company name doesn't appear in the title at all,
-    # as they are very likely wrong-company noise from broad SERP queries.
-    if not _company_name_in_title(company_name, title_raw):
-        return None
+    # LinkedIn search result titles usually mention the current employer
+    # ("… at Figma", "Name - Figma | LinkedIn", "@ Figma").  The snippet can
+    # also carry company signals.  Rather than hard-rejecting results where
+    # the company name isn't in the title, flag them as lower confidence so
+    # downstream ranking can demote them without losing viable candidates.
+    company_in_title = _company_name_in_title(company_name, title_raw)
+    snippet = item.get("description", "")
+    company_in_snippet = company_name.lower() in (snippet or "").lower()
 
     return {
         "full_name": full_name,
@@ -222,9 +223,10 @@ def _parse_linkedin_result(item: dict, company_name: str) -> dict | None:
         "photo_url": "",
         "apollo_id": "",
         "source": "brave_search",
-        "snippet": item.get("description", ""),
+        "snippet": snippet,
         "profile_data": {
             "linkedin_result_title": title_clean,
+            "company_match_confidence": "strong_signal" if company_in_title else ("weak_signal" if company_in_snippet else "unverified"),
         },
     }
 

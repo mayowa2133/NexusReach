@@ -201,11 +201,11 @@ def _clamp_target_count_per_bucket(value: int | None) -> int:
 
 
 def _search_limit_for_target(target_count_per_bucket: int) -> int:
-    return min(40, max(10, target_count_per_bucket * 4))
+    return min(50, max(15, target_count_per_bucket * 5))
 
 
 def _prepare_limit_for_target(target_count_per_bucket: int) -> int:
-    return min(30, max(6, target_count_per_bucket * 3))
+    return min(40, max(10, target_count_per_bucket * 4))
 
 
 def _minimum_results_for_target(target_count_per_bucket: int) -> int:
