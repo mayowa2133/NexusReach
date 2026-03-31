@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -168,28 +168,13 @@ describe('JobsPage', () => {
     expect(screen.getByPlaceholderText(/new york/i)).toBeInTheDocument();
   });
 
-  it('renders a contacts-per-category control on the selected job detail', async () => {
+  it('navigates to job detail page when a job card is clicked', async () => {
     mockSavedJobs = { items: [sampleJob], total: 1, limit: null, offset: 0 };
 
     renderJobs();
     await userEvent.click(screen.getByText('Backend Engineer'));
 
-    expect(screen.getByLabelText(/contacts per category/i)).toBeInTheDocument();
-  });
-
-  it('navigates to People with the selected target count', async () => {
-    mockSavedJobs = { items: [sampleJob], total: 1, limit: null, offset: 0 };
-
-    renderJobs();
-    await userEvent.click(screen.getByText('Backend Engineer'));
-    const countInput = screen.getByLabelText(/contacts per category/i);
-    fireEvent.change(countInput, { target: { value: '5' } });
-    await userEvent.click(screen.getByRole('button', { name: /^find people$/i }));
-
-    expect(mockNavigate).toHaveBeenCalledWith(
-      '/people?job_id=job-1&company=AppLovin&title=Backend+Engineer&target_count=5'
-    );
-    expect(window.localStorage.getItem('nexusreach-target-count-per-bucket')).toBe('5');
+    expect(mockNavigate).toHaveBeenCalledWith('/jobs/job-1');
   });
 
   // --- Saved Searches ---

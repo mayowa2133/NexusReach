@@ -10,6 +10,7 @@ import { LoginPage } from '@/pages/LoginPage';
 import { SignupPage } from '@/pages/SignupPage';
 import { DashboardPage } from '@/pages/DashboardPage';
 import { JobsPage } from '@/pages/JobsPage';
+import { JobDetailPage } from '@/pages/JobDetailPage';
 import { PeoplePage } from '@/pages/PeoplePage';
 import { MessagesPage } from '@/pages/MessagesPage';
 import { OutreachPage } from '@/pages/OutreachPage';
@@ -46,6 +47,7 @@ function AppRoutes() {
       >
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/jobs" element={<JobsPage />} />
+        <Route path="/jobs/:jobId" element={<JobDetailPage />} />
         <Route path="/people" element={<PeoplePage />} />
         <Route path="/messages" element={<MessagesPage />} />
         <Route path="/outreach" element={<OutreachPage />} />

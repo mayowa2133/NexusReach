@@ -576,7 +576,7 @@ export function JobsPage() {
                 job={job}
                 isSelected={selectedJob?.id === job.id}
                 isNew={!!lastVisited && job.created_at > lastVisited}
-                onClick={() => setSelectedJob(job)}
+                onClick={() => navigate(`/jobs/${job.id}`)}
                 onToggleStar={(starred) => handleToggleStar(job.id, starred)}
               />
             ))
@@ -642,6 +642,9 @@ function JobListCard({
     <Card
       className={`cursor-pointer transition-colors ${isSelected ? 'border-primary bg-muted/30' : 'hover:bg-muted/20'}`}
       onClick={onClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onClick(); }}
     >
       <CardContent className="pt-3 pb-3 space-y-1">
         <div className="flex items-start justify-between gap-2">
