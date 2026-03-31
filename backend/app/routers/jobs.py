@@ -61,6 +61,7 @@ def _to_response(job) -> JobResponse:
         tags=job.tags,
         department=job.department,
         notes=job.notes,
+        experience_level=job.experience_level,
         starred=job.starred,
         created_at=job.created_at.isoformat(),
         updated_at=job.updated_at.isoformat(),
