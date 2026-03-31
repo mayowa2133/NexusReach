@@ -11,20 +11,19 @@ logger = logging.getLogger(__name__)
 
 BASE_URL = "https://www.newgrad-jobs.com"
 
-# Categories that map to the site's URL structure
+# Categories that map to the site's URL structure (/list-{category})
 CATEGORIES = [
     "software-engineer-jobs",
     "data-analyst",
-    "data-science-jobs",
     "cyber-security",
     "remote",
 ]
 
 
-def _parse_date(date_str: str) -> str:
-    """Parse 'March 30, 2026' style date into ISO 8601."""
+def _try_parse_date(text: str) -> str:
+    """Try to parse a date string, return ISO string or empty."""
     try:
-        dt = datetime.strptime(date_str.strip(), "%B %d, %Y")
+        dt = datetime.strptime(text.strip(), "%B %d, %Y")
         return dt.replace(tzinfo=timezone.utc).isoformat()
     except (ValueError, AttributeError):
         return ""
@@ -42,7 +41,7 @@ def _parse_salary(text: str) -> tuple[float | None, float | None, str]:
 
 async def fetch_job_list(
     category: str = "software-engineer-jobs",
-    limit: int = 20,
+    limit: int = 50,
 ) -> list[dict]:
     """Fetch job listings from a newgrad-jobs.com category page.
 
@@ -57,9 +56,13 @@ async def fetch_job_list(
 
     soup = BeautifulSoup(resp.text, "html.parser")
 
-    # Job cards are <a> tags linking to /list-{category}/{slug}
-    # Each job typically has two <a> tags: one wrapping an image (no text)
-    # and one with the job title, date, and company name.
+    # Each job has two <a> tags with the same href:
+    #   1. A logo-only link (class="w-inline-block", no text)
+    #   2. A text link (class="flex-block-27 w-inline-block") containing:
+    #      - p.jobtitle: job title
+    #      - p.jobtime: date like "March 31, 2026"
+    #      - p.companyname_list: company name
+    # We target the text links by looking for stripped_strings.
     link_prefix = f"/list-{category}/"
     job_links = [
         a for a in soup.find_all("a", href=True)
@@ -76,21 +79,26 @@ async def fetch_job_list(
             continue
         seen_slugs.add(slug)
 
-        # Text order is typically: [title, date, company]
-        text_parts = [t.strip() for t in link.stripped_strings]
+        # Extract structured fields using CSS classes when available
+        title_el = link.select_one("p.jobtitle, .jobtitle")
+        date_el = link.select_one("p.jobtime, .jobtime")
+        company_el = link.select_one("p.companyname_list, .companyname_list")
 
-        title = ""
-        company = ""
-        posted_at = ""
+        title = title_el.get_text(strip=True) if title_el else ""
+        posted_at = _try_parse_date(date_el.get_text(strip=True)) if date_el else ""
+        company = company_el.get_text(strip=True) if company_el else ""
 
-        for part in text_parts:
-            parsed_date = _try_parse_date(part)
-            if parsed_date:
-                posted_at = parsed_date
-            elif not title:
-                title = part
-            elif not company:
-                company = part
+        # Fallback to positional parsing if CSS selectors miss
+        if not title:
+            text_parts = [t.strip() for t in link.stripped_strings]
+            for part in text_parts:
+                parsed_date = _try_parse_date(part)
+                if parsed_date:
+                    posted_at = posted_at or parsed_date
+                elif not title:
+                    title = part
+                elif not company:
+                    company = part
 
         if not title:
             continue
@@ -111,15 +119,6 @@ async def fetch_job_list(
             break
 
     return jobs
-
-
-def _try_parse_date(text: str) -> str:
-    """Try to parse a date string, return ISO string or empty."""
-    try:
-        dt = datetime.strptime(text.strip(), "%B %d, %Y")
-        return dt.replace(tzinfo=timezone.utc).isoformat()
-    except (ValueError, AttributeError):
-        return ""
 
 
 async def fetch_job_detail(job_url: str) -> dict | None:
@@ -157,23 +156,38 @@ async def fetch_job_detail(job_url: str) -> dict | None:
 
 async def search_newgrad_jobs(
     query: str | None = None,
-    category: str = "software-engineer-jobs",
-    limit: int = 20,
+    category: str | None = None,
+    limit: int = 25,
 ) -> list[dict]:
-    """Search newgrad-jobs.com for jobs.
+    """Search newgrad-jobs.com for jobs across multiple categories.
 
-    Uses category browsing since the site has no search API.
-    If a query is provided, results are filtered client-side by title match.
+    If a specific category is given, only that category is scraped.
+    Otherwise, all known categories are scraped for maximum coverage.
+    If a query is provided, results are filtered client-side by title/company match.
     """
-    jobs = await fetch_job_list(category=category, limit=limit * 2 if query else limit)
+    categories_to_search = [category] if category else CATEGORIES
+
+    all_jobs: list[dict] = []
+    seen_ids: set[str] = set()
+
+    for cat in categories_to_search:
+        per_cat_limit = limit * 2 if query else limit
+        jobs = await fetch_job_list(category=cat, limit=per_cat_limit)
+        for job in jobs:
+            eid = job["external_id"]
+            if eid not in seen_ids:
+                seen_ids.add(eid)
+                all_jobs.append(job)
 
     if query:
         keywords = query.lower().split()
         filtered = [
-            j for j in jobs
-            if any(kw in j["title"].lower() or kw in j.get("company_name", "").lower()
-                   for kw in keywords)
+            j for j in all_jobs
+            if any(
+                kw in j["title"].lower() or kw in j.get("company_name", "").lower()
+                for kw in keywords
+            )
         ]
         return filtered[:limit]
 
-    return jobs[:limit]
+    return all_jobs[:limit]
