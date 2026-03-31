@@ -110,7 +110,7 @@ export function JobsPage() {
   const [atsType, setAtsType] = useState('greenhouse');
   const [stageFilter, setStageFilter] = useState<string>('');
   const [starredFilter, setStarredFilter] = useState(false);
-  const [sortBy, setSortBy] = useState('score');
+  const [sortBy, setSortBy] = useState('date');
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [targetCountPerBucket, setTargetCountPerBucket] = useState(() =>
     getStoredPeopleSearchTargetCount()
