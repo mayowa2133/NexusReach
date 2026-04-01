@@ -9,6 +9,7 @@ from sqlalchemy import String, func as sa_func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients import jsearch_client, adzuna_client, ats_client, remote_jobs_client, newgrad_jobs_client
+from app.clients import lever_scrape_client, workday_client
 from app.models.job import Job
 from app.models.profile import Profile
 from app.models.search_preference import SearchPreference
@@ -643,14 +644,25 @@ ATS_DISCOVER_BOARDS: list[dict[str, str]] = [
     {"slug": "cursor", "ats": "ashby"},
 ]
 
+# Lever companies (scraped from HTML since the API is deprecated)
+LEVER_DISCOVER_SLUGS = [
+    "spotify",
+    "matchgroup",
+]
+
 
 async def _discover_ats_boards(
     db: AsyncSession,
     user_id: uuid.UUID,
     limit_per_board: int = 50,
 ) -> int:
-    """Pull jobs from curated Greenhouse and Ashby boards."""
+    """Pull jobs from curated Greenhouse, Ashby, Lever, and Workday boards."""
+    result = await db.execute(select(Profile).where(Profile.user_id == user_id))
+    profile = result.scalar_one_or_none()
+
     total_new = 0
+
+    # --- Greenhouse + Ashby (API-based) ---
     for board in ATS_DISCOVER_BOARDS:
         try:
             stored = await search_ats_jobs(
@@ -670,7 +682,86 @@ async def _discover_ats_boards(
             logger.exception(
                 "ATS discover failed for %s/%s", board["ats"], board["slug"]
             )
+
+    # --- Lever (HTML scraping) ---
+    for slug in LEVER_DISCOVER_SLUGS:
+        try:
+            raw_jobs = await lever_scrape_client.search_lever_html(slug, limit=limit_per_board)
+            stored = await _store_raw_jobs(db, user_id, raw_jobs, profile)
+            if stored:
+                logger.info("Lever discover %s: %d new jobs", slug, len(stored))
+            total_new += len(stored)
+        except Exception:
+            logger.exception("Lever discover failed for %s", slug)
+
+    # --- Workday (hidden JSON API) ---
+    try:
+        raw_jobs = await workday_client.discover_all_workday(limit_per_company=20)
+        stored = await _store_raw_jobs(db, user_id, raw_jobs, profile)
+        if stored:
+            logger.info("Workday discover: %d new jobs", len(stored))
+        total_new += len(stored)
+    except Exception:
+        logger.exception("Workday discover failed")
+
     return total_new
+
+
+async def _store_raw_jobs(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    raw_jobs: list[dict],
+    profile: Profile | None,
+) -> list[Job]:
+    """Deduplicate and store raw job dicts from any source."""
+    stored: list[Job] = []
+    seen_fps: set[str] = set()
+
+    for data in raw_jobs:
+        fp = _fingerprint(data.get("company_name", ""), data.get("title", ""), data.get("location", ""))
+        if fp in seen_fps:
+            continue
+        seen_fps.add(fp)
+
+        existing = await _find_existing_job(
+            db,
+            user_id=user_id,
+            ats=data.get("ats"),
+            external_id=data.get("external_id"),
+            url=data.get("url"),
+            fingerprint=fp,
+        )
+        if existing:
+            continue
+
+        score, breakdown = _score_job(data, profile)
+        level = classify_experience_level(data.get("title", ""))
+
+        job = Job(
+            user_id=user_id,
+            title=data.get("title", ""),
+            company_name=data.get("company_name", ""),
+            location=data.get("location", ""),
+            remote=data.get("remote", False),
+            url=data.get("url", ""),
+            description=data.get("description", ""),
+            employment_type=data.get("employment_type"),
+            department=data.get("department"),
+            posted_at=data.get("posted_at") or None,
+            source=data.get("source", "unknown"),
+            ats=data.get("ats"),
+            match_score=score,
+            score_breakdown=breakdown,
+            experience_level=level,
+            fingerprint=fp,
+        )
+        db.add(job)
+        stored.append(job)
+
+    if stored:
+        await db.commit()
+
+    return stored
 
 
 async def discover_jobs(
