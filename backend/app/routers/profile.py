@@ -61,7 +61,21 @@ async def get_profile(
     profile = result.scalar_one_or_none()
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
-    return profile
+    return ProfileResponse(
+        id=str(profile.id),
+        full_name=profile.full_name,
+        bio=profile.bio,
+        goals=profile.goals,
+        tone=profile.tone,
+        target_industries=profile.target_industries,
+        target_company_sizes=profile.target_company_sizes,
+        target_roles=profile.target_roles,
+        target_locations=profile.target_locations,
+        linkedin_url=profile.linkedin_url,
+        github_url=profile.github_url,
+        portfolio_url=profile.portfolio_url,
+        resume_parsed=profile.resume_parsed,
+    )
 
 
 @router.put("", response_model=ProfileResponse)
@@ -86,7 +100,21 @@ async def update_profile(
     if "target_roles" in update_data or "target_locations" in update_data:
         await _seed_saved_searches(db, user_id, profile)
 
-    return profile
+    return ProfileResponse(
+        id=str(profile.id),
+        full_name=profile.full_name,
+        bio=profile.bio,
+        goals=profile.goals,
+        tone=profile.tone,
+        target_industries=profile.target_industries,
+        target_company_sizes=profile.target_company_sizes,
+        target_roles=profile.target_roles,
+        target_locations=profile.target_locations,
+        linkedin_url=profile.linkedin_url,
+        github_url=profile.github_url,
+        portfolio_url=profile.portfolio_url,
+        resume_parsed=profile.resume_parsed,
+    )
 
 
 @router.post("/resume", response_model=ProfileResponse)
