@@ -617,17 +617,72 @@ DISCOVER_QUERIES = [
     {"query": "New Grad Software", "location": None, "remote_only": False},
 ]
 
+# Curated ATS boards to pull from during discovery.
+# These are popular tech companies with public Greenhouse/Ashby boards.
+ATS_DISCOVER_BOARDS: list[dict[str, str]] = [
+    # Greenhouse
+    {"slug": "stripe", "ats": "greenhouse"},
+    {"slug": "airbnb", "ats": "greenhouse"},
+    {"slug": "figma", "ats": "greenhouse"},
+    {"slug": "coinbase", "ats": "greenhouse"},
+    {"slug": "robinhood", "ats": "greenhouse"},
+    {"slug": "databricks", "ats": "greenhouse"},
+    {"slug": "discord", "ats": "greenhouse"},
+    {"slug": "brex", "ats": "greenhouse"},
+    {"slug": "doordash", "ats": "greenhouse"},
+    {"slug": "plaid", "ats": "greenhouse"},
+    {"slug": "duolingo", "ats": "greenhouse"},
+    {"slug": "squarespace", "ats": "greenhouse"},
+    {"slug": "relativityspace", "ats": "greenhouse"},
+    {"slug": "airtable", "ats": "greenhouse"},
+    # Ashby
+    {"slug": "ramp", "ats": "ashby"},
+    {"slug": "notion", "ats": "ashby"},
+    {"slug": "openai", "ats": "ashby"},
+    {"slug": "linear", "ats": "ashby"},
+    {"slug": "cursor", "ats": "ashby"},
+]
+
+
+async def _discover_ats_boards(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    limit_per_board: int = 50,
+) -> int:
+    """Pull jobs from curated Greenhouse and Ashby boards."""
+    total_new = 0
+    for board in ATS_DISCOVER_BOARDS:
+        try:
+            stored = await search_ats_jobs(
+                db,
+                user_id,
+                company_slug=board["slug"],
+                ats_type=board["ats"],
+                limit=limit_per_board,
+            )
+            if stored:
+                logger.info(
+                    "ATS discover %s/%s: %d new jobs",
+                    board["ats"], board["slug"], len(stored),
+                )
+            total_new += len(stored)
+        except Exception:
+            logger.exception(
+                "ATS discover failed for %s/%s", board["ats"], board["slug"]
+            )
+    return total_new
+
 
 async def discover_jobs(
     db: AsyncSession,
     user_id: uuid.UUID,
     queries: list[str] | None = None,
 ) -> int:
-    """Run a batch of job searches across free sources.
+    """Run a batch of job searches across free sources and ATS boards.
 
     Unlike seed_default_feeds this always runs — it is the manual
-    "Discover Jobs" action.  Deduplication is handled by search_jobs,
-    so repeat runs are safe and will only store genuinely new results.
+    "Discover Jobs" action.  Deduplication is handled by search_jobs
+    and search_ats_jobs, so repeat runs are safe.
 
     Args:
         queries: Optional custom list of search terms.  Falls back to
@@ -640,6 +695,8 @@ async def discover_jobs(
     )
 
     total_new = 0
+
+    # 1. Standard job search (JSearch, Dice, Remotive, newgrad-jobs)
     for seed in search_list:
         try:
             stored = await search_jobs(
@@ -652,6 +709,13 @@ async def discover_jobs(
             total_new += len(stored)
         except Exception:
             logger.exception("Discover failed for query: %s", seed["query"])
+
+    # 2. ATS board discovery (Greenhouse + Ashby)
+    try:
+        ats_new = await _discover_ats_boards(db, user_id)
+        total_new += ats_new
+    except Exception:
+        logger.exception("ATS board discovery failed")
 
     logger.info("Discovered %d new jobs for user %s", total_new, user_id)
     return total_new
