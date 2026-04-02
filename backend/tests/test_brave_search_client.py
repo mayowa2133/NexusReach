@@ -286,9 +286,13 @@ class TestSearchPeople:
             s.brave_api_key = "key"
             results = await search_people("Google")
 
-        # Company page and wrong-company profile should be filtered
-        assert len(results) == 1
-        assert results[0]["full_name"] == "Jane Doe"
+        # Company page should be filtered (not /in/ URL).
+        # Bob Smith at Meta is still returned but with lower confidence;
+        # downstream ranking handles company filtering.
+        names = [r["full_name"] for r in results]
+        assert "Jane Doe" in names
+        # Company page should NOT appear
+        assert not any("/company/" in (r.get("linkedin_url") or "") for r in results)
 
     async def test_limits_title_keywords(self):
         """Each query batch uses at most 2 titles."""
@@ -311,7 +315,7 @@ class TestSearchPeople:
             assert title_count <= 2, f"Query has {title_count} titles: {q}"
 
     async def test_team_keywords_appended_to_query(self):
-        """Team keywords are added to the search query."""
+        """Team keywords are added to at least one search query (scoped variant)."""
         mock_client = _mock_client_with(_mock_httpx_response({"web": {"results": []}}))
 
         with (
@@ -321,10 +325,12 @@ class TestSearchPeople:
             s.brave_api_key = "key"
             await search_people("Stripe", titles=["engineer"], team_keywords=["payments"])
 
-        query = mock_client.get.call_args[1]["params"]["q"]
-        assert '"payments"' in query
-        assert "site:linkedin.com/in" in query
-        assert '"Stripe"' in query
+        queries = [call[1]["params"]["q"] for call in mock_client.get.call_args_list]
+        # At least one query should include the team keyword (scoped variant)
+        assert any('"payments"' in q for q in queries)
+        # All queries should target linkedin and company
+        assert all("site:linkedin.com/in" in q for q in queries)
+        assert all('"Stripe"' in q or "Stripe" in q for q in queries)
 
     async def test_team_keywords_uses_only_first(self):
         """Only the first team keyword is used to avoid over-constraining."""
@@ -337,10 +343,13 @@ class TestSearchPeople:
             s.brave_api_key = "key"
             await search_people("Google", team_keywords=["backend", "api", "platform"])
 
-        query = mock_client.get.call_args[1]["params"]["q"]
-        assert '"backend"' in query
-        assert '"api"' not in query
-        assert '"platform"' not in query
+        queries = [call[1]["params"]["q"] for call in mock_client.get.call_args_list]
+        # Scoped queries should use only first keyword
+        scoped = [q for q in queries if '"backend"' in q]
+        assert len(scoped) >= 1
+        for q in scoped:
+            assert '"api"' not in q
+            assert '"platform"' not in q
 
     async def test_empty_team_keywords_ignored(self):
         """Empty team_keywords list doesn't affect the query."""

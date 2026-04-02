@@ -19,11 +19,21 @@ import {
   useStartLinkedInGraphSyncSession,
   useUploadLinkedInGraphFile,
 } from '@/hooks/useLinkedInGraph';
+import { API_URL } from '@/lib/api';
 import { GuardrailsPanel } from '@/components/settings/GuardrailsPanel';
 import { toast } from 'sonner';
 import type { LinkedInGraphSyncSession } from '@/types';
 
 const REDIRECT_URI = `${window.location.origin}/settings`;
+const LINKEDIN_CONNECTOR_PROFILE_DIR = '~/.nexusreach/linkedin-graph-browser';
+
+function buildLinkedInCdpCommand(sessionToken: string): string {
+  return `cd backend && python scripts/linkedin_graph_connector.py --base-url ${API_URL} --session-token ${sessionToken} --cdp-url http://127.0.0.1:9222`;
+}
+
+function buildLinkedInProfileCommand(sessionToken: string): string {
+  return `cd backend && python scripts/linkedin_graph_connector.py --base-url ${API_URL} --session-token ${sessionToken}`;
+}
 
 export function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -307,12 +317,29 @@ export function SettingsPage() {
             <div className="rounded-lg border bg-muted/30 p-4 space-y-2">
               <p className="text-sm font-medium">Local connector session ready</p>
               <p className="text-sm text-muted-foreground">
-                Use this short-lived session token with the user-side connector to upload
-                batched connection data to <code>{syncSession.upload_path}</code>.
+                Use the connector below to scrape LinkedIn directly from a logged-in browser and
+                upload batched connection data to <code>{syncSession.upload_path}</code>. If you
+                skip <code>--cdp-url</code>, the connector opens a dedicated persistent browser
+                profile at <code>{LINKEDIN_CONNECTOR_PROFILE_DIR}</code> and waits for you to sign
+                in once.
               </p>
               <div className="text-xs text-muted-foreground space-y-1">
                 <p>Expires: {new Date(syncSession.expires_at).toLocaleString()}</p>
                 <p>Max batch size: {syncSession.max_batch_size}</p>
+              </div>
+              <div className="rounded border bg-background p-3 text-xs font-mono break-all space-y-2">
+                <div>
+                  <p className="mb-1 font-sans text-muted-foreground">
+                    Existing logged-in Chrome session via CDP
+                  </p>
+                  <code>{buildLinkedInCdpCommand(syncSession.session_token)}</code>
+                </div>
+                <div>
+                  <p className="mb-1 font-sans text-muted-foreground">
+                    Dedicated NexusReach browser profile
+                  </p>
+                  <code>{buildLinkedInProfileCommand(syncSession.session_token)}</code>
+                </div>
               </div>
               <div className="rounded border bg-background p-3 text-xs break-all font-mono">
                 {syncSession.session_token}

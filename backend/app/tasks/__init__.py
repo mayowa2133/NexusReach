@@ -20,7 +20,11 @@ celery_app.conf.update(
     beat_schedule={
         "refresh-job-feeds": {
             "task": "app.tasks.jobs.refresh_all_job_feeds",
-            "schedule": crontab(minute=0),  # every hour
+            "schedule": crontab(minute="0,30"),  # every 30 minutes
+        },
+        "discover-ats-boards": {
+            "task": "app.tasks.jobs.discover_ats_boards",
+            "schedule": crontab(minute="15,45"),  # every 30 minutes (offset)
         },
         "reverify-stale-contacts": {
             "task": "app.tasks.reverify.reverify_stale_contacts",

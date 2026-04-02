@@ -17,6 +17,7 @@ CATEGORIES = [
     "data-analyst",
     "cyber-security",
     "remote",
+    "ux-designer",
 ]
 
 
@@ -41,7 +42,7 @@ def _parse_salary(text: str) -> tuple[float | None, float | None, str]:
 
 async def fetch_job_list(
     category: str = "software-engineer-jobs",
-    limit: int = 50,
+    limit: int = 100,
 ) -> list[dict]:
     """Fetch job listings from a newgrad-jobs.com category page.
 
@@ -157,13 +158,16 @@ async def fetch_job_detail(job_url: str) -> dict | None:
 async def search_newgrad_jobs(
     query: str | None = None,
     category: str | None = None,
-    limit: int = 25,
+    limit: int = 500,
 ) -> list[dict]:
     """Search newgrad-jobs.com for jobs across multiple categories.
 
     If a specific category is given, only that category is scraped.
     Otherwise, all known categories are scraped for maximum coverage.
     If a query is provided, results are filtered client-side by title/company match.
+
+    The site serves ~100 jobs per category.  With 5 categories that gives up
+    to ~500 unique jobs per scrape (some overlap between categories is deduped).
     """
     categories_to_search = [category] if category else CATEGORIES
 
@@ -171,8 +175,7 @@ async def search_newgrad_jobs(
     seen_ids: set[str] = set()
 
     for cat in categories_to_search:
-        per_cat_limit = limit * 2 if query else limit
-        jobs = await fetch_job_list(category=cat, limit=per_cat_limit)
+        jobs = await fetch_job_list(category=cat, limit=100)
         for job in jobs:
             eid = job["external_id"]
             if eid not in seen_ids:

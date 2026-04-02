@@ -1,6 +1,6 @@
 # NexusReach — Lessons Learned
 
-Last updated: 2026-03-22
+Last updated: 2026-04-02
 
 This is a curated list of the lessons that still matter for the current codebase. Older one-off historical notes were trimmed so this file stays useful to humans and AI tools.
 
@@ -20,12 +20,20 @@ This is a curated list of the lessons that still matter for the current codebase
 - `normalized_name`, `public_identity_slugs`, and `identity_hints` are now core system fields.
 - **Lesson:** company identity is not just enrichment metadata. It drives search precision, The Org traversal, and verification safety.
 
+### Imported LinkedIn graph data should not become CRM state by accident
+- First-degree connection graph data is useful for ranking and explanation, but it is not the same thing as a saved contact or an outreach relationship.
+- **Lesson:** keep graph rows in their own tables and keep dashboard outreach insights separate until there is an explicit product decision to merge semantics.
+
 ## Search and provider routing
+
+### SearXNG is the right primary bulk engine
+- Self-hosted SearXNG gives enough breadth for bulk discovery without defaulting every request to paid providers.
+- **Lesson:** keep SearXNG first for broad LinkedIn/public discovery, then fall back only when needed.
 
 ### Brave is valuable, but not as the default bulk engine
 - Brave is still strong for exact LinkedIn x-ray lookups.
 - Bulk discovery burns credits too quickly there.
-- **Lesson:** reserve Brave for exact LinkedIn backfill and fallback, and move primary bulk search to Serper.
+- **Lesson:** reserve Brave for exact LinkedIn backfill and fallback, not as the primary bulk path.
 
 ### Tavily is better for corroboration than LinkedIn x-ray
 - Tavily shines when the goal is public-web evidence and summarized corroboration.
@@ -76,6 +84,28 @@ This is a curated list of the lessons that still matter for the current codebase
 - Public identity success does not prove the company’s email domain.
 - **Lesson:** keep public-company verification and email-domain trust on different rails.
 
+## LinkedIn graph and warm paths
+
+### Keep browser auth local
+- The highest-value version of LinkedIn graph sync depends on the user's already-authenticated browser state.
+- **Lesson:** let the local connector read LinkedIn on the user's machine and upload only normalized connection rows. Do not store LinkedIn cookies, passwords, or session tokens on the server.
+
+### Support both CDP attach and a dedicated profile
+- Some users already have a logged-in Chrome session; others need a clean dedicated browser flow.
+- **Lesson:** a local connector should support both an attached CDP session and a persistent profile it owns.
+
+### Never close the user's browser when using CDP
+- Attaching to an existing browser is convenient, but the connector is a guest in that session.
+- **Lesson:** close only the page you open; do not shut down the attached browser instance.
+
+### Headline-based company inference must stay conservative
+- LinkedIn connection cards often expose name + headline but not a structured company field.
+- **Lesson:** infer company names only from obvious patterns like `at Company` or `@ Company`, and let the trusted company-identity layer make the final safety decision.
+
+### Warm-path boosts should happen after safety, not instead of safety
+- First-degree and same-company bridge signals feel persuasive, but they can still point at the wrong company if brand identity is ambiguous.
+- **Lesson:** apply warm-path ranking only after company-safety checks have already passed.
+
 ## LinkedIn backfill and role recovery
 
 ### Humans resolve ambiguity better than the tool, so the tool must stay conservative
@@ -93,7 +123,7 @@ This is a curated list of the lessons that still matter for the current codebase
 ## Email behavior
 
 ### Best-guess emails need explicit basis metadata
-- Once multiple guess modes exist, “best guess” alone is too vague.
+- Once multiple guess modes exist, `best_guess` alone is too vague.
 - **Lesson:** store whether the guess came from a learned company pattern or a weaker generic/domain path.
 
 ### Safe best guesses are useful, but only with domain gating
@@ -110,6 +140,10 @@ This is a curated list of the lessons that still matter for the current codebase
 - Mixing old saved contacts with fresh people-search results caused real confusion during UI testing.
 - **Lesson:** group saved contacts by company, filter them by company, and hide them during live people-search loading.
 
+### Warm-path explanation belongs close to the contact card
+- Imported graph data is only useful if the user can immediately see why a person is warm or cold.
+- **Lesson:** render `your_connections` separately and show warm-path badges/reasons inline on search results.
+
 ### Role-based queries are safer than text-only queries
 - This codebase has many repeated labels and statuses.
 - **Lesson:** prefer Testing Library role queries and exact labels to avoid brittle test failures.
@@ -123,10 +157,6 @@ This is a curated list of the lessons that still matter for the current codebase
 ### `backend/.env` loading depends on the current working directory
 - Running helper scripts from the repo root can silently miss backend config because settings load `.env` relative to the cwd.
 - **Lesson:** run environment-sensitive backend scripts from `backend/` unless you explicitly load the env another way.
-
-### Async relationship access still bites in SQLAlchemy
-- Lazy relationship access inside async services can still trigger `MissingGreenlet`.
-- **Lesson:** eagerly load what the service will need rather than relying on implicit lazy loads.
 
 ### Full repo lint/test commands matter
 - Running only part of the suite misses real failures.

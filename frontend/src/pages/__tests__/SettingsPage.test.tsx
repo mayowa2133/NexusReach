@@ -3,6 +3,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SettingsPage } from '../SettingsPage';
@@ -153,6 +154,22 @@ describe('SettingsPage — basic', () => {
     expect(screen.getByText('LinkedIn Graph')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /sync now/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /upload export/i })).toBeInTheDocument();
+  });
+
+  it('shows connector commands after starting a sync session', async () => {
+    mockStartLinkedInGraphSync.mutateAsync.mockResolvedValue({
+      sync_run_id: 'run-1',
+      session_token: 'secret-token',
+      expires_at: '2026-04-02T12:00:00Z',
+      upload_path: '/api/linkedin-graph/import-batch',
+      max_batch_size: 250,
+    });
+
+    renderSettings();
+    await userEvent.click(screen.getByRole('button', { name: /sync now/i }));
+
+    expect(await screen.findByText(/existing logged-in chrome session via cdp/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/python scripts\/linkedin_graph_connector\.py --base-url/i)).toHaveLength(2);
   });
 });
 

@@ -41,10 +41,33 @@ def _quoted_or_clause(terms: list[str] | None, *, limit: int) -> str:
     return f'({" OR ".join(filtered)})'
 
 
+def _is_product_family(normalized: str) -> bool:
+    """Check whether titles belong to the product/program management family."""
+    return any(
+        kw in normalized
+        for kw in (
+            "product manager", "program manager", "project manager",
+            "associate product", "apm", "group product", "product lead",
+            "director of product", "head of product", "vp product",
+        )
+    )
+
+
+def _is_design_family(normalized: str) -> bool:
+    return any(
+        kw in normalized
+        for kw in ("designer", "design manager", "head of design", "vp of design")
+    )
+
+
 def _public_role_hint(titles: list[str] | None) -> str:
     normalized = " ".join(title.lower() for title in (titles or []) if title)
     if any(keyword in normalized for keyword in ("recruit", "talent acquisition", "sourcer", "campus", "university", "early careers", "early talent")):
         return '("recruiter" OR "recruiting" OR "talent acquisition" OR "sourcer")'
+    if _is_product_family(normalized):
+        return '("product manager" OR "product" OR "program manager")'
+    if _is_design_family(normalized):
+        return '("designer" OR "design manager" OR "design")'
     if any(keyword in normalized for keyword in ("manager", "director", "lead")):
         return '("manager" OR "director" OR "lead")'
     return ""
@@ -56,25 +79,40 @@ def _broad_role_queries(company_name: str, titles: list[str] | None) -> list[str
     Exact-title queries miss people with non-standard titles like
     "Recruiting @ Figma" or "Talent Operations at Figma".  These broad
     queries use role-family keywords instead.
+
+    Important: product/design/data families are checked before the generic
+    "manager" keyword to avoid generating Engineering Manager queries for
+    a Product Manager search.
     """
     if not titles:
         return []
     normalized = " ".join(t.lower() for t in titles if t)
     queries: list[str] = []
+
+    # --- Recruiter family ---
     if any(kw in normalized for kw in ("recruit", "talent", "sourcer")):
         queries.append(f'site:linkedin.com/in "at {company_name}" "Recruiter"')
         queries.append(f'site:linkedin.com/in "at {company_name}" "Recruiting"')
         queries.append(f'site:linkedin.com/in "at {company_name}" "Talent Acquisition"')
-    if any(kw in normalized for kw in ("manager", "director", "lead", "head", "vp", "cto", "cpo")):
+
+    # --- Product / Program management family (checked BEFORE generic "manager") ---
+    if _is_product_family(normalized):
+        queries.append(f'site:linkedin.com/in "at {company_name}" "Product Manager"')
+        queries.append(f'site:linkedin.com/in "at {company_name}" "Program Manager"')
+        queries.append(f'site:linkedin.com/in "at {company_name}" "Head of Product"')
+
+    # --- Design family ---
+    elif _is_design_family(normalized):
+        queries.append(f'site:linkedin.com/in "at {company_name}" "Designer"')
+        queries.append(f'site:linkedin.com/in "at {company_name}" "Design Manager"')
+        queries.append(f'site:linkedin.com/in "at {company_name}" "Head of Design"')
+
+    # --- Engineering / generic leadership (only when NOT product/design) ---
+    elif any(kw in normalized for kw in ("manager", "director", "lead", "head", "vp", "cto")):
         queries.append(f'site:linkedin.com/in "at {company_name}" "Engineering Manager"')
         queries.append(f'site:linkedin.com/in "at {company_name}" "Director of Engineering"')
         queries.append(f'site:linkedin.com/in "at {company_name}" "VP of Engineering"')
-    if any(kw in normalized for kw in ("product manager", "director of product", "head of product", "vp of product", "cpo")):
-        queries.append(f'site:linkedin.com/in "at {company_name}" "Product Manager"')
-        queries.append(f'site:linkedin.com/in "at {company_name}" "Head of Product"')
-    if any(kw in normalized for kw in ("design manager", "head of design", "vp of design")):
-        queries.append(f'site:linkedin.com/in "at {company_name}" "Design Manager"')
-        queries.append(f'site:linkedin.com/in "at {company_name}" "Head of Design"')
+
     return queries
 
 
@@ -336,14 +374,17 @@ async def search_people(
 
     # Broad role-family queries first — they catch non-standard titles
     queries: list[str] = _broad_role_queries(company_name, titles)
-    # Then title-specific queries for each batch
+    # Title-specific queries: scoped (with team keyword) then unscoped for recall
     for batch in _title_batches(titles, batch_size=2):
         title_clause = _quoted_or_clause(batch, limit=2)
         title_part = f" {title_clause}" if title_clause else ""
-        if company_domain:
+        if team_part:
             queries.append(f'site:linkedin.com/in "at {company_name}"{title_part}{team_part}')
+            queries.append(f'site:linkedin.com/in "{company_name}"{domain_part}{title_part}{team_part}')
+        if company_domain:
+            queries.append(f'site:linkedin.com/in "at {company_name}"{title_part}')
             queries.append(f'"{company_name}" "{company_domain}" site:linkedin.com/in{title_part}')
-        queries.append(f'site:linkedin.com/in "{company_name}"{domain_part}{title_part}{team_part}')
+        queries.append(f'site:linkedin.com/in "{company_name}"{domain_part}{title_part}')
 
     results: list[dict] = []
     seen_urls: set[str] = set()

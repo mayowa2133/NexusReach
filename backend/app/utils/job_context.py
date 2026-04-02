@@ -123,6 +123,21 @@ DOMAIN_KEYWORDS_MAP: dict[str, list[str]] = {
     "underwriting": ["underwriting", "adjudication"],
 }
 
+# Roles where "manager" in the title does NOT imply people-management seniority.
+# These are IC roles that happen to contain the word "manager".
+IC_MANAGER_ROLES = (
+    r"\bproduct manager\b",
+    r"\bprogram manager\b",
+    r"\bproject manager\b",
+    r"\baccount manager\b",
+    r"\bcommunity manager\b",
+    r"\bcontent manager\b",
+    r"\bcampaign manager\b",
+    r"\bpartnership manager\b",
+    r"\bsuccess manager\b",
+    r"\brelationship manager\b",
+)
+
 SENIORITY_PATTERNS: list[tuple[str, str]] = [
     (r"\bintern\b", "intern"),
     (r"\bjunior\b|\bjr\.?\b|\bentry[- ]level\b", "junior"),
@@ -131,7 +146,7 @@ SENIORITY_PATTERNS: list[tuple[str, str]] = [
     (r"\bstaff\b", "staff"),
     (r"\bprincipal\b", "principal"),
     (r"\blead\b|\btech lead\b|\bteam lead\b", "lead"),
-    (r"\bmanager\b|\bengineering manager\b|\bem\b", "manager"),
+    (r"\bengineering manager\b|\bem\b", "manager"),
     (r"\bdirector\b", "director"),
     (r"\bvp\b|\bvice president\b", "vp"),
     (r"\bc-level\b|\bcto\b|\bcio\b|\bciso\b", "executive"),
@@ -143,6 +158,7 @@ class JobContext:
     department: str
     team_keywords: list[str] = field(default_factory=list)
     domain_keywords: list[str] = field(default_factory=list)
+    product_team_names: list[str] = field(default_factory=list)
     seniority: str = "mid"
     early_career: bool = False
     manager_titles: list[str] = field(default_factory=list)
@@ -277,10 +293,24 @@ def _top_keywords(scores: dict[str, int], *, min_score: int, limit: int) -> list
     return ranked[:limit]
 
 
+def _is_ic_manager_role(title_lower: str) -> bool:
+    """Return True if the title is an IC role that contains 'manager'."""
+    return any(re.search(p, title_lower) for p in IC_MANAGER_ROLES)
+
+
 def _detect_seniority(title_lower: str) -> str:
     for pattern, level in SENIORITY_PATTERNS:
         if re.search(pattern, title_lower):
+            # Bare "\bmanager\b" was removed from patterns, but if
+            # the title says "Engineering Manager" it still matches.
             return level
+    # If the title contains "manager" but it's an IC role (Product Manager,
+    # Program Manager etc.), treat it as mid-level IC — not people-manager.
+    if re.search(r"\bmanager\b", title_lower) and _is_ic_manager_role(title_lower):
+        return "mid"
+    # Genuine people-manager titles that weren't caught above
+    if re.search(r"\bmanager\b", title_lower):
+        return "manager"
     return "mid"
 
 
@@ -321,42 +351,134 @@ def _build_manager_titles(
 ) -> list[str]:
     titles: list[str] = []
     core = _extract_core_role(base_title)
+    core_lower = core.lower()
+    is_ic_mgr = _is_ic_manager_role(core_lower)
 
-    # Team-specific titles first (highest precision at large orgs)
-    for keyword in keywords[:2]:
-        label = _keyword_label(keyword)
-        titles.extend([
-            f"{label} Engineering Manager",
-            f"{label} Lead",
-            f"{label} Team Lead",
-        ])
+    # --- Product / Program / Project management (IC "manager" roles) ---
+    if is_ic_mgr:
+        # The hiring manager for a PM is a senior PM or product leader
+        if "product manager" in core_lower:
+            titles.extend([
+                "Group Product Manager",
+                "Senior Product Manager",
+                "Director of Product",
+                "Director of Product Management",
+                "VP Product",
+                "Head of Product",
+                "Product Lead",
+            ])
+        elif "program manager" in core_lower:
+            titles.extend([
+                "Senior Program Manager",
+                "Director of Program Management",
+                "Head of Program Management",
+                "Program Director",
+            ])
+        elif "project manager" in core_lower:
+            titles.extend([
+                "Senior Project Manager",
+                "Director of Project Management",
+                "Head of PMO",
+                "Program Director",
+            ])
+        else:
+            # Generic IC-manager role (account manager, etc.)
+            role_family = re.sub(r"\bmanager\b", "", core_lower).strip()
+            role_label = role_family.title() if role_family else ""
+            if role_label:
+                titles.extend([
+                    f"Senior {core}",
+                    f"Director of {role_label}",
+                    f"Head of {role_label}",
+                    f"VP {role_label}",
+                ])
 
+        # Team-specific product/program leaders
+        for keyword in keywords[:2]:
+            label = _keyword_label(keyword)
+            titles.extend([
+                f"{label} Product Lead",
+                f"{label} Group Product Manager",
+            ])
+
+        return list(dict.fromkeys(title for title in titles if title))
+
+    # --- Engineering / Technical roles ---
     if core:
-        if "engineer" in core.lower():
+        if "engineering manager" in core_lower:
+            # Already a management title — manager's manager is a director/VP
+            for keyword in keywords[:2]:
+                label = _keyword_label(keyword)
+                titles.append(f"{label} Engineering Director")
+            titles.extend([
+                "Senior Engineering Manager",
+                "Director of Engineering",
+                "VP Engineering",
+                "Head of Engineering",
+            ])
+        elif "engineer" in core_lower or "engineering" in core_lower:
             engineering_core = re.sub(r"Engineer\b", "Engineering", core, flags=re.IGNORECASE)
+            # Team-specific titles (highest precision at large orgs)
+            for keyword in keywords[:2]:
+                label = _keyword_label(keyword)
+                titles.extend([
+                    f"{label} Engineering Manager",
+                    f"{label} Lead",
+                    f"{label} Team Lead",
+                ])
             titles.extend([
                 f"{engineering_core} Manager",
                 f"{engineering_core} Lead",
                 f"{core} Team Lead",
                 f"{core} Tech Lead",
             ])
-        else:
+        elif department == "design":
+            for keyword in keywords[:2]:
+                label = _keyword_label(keyword)
+                titles.append(f"{label} Design Lead")
             titles.extend([
-                f"{core} Manager",
-                f"{core} Engineering Manager",
+                f"Senior {core}",
+                "Design Manager",
+                "Head of Design",
+                "Design Director",
+                "UX Manager",
+            ])
+        elif department == "data_science":
+            for keyword in keywords[:2]:
+                label = _keyword_label(keyword)
+                titles.append(f"{label} Data Science Lead")
+            titles.extend([
+                f"Senior {core}",
+                "Data Science Manager",
+                "Head of Data Science",
+                "ML Engineering Manager",
+                "Director of Data Science",
+            ])
+        else:
+            for keyword in keywords[:2]:
+                label = _keyword_label(keyword)
+                titles.extend([
+                    f"{label} Lead",
+                    f"{label} Team Lead",
+                ])
+            titles.extend([
+                f"{core} Lead",
+                f"Senior {core}",
                 f"{core} Team Lead",
-                f"{core} Tech Lead",
             ])
         if seniority in {"staff", "principal", "manager", "director", "vp", "executive"}:
             titles.append(f"Head of {core}")
 
     dept_label = department.replace("_", " ").title()
-    titles.extend([
-        f"{dept_label} Manager",
-        "Engineering Manager",
-        "Team Lead",
-        "Tech Lead",
-    ])
+    if department == "engineering":
+        titles.extend([
+            f"{dept_label} Manager",
+            "Engineering Manager",
+            "Team Lead",
+            "Tech Lead",
+        ])
+    else:
+        titles.append(f"{dept_label} Manager")
 
     return list(dict.fromkeys(title for title in titles if title))
 
@@ -370,30 +492,93 @@ def _build_peer_titles(
     titles: list[str] = []
     core = _extract_core_role(base_title)
     core_lower = core.lower()
+    is_ic_mgr = _is_ic_manager_role(core_lower)
     ml_like_role = (
         department == "data_science"
         and any(term in core_lower for term in ("machine learning", "ml", "ai", "applied scientist", "model training"))
     ) or ("data scientist" in core_lower) or ("model training" in core_lower)
+
+    # --- Product / Program / Project manager peers ---
+    if is_ic_mgr:
+        titles.append(core)
+        if "product manager" in core_lower:
+            titles.extend([
+                "Product Manager",
+                "Associate Product Manager",
+                "Technical Program Manager",
+                "Product Analyst",
+            ])
+        elif "program manager" in core_lower:
+            titles.extend([
+                "Program Manager",
+                "Technical Program Manager",
+                "Project Manager",
+            ])
+        elif "project manager" in core_lower:
+            titles.extend([
+                "Project Manager",
+                "Program Manager",
+                "Project Coordinator",
+            ])
+        else:
+            titles.append(core)
+
+        # Seniority-adjacent variants
+        if seniority in {"senior", "staff", "lead", "principal"}:
+            titles.extend([
+                f"Senior {title}" for title in titles[:3]
+                if title and not title.startswith("Senior ")
+            ])
+        if seniority in {"junior", "mid", "intern"}:
+            titles.extend([
+                f"Associate {title}" for title in titles[:2]
+                if title and not title.startswith("Associate ")
+            ])
+            # APM is very common shorthand
+            if "product manager" in core_lower:
+                titles.append("APM")
+
+        # Team-specific peers
+        for keyword in keywords[:2]:
+            label = _keyword_label(keyword)
+            titles.append(f"{label} Product Manager")
+
+        return list(dict.fromkeys(title for title in titles if title))
+
+    # --- Engineering / Technical peers ---
     if core:
         titles.append(core)
-        if "engineer" in core.lower():
-            titles.append(core.replace("Engineer", "Developer"))
-            if "software engineer" not in core.lower():
-                titles.append(core.replace("Engineer", "Software Engineer"))
-        elif "developer" in core.lower():
+        if re.search(r"\bengineer\b", core_lower):
+            titles.append(re.sub(r"\bEngineer\b", "Developer", core, flags=re.IGNORECASE))
+            if "software engineer" not in core_lower:
+                titles.append(re.sub(r"\bEngineer\b", "Software Engineer", core, flags=re.IGNORECASE))
+        elif "developer" in core_lower:
             titles.append(core.replace("Developer", "Engineer"))
+        elif "designer" in core_lower:
+            # Design-specific peer expansion
+            titles.extend([
+                "UX Designer",
+                "Product Designer",
+                "UI Designer",
+                "Visual Designer",
+            ])
+        elif "analyst" in core_lower:
+            # Analyst-specific peer expansion
+            titles.extend([
+                "Data Analyst",
+                "Business Analyst",
+                "Analytics Engineer",
+            ])
         if ml_like_role:
-            titles.extend(
-                [
-                    "Machine Learning Engineer",
-                    "Software Engineer",
-                    "Applied Scientist",
-                    "Research Engineer",
-                    "Data Scientist",
-                    "Model Training Engineer",
-                    "Training Infrastructure Engineer",
-                ]
-            )
+            titles.extend([
+                "Machine Learning Engineer",
+                "Software Engineer",
+                "Applied Scientist",
+                "Research Engineer",
+                "Data Scientist",
+                "Model Training Engineer",
+                "Training Infrastructure Engineer",
+            ])
 
     for keyword in keywords[:2]:
         if ml_like_role and keyword == "security":
@@ -509,6 +694,63 @@ def _conservative_early_career_keywords(
     return ranked
 
 
+# Common product/team/org name patterns to extract from job descriptions.
+# These are capitalized multi-word phrases that indicate a specific product,
+# platform, or team and are useful for scoping people searches.
+_PRODUCT_NAME_RE = re.compile(
+    r"\b([A-Z][a-zA-Z0-9]+(?: [A-Z][a-zA-Z0-9]+)+)\b"
+)
+# Phrases that look like product names but are actually generic.
+_PRODUCT_NAME_STOPWORDS = frozenset({
+    "About Us", "About The", "The Company", "The Team", "Our Team",
+    "Our Mission", "We Are", "You Will", "What You", "Who You",
+    "How You", "This Role", "The Role", "Your Role", "In This",
+    "United States", "San Francisco", "New York", "Los Angeles",
+    "Equal Opportunity", "Equal Employment", "Base Salary",
+    "Job Description", "Key Responsibilities", "Nice To",
+    "Must Have", "Years Of", "Bachelor Of",
+    "North America", "Remote Work",
+})
+
+
+def _extract_product_team_names(
+    description: str | None,
+    company_name: str | None = None,
+    limit: int = 3,
+) -> list[str]:
+    """Extract specific product/team/platform names from a job description.
+
+    Looks for capitalized multi-word phrases that appear at least twice in
+    the description, indicating they are named products or teams rather than
+    one-off mentions.  Results are ranked by frequency.
+
+    Examples: "Data Cloud", "Data 360", "Einstein Analytics", "Commerce Cloud"
+    """
+    if not description:
+        return []
+    desc_clean = _strip_html(description)
+
+    # Count occurrences of each capitalized phrase
+    counts: dict[str, int] = {}
+    for match in _PRODUCT_NAME_RE.finditer(desc_clean):
+        name = match.group(1).strip()
+        if len(name) < 4 or name in _PRODUCT_NAME_STOPWORDS:
+            continue
+        # Skip phrases that are just the company name
+        if company_name and name.lower() == company_name.lower():
+            continue
+        counts[name] = counts.get(name, 0) + 1
+
+    # Only keep names mentioned 2+ times (to filter noise)
+    frequent = [
+        (name, count) for name, count in counts.items()
+        if count >= 2
+    ]
+    # Rank by frequency, then length (shorter product names are usually more specific)
+    frequent.sort(key=lambda x: (-x[1], len(x[0])))
+    return [name for name, _ in frequent[:limit]]
+
+
 def extract_job_context(title: str, description: str | None = None) -> JobContext:
     """Extract structured job context from a title and description."""
     title_lower, lead_lower, body_lower = _extract_sections(title, description)
@@ -555,11 +797,13 @@ def extract_job_context(title: str, description: str | None = None) -> JobContex
         domain_keywords,
         early_career=early_career,
     )
+    product_team_names = _extract_product_team_names(description)
 
     return JobContext(
         department=department,
         team_keywords=team_keywords,
         domain_keywords=domain_keywords,
+        product_team_names=product_team_names,
         seniority=seniority,
         early_career=early_career,
         manager_titles=manager_titles,

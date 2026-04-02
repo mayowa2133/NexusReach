@@ -86,14 +86,17 @@ async def search_people(
 
     # Broad role-family queries first — they catch non-standard titles
     queries: list[str] = brave_search_client._broad_role_queries(company_name, titles)
-    # Then title-specific queries for each batch
+    # Title-specific queries: scoped (with team keyword) then unscoped for recall
     for batch in _title_batches(titles, batch_size=2):
         title_clause = brave_search_client._quoted_or_clause(batch, limit=2)
         title_part = f" {title_clause}" if title_clause else ""
-        if company_domain:
+        if team_part:
             queries.append(f'site:linkedin.com/in "at {company_name}"{title_part}{team_part}')
+            queries.append(f'site:linkedin.com/in "{company_name}"{domain_part}{title_part}{team_part}')
+        if company_domain:
+            queries.append(f'site:linkedin.com/in "at {company_name}"{title_part}')
             queries.append(f'"{company_name}" "{company_domain}" site:linkedin.com/in{title_part}')
-        queries.append(f'site:linkedin.com/in "{company_name}"{domain_part}{title_part}{team_part}')
+        queries.append(f'site:linkedin.com/in "{company_name}"{domain_part}{title_part}')
 
     results: list[dict] = []
     seen_urls: set[str] = set()

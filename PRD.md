@@ -1,8 +1,8 @@
 # NexusReach — Product Requirements Document
 
-Last updated: 2026-03-22
+Last updated: 2026-04-02
 
-This PRD reflects the current intended product behavior, including features that are already shipped and the operating rules they should continue to preserve.
+This PRD reflects the current intended product behavior, including features that are already shipped and the rules they should continue to preserve.
 
 ## Vision
 
@@ -12,6 +12,7 @@ NexusReach helps a job seeker go from:
 
 to:
 - the right humans to contact
+- a usable warm path when one exists
 - a safe way to reach them
 - a high-quality draft message
 - a clear history of prior outreach
@@ -33,6 +34,7 @@ The product should make networking systematic without making it robotic. The use
 3. Same-company contact hierarchy beats empty output.
 4. Verification and role fit are different concerns.
 5. Email-domain trust and public-company identity trust are different concerns.
+6. Imported relationship graph data must stay separate from CRM contact state and outreach analytics.
 
 ## Module 1: Profile and user context
 
@@ -99,9 +101,10 @@ Each bucket should be ranked in this order:
 2. `adjacent`
 3. `next_best`
 
-### Product requirement
+### Product requirements
 - buckets should prefer same-company contacts even when the exact ideal person is not available
 - lower-confidence same-company fallbacks must be labeled, not silently mixed with direct matches
+- ranking may use warm-path metadata only after company-safety checks have already passed
 
 ### Job-aware search
 When the user launches people search from a saved job:
@@ -119,11 +122,34 @@ People discovery can use:
 - Proxycurl and GitHub enrichment where relevant
 
 ### Search provider requirements
-- Brave should remain available because it is strong for exact LinkedIn backfill
-- bulk search should not depend exclusively on Brave credits
+- SearXNG should remain the default bulk provider because it is self-hosted and cheap to scale
+- Brave should remain available because it is still strong for exact LinkedIn backfill
+- bulk search should not depend exclusively on paid provider credits
 - search should support provider fallback and caching
 
-## Module 5: Public-web verification
+## Module 5: LinkedIn graph warm paths
+
+The product should support a user-controlled warm-path layer without turning LinkedIn into a server-side auth dependency.
+
+### Required behaviors
+- import first-degree LinkedIn connection data in a user-scoped graph store separate from CRM contacts
+- support manual LinkedIn export upload as a fallback
+- support a local browser-sync flow that reads LinkedIn from the user's device and uploads only normalized rows
+- surface `your_connections` at the target company in the People flow
+- annotate contacts with direct-connection or same-company-bridge explanations when appropriate
+
+### Safety requirements
+- imported graph data must not bypass ambiguous-company protections
+- imported graph data must not alter email trust rules
+- imported graph data must not overwrite saved CRM `Person` rows
+- the server must not store LinkedIn cookies, passwords, or session tokens
+
+### v1 scope requirement
+- LinkedIn graph data affects people-search ranking and explanation only
+- dashboard outreach `warm_paths` remains based on real outreach history in v1
+- message drafting does not yet depend on the graph in v1
+
+## Module 6: Public-web verification
 
 The product must separate:
 - company verification
@@ -136,11 +162,11 @@ The product must separate:
 - team pages require stricter evidence than person pages
 - public verification source should be surfaced as `public_web`
 
-### Product requirement
+### Product requirements
 - a contact may be useful as a `next_best` fallback even if current company is not fully verified
 - a verified company match should not automatically imply a safe email domain
 
-## Module 6: Email layer
+## Module 7: Email layer
 
 ### Desired outputs
 Email lookup should return one of:
@@ -148,7 +174,7 @@ Email lookup should return one of:
 - `best_guess`
 - `not_found`
 
-### Product requirement
+### Product requirements
 - verified emails should always outrank guesses
 - best guesses are allowed only from approved domain signals
 - ambiguous-company or unsafe-domain cases must still withhold guesses
@@ -157,7 +183,7 @@ Email lookup should return one of:
 ### User experience requirement
 - if no safe email exists, the product should still leave the user with a LinkedIn/public-contact path when available
 
-## Module 7: Message drafting
+## Module 8: Message drafting
 
 ### Required message types
 - LinkedIn connection note
@@ -166,7 +192,7 @@ Email lookup should return one of:
 - follow-up
 - thank-you / post-conversation
 
-### Product requirement
+### Product requirements
 - drafts must incorporate:
   - user context
   - contact context
@@ -175,7 +201,7 @@ Email lookup should return one of:
 - provider choice should be abstracted so the product is not locked to one LLM vendor
 - drafts may be staged into Gmail or Outlook, but never auto-sent
 
-## Module 8: CRM and contact history
+## Module 9: CRM and contact history
 
 The CRM should ensure the user always knows:
 - who they found
@@ -188,20 +214,22 @@ The CRM should ensure the user always knows:
 - status tracking for each relationship
 - linkage between jobs, companies, people, messages, and outreach logs
 - saved contacts should be filterable by company
+- imported LinkedIn graph rows must stay outside the saved-contact CRM model
 
-## Module 9: Insights and cost-awareness
+## Module 10: Insights and cost-awareness
 
 The product should help the user network more intelligently over time.
 
 ### Required capabilities
 - response-rate style analytics
 - network-gap views
-- warm-path visibility
+- warm-path visibility in people search
 - company/job linkage across outreach
 
-### Internal system requirement
+### Internal system requirements
 - external-provider usage should be routed and cached to reduce cost burn
-- expensive search providers should be reserved for the narrowest, highest-value tasks
+- expensive providers should be reserved for the narrowest, highest-value tasks
+- outreach-derived insights and imported LinkedIn graph insights must remain conceptually separate until intentionally unified
 
 ## Non-functional requirements
 
@@ -209,7 +237,7 @@ The product should help the user network more intelligently over time.
 - **Accuracy:** same-company misclassification is a higher-severity error than underfilling a bucket
 - **Privacy:** all persisted data must remain scoped to `user_id`
 - **Resilience:** exact-job pages and public pages should fail honestly when upstream providers are down
-- **Transparency:** the UI should expose enough metadata that a user can tell whether a contact is direct, adjacent, next-best, verified, or guessed
+- **Transparency:** the UI should expose enough metadata that a user can tell whether a contact is direct, adjacent, next-best, verified, guessed, or supported by a warm path
 
 ## Guardrails
 
@@ -218,6 +246,7 @@ The product should help the user network more intelligently over time.
 - visible prior outreach history
 - explicit labels for weaker evidence
 - warnings rather than silent unsafe behavior
+- no server-side storage of LinkedIn auth material
 
 ### Toggle philosophy
-Guardrails are defaults, not locks. But safety-sensitive behaviors such as ambiguous-domain email guessing must still be blocked even if the user wants more aggressive output.
+Guardrails are defaults, not locks. But safety-sensitive behaviors such as ambiguous-domain email guessing or unsafe same-company promotion must still be blocked even if the user wants more aggressive output.

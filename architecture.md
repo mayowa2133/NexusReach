@@ -1,6 +1,6 @@
 # NexusReach — Architecture
 
-Last updated: 2026-03-22
+Last updated: 2026-04-02
 
 This document describes the current implemented architecture, not the original greenfield plan.
 
@@ -16,6 +16,7 @@ flowchart TD
 
     SVC --> JOBS["Job Ingestion"]
     SVC --> PEOPLE["People Discovery"]
+    SVC --> GRAPH["LinkedIn Graph"]
     SVC --> EMAIL["Email Finder"]
     SVC --> MSG["Message Drafting"]
 
@@ -24,9 +25,13 @@ flowchart TD
     PEOPLE --> THEORG["The Org Traversal"]
     PEOPLE --> VERIFY["Employment Verification"]
     PEOPLE --> BACKFILL["LinkedIn Backfill"]
+    PEOPLE --> GRAPH
+    GRAPH --> CONNECTOR["Local Browser Connector"]
+    GRAPH --> IMPORT["Manual CSV / ZIP Import"]
     EMAIL --> HUNTER["Hunter / Pattern Learning"]
     MSG --> LLM["LLM Provider Router"]
 
+    SEARCH --> SEARXNG["SearXNG"]
     SEARCH --> SERPER["Serper"]
     SEARCH --> BRAVE["Brave Search"]
     SEARCH --> TAVILY["Tavily"]
@@ -54,7 +59,7 @@ That remains the right tradeoff because the product is integration-heavy, data r
 ## Frontend architecture
 
 ### Stack
-- React 18
+- React 19
 - TypeScript
 - Vite
 - React Router
@@ -83,11 +88,14 @@ frontend/src/pages/
 - Zustand owns auth/session and other client-only state.
 - The People page groups saved contacts by company and filters them by company name.
 - Messages and Outreach reuse the same saved-contact company filter pattern.
-- People cards render:
+- People results can render:
   - `match_quality`
   - `company_match_confidence`
   - email verification metadata
   - current-company verification metadata
+  - warm-path badges and explanations
+  - a `your_connections` section for imported first-degree LinkedIn matches
+- The Settings page exposes the LinkedIn graph status, import actions, sync-session creation, and local connector commands.
 
 ## Backend architecture
 
@@ -100,6 +108,7 @@ backend/app/routers/
 ├── email.py
 ├── insights.py
 ├── jobs.py
+├── linkedin_graph.py
 ├── messages.py
 ├── notifications.py
 ├── outreach.py
@@ -116,11 +125,16 @@ Routers remain thin. They validate input, resolve dependencies, and delegate to 
 Key current services:
 - `job_service.py`
 - `people_service.py`
+- `linkedin_graph_service.py`
 - `employment_verification_service.py`
 - `email_finder_service.py`
 - `message_service.py`
 - `api_usage_service.py`
 - `theorg_discovery_service.py`
+
+The local browser connector helper is implemented separately in:
+- `backend/app/services/linkedin_graph_browser_sync.py`
+- `backend/scripts/linkedin_graph_connector.py`
 
 ### Client layer
 
@@ -132,6 +146,7 @@ Key current clients:
   - `remote_jobs_client.py`
 - search clients:
   - `search_router_client.py`
+  - `searxng_search_client.py`
   - `serper_search_client.py`
   - `brave_search_client.py`
   - `tavily_search_client.py`
@@ -155,7 +170,7 @@ Key current clients:
 
 ### Company
 
-The company model is now central to identity and email safety, not just enrichment.
+The company model is central to identity and email safety, not just enrichment.
 
 Important fields:
 - `name`
@@ -167,11 +182,9 @@ Important fields:
 - `email_pattern`
 - `email_pattern_confidence`
 
-`public_identity_slugs` and `identity_hints` drive The Org traversal, slug repair, and company disambiguation.
-
 ### Job
 
-Jobs are now stored in a way that supports both board-backed ATS and exact-job URLs.
+Jobs support both board-backed ATS and exact-job URLs.
 
 Important fields:
 - `external_id`
@@ -188,7 +201,7 @@ Important fields:
 
 ### Person
 
-The person model now carries verification and email state, not just profile info.
+The person model carries verification and email state, not just profile info.
 
 Important fields:
 - `full_name`
@@ -212,12 +225,36 @@ Transient response-layer metadata also matters:
 - `match_quality`
 - `company_match_confidence`
 - `fallback_reason`
+- `warm_path_type`
+- `warm_path_reason`
+- `warm_path_connection`
+
+### LinkedIn graph
+
+Warm-path data is intentionally stored outside the CRM `Person` table.
+
+Important persisted models:
+- `LinkedInGraphConnection`
+  - user-scoped connection record
+  - normalized LinkedIn profile slug/URL
+  - display name
+  - headline
+  - current company
+  - normalized company identity
+  - optional company LinkedIn URL/slug
+  - sync/import source
+- `LinkedInGraphSyncRun`
+  - sync source (`local_sync` or `manual_import`)
+  - short-lived session-token hash
+  - sync status
+  - processed / created / updated counts
+  - expiry, completion, and error metadata
 
 ## Job ingestion architecture
 
 ### Two-lane ingestion model
 
-NexusReach now supports two job-ingestion lanes:
+NexusReach supports two job-ingestion lanes:
 
 1. **Board-backed ATS search**
    - Greenhouse
@@ -242,12 +279,6 @@ flowchart TD
     DEDUPE --> SAVE["Persist Job + Company linkage"]
 ```
 
-### Important exact-job behaviors
-- URLs are canonicalized before persistence.
-- Workday exact-job fetch preserves metadata-rich HTML even when the visible body is thin.
-- Workday outage or maintenance pages should fail cleanly instead of importing the wrong landing page.
-- Generic exact-job ingestion is best-effort and only activates for direct `job_url` input.
-
 ## People discovery architecture
 
 ### High-level flow
@@ -258,62 +289,82 @@ flowchart TD
     CONTEXT --> SEARCH["Search router"]
     SEARCH --> HIRING["Hiring-team search"]
     SEARCH --> PUBLIC["Public people search"]
-    SEARCH --> LINKEDIN["LinkedIn x-ray search"]
-    CONTEXT --> THEORG["The Org expansion when needed"]
-    THEORG --> VERIFY["Employment verification"]
-    SEARCH --> VERIFY
+    PUBLIC --> THEORG["The Org expansion when needed"]
+    HIRING --> VERIFY["Employment verification"]
+    THEORG --> VERIFY
     VERIFY --> TITLE["Title recovery"]
     TITLE --> BACKFILL["LinkedIn backfill"]
-    BACKFILL --> RANK["Rank into direct / adjacent / next_best"]
+    BACKFILL --> GRAPH["Apply LinkedIn graph warm-path annotations"]
+    GRAPH --> RANK["Rank into direct / adjacent / next_best"]
     RANK --> STORE["Store/update Person rows"]
 ```
 
 ### Search-provider router
 
-The router exists to preserve Brave credits while keeping discovery quality stable.
+The router exists to keep discovery quality stable without defaulting to paid provider fan-out.
 
 Current provider responsibility matrix:
 
 | Query family | Default order |
 | --- | --- |
-| Bulk LinkedIn people | `Serper -> Brave -> Google CSE` |
-| Exact LinkedIn profile | `Brave -> Serper -> Google CSE` |
-| Hiring-team search | `Serper -> Brave` |
-| Public people | `Serper -> Brave -> Tavily` |
-| Employment corroboration | `Tavily -> Serper -> Brave` |
+| Bulk LinkedIn people | `SearXNG -> Serper -> Brave -> Google CSE` |
+| Exact LinkedIn profile | `SearXNG -> Brave -> Serper -> Google CSE` |
+| Hiring-team search | `SearXNG -> Serper -> Brave` |
+| Public people | `SearXNG -> Serper -> Brave -> Tavily` |
+| Employment corroboration | `Tavily -> SearXNG -> Serper -> Brave` |
 
 Raw provider results are cached in Redis by:
 - provider
 - query family
 - normalized params hash
 
-### The Org traversal
+### Warm-path application rules
 
-The Org is a bounded second-stage expansion, not the only discovery path.
+The LinkedIn graph participates after the candidate set is already safe enough to rank.
 
-Current behavior:
-- resolves org slugs from trusted `public_identity_slugs`
-- validates org pages before trusting the slug
-- caches preferred and rejected slug state in `identity_hints`
-- traverses a limited number of org/team/person pages
-- harvests recruiter, manager, and peer candidates
-- keeps page metadata in `profile_data`
+Important rules:
+- direct LinkedIn connection matches are detected by normalized profile slug
+- same-company bridge matches are detected by trusted company identity
+- warm-path ranking boosts can reorder safe candidates
+- warm-path ranking boosts cannot override:
+  - ambiguous-company protections
+  - employer verification rules
+  - email trust rules
 
-### Title recovery and LinkedIn backfill
+## LinkedIn graph sync architecture
 
-After raw discovery:
-- weak titles are repaired from snippets, public pages, or The Org
-- verified public candidates without LinkedIn URLs get a second-pass exact-name/company LinkedIn lookup
-- LinkedIn attachment is strict and precision-biased
+### API surface
 
-### Ranking model
+The backend exposes:
+- `GET /api/linkedin-graph/status`
+- `POST /api/linkedin-graph/sync-session`
+- `POST /api/linkedin-graph/import-batch`
+- `POST /api/linkedin-graph/import-file`
+- `DELETE /api/linkedin-graph/connections`
 
-Current buckets are ranked in same-company order:
-1. `direct`
-2. `adjacent`
-3. `next_best`
+### Local browser-sync flow
 
-This replaced the older verified-only-empty-bucket behavior.
+```mermaid
+flowchart TD
+    SETTINGS["Settings page"] --> SESSION["Create sync session"]
+    SESSION --> TOKEN["Short-lived session token"]
+    TOKEN --> CONNECTOR["Local Playwright connector"]
+    CONNECTOR -->|CDP| CHROME["Existing logged-in Chrome"]
+    CONNECTOR -->|Persistent profile| PROFILE["Dedicated NexusReach browser profile"]
+    CHROME --> SCRAPE["Scrape first-degree connection cards locally"]
+    PROFILE --> SCRAPE
+    SCRAPE --> NORMALIZE["Normalize + dedupe rows"]
+    NORMALIZE --> BATCH["POST /api/linkedin-graph/import-batch"]
+    BATCH --> GRAPHDB["linkedin_graph_connections"]
+```
+
+### Manual-import flow
+
+Manual import remains the fallback:
+- LinkedIn Connections CSV
+- LinkedIn data-export ZIP containing the connections CSV
+
+Both flows converge on the same normalization/upsert path.
 
 ## Employment verification architecture
 
@@ -367,6 +418,7 @@ Draft creation and draft staging remain separate. NexusReach never auto-sends.
   - Redis on `localhost:6379`
   - frontend on `localhost:5173`
   - backend on `localhost:8000`
+- LinkedIn graph browser sync is a local operator flow and currently assumes Playwright is available on the machine running the connector.
 
 ## Architecture truths worth preserving
 
@@ -375,3 +427,4 @@ Draft creation and draft staging remain separate. NexusReach never auto-sends.
 3. Company identity and email trust must stay separate.
 4. Exact-job ingestion should prefer honesty over over-parsing.
 5. Same-company fallback hierarchy is more useful than empty verified-only buckets.
+6. Imported LinkedIn graph data should remain a separate subsystem until there is an explicit decision to merge it with CRM or insights semantics.

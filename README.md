@@ -1,6 +1,6 @@
 # NexusReach
 
-NexusReach is a networking assistant for job seekers. It helps a user move from a job posting or target company to actual people, usable outreach drafts, and a lightweight networking CRM.
+NexusReach is a networking assistant for job seekers. It helps a user move from a job posting or target company to actual people, usable warm paths, safe outreach drafts, and a lightweight networking CRM.
 
 The product is designed around one rule: the human is always in the loop. NexusReach can discover, rank, enrich, verify, and draft, but it never sends outreach automatically.
 
@@ -23,11 +23,22 @@ The product is designed around one rule: the human is always in the loop. NexusR
   - `Adjacent`
   - `Next Best`
 - enrich and verify people using LinkedIn/public-web evidence, not just one provider
+- surface imported first-degree LinkedIn connections as warm paths during people search
+
+### LinkedIn graph warm paths
+- import LinkedIn connections through:
+  - manual CSV/ZIP upload
+  - a local browser-sync connector
+- show `Your Connections at {company}` above people-search results
+- annotate contacts with:
+  - direct LinkedIn connection
+  - same-company warm-path bridge
+- keep imported graph data separate from saved CRM contacts and outreach-derived dashboard insights
 
 ### Public discovery stack
 - Apollo for company/org enrichment where useful
-- Serper as the primary bulk search provider
-- Brave Search retained for exact LinkedIn backfill and fallback
+- SearXNG as the primary bulk search provider
+- Serper and Brave Search retained as paid fallbacks
 - Tavily for employment corroboration and fallback public discovery
 - The Org traversal for trusted org-chart discovery
 - Redis-backed search query caching to reduce repeated provider spend
@@ -42,14 +53,16 @@ The product is designed around one rule: the human is always in the loop. NexusR
 - track outreach statuses and notes
 - filter saved contacts by company on People, Messages, and Outreach
 - keep contacts linked back to the jobs and companies that produced them
+- expose LinkedIn graph sync status and local connector commands in Settings
 
 ## Current architecture highlights
 
-- **Frontend:** React 18, TypeScript, Vite, React Router, TanStack Query, Zustand, Tailwind, shadcn/ui
+- **Frontend:** React 19, TypeScript, Vite, React Router, TanStack Query, Zustand, Tailwind, shadcn/ui
 - **Backend:** FastAPI, SQLAlchemy, Alembic, PostgreSQL, Redis, Celery, Pydantic v2
 - **LLMs:** Anthropic, OpenAI, Gemini, or Groq through a shared provider abstraction
-- **Search routing:** Serper, Brave, Tavily, optional Google CSE, Redis cache
+- **Search routing:** SearXNG, Serper, Brave, Tavily, optional Google CSE, Redis cache
 - **Public page retrieval:** direct `httpx`, then Crawl4AI, then optional Firecrawl
+- **LinkedIn graph sync:** manual import or local Playwright browser connector
 
 ## Supported job posting flows
 
@@ -74,7 +87,8 @@ NexusReach does not rely on one provider to find people. The current pipeline is
 4. expand with The Org when buckets underfill or the company is ambiguous
 5. verify current company using LinkedIn/public-web evidence
 6. backfill LinkedIn profiles for verified The Org/public candidates
-7. rank results as `direct`, `adjacent`, or `next_best`
+7. apply imported LinkedIn graph warm-path annotations
+8. rank results as `direct`, `adjacent`, or `next_best`
 
 ## Email behavior
 
@@ -112,6 +126,7 @@ NexusReach/
 │   │   ├── tasks/
 │   │   └── utils/
 │   ├── alembic/
+│   ├── scripts/
 │   └── tests/
 ├── PRD.md
 ├── architecture.md
@@ -158,6 +173,21 @@ celery -A app.tasks worker --loglevel=info
 celery -A app.tasks beat --loglevel=info
 ```
 
+### Optional LinkedIn browser-sync helper
+
+The local LinkedIn graph connector is not part of the backend requirements file. Install Playwright locally if you want the browser-sync flow:
+
+```bash
+cd backend
+pip install playwright
+python -m playwright install chrome
+python scripts/linkedin_graph_connector.py --help
+```
+
+The connector can either:
+- attach to an already logged-in Chrome session via `--cdp-url`
+- open a dedicated persistent browser profile and wait for you to sign in once
+
 ## Important environment variables
 
 ### Core app
@@ -169,6 +199,7 @@ celery -A app.tasks beat --loglevel=info
 - `NEXUSREACH_AUTH_MODE`
 
 ### Search and public discovery
+- `NEXUSREACH_SEARXNG_BASE_URL`
 - `NEXUSREACH_BRAVE_API_KEY`
 - `NEXUSREACH_SERPER_API_KEY`
 - `NEXUSREACH_TAVILY_API_KEY`
@@ -202,6 +233,10 @@ celery -A app.tasks beat --loglevel=info
 - `NEXUSREACH_GROQ_API_KEY`
 - `NEXUSREACH_LLM_PROVIDER`
 
+### LinkedIn graph
+- `NEXUSREACH_LINKEDIN_GRAPH_SYNC_SESSION_TTL_SECONDS`
+- `NEXUSREACH_LINKEDIN_GRAPH_MAX_IMPORT_BATCH_SIZE`
+
 ## Local quality checks
 
 ```bash
@@ -215,8 +250,9 @@ cd frontend && npm run build
 
 ## Important truths
 
-1. Brave is still part of the product, but it is intentionally reserved for higher-value exact LinkedIn lookups and fallback use.
+1. SearXNG is the default primary search provider; Brave and Serper are fallback paths, not the first stop.
 2. Firecrawl is optional. The default page-fetch path is direct `httpx` plus Crawl4AI.
 3. Current-company verification and email-domain trust are different concerns.
-4. Workday exact-job ingestion should fail honestly on maintenance/outage pages instead of importing the wrong landing page.
-5. Saved contacts are user-scoped and company-filterable, but people-search output should always be interpreted against the live bucket result, not the global saved-contact list.
+4. Imported LinkedIn graph data is separate from saved CRM contacts and from outreach-derived dashboard `warm_paths`.
+5. The server does not store LinkedIn browser auth material. The local connector uploads only normalized connection rows.
+6. Workday exact-job ingestion should fail honestly on maintenance/outage pages instead of importing the wrong landing page.

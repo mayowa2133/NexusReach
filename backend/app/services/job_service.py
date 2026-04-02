@@ -239,8 +239,10 @@ async def search_jobs(
     if "simplify" in all_sources:
         raw_jobs.extend(await remote_jobs_client.fetch_simplify_jobs(limit=limit))
     if "newgrad" in all_sources:
+        # newgrad-jobs.com serves ~100 jobs per category across 5 categories.
+        # Let it pull all available instead of capping to the generic limit.
         raw_jobs.extend(await newgrad_jobs_client.search_newgrad_jobs(
-            query=query, limit=limit,
+            query=query,
         ))
 
     # Deduplicate and store
@@ -636,18 +638,96 @@ ATS_DISCOVER_BOARDS: list[dict[str, str]] = [
     {"slug": "squarespace", "ats": "greenhouse"},
     {"slug": "relativityspace", "ats": "greenhouse"},
     {"slug": "airtable", "ats": "greenhouse"},
+    {"slug": "zscaler", "ats": "greenhouse"},
+    {"slug": "instacart", "ats": "greenhouse"},
+    {"slug": "scaleai", "ats": "greenhouse"},
+    {"slug": "twitch", "ats": "greenhouse"},
+    {"slug": "affirm", "ats": "greenhouse"},
+    {"slug": "epicgames", "ats": "greenhouse"},
+    {"slug": "roblox", "ats": "greenhouse"},
+    {"slug": "postman", "ats": "greenhouse"},
+    {"slug": "vercel", "ats": "greenhouse"},
+    {"slug": "roku", "ats": "greenhouse"},
+    {"slug": "gusto", "ats": "greenhouse"},
+    {"slug": "jfrog", "ats": "greenhouse"},
+    {"slug": "block", "ats": "greenhouse"},
+    {"slug": "toast", "ats": "greenhouse"},
+    {"slug": "spacex", "ats": "greenhouse"},
+    {"slug": "marqeta", "ats": "greenhouse"},
+    {"slug": "anthropic", "ats": "greenhouse"},
+    {"slug": "asana", "ats": "greenhouse"},
+    {"slug": "stabilityai", "ats": "greenhouse"},
+    {"slug": "pinterest", "ats": "greenhouse"},
+    {"slug": "togetherai", "ats": "greenhouse"},
+    {"slug": "reddit", "ats": "greenhouse"},
+    {"slug": "lucidmotors", "ats": "greenhouse"},
+    {"slug": "dropbox", "ats": "greenhouse"},
+    {"slug": "twilio", "ats": "greenhouse"},
+    {"slug": "datadog", "ats": "greenhouse"},
+    {"slug": "cloudflare", "ats": "greenhouse"},
+    {"slug": "betterment", "ats": "greenhouse"},
+    {"slug": "webflow", "ats": "greenhouse"},
+    {"slug": "elastic", "ats": "greenhouse"},
+    {"slug": "chime", "ats": "greenhouse"},
+    {"slug": "flexport", "ats": "greenhouse"},
+    {"slug": "billcom", "ats": "greenhouse"},
+    {"slug": "gitlab", "ats": "greenhouse"},
+    {"slug": "linkedin", "ats": "greenhouse"},
+    {"slug": "mongodb", "ats": "greenhouse"},
+    {"slug": "lyft", "ats": "greenhouse"},
+    {"slug": "okta", "ats": "greenhouse"},
     # Ashby
     {"slug": "ramp", "ats": "ashby"},
     {"slug": "notion", "ats": "ashby"},
     {"slug": "openai", "ats": "ashby"},
     {"slug": "linear", "ats": "ashby"},
     {"slug": "cursor", "ats": "ashby"},
+    {"slug": "snowflake", "ats": "ashby"},
+    {"slug": "cohere", "ats": "ashby"},
+    {"slug": "clickup", "ats": "ashby"},
+    {"slug": "zapier", "ats": "ashby"},
+    {"slug": "runway", "ats": "ashby"},
+    {"slug": "deel", "ats": "ashby"},
+    {"slug": "vanta", "ats": "ashby"},
+    {"slug": "plaid", "ats": "ashby"},
+    {"slug": "elevenlabs", "ats": "ashby"},
+    {"slug": "replit", "ats": "ashby"},
+    {"slug": "perplexity", "ats": "ashby"},
+    {"slug": "ashby", "ats": "ashby"},
+    {"slug": "deepgram", "ats": "ashby"},
+    {"slug": "confluent", "ats": "ashby"},
+    {"slug": "benchling", "ats": "ashby"},
+    {"slug": "supabase", "ats": "ashby"},
+    {"slug": "sentry", "ats": "ashby"},
+    {"slug": "sanity", "ats": "ashby"},
+    {"slug": "modal", "ats": "ashby"},
+    {"slug": "lambda", "ats": "ashby"},
+    {"slug": "astronomer", "ats": "ashby"},
+    {"slug": "drata", "ats": "ashby"},
+    {"slug": "livekit", "ats": "ashby"},
+    {"slug": "atlan", "ats": "ashby"},
+    {"slug": "render", "ats": "ashby"},
+    {"slug": "posthog", "ats": "ashby"},
+    {"slug": "anyscale", "ats": "ashby"},
+    {"slug": "neon", "ats": "ashby"},
+    {"slug": "resend", "ats": "ashby"},
+    {"slug": "railway", "ats": "ashby"},
+    {"slug": "airbyte", "ats": "ashby"},
 ]
 
 # Lever companies (scraped from HTML since the API is deprecated)
 LEVER_DISCOVER_SLUGS = [
     "spotify",
     "matchgroup",
+    "palantir",
+    "plaid",
+    "ro",
+    "outreach",
+    "toptal",
+    "jumpcloud",
+    "greenlight",
+    "wealthfront",
+    "matillion",
 ]
 
 
@@ -787,7 +867,9 @@ async def discover_jobs(
 
     total_new = 0
 
-    # 1. Standard job search (JSearch, Dice, Remotive, newgrad-jobs)
+    # 1. Standard job search (JSearch, Dice, Remotive — newgrad excluded here)
+    #    newgrad is scraped once unfiltered below instead of 7× with keyword filters
+    #    that would discard most results.
     for seed in search_list:
         try:
             stored = await search_jobs(
@@ -796,12 +878,26 @@ async def discover_jobs(
                 query=seed["query"],  # type: ignore[arg-type]
                 location=seed["location"],  # type: ignore[arg-type]
                 remote_only=seed["remote_only"],  # type: ignore[arg-type]
+                sources=["jsearch", "adzuna", "remotive", "dice"],
             )
             total_new += len(stored)
         except Exception:
             logger.exception("Discover failed for query: %s", seed["query"])
 
-    # 2. ATS board discovery (Greenhouse + Ashby)
+    # 2. newgrad-jobs.com — single unfiltered scrape across all 5 categories
+    #    (~500 unique jobs).  Deduplication is handled by _store_raw_jobs.
+    try:
+        result = await db.execute(select(Profile).where(Profile.user_id == user_id))
+        profile = result.scalar_one_or_none()
+        raw_newgrad = await newgrad_jobs_client.search_newgrad_jobs()
+        ng_stored = await _store_raw_jobs(db, user_id, raw_newgrad, profile)
+        if ng_stored:
+            logger.info("newgrad-jobs discover: %d new jobs", len(ng_stored))
+        total_new += len(ng_stored)
+    except Exception:
+        logger.exception("newgrad-jobs discover failed")
+
+    # 3. ATS board discovery (Greenhouse, Ashby, Lever, Workday)
     try:
         ats_new = await _discover_ats_boards(db, user_id)
         total_new += ats_new
