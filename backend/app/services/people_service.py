@@ -16,6 +16,7 @@ from app.clients import apollo_client, github_client, proxycurl_client, search_r
 from app.models.company import Company
 from app.models.job import Job
 from app.models.person import Person
+from app.services import linkedin_graph_service
 from app.services.employment_verification_service import verify_people_current_company
 from app.services.theorg_discovery_service import discover_theorg_candidates
 from app.utils.company_identity import (
@@ -30,6 +31,7 @@ from app.utils.company_identity import (
     should_trust_company_enrichment,
 )
 from app.utils.job_context import JobContext, extract_job_context
+from app.utils.linkedin import normalize_linkedin_url
 from app.utils.relevance_scorer import score_candidate_relevance
 
 RECRUITER_TITLE_KEYWORDS = (
@@ -464,6 +466,21 @@ def _strip_seniority_prefix(title: str | None) -> str:
     return " ".join(cleaned.split()).strip()
 
 
+# IC roles where "manager" does not mean people-management seniority.
+_IC_MANAGER_PATTERNS = (
+    r"\bproduct manager\b",
+    r"\bprogram manager\b",
+    r"\bproject manager\b",
+    r"\baccount manager\b",
+    r"\bcommunity manager\b",
+    r"\bcontent manager\b",
+    r"\bcampaign manager\b",
+    r"\bpartnership manager\b",
+    r"\bsuccess manager\b",
+    r"\brelationship manager\b",
+)
+
+
 def _candidate_seniority_level(data: dict) -> str:
     explicit = _normalize_identity(str(data.get("seniority") or ""))
     if explicit in SENIORITY_ORDER:
@@ -473,14 +490,20 @@ def _candidate_seniority_level(data: dict) -> str:
         part for part in [data.get("title", ""), data.get("snippet", "")]
         if part
     ).lower()
+
+    # Check for IC "manager" roles first — these should be sized by their
+    # own seniority prefix (Senior PM → senior, Associate PM → junior),
+    # NOT treated as people-managers.
+    is_ic_manager = any(re.search(p, haystack) for p in _IC_MANAGER_PATTERNS)
+
     patterns = (
         (r"\bintern\b", "intern"),
-        (r"\bjunior\b|\bjr\.?\b|\bentry[- ]level\b|\bassociate\b|\bnew grad\b", "junior"),
+        (r"\bjunior\b|\bjr\.?\b|\bentry[- ]level\b|\bassociate\b|\bnew grad\b|\bapm\b", "junior"),
         (r"\bsenior\b|\bsr\.?\b", "senior"),
         (r"\bstaff\b", "staff"),
         (r"\bprincipal\b", "principal"),
         (r"\blead\b", "lead"),
-        (r"\bmanager\b", "manager"),
+        (r"\bengineering manager\b", "manager"),
         (r"\bdirector\b", "director"),
         (r"\bvp\b|\bvice president\b", "vp"),
         (r"\bchief\b|\bc-level\b", "executive"),
@@ -488,6 +511,11 @@ def _candidate_seniority_level(data: dict) -> str:
     for pattern, level in patterns:
         if re.search(pattern, haystack):
             return level
+
+    # Bare "manager" — only counts as people-manager if NOT an IC title
+    if re.search(r"\bmanager\b", haystack):
+        return "mid" if is_ic_manager else "manager"
+
     return "mid"
 
 
@@ -984,7 +1012,7 @@ def _linkedin_title_match_score(
     return 0
 
 
-def _linkedin_backfill_search_titles(candidate: dict, *, bucket: str, company_name: str) -> list[str]:
+def _linkedin_backfill_search_titles(candidate: dict, *, bucket: str, company_name: str, context: JobContext | None = None) -> list[str]:
     titles: list[str] = []
     current_title = (candidate.get("title") or "").strip()
     if current_title and not _title_is_weak(current_title, company_name):
@@ -999,16 +1027,41 @@ def _linkedin_backfill_search_titles(candidate: dict, *, bucket: str, company_na
             ]
         )
     elif bucket == "hiring_managers":
-        titles.extend(
-            [
-                "engineering manager",
-                "software engineering manager",
-                "director engineering",
-                "senior director engineering",
-            ]
-        )
+        dept = context.department if context else ""
+        if dept == "product_management":
+            titles.extend(
+                [
+                    "group product manager",
+                    "senior product manager",
+                    "director of product management",
+                    "head of product",
+                ]
+            )
+        elif dept == "design":
+            titles.extend(
+                [
+                    "design manager",
+                    "head of design",
+                    "senior design manager",
+                ]
+            )
+        else:
+            titles.extend(
+                [
+                    "engineering manager",
+                    "software engineering manager",
+                    "director engineering",
+                    "senior director engineering",
+                ]
+            )
     elif bucket == "peers":
-        titles.extend(["software engineer", "senior software engineer"])
+        dept = context.department if context else ""
+        if dept == "product_management":
+            titles.extend(["product manager", "associate product manager", "technical program manager"])
+        elif dept == "design":
+            titles.extend(["product designer", "ux designer", "ui designer"])
+        else:
+            titles.extend(["software engineer", "senior software engineer"])
 
     ordered: list[str] = []
     seen: set[str] = set()
@@ -1562,6 +1615,13 @@ def _classify_org_level(title: str, source: str = "", snippet: str = "") -> str:
     haystack = " ".join(part for part in [title, snippet, source] if part).lower()
     if any(keyword in haystack for keyword in DIRECTOR_PLUS_KEYWORDS):
         return "director_plus"
+    # IC manager titles (Product Manager, Program Manager, etc.) are ICs
+    # unless they carry a senior leadership prefix.
+    if _is_ic_manager_title(haystack):
+        title_lower = (title or "").lower()
+        if _SENIOR_LEADERSHIP_PREFIXES.search(title_lower):
+            return "manager"
+        return "ic"
     if any(keyword in haystack for keyword in MANAGER_TITLE_KEYWORDS):
         return "manager"
     if any(keyword in haystack for keyword in CONTROLLED_LEAD_KEYWORDS):
@@ -1656,6 +1716,22 @@ def _manager_seniority_filters(context: JobContext | None) -> list[str]:
     if context and context.seniority in {"intern", "junior"}:
         return ["manager"]
     return ["manager", "director", "vp"]
+
+
+def _peer_seniority_filters(context: JobContext | None) -> list[str] | None:
+    """Return Apollo seniority filters for peers, or None if no restriction.
+
+    For early-career / junior roles, restrict peers to entry-level and
+    mid-level so we don't surface Directors as "peers".
+    For senior+ roles, allow broader range (no filter).
+    """
+    if not context:
+        return None
+    if context.early_career or context.seniority in {"intern", "junior"}:
+        return ["entry", "junior", "mid"]
+    if context.seniority in {"mid"}:
+        return ["junior", "mid", "senior"]
+    return None  # senior+ jobs: no restriction
 
 
 def _prepare_candidates(
@@ -1790,11 +1866,37 @@ def _should_expand_with_theorg(
     return any(count < target_count_per_bucket for count in current_counts.values())
 
 
+def _is_ic_manager_title(text: str) -> bool:
+    """Check if text contains an IC role with 'manager' in the title.
+
+    Product Manager, Program Manager, etc. are individual-contributor roles
+    even though they contain the word 'manager'.
+    """
+    return any(re.search(p, text) for p in _IC_MANAGER_PATTERNS)
+
+
+# Prefixes/keywords that promote an IC-manager title to people-manager level.
+# "Group Product Manager" or "Director of Product" are people-managers,
+# even though the core role (Product Manager) is an IC title.
+_SENIOR_LEADERSHIP_PREFIXES = re.compile(
+    r"\b(?:group|director|head|vp|vice president|chief|managing)\b",
+    re.IGNORECASE,
+)
+
+
 def _classify_person(title: str, source: str = "", snippet: str = "") -> str:
     """Classify a result into recruiter, hiring_manager, or peer."""
     haystack = " ".join(part for part in [title, snippet, source] if part).lower()
     if _is_recruiter_like(haystack):
         return "recruiter"
+    # IC manager titles (Product Manager, Program Manager, etc.) are peers
+    # UNLESS they carry a senior leadership prefix (Group PM, Director of
+    # Product, VP Product, Head of Product).
+    if _is_ic_manager_title(haystack):
+        title_lower = (title or "").lower()
+        if _SENIOR_LEADERSHIP_PREFIXES.search(title_lower):
+            return "hiring_manager"
+        return "peer"
     if any(keyword in haystack for keyword in MANAGER_TITLE_KEYWORDS):
         return "hiring_manager"
     if any(keyword in haystack for keyword in CONTROLLED_LEAD_KEYWORDS):
@@ -2431,8 +2533,25 @@ def _bucket_role_fit_rank(bucket: str, person: Person) -> int:
     return 0 if getattr(person, "org_level", None) == "ic" else 1
 
 
+def _warm_path_rank(person: Person) -> int:
+    return {
+        "direct_connection": 0,
+        "same_company_bridge": 1,
+    }.get(getattr(person, "warm_path_type", None), 2)
+
+
+def _bucketed_linkedin_slugs(bucketed: dict[str, list[Person]]) -> list[str]:
+    slugs: set[str] = set()
+    for people in bucketed.values():
+        for person in people:
+            normalized = normalize_linkedin_url(person.linkedin_url)
+            if normalized:
+                slugs.add(normalized.rstrip("/").rsplit("/", 1)[-1])
+    return sorted(slugs)
+
+
 def _dedupe_bucket_assignments(bucketed: dict[str, list[Person]]) -> dict[str, list[Person]]:
-    winners: dict[uuid.UUID, tuple[str, tuple[int, int, int, int, int, str]]] = {}
+    winners: dict[uuid.UUID, tuple[str, tuple[int, int, int, int, int, int, str]]] = {}
     for bucket, people in bucketed.items():
         for person in people:
             if not person.id:
@@ -2443,6 +2562,7 @@ def _dedupe_bucket_assignments(bucketed: dict[str, list[Person]]) -> dict[str, l
                 100 - usefulness,
                 _bucket_role_fit_rank(bucket, person),
                 0 if getattr(person, "company_match_confidence", None) == "verified" else 1,
+                _warm_path_rank(person),
                 0 if person.linkedin_url else 1,
                 _normalize_identity(person.full_name),
             )
@@ -2489,6 +2609,7 @@ def _finalize_bucketed(
         ordered.sort(
             key=lambda person: (
                 _confidence_rank(getattr(person, "company_match_confidence", None)),
+                _warm_path_rank(person),
                 -(getattr(person, "usefulness_score", None) or 0),
                 _match_rank(getattr(person, "match_quality", None)),
                 _org_rank(bucket, getattr(person, "org_level", "ic") or "ic"),
@@ -2965,6 +3086,23 @@ async def search_people_at_company(
         bucketed,
         target_count_per_bucket=target_count_per_bucket,
     )
+    your_connections = await linkedin_graph_service.get_connections_for_company(
+        db,
+        user_id,
+        company_name=company_name,
+        public_identity_slugs=public_identity_terms,
+    )
+    direct_connections = await linkedin_graph_service.get_connections_by_linkedin_slugs(
+        db,
+        user_id,
+        _bucketed_linkedin_slugs(bucketed),
+    )
+    linkedin_graph_service.apply_warm_path_annotations(
+        bucketed,
+        company_name=company_name,
+        your_connections=your_connections,
+        direct_connections=direct_connections,
+    )
     finalized = _finalize_bucketed(bucketed, target_count_per_bucket=target_count_per_bucket)
 
     # Record search in audit log
@@ -2982,7 +3120,14 @@ async def search_people_at_company(
     db.add(search_log)
     await db.commit()
 
-    return {"company": company, **finalized}
+    return {
+        "company": company,
+        "your_connections": [
+            linkedin_graph_service.serialize_connection(connection)
+            for connection in your_connections
+        ],
+        **finalized,
+    }
 
 
 async def search_people_for_job(
@@ -3065,11 +3210,17 @@ async def search_people_for_job(
         context=context,
     )
 
+    # Build search keywords: product/team names first (most specific), then
+    # generic team + domain keywords.  Product names like "Data Cloud" scope
+    # searches to the right part of a large org.
+    product_names = getattr(context, "product_team_names", []) or []
+    search_keywords = product_names + context.team_keywords + context.domain_keywords
+
     recruiter_candidates = await _search_candidates(
         job.company_name,
         titles=recruiter_titles,
         departments=context.apollo_departments,
-        team_keywords=context.team_keywords + context.domain_keywords,
+        team_keywords=search_keywords,
         public_identity_terms=public_identity_terms,
         company_domain=search_domain,
         limit=search_limit,
@@ -3080,7 +3231,7 @@ async def search_people_for_job(
         titles=manager_titles,
         departments=context.apollo_departments,
         seniority=_manager_seniority_filters(context),
-        team_keywords=context.team_keywords + context.domain_keywords,
+        team_keywords=search_keywords,
         public_identity_terms=public_identity_terms,
         company_domain=search_domain,
         limit=search_limit,
@@ -3090,7 +3241,8 @@ async def search_people_for_job(
         job.company_name,
         titles=peer_titles,
         departments=context.apollo_departments,
-        team_keywords=context.team_keywords + context.domain_keywords,
+        seniority=_peer_seniority_filters(context),
+        team_keywords=search_keywords,
         public_identity_terms=public_identity_terms,
         company_domain=search_domain,
         limit=search_limit,
@@ -3527,6 +3679,23 @@ async def search_people_for_job(
         bucketed,
         target_count_per_bucket=target_count_per_bucket,
     )
+    your_connections = await linkedin_graph_service.get_connections_for_company(
+        db,
+        user_id,
+        company_name=job.company_name,
+        public_identity_slugs=public_identity_terms,
+    )
+    direct_connections = await linkedin_graph_service.get_connections_by_linkedin_slugs(
+        db,
+        user_id,
+        _bucketed_linkedin_slugs(bucketed),
+    )
+    linkedin_graph_service.apply_warm_path_annotations(
+        bucketed,
+        company_name=job.company_name,
+        your_connections=your_connections,
+        direct_connections=direct_connections,
+    )
     await db.commit()
     filtered_bucketed = _finalize_bucketed(
         bucketed,
@@ -3534,6 +3703,10 @@ async def search_people_for_job(
     )
     return {
         "company": company,
+        "your_connections": [
+            linkedin_graph_service.serialize_connection(connection)
+            for connection in your_connections
+        ],
         **filtered_bucketed,
         "job_context": {
             "department": context.department,

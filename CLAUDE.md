@@ -1,6 +1,6 @@
 # NexusReach — Claude Context
 
-Last updated: 2026-03-22
+Last updated: 2026-04-02
 
 This file mirrors `AGENTS.md` so Claude and Codex see the same project state. If these files ever drift, update both together.
 
@@ -10,6 +10,7 @@ NexusReach is a networking assistant for job seekers. It helps a user:
 - import or discover relevant jobs
 - find recruiters, hiring-side contacts, and peers at the target company
 - recover LinkedIn/public profile evidence for those people
+- surface warm paths from the user's imported first-degree LinkedIn graph
 - find or guess work emails safely
 - draft outreach messages and stage email drafts
 - track networking activity in a lightweight CRM
@@ -52,9 +53,35 @@ The human is always in the loop. Nothing is ever sent automatically.
   - `match_quality` = role/team closeness
   - `company_match_confidence` = verified vs strong/weak company signal
 
+### LinkedIn graph and warm paths
+- LinkedIn graph data is user-scoped and stored separately from saved CRM `Person` rows.
+- The new graph subsystem persists:
+  - `linkedin_graph_connections`
+  - `linkedin_graph_sync_runs`
+- Settings now supports two graph inputs:
+  - manual LinkedIn connections CSV/ZIP import
+  - short-lived sync session for a local browser connector
+- The local connector can:
+  - attach to an already logged-in Chrome session via CDP
+  - open a dedicated persistent browser profile and wait for the user to log into LinkedIn once
+  - scrape first-degree LinkedIn connection cards locally with Playwright
+  - upload only normalized connection rows back to the API
+- The server does not store LinkedIn cookies, OAuth tokens, or credentials.
+- People search now returns:
+  - `your_connections`
+  - per-person `warm_path_type`
+  - per-person `warm_path_reason`
+  - per-person `warm_path_connection`
+- Warm-path boosts are bounded:
+  - they only reorder already-safe candidates
+  - they do not override ambiguous-company protections
+  - they do not bypass `current_company_verified` / `company_match_confidence`
+  - they do not change email trust rules
+- Dashboard `warm_paths` semantics remain outreach-based in v1. Imported LinkedIn graph data is only used in people-search ranking and explanation.
+
 ### Search-provider routing
 - SearXNG is the default primary search provider (free, self-hosted, unlimited).
-- Brave and Serper are retained as fallbacks if re-funded.
+- Brave and Serper are retained as paid fallbacks if re-funded.
 - Current router behavior:
   - bulk LinkedIn people discovery: `SearXNG -> Serper -> Brave -> Google CSE`
   - exact LinkedIn backfill: `SearXNG -> Brave -> Serper -> Google CSE`
@@ -98,6 +125,7 @@ The human is always in the loop. Nothing is ever sent automatically.
   - `gemini`
   - `groq`
 - The drafting flow still follows the same product rule: generate only drafts, never send automatically.
+- LinkedIn graph warm-path context is not yet threaded into drafting in v1.
 
 ### Frontend state and UX
 - Saved contacts are grouped by company on the People page.
@@ -106,11 +134,21 @@ The human is always in the loop. Nothing is ever sent automatically.
   - Messages
   - Outreach
 - Saved contacts are hidden while a live people search is pending to avoid cross-company confusion.
+- People search can show:
+  - a `Your Connections at {company}` section above the live buckets
+  - warm-path badges and explanations on cold contacts
+- Settings includes a LinkedIn Graph card with:
+  - sync status
+  - last sync time
+  - `Sync Now`
+  - `Upload Export`
+  - `Clear Graph Data`
+  - generated local connector commands for CDP or dedicated-profile browser sync
 
 ## Tech stack
 
 ### Frontend
-- React 18 + TypeScript
+- React 19 + TypeScript
 - Vite
 - React Router
 - TanStack Query
@@ -141,6 +179,9 @@ The human is always in the loop. Nothing is ever sent automatically.
 - Crawl4AI / Firecrawl: public-page retrieval fallback stack
 - Gmail API / Microsoft Graph: draft staging
 
+### Local helper tooling
+- Playwright is used by the LinkedIn graph browser connector (`backend/scripts/linkedin_graph_connector.py`).
+
 ## Project structure
 
 ```text
@@ -163,6 +204,7 @@ NexusReach/
 │   │   ├── tasks/
 │   │   └── utils/
 │   ├── alembic/
+│   ├── scripts/
 │   └── tests/
 ├── PRD.md
 ├── architecture.md
@@ -195,6 +237,7 @@ NexusReach/
 - All user data must remain scoped by `user_id`.
 - Never treat cross-company public results as safe fallback contacts.
 - Company verification, role ranking, and email trust are separate axes.
+- Imported LinkedIn graph rows must remain separate from saved CRM contacts.
 
 ## Key commands
 
@@ -215,6 +258,9 @@ cd backend && ruff check app tests conftest.py
 cd backend && pytest
 cd backend && celery -A app.tasks worker --loglevel=info
 cd backend && celery -A app.tasks beat --loglevel=info
+
+# LinkedIn graph local connector
+cd backend && python scripts/linkedin_graph_connector.py --help
 ```
 
 ## Environment variables
@@ -275,6 +321,9 @@ NEXUSREACH_MICROSOFT_CLIENT_SECRET=...
 NEXUSREACH_EMPLOYMENT_VERIFY_TOP_N=10
 NEXUSREACH_EMPLOYMENT_VERIFY_TIMEOUT_SECONDS=20
 NEXUSREACH_EMPLOYMENT_VERIFY_ENABLED=true
+
+NEXUSREACH_LINKEDIN_GRAPH_SYNC_SESSION_TTL_SECONDS=900
+NEXUSREACH_LINKEDIN_GRAPH_MAX_IMPORT_BATCH_SIZE=250
 ```
 
 ### Frontend
@@ -304,6 +353,11 @@ VITE_SUPABASE_ANON_KEY=...
 16. The global error handler returns `{"error": {"code", "message"}}`, not FastAPI's default `{"detail": ...}`.
 17. Vitest utilities should still be imported explicitly for portability.
 18. Always inspect `frontend/src/components/ui/*.tsx` before assuming shadcn prop support from external examples.
+19. Imported LinkedIn graph data must remain separate from `Person` CRM rows and from dashboard outreach-derived `warm_paths`.
+20. `Sync Now` on Settings is not LinkedIn OAuth. It creates a short-lived sync session for the local browser connector.
+21. The server must never store LinkedIn cookies, session tokens, or credentials. Only normalized connection rows are uploaded.
+22. Warm-path ranking boosts cannot bless unsafe candidates. They operate only within already-safe same-company results.
+23. The local browser connector requires Playwright locally and can either attach to Chrome over CDP or use a dedicated persistent browser profile.
 
 ## Pre-commit checklist
 

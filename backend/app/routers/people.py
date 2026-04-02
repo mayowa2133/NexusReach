@@ -19,6 +19,7 @@ from app.schemas.people import (
     SearchErrorDetail,
     SearchLogResponse,
 )
+from app.schemas.linkedin_graph import LinkedInGraphConnectionResponse
 from app.services.people_service import (
     search_people_at_company,
     search_people_for_job,
@@ -54,13 +55,43 @@ def _serialize_company(company) -> CompanyResponse | None:
     return CompanyResponse(**payload)
 
 
+def _safe_value(value):
+    return None if _is_mock_value(value) else value
+
+
+def _serialize_linkedin_graph_connection(connection) -> LinkedInGraphConnectionResponse | None:
+    if not connection:
+        return None
+    if isinstance(connection, dict):
+        return LinkedInGraphConnectionResponse(**connection)
+
+    payload = {
+        "id": str(_safe_value(getattr(connection, "id", "")) or ""),
+        "display_name": _safe_value(getattr(connection, "display_name", None)),
+        "headline": _safe_value(getattr(connection, "headline", None)),
+        "current_company_name": _safe_value(getattr(connection, "current_company_name", None)),
+        "linkedin_url": _safe_value(getattr(connection, "linkedin_url", None)),
+        "company_linkedin_url": _safe_value(getattr(connection, "company_linkedin_url", None)),
+        "source": _safe_value(getattr(connection, "source", "manual_import")) or "manual_import",
+        "last_synced_at": _safe_value(getattr(connection, "last_synced_at", None)),
+    }
+    if not payload["display_name"]:
+        return None
+    return LinkedInGraphConnectionResponse(**payload)
+
+
 def _serialize_person(person) -> PersonResponse:
     payload = {
-        field: getattr(person, field, None)
+        field: _safe_value(getattr(person, field, None))
         for field in PersonResponse.model_fields
-        if field != "company"
+        if field not in {"company", "warm_path_connection"}
     }
     payload["company"] = _serialize_company(_loaded_company(person))
+    warm_path_connection = _serialize_linkedin_graph_connection(
+        getattr(person, "warm_path_connection", None)
+    )
+    if warm_path_connection is not None:
+        payload["warm_path_connection"] = warm_path_connection
     return PersonResponse(**payload)
 
 
@@ -73,6 +104,10 @@ def _serialize_people_search_result(result: dict) -> PeopleSearchResponse:
     )
     return PeopleSearchResponse(
         company=_serialize_company(result.get("company")),
+        your_connections=[
+            LinkedInGraphConnectionResponse(**connection)
+            for connection in result.get("your_connections", [])
+        ],
         recruiters=[_serialize_person(person) for person in result.get("recruiters", [])],
         hiring_managers=[_serialize_person(person) for person in result.get("hiring_managers", [])],
         peers=[_serialize_person(person) for person in result.get("peers", [])],

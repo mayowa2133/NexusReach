@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type FormEvent } from 'react';
+import { useState, useEffect, useRef, type FormEvent, type MouseEventHandler } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,7 +21,7 @@ import {
   setStoredPeopleSearchTargetCount,
 } from '@/lib/peopleSearchCount';
 import { toast } from 'sonner';
-import type { EmailFindResult, Person, PeopleSearchResult } from '@/types';
+import type { EmailFindResult, LinkedInGraphConnection, Person, PeopleSearchResult } from '@/types';
 
 function formatFailureReason(reason: string): string {
   return reason.replace(/_/g, ' ');
@@ -52,6 +52,12 @@ function formatMatchQuality(matchQuality: string | null | undefined): string | n
 function formatCompanyMatchConfidence(confidence: string | null | undefined): string | null {
   if (confidence === 'verified') return 'Current company verified';
   if (confidence === 'strong_signal' || confidence === 'weak_signal') return 'Lower-confidence company match';
+  return null;
+}
+
+function formatWarmPathType(warmPathType: string | null | undefined): string | null {
+  if (warmPathType === 'direct_connection') return 'Direct Connection';
+  if (warmPathType === 'same_company_bridge') return 'Warm Path';
   return null;
 }
 
@@ -406,7 +412,7 @@ export function PeoplePage() {
                 <button
                   type="button"
                   className="shrink-0 rounded-md bg-yellow-200 px-3 py-1.5 text-sm font-medium text-yellow-900 hover:bg-yellow-300 dark:bg-yellow-800 dark:text-yellow-100 dark:hover:bg-yellow-700"
-                  onClick={handleSearch as unknown as React.MouseEventHandler}
+                  onClick={handleSearch as unknown as MouseEventHandler}
                 >
                   Retry Search
                 </button>
@@ -414,14 +420,22 @@ export function PeoplePage() {
             </div>
           )}
 
-          {totalResults === 0 ? (
-            <div className="rounded-lg border border-dashed p-8 text-center">
-              <p className="text-muted-foreground">
-                No people found. Try a different company name or add someone manually via LinkedIn URL.
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-4">
+          <div className="space-y-4">
+            {searchResults.your_connections && searchResults.your_connections.length > 0 && (
+              <YourConnectionsSection
+                companyName={searchResults.company?.name || companyName}
+                connections={searchResults.your_connections}
+              />
+            )}
+
+            {totalResults === 0 ? (
+              <div className="rounded-lg border border-dashed p-8 text-center">
+                <p className="text-muted-foreground">
+                  No people found. Try a different company name or add someone manually via LinkedIn URL.
+                </p>
+              </div>
+            ) : (
+              <>
               <PersonSection
                 title="Recruiters & Talent Acquisition"
                 description="Direct line into the hiring process"
@@ -446,8 +460,9 @@ export function PeoplePage() {
                 selectedPersonIds={selectedPersonIds}
                 onToggleSelect={togglePersonSelection}
               />
-            </div>
-          )}
+              </>
+            )}
+          </div>
         </div>
       )}
 
@@ -539,6 +554,57 @@ export function PeoplePage() {
           </p>
         </div>
       )}
+    </div>
+  );
+}
+
+function YourConnectionsSection({
+  companyName,
+  connections,
+}: {
+  companyName: string;
+  connections: LinkedInGraphConnection[];
+}) {
+  return (
+    <div className="space-y-2">
+      <div>
+        <h3 className="font-medium">Your Connections at {companyName}</h3>
+        <p className="text-sm text-muted-foreground">
+          These are imported first-degree LinkedIn connections at the target company.
+        </p>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+        {connections.map((connection) => (
+          <Card key={connection.id}>
+            <CardContent className="pt-4 space-y-2">
+              <div>
+                <div className="font-medium">{connection.display_name}</div>
+                <div className="text-sm text-muted-foreground">
+                  {connection.headline || 'Imported LinkedIn connection'}
+                </div>
+              </div>
+              {connection.current_company_name && (
+                <Badge variant="secondary">{connection.current_company_name}</Badge>
+              )}
+              <div className="flex gap-2 pt-1">
+                {connection.linkedin_url && (
+                  <a
+                    href={connection.linkedin_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-primary hover:underline"
+                  >
+                    LinkedIn
+                  </a>
+                )}
+                <span className="text-xs text-muted-foreground ml-auto">
+                  via {connection.source === 'manual_import' ? 'manual import' : 'local sync'}
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
     </div>
   );
 }
@@ -773,8 +839,18 @@ function PersonCard({
           </Badge>
         )}
 
+        {formatWarmPathType(person.warm_path_type) && (
+          <Badge variant={person.warm_path_type === 'direct_connection' ? 'secondary' : 'outline'}>
+            {formatWarmPathType(person.warm_path_type)}
+          </Badge>
+        )}
+
         {person.match_reason && (
           <div className="text-xs text-muted-foreground">{person.match_reason}</div>
+        )}
+
+        {person.warm_path_reason && (
+          <div className="text-xs text-muted-foreground">{person.warm_path_reason}</div>
         )}
 
         {person.usefulness_score != null && person.usefulness_score > 0 && (

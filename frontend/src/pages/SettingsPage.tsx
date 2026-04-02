@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,10 +13,27 @@ import {
   useGmailAuthUrl,
   useOutlookAuthUrl,
 } from '@/hooks/useEmail';
+import {
+  useClearLinkedInGraph,
+  useLinkedInGraphStatus,
+  useStartLinkedInGraphSyncSession,
+  useUploadLinkedInGraphFile,
+} from '@/hooks/useLinkedInGraph';
+import { API_URL } from '@/lib/api';
 import { GuardrailsPanel } from '@/components/settings/GuardrailsPanel';
 import { toast } from 'sonner';
+import type { LinkedInGraphSyncSession } from '@/types';
 
 const REDIRECT_URI = `${window.location.origin}/settings`;
+const LINKEDIN_CONNECTOR_PROFILE_DIR = '~/.nexusreach/linkedin-graph-browser';
+
+function buildLinkedInCdpCommand(sessionToken: string): string {
+  return `cd backend && python scripts/linkedin_graph_connector.py --base-url ${API_URL} --session-token ${sessionToken} --cdp-url http://127.0.0.1:9222`;
+}
+
+function buildLinkedInProfileCommand(sessionToken: string): string {
+  return `cd backend && python scripts/linkedin_graph_connector.py --base-url ${API_URL} --session-token ${sessionToken}`;
+}
 
 export function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -27,6 +44,12 @@ export function SettingsPage() {
   const disconnectOutlook = useDisconnectOutlook();
   const { data: gmailAuth } = useGmailAuthUrl(REDIRECT_URI);
   const { data: outlookAuth } = useOutlookAuthUrl(REDIRECT_URI);
+  const { data: linkedinGraphStatus, isLoading: linkedinGraphLoading } = useLinkedInGraphStatus();
+  const startLinkedInSync = useStartLinkedInGraphSyncSession();
+  const uploadLinkedInGraphFile = useUploadLinkedInGraphFile();
+  const clearLinkedInGraph = useClearLinkedInGraph();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [syncSession, setSyncSession] = useState<LinkedInGraphSyncSession | null>(null);
 
   // Handle OAuth callback
   useEffect(() => {
@@ -84,6 +107,55 @@ export function SettingsPage() {
       toast.error(err instanceof Error ? err.message : 'Failed to disconnect');
     }
   };
+
+  const handleStartLinkedInSync = async () => {
+    try {
+      const session = await startLinkedInSync.mutateAsync();
+      setSyncSession(session);
+      toast.success('LinkedIn graph sync session created');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to start LinkedIn graph sync');
+    }
+  };
+
+  const handleUploadLinkedInExport = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    try {
+      await uploadLinkedInGraphFile.mutateAsync(file);
+      setSyncSession(null);
+      toast.success('LinkedIn connections imported');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to import LinkedIn export');
+    } finally {
+      event.target.value = '';
+    }
+  };
+
+  const handleClearLinkedInGraph = async () => {
+    try {
+      await clearLinkedInGraph.mutateAsync();
+      setSyncSession(null);
+      toast.success('LinkedIn graph data cleared');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to clear LinkedIn graph data');
+    }
+  };
+
+  const linkedInSyncStatus = linkedinGraphStatus?.sync_status || 'idle';
+  const linkedInSyncLabel =
+    linkedInSyncStatus === 'awaiting_upload'
+      ? 'Session ready'
+      : linkedInSyncStatus === 'syncing'
+        ? 'Syncing'
+        : linkedInSyncStatus === 'failed'
+          ? 'Sync failed'
+          : linkedInSyncStatus === 'completed'
+            ? 'Synced'
+            : 'Idle';
 
   return (
     <div className="space-y-6">
@@ -167,6 +239,113 @@ export function SettingsPage() {
               </Button>
             )}
           </div>
+        </CardContent>
+      </Card>
+
+      <Separator />
+
+      <Card>
+        <CardHeader>
+          <CardTitle>LinkedIn Graph</CardTitle>
+          <CardDescription>
+            Import your first-degree LinkedIn connections so NexusReach can surface warm paths
+            during people search. The server stores only minimal graph match data.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv,.zip"
+            className="hidden"
+            onChange={handleUploadLinkedInExport}
+          />
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant={linkedinGraphStatus?.connected ? 'default' : 'outline'}>
+              {linkedinGraphStatus?.connected ? 'Connected' : 'Not connected'}
+            </Badge>
+            <Badge variant={linkedInSyncStatus === 'failed' ? 'destructive' : 'secondary'}>
+              {linkedInSyncLabel}
+            </Badge>
+            {linkedinGraphStatus && (
+              <Badge variant="outline">
+                {linkedinGraphStatus.connection_count} connection
+                {linkedinGraphStatus.connection_count === 1 ? '' : 's'}
+              </Badge>
+            )}
+          </div>
+
+          <div className="text-sm text-muted-foreground space-y-1">
+            <p>
+              {linkedinGraphStatus?.last_synced_at
+                ? `Last synced ${new Date(linkedinGraphStatus.last_synced_at).toLocaleString()}.`
+                : 'No LinkedIn graph data synced yet.'}
+            </p>
+            {linkedinGraphStatus?.source && (
+              <p>Latest source: {linkedinGraphStatus.source === 'manual_import' ? 'Manual import' : 'Local sync session'}.</p>
+            )}
+            {linkedinGraphStatus?.last_error && (
+              <p className="text-destructive">{linkedinGraphStatus.last_error}</p>
+            )}
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <Button
+              onClick={handleStartLinkedInSync}
+              disabled={startLinkedInSync.isPending || linkedinGraphLoading}
+            >
+              {startLinkedInSync.isPending ? 'Starting...' : 'Sync Now'}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploadLinkedInGraphFile.isPending}
+            >
+              {uploadLinkedInGraphFile.isPending ? 'Uploading...' : 'Upload Export'}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleClearLinkedInGraph}
+              disabled={clearLinkedInGraph.isPending || !linkedinGraphStatus?.connection_count}
+            >
+              {clearLinkedInGraph.isPending ? 'Clearing...' : 'Clear Graph Data'}
+            </Button>
+          </div>
+
+          {syncSession && (
+            <div className="rounded-lg border bg-muted/30 p-4 space-y-2">
+              <p className="text-sm font-medium">Local connector session ready</p>
+              <p className="text-sm text-muted-foreground">
+                Use the connector below to scrape LinkedIn directly from a logged-in browser and
+                upload batched connection data to <code>{syncSession.upload_path}</code>. If you
+                skip <code>--cdp-url</code>, the connector opens a dedicated persistent browser
+                profile at <code>{LINKEDIN_CONNECTOR_PROFILE_DIR}</code> and waits for you to sign
+                in once.
+              </p>
+              <div className="text-xs text-muted-foreground space-y-1">
+                <p>Expires: {new Date(syncSession.expires_at).toLocaleString()}</p>
+                <p>Max batch size: {syncSession.max_batch_size}</p>
+              </div>
+              <div className="rounded border bg-background p-3 text-xs font-mono break-all space-y-2">
+                <div>
+                  <p className="mb-1 font-sans text-muted-foreground">
+                    Existing logged-in Chrome session via CDP
+                  </p>
+                  <code>{buildLinkedInCdpCommand(syncSession.session_token)}</code>
+                </div>
+                <div>
+                  <p className="mb-1 font-sans text-muted-foreground">
+                    Dedicated NexusReach browser profile
+                  </p>
+                  <code>{buildLinkedInProfileCommand(syncSession.session_token)}</code>
+                </div>
+              </div>
+              <div className="rounded border bg-background p-3 text-xs break-all font-mono">
+                {syncSession.session_token}
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 

@@ -1,6 +1,6 @@
 import { useAuthStore } from '@/stores/auth';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 class ApiClient {
   private baseUrl: string;
@@ -14,11 +14,14 @@ class ApiClient {
     options: RequestInit = {}
   ): Promise<T> {
     const token = useAuthStore.getState().session?.access_token;
+    const isFormData = options.body instanceof FormData;
 
     const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
       ...((options.headers as Record<string, string>) || {}),
     };
+    if (!isFormData) {
+      headers['Content-Type'] = headers['Content-Type'] || 'application/json';
+    }
 
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
@@ -55,6 +58,13 @@ class ApiClient {
     return this.request<T>(path, {
       method: 'POST',
       body: data ? JSON.stringify(data) : undefined,
+    });
+  }
+
+  postForm<T>(path: string, formData: FormData) {
+    return this.request<T>(path, {
+      method: 'POST',
+      body: formData,
     });
   }
 

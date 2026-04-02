@@ -123,3 +123,40 @@ def refresh_all_job_feeds() -> dict:
     """Celery task: refresh job feeds for all users with saved searches."""
     asyncio.run(_refresh_all())
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Auto-discover ATS boards (Greenhouse, Ashby, Lever, Workday)
+# ---------------------------------------------------------------------------
+
+async def _discover_all_boards() -> None:
+    """Run ATS board discovery for every user with at least one saved search."""
+    from app.services.job_service import _discover_ats_boards  # noqa: PLC0415
+
+    async with async_session() as db:
+        stmt = (
+            select(SearchPreference.user_id)
+            .where(SearchPreference.enabled == True)  # noqa: E712
+            .distinct()
+        )
+        result = await db.execute(stmt)
+        user_ids = [row[0] for row in result.all()]
+
+    logger.info("Running ATS board auto-discovery for %d users", len(user_ids))
+
+    for uid in user_ids:
+        try:
+            async with async_session() as db:
+                new_count = await _discover_ats_boards(db, uid)
+                logger.info(
+                    "ATS auto-discover: %d new jobs for user %s", new_count, uid,
+                )
+        except Exception:
+            logger.exception("ATS auto-discover failed for user %s", uid)
+
+
+@celery_app.task(name="app.tasks.jobs.discover_ats_boards")
+def discover_ats_boards() -> dict:
+    """Celery task: poll all curated ATS boards for new postings."""
+    asyncio.run(_discover_all_boards())
+    return {"status": "ok"}

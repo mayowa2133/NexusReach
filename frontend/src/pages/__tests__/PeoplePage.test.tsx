@@ -129,6 +129,9 @@ beforeEach(() => {
       current_company_verification_confidence: null,
       current_company_verification_evidence: 'Not shortlisted for verification.',
       current_company_verified_at: null,
+      warm_path_type: null,
+      warm_path_reason: null,
+      warm_path_connection: null,
       company_match_confidence: 'strong_signal',
       fallback_reason: 'Strong same-company signal, but current employment is not fully verified.',
       company: {
@@ -147,6 +150,7 @@ beforeEach(() => {
   mockPeopleSearch.mutateAsync.mockReset();
   mockPeopleSearch.mutateAsync.mockResolvedValue({
     company: null,
+    your_connections: [],
     recruiters: [],
     hiring_managers: [],
     peers: [],
@@ -391,6 +395,7 @@ describe('PeoplePage', () => {
         description: null,
         careers_url: null,
       },
+      your_connections: [],
       recruiters: [],
       hiring_managers: [],
       peers: [mockSavedPeopleItems[0]],
@@ -404,6 +409,68 @@ describe('PeoplePage', () => {
 
     expect(await screen.findByText(/no current-company-verified recruiter was found/i)).toBeInTheDocument();
     expect(screen.getByText(/no current-company-verified hiring-side contact was found/i)).toBeInTheDocument();
+  });
+
+  it('renders imported connections and warm-path badges in search results', async () => {
+    mockPeopleSearch.mutateAsync.mockResolvedValue({
+      company: {
+        id: 'c1',
+        name: 'Affirm',
+        domain: 'affirm.com',
+        size: '5000',
+        industry: 'Fintech',
+        description: null,
+        careers_url: null,
+      },
+      your_connections: [
+        {
+          id: 'lc1',
+          display_name: 'Jamie Rivera',
+          headline: 'Senior Recruiter at Affirm',
+          current_company_name: 'Affirm',
+          linkedin_url: 'https://www.linkedin.com/in/jamierivera',
+          company_linkedin_url: 'https://www.linkedin.com/company/affirm',
+          source: 'manual_import',
+          last_synced_at: '2026-04-02T10:00:00Z',
+        },
+      ],
+      recruiters: [
+        {
+          ...mockSavedPeopleItems[0],
+          id: 'search-1',
+          full_name: 'Taylor West',
+          warm_path_type: 'same_company_bridge',
+          warm_path_reason: 'You already know Jamie Rivera at Affirm.',
+          warm_path_connection: {
+            id: 'lc1',
+            display_name: 'Jamie Rivera',
+            headline: 'Senior Recruiter at Affirm',
+            current_company_name: 'Affirm',
+            linkedin_url: 'https://www.linkedin.com/in/jamierivera',
+            company_linkedin_url: 'https://www.linkedin.com/company/affirm',
+            source: 'manual_import',
+            last_synced_at: '2026-04-02T10:00:00Z',
+          },
+          company_match_confidence: 'verified',
+          current_company_verified: true,
+          current_company_verification_status: 'verified',
+          fallback_reason: null,
+        },
+      ],
+      hiring_managers: [],
+      peers: [],
+      job_context: null,
+    });
+
+    renderPeople();
+
+    await userEvent.type(screen.getByLabelText(/company name/i), 'Affirm');
+    await userEvent.click(screen.getByRole('button', { name: /^find people$/i }));
+
+    expect(await screen.findByRole('heading', { name: /your connections at affirm/i })).toBeInTheDocument();
+    expect(screen.getByText('Jamie Rivera')).toBeInTheDocument();
+    expect(screen.getByText(/warm path/i)).toBeInTheDocument();
+    expect(screen.getByText(/you already know jamie rivera at affirm\./i)).toBeInTheDocument();
   });
 
   it('navigates into batch draft mode from a shortlist selection', async () => {

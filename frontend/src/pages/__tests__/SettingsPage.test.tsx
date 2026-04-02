@@ -3,6 +3,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SettingsPage } from '../SettingsPage';
@@ -39,8 +40,12 @@ vi.mock('@/stores/auth', () => ({
 
 let mockGuardrails: { data: unknown; isLoading: boolean } = { data: undefined, isLoading: false };
 let mockEmailStatus: { data: unknown; isLoading: boolean } = { data: undefined, isLoading: false };
+let mockLinkedInGraphStatus: { data: unknown; isLoading: boolean } = { data: undefined, isLoading: false };
 
 const mockUpdateGuardrails = { mutateAsync: vi.fn(), isPending: false };
+const mockStartLinkedInGraphSync = { mutateAsync: vi.fn(), isPending: false };
+const mockUploadLinkedInGraphFile = { mutateAsync: vi.fn(), isPending: false };
+const mockClearLinkedInGraph = { mutateAsync: vi.fn(), isPending: false };
 
 vi.mock('@/hooks/useSettings', () => ({
   useGuardrails: () => mockGuardrails,
@@ -55,6 +60,13 @@ vi.mock('@/hooks/useEmail', () => ({
   useDisconnectOutlook: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useGmailAuthUrl: () => ({ data: { auth_url: 'https://example.com' } }),
   useOutlookAuthUrl: () => ({ data: { auth_url: 'https://example.com' } }),
+}));
+
+vi.mock('@/hooks/useLinkedInGraph', () => ({
+  useLinkedInGraphStatus: () => mockLinkedInGraphStatus,
+  useStartLinkedInGraphSyncSession: () => mockStartLinkedInGraphSync,
+  useUploadLinkedInGraphFile: () => mockUploadLinkedInGraphFile,
+  useClearLinkedInGraph: () => mockClearLinkedInGraph,
 }));
 
 // Mock sonner toast
@@ -89,7 +101,22 @@ beforeEach(() => {
     data: { gmail_connected: false, outlook_connected: false },
     isLoading: false,
   };
+  mockLinkedInGraphStatus = {
+    data: {
+      connected: false,
+      source: null,
+      last_synced_at: null,
+      sync_status: 'idle',
+      last_error: null,
+      connection_count: 0,
+      last_run: null,
+    },
+    isLoading: false,
+  };
   mockUpdateGuardrails.mutateAsync.mockReset();
+  mockStartLinkedInGraphSync.mutateAsync.mockReset();
+  mockUploadLinkedInGraphFile.mutateAsync.mockReset();
+  mockClearLinkedInGraph.mutateAsync.mockReset();
 });
 
 // ===========================================================================
@@ -120,6 +147,29 @@ describe('SettingsPage — basic', () => {
     };
     renderSettings();
     expect(screen.getByText('Outreach Guardrails')).toBeInTheDocument();
+  });
+
+  it('renders LinkedIn graph section', () => {
+    renderSettings();
+    expect(screen.getByText('LinkedIn Graph')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /sync now/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /upload export/i })).toBeInTheDocument();
+  });
+
+  it('shows connector commands after starting a sync session', async () => {
+    mockStartLinkedInGraphSync.mutateAsync.mockResolvedValue({
+      sync_run_id: 'run-1',
+      session_token: 'secret-token',
+      expires_at: '2026-04-02T12:00:00Z',
+      upload_path: '/api/linkedin-graph/import-batch',
+      max_batch_size: 250,
+    });
+
+    renderSettings();
+    await userEvent.click(screen.getByRole('button', { name: /sync now/i }));
+
+    expect(await screen.findByText(/existing logged-in chrome session via cdp/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/python scripts\/linkedin_graph_connector\.py --base-url/i)).toHaveLength(2);
   });
 });
 
@@ -195,7 +245,7 @@ describe('SettingsPage — email integrations', () => {
   it('shows Not connected badges when disconnected', () => {
     renderSettings();
     const badges = screen.getAllByText('Not connected');
-    expect(badges.length).toBe(2);
+    expect(badges.length).toBe(3);
   });
 
   it('shows Connected badge when gmail is connected', () => {
@@ -205,5 +255,25 @@ describe('SettingsPage — email integrations', () => {
     };
     renderSettings();
     expect(screen.getByText('Connected')).toBeInTheDocument();
+  });
+
+  it('shows LinkedIn graph connection count when present', () => {
+    mockLinkedInGraphStatus = {
+      data: {
+        connected: true,
+        source: 'manual_import',
+        last_synced_at: '2026-04-02T10:00:00Z',
+        sync_status: 'completed',
+        last_error: null,
+        connection_count: 12,
+        last_run: null,
+      },
+      isLoading: false,
+    };
+
+    renderSettings();
+
+    expect(screen.getByText('12 connections')).toBeInTheDocument();
+    expect(screen.getAllByText('Connected').length).toBeGreaterThanOrEqual(1);
   });
 });

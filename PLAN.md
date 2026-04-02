@@ -1,8 +1,8 @@
 # NexusReach — Current Plan and Roadmap
 
-Last updated: 2026-03-22
+Last updated: 2026-04-02
 
-This file is no longer a speculative greenfield checklist. It now tracks what is already shipped and what still matters next.
+This file tracks what is already shipped, what is actively being hardened, and what still matters next.
 
 ## Product status
 
@@ -10,9 +10,10 @@ NexusReach already has a working end-to-end loop:
 1. import or discover a job
 2. find recruiters, hiring-side contacts, and peers
 3. recover LinkedIn/public evidence
-4. find or guess an email safely
-5. draft outreach
-6. track the relationship in CRM views
+4. surface warm paths from imported first-degree LinkedIn connections
+5. find or guess an email safely
+6. draft outreach
+7. track the relationship in CRM views
 
 ## Completed foundations
 
@@ -36,6 +37,7 @@ NexusReach already has a working end-to-end loop:
 - [x] Apollo free-tier company support
 - [x] Google CSE fallback
 - [x] Brave LinkedIn/public search fallback
+- [x] SearXNG primary search-provider integration
 
 ### Job-aware discovery
 - [x] `job_id`-driven people search
@@ -55,6 +57,16 @@ NexusReach already has a working end-to-end loop:
 - [x] same-company fallback ranking
 - [x] `company_match_confidence` and `fallback_reason`
 - [x] safe best-guess emails from approved domain signals
+- [x] usefulness_score (0-100) combining team, title, level, rank, company, and source signals
+
+### LinkedIn graph warm-path v1
+- [x] separate `linkedin_graph_connections` and `linkedin_graph_sync_runs`
+- [x] LinkedIn graph status + sync-session API
+- [x] manual LinkedIn CSV/ZIP import fallback
+- [x] People page `your_connections` section
+- [x] per-person warm-path metadata in people search responses
+- [x] bounded warm-path ranking boost that does not override safety gates
+- [x] local browser connector that can scrape first-degree LinkedIn connections from a logged-in browser
 
 ## Completed job-ingestion milestones
 
@@ -83,24 +95,25 @@ NexusReach already has a working end-to-end loop:
 - [x] saved-contact company filter on Messages
 - [x] saved-contact company filter on Outreach
 - [x] hide saved contacts during live people-search loading
+- [x] LinkedIn Graph settings card
+- [x] local connector command surface in Settings
 
 ## Current priorities
 
 ### P1
-- [x] Improve hiring-manager precision for large engineering orgs
-- [x] Increase peer recall for broad roles without drifting into noisy adjacent titles
-- [x] Reduce cross-bucket duplicates when one same-company fallback qualifies for multiple buckets
-- [x] Add usefulness_score (0-100) combining team, title, level, rank, company, and source signals
+- [ ] Harden LinkedIn browser sync against more LinkedIn DOM variants and security-challenge flows
+- [ ] Add warm-intro-aware drafting suggestions without changing the no-auto-send rule
+- [ ] Add provider usage telemetry and easier cost/credit visibility
 
 ### P2
 - [ ] Add more first-class exact-job host adapters beyond Apple and Workday
 - [ ] Improve company-identity disambiguation for overloaded short brands
-- [ ] Add provider usage telemetry and easier cost/credit visibility
+- [ ] Add optional scheduled LinkedIn graph refresh on top of the current on-demand sync model
 
 ### P3
-- [ ] Add optional self-hosted search fallback behind the router if vendor-cost pressure remains
 - [ ] Expand company-research surfaces using the existing public-web stack
-- [ ] Revisit background sync/reminder automation once retrieval precision stabilizes
+- [ ] Revisit reminder/automation workflows once retrieval precision stabilizes
+- [ ] Decide whether LinkedIn graph should inform dashboard insights beyond people-search ranking
 
 ## Near-term regression suite to keep healthy
 
@@ -110,11 +123,14 @@ NexusReach already has a working end-to-end loop:
 - [ ] Fortune Media vs Fortune Brands identity split
 - [ ] Uber generic exact-job import + hierarchy output
 - [ ] xAI hierarchy + safe best-guess email behavior
+- [ ] LinkedIn graph direct-connection match ordering
+- [ ] LinkedIn graph same-company bridge ordering without unsafe-company promotion
 
 ## Guiding principles
 
 1. Keep humans in the loop. Draft and stage; never auto-send.
 2. Prefer explicit same-company hierarchy over empty buckets.
 3. Keep public identity trust separate from email-domain trust.
-4. Reserve expensive providers for the narrowest, highest-value tasks.
-5. Optimize for truthful output over aggressive guessing.
+4. Keep imported LinkedIn graph data separate from CRM contacts and outreach-derived insights.
+5. Reserve expensive providers for the narrowest, highest-value tasks.
+6. Optimize for truthful output over aggressive guessing.
