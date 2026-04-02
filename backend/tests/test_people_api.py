@@ -44,6 +44,9 @@ def _mock_person(user_id, **overrides):
     p.current_company_verification_confidence = overrides.get("current_company_verification_confidence", None)
     p.current_company_verification_evidence = overrides.get("current_company_verification_evidence", None)
     p.current_company_verified_at = overrides.get("current_company_verified_at", None)
+    p.warm_path_type = overrides.get("warm_path_type", None)
+    p.warm_path_reason = overrides.get("warm_path_reason", None)
+    p.warm_path_connection = overrides.get("warm_path_connection", None)
     p.company = overrides.get("company", None)
     return p
 
@@ -192,3 +195,56 @@ async def test_verify_current_company(client, mock_user_id):
     data = resp.json()
     assert data["current_company_verified"] is True
     assert data["current_company_verification_status"] == "verified"
+
+
+async def test_search_people_includes_your_connections_and_warm_path_metadata(client, mock_user_id):
+    company = _mock_company(mock_user_id)
+    recruiter = _mock_person(
+        mock_user_id,
+        full_name="Recruiter Bob",
+        person_type="recruiter",
+        warm_path_type="same_company_bridge",
+        warm_path_reason="You already know Jane Doe at TechCorp.",
+    )
+    recruiter.warm_path_connection = MagicMock(
+        id=uuid.uuid4(),
+        display_name="Jane Doe",
+        headline="Senior Recruiter",
+        current_company_name="TechCorp",
+        linkedin_url="https://www.linkedin.com/in/janedoe",
+        company_linkedin_url="https://www.linkedin.com/company/techcorp",
+        source="manual_import",
+        last_synced_at=None,
+    )
+
+    mock_result = {
+        "company": company,
+        "your_connections": [
+            {
+                "id": str(uuid.uuid4()),
+                "display_name": "Jane Doe",
+                "headline": "Senior Recruiter",
+                "current_company_name": "TechCorp",
+                "linkedin_url": "https://www.linkedin.com/in/janedoe",
+                "company_linkedin_url": "https://www.linkedin.com/company/techcorp",
+                "source": "manual_import",
+                "last_synced_at": None,
+            }
+        ],
+        "recruiters": [recruiter],
+        "hiring_managers": [],
+        "peers": [],
+    }
+
+    with patch("app.routers.people.search_people_at_company", new_callable=AsyncMock) as mock_search:
+        mock_search.return_value = mock_result
+        resp = await client.post(
+            "/api/people/search",
+            json={"company_name": "TechCorp"},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["your_connections"][0]["display_name"] == "Jane Doe"
+    assert data["recruiters"][0]["warm_path_type"] == "same_company_bridge"
+    assert data["recruiters"][0]["warm_path_connection"]["display_name"] == "Jane Doe"

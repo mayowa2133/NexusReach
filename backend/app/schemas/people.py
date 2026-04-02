@@ -3,6 +3,8 @@ import uuid
 
 from pydantic import BaseModel, field_validator
 
+from app.schemas.linkedin_graph import LinkedInGraphConnectionResponse
+
 
 class CompanyResponse(BaseModel):
     id: uuid.UUID
@@ -52,6 +54,9 @@ class PersonResponse(BaseModel):
     current_company_verification_confidence: int | None = None
     current_company_verification_evidence: str | None = None
     current_company_verified_at: datetime | None = None
+    warm_path_type: str | None = None
+    warm_path_reason: str | None = None
+    warm_path_connection: LinkedInGraphConnectionResponse | None = None
     company: CompanyResponse | None = None
 
     model_config = {"from_attributes": True}
@@ -94,6 +99,7 @@ class SearchErrorDetail(BaseModel):
 
 class PeopleSearchResponse(BaseModel):
     company: CompanyResponse | None
+    your_connections: list[LinkedInGraphConnectionResponse] = []
     recruiters: list[PersonResponse]
     hiring_managers: list[PersonResponse]
     peers: list[PersonResponse]

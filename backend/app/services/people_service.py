@@ -16,6 +16,7 @@ from app.clients import apollo_client, github_client, proxycurl_client, search_r
 from app.models.company import Company
 from app.models.job import Job
 from app.models.person import Person
+from app.services import linkedin_graph_service
 from app.services.employment_verification_service import verify_people_current_company
 from app.services.theorg_discovery_service import discover_theorg_candidates
 from app.utils.company_identity import (
@@ -30,6 +31,7 @@ from app.utils.company_identity import (
     should_trust_company_enrichment,
 )
 from app.utils.job_context import JobContext, extract_job_context
+from app.utils.linkedin import normalize_linkedin_url
 from app.utils.relevance_scorer import score_candidate_relevance
 
 RECRUITER_TITLE_KEYWORDS = (
@@ -2431,8 +2433,25 @@ def _bucket_role_fit_rank(bucket: str, person: Person) -> int:
     return 0 if getattr(person, "org_level", None) == "ic" else 1
 
 
+def _warm_path_rank(person: Person) -> int:
+    return {
+        "direct_connection": 0,
+        "same_company_bridge": 1,
+    }.get(getattr(person, "warm_path_type", None), 2)
+
+
+def _bucketed_linkedin_slugs(bucketed: dict[str, list[Person]]) -> list[str]:
+    slugs: set[str] = set()
+    for people in bucketed.values():
+        for person in people:
+            normalized = normalize_linkedin_url(person.linkedin_url)
+            if normalized:
+                slugs.add(normalized.rstrip("/").rsplit("/", 1)[-1])
+    return sorted(slugs)
+
+
 def _dedupe_bucket_assignments(bucketed: dict[str, list[Person]]) -> dict[str, list[Person]]:
-    winners: dict[uuid.UUID, tuple[str, tuple[int, int, int, int, int, str]]] = {}
+    winners: dict[uuid.UUID, tuple[str, tuple[int, int, int, int, int, int, str]]] = {}
     for bucket, people in bucketed.items():
         for person in people:
             if not person.id:
@@ -2443,6 +2462,7 @@ def _dedupe_bucket_assignments(bucketed: dict[str, list[Person]]) -> dict[str, l
                 100 - usefulness,
                 _bucket_role_fit_rank(bucket, person),
                 0 if getattr(person, "company_match_confidence", None) == "verified" else 1,
+                _warm_path_rank(person),
                 0 if person.linkedin_url else 1,
                 _normalize_identity(person.full_name),
             )
@@ -2489,6 +2509,7 @@ def _finalize_bucketed(
         ordered.sort(
             key=lambda person: (
                 _confidence_rank(getattr(person, "company_match_confidence", None)),
+                _warm_path_rank(person),
                 -(getattr(person, "usefulness_score", None) or 0),
                 _match_rank(getattr(person, "match_quality", None)),
                 _org_rank(bucket, getattr(person, "org_level", "ic") or "ic"),
@@ -2965,6 +2986,23 @@ async def search_people_at_company(
         bucketed,
         target_count_per_bucket=target_count_per_bucket,
     )
+    your_connections = await linkedin_graph_service.get_connections_for_company(
+        db,
+        user_id,
+        company_name=company_name,
+        public_identity_slugs=public_identity_terms,
+    )
+    direct_connections = await linkedin_graph_service.get_connections_by_linkedin_slugs(
+        db,
+        user_id,
+        _bucketed_linkedin_slugs(bucketed),
+    )
+    linkedin_graph_service.apply_warm_path_annotations(
+        bucketed,
+        company_name=company_name,
+        your_connections=your_connections,
+        direct_connections=direct_connections,
+    )
     finalized = _finalize_bucketed(bucketed, target_count_per_bucket=target_count_per_bucket)
 
     # Record search in audit log
@@ -2982,7 +3020,14 @@ async def search_people_at_company(
     db.add(search_log)
     await db.commit()
 
-    return {"company": company, **finalized}
+    return {
+        "company": company,
+        "your_connections": [
+            linkedin_graph_service.serialize_connection(connection)
+            for connection in your_connections
+        ],
+        **finalized,
+    }
 
 
 async def search_people_for_job(
@@ -3527,6 +3572,23 @@ async def search_people_for_job(
         bucketed,
         target_count_per_bucket=target_count_per_bucket,
     )
+    your_connections = await linkedin_graph_service.get_connections_for_company(
+        db,
+        user_id,
+        company_name=job.company_name,
+        public_identity_slugs=public_identity_terms,
+    )
+    direct_connections = await linkedin_graph_service.get_connections_by_linkedin_slugs(
+        db,
+        user_id,
+        _bucketed_linkedin_slugs(bucketed),
+    )
+    linkedin_graph_service.apply_warm_path_annotations(
+        bucketed,
+        company_name=job.company_name,
+        your_connections=your_connections,
+        direct_connections=direct_connections,
+    )
     await db.commit()
     filtered_bucketed = _finalize_bucketed(
         bucketed,
@@ -3534,6 +3596,10 @@ async def search_people_for_job(
     )
     return {
         "company": company,
+        "your_connections": [
+            linkedin_graph_service.serialize_connection(connection)
+            for connection in your_connections
+        ],
         **filtered_bucketed,
         "job_context": {
             "department": context.department,

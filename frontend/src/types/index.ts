@@ -72,6 +72,17 @@ export interface Company {
   starred: boolean;
 }
 
+export interface LinkedInGraphConnection {
+  id: string;
+  display_name: string;
+  headline: string | null;
+  current_company_name: string | null;
+  linkedin_url: string | null;
+  company_linkedin_url: string | null;
+  source: 'local_sync' | 'manual_import' | string;
+  last_synced_at: string | null;
+}
+
 export interface Person {
   id: string;
   full_name: string | null;
@@ -112,6 +123,9 @@ export interface Person {
   current_company_verification_confidence?: number | null;
   current_company_verification_evidence?: string | null;
   current_company_verified_at?: string | null;
+  warm_path_type?: 'direct_connection' | 'same_company_bridge' | null;
+  warm_path_reason?: string | null;
+  warm_path_connection?: LinkedInGraphConnection | null;
   company: Company | null;
 }
 
@@ -156,6 +170,7 @@ export interface SearchErrorDetail {
 
 export interface PeopleSearchResult {
   company: Company | null;
+  your_connections: LinkedInGraphConnection[];
   recruiters: Person[];
   hiring_managers: Person[];
   peers: Person[];
@@ -497,6 +512,37 @@ export interface GuardrailsSettings {
   response_rate_warnings_enabled: boolean;
   guardrails_acknowledged: boolean;
   onboarding_completed: boolean;
+}
+
+export interface LinkedInGraphSyncRun {
+  id: string;
+  source: 'local_sync' | 'manual_import' | string;
+  status: 'idle' | 'awaiting_upload' | 'syncing' | 'completed' | 'failed' | string;
+  processed_count: number;
+  created_count: number;
+  updated_count: number;
+  started_at: string | null;
+  completed_at: string | null;
+  session_expires_at: string | null;
+  last_error: string | null;
+}
+
+export interface LinkedInGraphStatus {
+  connected: boolean;
+  source: 'local_sync' | 'manual_import' | string | null;
+  last_synced_at: string | null;
+  sync_status: 'idle' | 'awaiting_upload' | 'syncing' | 'completed' | 'failed' | string;
+  last_error: string | null;
+  connection_count: number;
+  last_run: LinkedInGraphSyncRun | null;
+}
+
+export interface LinkedInGraphSyncSession {
+  sync_run_id: string;
+  session_token: string;
+  expires_at: string;
+  upload_path: string;
+  max_batch_size: number;
 }
 
 export interface InsightsDashboard {

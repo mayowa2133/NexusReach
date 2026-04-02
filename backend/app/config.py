@@ -83,6 +83,10 @@ class Settings(BaseSettings):
     discovery_rate_limit: str = "10/minute"
     discovery_daily_limit: int = 100
 
+    # LinkedIn graph sync
+    linkedin_graph_sync_session_ttl_seconds: int = 900
+    linkedin_graph_max_import_batch_size: int = 250
+
     # Stale contact re-verification
     reverify_stale_days: int = 14
     reverify_batch_size: int = 20
