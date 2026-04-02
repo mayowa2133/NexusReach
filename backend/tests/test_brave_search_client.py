@@ -62,13 +62,17 @@ class TestParseLinkedInResult:
         assert result is not None
         assert result["full_name"] == "Alice Johnson"
 
-    def test_name_only_without_company_rejected(self):
+    def test_name_only_without_company_low_confidence(self):
+        """Name-only results are returned but with low company confidence."""
         item = {
             "title": "Alice Johnson | LinkedIn",
             "url": "https://www.linkedin.com/in/alicejohnson",
         }
         result = _parse_linkedin_result(item, "Google")
-        assert result is None
+        assert result is not None
+        assert result["full_name"] == "Alice Johnson"
+        # No company signal → downstream ranking will demote
+        assert result["profile_data"]["company_match_confidence"] == "unverified"
 
     def test_strips_query_params_from_url(self):
         item = {
