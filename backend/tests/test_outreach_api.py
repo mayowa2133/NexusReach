@@ -20,6 +20,9 @@ def _mock_person(full_name="Jane Smith", title="Engineering Manager", company_na
     person = MagicMock()
     person.full_name = full_name
     person.title = title
+    person.warm_path_type = None
+    person.warm_path_reason = None
+    person.warm_path_connection = None
     if company_name:
         company = MagicMock()
         company.name = company_name

@@ -44,6 +44,9 @@ def _mock_person(user_id, **overrides):
     p.current_company_verification_confidence = overrides.get("current_company_verification_confidence", None)
     p.current_company_verification_evidence = overrides.get("current_company_verification_evidence", None)
     p.current_company_verified_at = overrides.get("current_company_verified_at", None)
+    p.warm_path_type = overrides.get("warm_path_type", None)
+    p.warm_path_reason = overrides.get("warm_path_reason", None)
+    p.warm_path_connection = overrides.get("warm_path_connection", None)
     p.company = overrides.get("company", None)
     return p
 
