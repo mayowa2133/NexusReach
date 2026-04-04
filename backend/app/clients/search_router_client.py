@@ -127,6 +127,7 @@ async def _run_family(
     params: dict[str, Any],
 ) -> list[dict]:
     aggregated: list[dict] = []
+    target_count = max(1, min(limit, min_results))
     for depth, provider in enumerate(order):
         fetcher = providers.get(provider)
         if fetcher is None:
@@ -161,7 +162,7 @@ async def _run_family(
                 "aggregate_count": len(aggregated),
             },
         )
-        if len(aggregated) >= limit:
+        if len(aggregated) >= target_count:
             break
 
     return aggregated[:limit]

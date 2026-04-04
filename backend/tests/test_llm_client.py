@@ -15,8 +15,6 @@ from app.clients.llm_client import (
     _GENERATORS,
 )
 
-pytestmark = pytest.mark.asyncio
-
 
 # ── _parse_reasoning ────────────────────────────────────────────────
 
@@ -78,6 +76,7 @@ class TestResolveProvider:
 
 # ── generate_message dispatching ────────────────────────────────────
 
+@pytest.mark.asyncio
 class TestGenerateMessage:
     async def test_dispatches_to_correct_provider(self):
         mock_result = {
@@ -118,6 +117,7 @@ class TestGenerateMessage:
 
 # ── Provider-specific generators ────────────────────────────────────
 
+@pytest.mark.asyncio
 class TestGenerateAnthropic:
     async def test_calls_anthropic_sdk(self):
         mock_response = MagicMock()
@@ -140,6 +140,7 @@ class TestGenerateAnthropic:
         mock_client.messages.create.assert_awaited_once()
 
 
+@pytest.mark.asyncio
 class TestGenerateOpenAI:
     async def test_calls_openai_sdk(self):
         mock_usage = MagicMock()
@@ -165,6 +166,7 @@ class TestGenerateOpenAI:
         assert result["usage"]["output_tokens"] == 40
 
 
+@pytest.mark.asyncio
 class TestGenerateGemini:
     async def test_calls_gemini_sdk(self):
         mock_meta = MagicMock()
@@ -205,6 +207,7 @@ class TestGenerateGemini:
         assert result["usage"]["output_tokens"] == 30
 
 
+@pytest.mark.asyncio
 class TestGenerateGroq:
     async def test_calls_groq_sdk(self):
         mock_usage = MagicMock()
