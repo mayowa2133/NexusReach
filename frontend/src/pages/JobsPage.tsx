@@ -28,6 +28,7 @@ import { toast } from 'sonner';
 import { sanitizeHTML } from '@/lib/sanitize';
 import { formatRelativeDate } from '@/lib/dateUtils';
 import { getJobCountry, getJobCountryOptions } from '@/lib/jobCountry';
+import { getStartupSourceLabels, isStartupJob } from '@/lib/jobStartup';
 import type { Job, JobStage } from '@/types';
 
 const LAST_VISITED_KEY = 'nexusreach-jobs-last-visited';
@@ -93,6 +94,9 @@ const SOURCE_LABELS: Record<string, string> = {
   apple_jobs: 'Apple Jobs',
   workday: 'Workday',
   newgrad_jobs: 'NewGrad Jobs',
+  yc_jobs: 'Y Combinator',
+  wellfound: 'Wellfound',
+  ventureloop: 'VentureLoop',
 };
 
 const LEVEL_LABELS: Record<string, string> = {
@@ -139,7 +143,9 @@ export function JobsPage() {
   const [experienceLevelFilter, setExperienceLevelFilter] = useState('');
   const [countryFilter, setCountryFilter] = useState('');
   const [remoteFilter, setRemoteFilter] = useState(false);
+  const [startupFilter, setStartupFilter] = useState(false);
   const [salaryMinFilter, setSalaryMinFilter] = useState('');
+  const [discoverMode, setDiscoverMode] = useState<'default' | 'startup' | null>(null);
 
   // "New jobs" tracking
   const [lastVisited] = useState<string | null>(() => getJobsLastVisited());
@@ -158,6 +164,7 @@ export function JobsPage() {
     experienceLevel: experienceLevelFilter || undefined,
     salaryMin: salaryMinFilter ? Number(salaryMinFilter) : undefined,
     remote: remoteFilter ? true : undefined,
+    startup: startupFilter ? true : undefined,
     search: searchFilter || undefined,
   });
   const baseSavedJobs = savedJobsData?.items ?? [];
@@ -356,25 +363,46 @@ export function JobsPage() {
             <div>
               <div className="font-medium">Discover Jobs</div>
               <p className="text-sm text-muted-foreground">
-                One-click search across multiple roles using free sources (Dice, Remotive, newgrad-jobs.com, and more).
+                Run the standard discover flow or target startup-first sources like YC, VentureLoop, Conviction, and a16z Speedrun.
               </p>
             </div>
-            <Button
-              disabled={discoverJobs.isPending}
-              onClick={() => {
-                discoverJobs.mutate(undefined, {
-                  onSuccess: (data) => {
-                    toast.success(`Discovered ${data.new_jobs_found} new jobs`);
-                  },
-                  onError: (err) => {
-                    toast.error(err instanceof Error ? err.message : 'Discovery failed');
-                  },
-                });
-              }}
-              className="shrink-0"
-            >
-              {discoverJobs.isPending ? 'Discovering...' : 'Discover Jobs'}
-            </Button>
+            <div className="flex items-center gap-2 shrink-0">
+              <Button
+                disabled={discoverJobs.isPending}
+                onClick={() => {
+                  setDiscoverMode('default');
+                  discoverJobs.mutate({ mode: 'default' }, {
+                    onSuccess: (data) => {
+                      toast.success(`Discovered ${data.new_jobs_found} new jobs`);
+                    },
+                    onError: (err) => {
+                      toast.error(err instanceof Error ? err.message : 'Discovery failed');
+                    },
+                    onSettled: () => setDiscoverMode(null),
+                  });
+                }}
+              >
+                {discoverMode === 'default' && discoverJobs.isPending ? 'Discovering...' : 'Discover Jobs'}
+              </Button>
+              <Button
+                variant="outline"
+                disabled={discoverJobs.isPending}
+                onClick={() => {
+                  setDiscoverMode('startup');
+                  discoverJobs.mutate({ mode: 'startup' }, {
+                    onSuccess: (data) => {
+                      toast.success(`Discovered ${data.new_jobs_found} startup jobs`);
+                    },
+                    onError: (err) => {
+                      toast.error(err instanceof Error ? err.message : 'Startup discovery failed');
+                    },
+                    onSettled: () => setDiscoverMode(null),
+                  });
+                }}
+              >
+                {discoverMode === 'startup' && discoverJobs.isPending ? 'Discovering...' : 'Discover Startup Jobs'}
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -559,6 +587,14 @@ export function JobsPage() {
               >
                 Remote
               </Button>
+              <Button
+                variant={startupFilter ? 'default' : 'outline'}
+                size="sm"
+                className="h-8 text-xs"
+                onClick={() => setStartupFilter(!startupFilter)}
+              >
+                Startup
+              </Button>
               <div className="flex items-center gap-1.5">
                 <Label className="text-sm whitespace-nowrap">Min salary:</Label>
                 <Input
@@ -670,6 +706,8 @@ function JobListCard({
   onClick: () => void;
   onToggleStar: (starred: boolean) => void;
 }) {
+  const startupSourceLabels = getStartupSourceLabels(job);
+
   return (
     <Card
       className={`cursor-pointer transition-colors ${isSelected ? 'border-primary bg-muted/30' : 'hover:bg-muted/20'}`}
@@ -726,6 +764,12 @@ function JobListCard({
           {job.remote && (
             <Badge variant="outline" className="text-[10px] px-1 py-0">Remote</Badge>
           )}
+          {isStartupJob(job) && (
+            <Badge variant="secondary" className="text-[10px] px-1 py-0">Startup</Badge>
+          )}
+          {startupSourceLabels.map((label) => (
+            <Badge key={label} variant="outline" className="text-[10px] px-1 py-0">{label}</Badge>
+          ))}
           <Badge variant={STAGE_COLORS[job.stage] || 'outline'} className="text-[10px] px-1 py-0 ml-auto">
             {STAGES.find((s) => s.value === job.stage)?.label || job.stage}
           </Badge>
@@ -750,6 +794,8 @@ function JobDetail({
   targetCountPerBucket: number;
   onTargetCountChange: (value: number) => void;
 }) {
+  const startupSourceLabels = getStartupSourceLabels(job);
+
   return (
     <Card>
       <CardHeader>
@@ -784,6 +830,10 @@ function JobDetail({
         <div className="flex flex-wrap gap-2">
           {job.location && <Badge variant="outline">{job.location}</Badge>}
           {job.remote && <Badge variant="secondary">Remote</Badge>}
+          {isStartupJob(job) && <Badge variant="secondary">Startup</Badge>}
+          {startupSourceLabels.map((label) => (
+            <Badge key={label} variant="outline">{label}</Badge>
+          ))}
           {job.employment_type && <Badge variant="outline">{job.employment_type}</Badge>}
           <Badge variant="outline">{SOURCE_LABELS[job.source] || job.source}</Badge>
           {job.experience_level && (

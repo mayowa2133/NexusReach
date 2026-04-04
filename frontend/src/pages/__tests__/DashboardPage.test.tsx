@@ -315,6 +315,30 @@ describe('DashboardPage — top opportunities', () => {
     renderDashboard();
     expect(screen.getAllByText(/view all jobs/i).length).toBeGreaterThanOrEqual(1);
   });
+
+  it('shows startup badges when jobs carry startup tags', () => {
+    mockJobs = {
+      data: {
+        items: [
+          {
+            id: 'j1',
+            title: 'Founding Engineer',
+            company_name: 'Cartesia',
+            location: 'San Francisco, CA',
+            match_score: 88,
+            tags: ['startup', 'startup_source:a16z_speedrun'],
+          },
+        ],
+        total: 1,
+        limit: null,
+        offset: 0,
+      },
+      isLoading: false,
+    };
+    renderDashboard();
+    expect(screen.getAllByText('Startup').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('a16z Speedrun').length).toBeGreaterThanOrEqual(1);
+  });
 });
 
 // ===========================================================================

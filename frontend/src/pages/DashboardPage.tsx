@@ -10,6 +10,7 @@ import { useOutreachLogs } from '@/hooks/useOutreach';
 import { useJobs, useRefreshJobs, useSavedSearches, useSeedDefaultJobs } from '@/hooks/useJobs';
 import { useGuardrails } from '@/hooks/useSettings';
 import { formatRelativeDate } from '@/lib/dateUtils';
+import { getStartupSourceLabels, isStartupJob } from '@/lib/jobStartup';
 import { useOnboarding } from '@/hooks/useOnboarding';
 import { OnboardingDialog } from '@/components/onboarding/OnboardingDialog';
 import { MetricCards } from '@/components/dashboard/MetricCards';
@@ -168,6 +169,7 @@ export function DashboardPage() {
             <div className="space-y-3">
               {latestJobs.map((job) => {
                 const isNew = !!lastVisited && job.created_at > lastVisited;
+                const startupSourceLabels = getStartupSourceLabels(job);
                 return (
                   <div
                     key={job.id}
@@ -189,6 +191,20 @@ export function DashboardPage() {
                           <span className="opacity-70"> · {formatRelativeDate(job.posted_at)}</span>
                         )}
                       </div>
+                      {(isStartupJob(job) || startupSourceLabels.length > 0) && (
+                        <div className="flex flex-wrap items-center gap-1 mt-1">
+                          {isStartupJob(job) && (
+                            <Badge variant="secondary" className="text-[10px] px-1 py-0">
+                              Startup
+                            </Badge>
+                          )}
+                          {startupSourceLabels.map((label) => (
+                            <Badge key={label} variant="outline" className="text-[10px] px-1 py-0">
+                              {label}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
                     </div>
                     {job.match_score != null && (
                       <Badge
@@ -294,6 +310,7 @@ export function DashboardPage() {
               <div className="space-y-3">
                 {topJobs.map((job) => {
                   const isNew = !!lastVisited && job.created_at > lastVisited;
+                  const startupSourceLabels = getStartupSourceLabels(job);
                   return (
                     <div
                       key={job.id}
@@ -315,6 +332,20 @@ export function DashboardPage() {
                             <span className="opacity-70"> · {formatRelativeDate(job.posted_at)}</span>
                           )}
                         </div>
+                        {(isStartupJob(job) || startupSourceLabels.length > 0) && (
+                          <div className="flex flex-wrap items-center gap-1 mt-1">
+                            {isStartupJob(job) && (
+                              <Badge variant="secondary" className="text-[10px] px-1 py-0">
+                                Startup
+                              </Badge>
+                            )}
+                            {startupSourceLabels.map((label) => (
+                              <Badge key={label} variant="outline" className="text-[10px] px-1 py-0">
+                                {label}
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
                       </div>
                       {job.match_score != null && (
                         <Badge

@@ -1,6 +1,14 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import type { ATSSearchRequest, Job, JobSearchRequest, JobStage, PaginatedResponse, SearchPreference } from '@/types';
+import type {
+  ATSSearchRequest,
+  DiscoverJobsRequest,
+  Job,
+  JobSearchRequest,
+  JobStage,
+  PaginatedResponse,
+  SearchPreference,
+} from '@/types';
 
 export function useJobSearch() {
   const queryClient = useQueryClient();
@@ -35,11 +43,12 @@ export interface JobFilters {
   experienceLevel?: string;
   salaryMin?: number;
   remote?: boolean;
+  startup?: boolean;
   search?: string;
 }
 
 export function useJobs(filters: JobFilters = {}) {
-  const { stage, sortBy, starred, employmentType, experienceLevel, salaryMin, remote, search } = filters;
+  const { stage, sortBy, starred, employmentType, experienceLevel, salaryMin, remote, startup, search } = filters;
   const params = new URLSearchParams();
   if (stage) params.set('stage', stage);
   if (sortBy) params.set('sort_by', sortBy);
@@ -48,11 +57,12 @@ export function useJobs(filters: JobFilters = {}) {
   if (experienceLevel) params.set('experience_level', experienceLevel);
   if (salaryMin !== undefined) params.set('salary_min', String(salaryMin));
   if (remote !== undefined) params.set('remote', String(remote));
+  if (startup !== undefined) params.set('startup', String(startup));
   if (search) params.set('search', search);
   const qs = params.toString();
 
   return useQuery({
-    queryKey: ['jobs', stage, sortBy, starred, employmentType, experienceLevel, salaryMin, remote, search],
+    queryKey: ['jobs', stage, sortBy, starred, employmentType, experienceLevel, salaryMin, remote, startup, search],
     queryFn: () => api.get<PaginatedResponse<Job>>(`/api/jobs${qs ? `?${qs}` : ''}`),
   });
 }
@@ -117,8 +127,8 @@ export function useDiscoverJobs() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (queries?: string[]) =>
-      api.post<{ new_jobs_found: number }>('/api/jobs/discover', queries ? { queries } : {}),
+    mutationFn: (params?: DiscoverJobsRequest) =>
+      api.post<{ new_jobs_found: number }>('/api/jobs/discover', params ?? {}),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['jobs'] });
       queryClient.invalidateQueries({ queryKey: ['saved-searches'] });

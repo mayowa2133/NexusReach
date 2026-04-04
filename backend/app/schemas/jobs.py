@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from typing import Literal
 
 
 class JobSearchRequest(BaseModel):
@@ -73,6 +74,7 @@ class SearchPreferenceToggle(BaseModel):
 
 class DiscoverRequest(BaseModel):
     queries: list[str] | None = None
+    mode: Literal["default", "startup"] = "default"
 
 
 class RefreshResponse(BaseModel):

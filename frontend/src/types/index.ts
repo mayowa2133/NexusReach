@@ -367,6 +367,11 @@ export interface JobSearchRequest {
   sources?: string[];
 }
 
+export interface DiscoverJobsRequest {
+  queries?: string[];
+  mode?: 'default' | 'startup';
+}
+
 export interface ATSSearchRequest {
   company_slug?: string;
   ats_type?: string;

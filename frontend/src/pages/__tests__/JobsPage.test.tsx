@@ -43,6 +43,14 @@ vi.mock('@/stores/auth', () => ({
 
 let mockSavedJobs: { items: Array<Record<string, unknown>>; total: number; limit: null; offset: 0 } | undefined;
 let mockSavedSearches: Array<Record<string, unknown>> = [];
+const mockUseJobs = vi.fn((filters: unknown) => {
+  void filters;
+  return {
+    data: mockSavedJobs,
+    isLoading: false,
+  };
+});
+const mockDiscoverJobs = { mutate: vi.fn(), isPending: false };
 const mockToggleSavedSearch = { mutate: vi.fn() };
 const mockDeleteSavedSearch = { mutate: vi.fn() };
 
@@ -55,10 +63,7 @@ vi.mock('@/hooks/useJobs', () => ({
     mutateAsync: vi.fn(),
     isPending: false,
   }),
-  useJobs: () => ({
-    data: mockSavedJobs,
-    isLoading: false,
-  }),
+  useJobs: (filters?: unknown) => mockUseJobs(filters),
   useUpdateJobStage: () => ({
     mutateAsync: vi.fn(),
   }),
@@ -71,7 +76,7 @@ vi.mock('@/hooks/useJobs', () => ({
   useToggleSavedSearch: () => mockToggleSavedSearch,
   useDeleteSavedSearch: () => mockDeleteSavedSearch,
   useRefreshJobs: () => ({ mutate: vi.fn(), isPending: false }),
-  useDiscoverJobs: () => ({ mutate: vi.fn(), isPending: false }),
+  useDiscoverJobs: () => mockDiscoverJobs,
 }));
 
 vi.mock('sonner', () => ({
@@ -109,6 +114,7 @@ const sampleJob = {
   match_score: 72,
   score_breakdown: {},
   starred: false,
+  tags: null,
   url: 'https://example.com/job',
   created_at: '2026-03-20T12:00:00Z',
 };
@@ -121,11 +127,22 @@ const canadaJob = {
   location: 'Toronto, ON, CA',
 };
 
+const startupJob = {
+  ...sampleJob,
+  id: 'job-3',
+  title: 'Founding Product Engineer',
+  company_name: 'Cartesia',
+  source: 'yc_jobs',
+  tags: ['startup', 'startup_source:yc_jobs'],
+};
+
 beforeEach(() => {
   window.localStorage.clear();
   mockNavigate.mockReset();
   mockSavedJobs = undefined;
   mockSavedSearches = [];
+  mockUseJobs.mockClear();
+  mockDiscoverJobs.mutate.mockReset();
   mockToggleSavedSearch.mutate.mockReset();
   mockDeleteSavedSearch.mutate.mockReset();
 });
@@ -159,6 +176,11 @@ describe('JobsPage', () => {
     renderJobs();
     const buttons = screen.getAllByRole('button', { name: /search/i });
     expect(buttons.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('renders the startup discover action', () => {
+    renderJobs();
+    expect(screen.getByRole('button', { name: /discover startup jobs/i })).toBeInTheDocument();
   });
 
   it('renders empty state when no jobs', () => {
@@ -286,6 +308,7 @@ describe('JobsPage', () => {
     expect(screen.getByLabelText(/minimum salary filter/i)).toBeInTheDocument();
     // Remote filter button (separate from search remote-only)
     expect(screen.getByRole('button', { name: /^remote$/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^startup$/i })).toBeInTheDocument();
   });
 
   it('filters saved jobs by derived country', async () => {
@@ -301,5 +324,38 @@ describe('JobsPage', () => {
     expect(screen.queryByText('Backend Engineer')).not.toBeInTheDocument();
     expect(screen.getByText('Platform Engineer')).toBeInTheDocument();
     expect(screen.getByText(/1 jobs/i)).toBeInTheDocument();
+  });
+
+  it('passes startup=true to useJobs when the startup filter is enabled', async () => {
+    mockSavedJobs = { items: [sampleJob], total: 1, limit: null, offset: 0 };
+
+    renderJobs();
+    await userEvent.click(screen.getByRole('button', { name: /^startup$/i }));
+
+    expect(mockUseJobs).toHaveBeenLastCalledWith(expect.objectContaining({ startup: true }));
+  });
+
+  it('triggers startup discover mode from the CTA', async () => {
+    renderJobs();
+
+    await userEvent.click(screen.getByRole('button', { name: /discover startup jobs/i }));
+
+    expect(mockDiscoverJobs.mutate).toHaveBeenCalledWith(
+      { mode: 'startup' },
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+        onSettled: expect.any(Function),
+      })
+    );
+  });
+
+  it('shows startup badges when a saved job is startup-tagged', () => {
+    mockSavedJobs = { items: [startupJob], total: 1, limit: null, offset: 0 };
+
+    renderJobs();
+
+    expect(screen.getAllByText('Startup').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText('Y Combinator')).toBeInTheDocument();
   });
 });

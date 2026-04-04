@@ -125,6 +125,7 @@ async def list_jobs(
     experience_level: str | None = None,
     salary_min: float | None = None,
     remote: bool | None = None,
+    startup: bool | None = None,
     search: str | None = None,
     limit: int | None = None,
     offset: int = 0,
@@ -133,7 +134,7 @@ async def list_jobs(
     jobs, total = await get_jobs(
         db, user_id, stage=stage, sort_by=sort_by, starred=starred,
         employment_type=employment_type, experience_level=experience_level,
-        salary_min=salary_min, remote=remote, search=search,
+        salary_min=salary_min, remote=remote, startup=startup, search=search,
         limit=limit, offset=offset,
     )
     return {
@@ -172,7 +173,8 @@ async def discover_jobs_endpoint(
     built-in defaults covering common roles when omitted.
     """
     queries = body.queries if body else None
-    new_count = await discover_jobs(db, user_id, queries=queries)
+    mode = body.mode if body else "default"
+    new_count = await discover_jobs(db, user_id, queries=queries, mode=mode)
     return RefreshResponse(new_jobs_found=new_count)
 
 
