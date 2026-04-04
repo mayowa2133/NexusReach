@@ -1,6 +1,6 @@
 # NexusReach — Architecture
 
-Last updated: 2026-04-02
+Last updated: 2026-04-04
 
 This document describes the current implemented architecture, not the original greenfield plan.
 
@@ -21,6 +21,7 @@ flowchart TD
     SVC --> MSG["Message Drafting"]
 
     JOBS --> ATS["ATS / Exact-Job Adapters"]
+    JOBS --> STARTUP["Startup Boards / Ecosystems"]
     PEOPLE --> SEARCH["Search Router"]
     PEOPLE --> THEORG["The Org Traversal"]
     PEOPLE --> VERIFY["Employment Verification"]
@@ -40,6 +41,7 @@ flowchart TD
     VERIFY --> PUBLICFETCH["Public Page Fetcher"]
     THEORG --> PUBLICFETCH
     ATS --> PUBLICFETCH
+    STARTUP --> PUBLICFETCH
 
     PUBLICFETCH --> DIRECT["Direct HTTPX"]
     PUBLICFETCH --> C4AI["Crawl4AI"]
@@ -86,6 +88,11 @@ frontend/src/pages/
 ### Important frontend behavior
 - TanStack Query owns server state.
 - Zustand owns auth/session and other client-only state.
+- The Jobs page now supports:
+  - default discover
+  - startup-only discover
+  - a server-backed startup filter
+  - a client-side country filter derived from `location`
 - The People page groups saved contacts by company and filters them by company name.
 - Messages and Outreach reuse the same saved-contact company filter pattern.
 - People results can render:
@@ -96,6 +103,7 @@ frontend/src/pages/
   - warm-path badges and explanations
   - a `your_connections` section for imported first-degree LinkedIn matches
 - The Settings page exposes the LinkedIn graph status, import actions, sync-session creation, and local connector commands.
+- Jobs, Job Detail, and Dashboard render startup badges/source labels from reserved job tags.
 
 ## Backend architecture
 
@@ -144,6 +152,12 @@ Key current clients:
   - `jsearch_client.py`
   - `adzuna_client.py`
   - `remote_jobs_client.py`
+  - `newgrad_jobs_client.py`
+  - `yc_jobs_client.py`
+  - `ventureloop_jobs_client.py`
+  - `wellfound_jobs_client.py`
+  - `conviction_jobs_client.py`
+  - `speedrun_jobs_client.py`
 - search clients:
   - `search_router_client.py`
   - `searxng_search_client.py`
@@ -195,6 +209,7 @@ Important fields:
 - `source`
 - `ats`
 - `ats_slug`
+- `tags`
 - `fingerprint`
 - `match_score`
 - `stage`
@@ -267,6 +282,23 @@ NexusReach supports two job-ingestion lanes:
    - Workday exact-job URLs
    - generic exact-job hosts with parseable metadata
 
+There are also two discovery modes above those lanes:
+
+1. **Default discover**
+   - broad aggregators
+   - curated ATS boards
+   - `newgrad-jobs.com`
+
+2. **Startup discover**
+   - direct startup boards:
+     - Y Combinator Jobs
+     - VentureLoop
+     - Wellfound (best-effort)
+   - startup ecosystems:
+     - Conviction Jobs / Mixture of Experts
+     - a16z Speedrun
+   - ecosystem links resolve back into the ATS/exact-job ingestion lanes when possible
+
 ### Exact-job flow
 
 ```mermaid
@@ -275,9 +307,18 @@ flowchart TD
     PARSE -->|board-backed| BOARD["Board search"]
     PARSE -->|exact-job| FETCH["Exact page fetch"]
     FETCH --> NORM["Normalize job metadata"]
-    NORM --> DEDUPE["Deduplicate by ats/external_id/canonical URL/fingerprint"]
+    NORM --> DEDUPE["Deduplicate by source/external_id/canonical URL/fingerprint"]
     DEDUPE --> SAVE["Persist Job + Company linkage"]
 ```
+
+### Startup-provenance rules
+
+- Startup state is stored in `Job.tags`, not a dedicated schema column.
+- Reserved tags are:
+  - `startup`
+  - `startup_source:<source_key>`
+- When a startup-sourced job matches an existing ATS/exact row, startup tags are merged into the existing job instead of creating a duplicate.
+- The underlying `source` / `ats` should continue to describe the resolved posting origin; startup provenance is additive metadata.
 
 ## People discovery architecture
 

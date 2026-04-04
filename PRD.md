@@ -1,6 +1,6 @@
 # NexusReach — Product Requirements Document
 
-Last updated: 2026-04-02
+Last updated: 2026-04-04
 
 This PRD reflects the current intended product behavior, including features that are already shipped and the rules they should continue to preserve.
 
@@ -57,6 +57,8 @@ Users should be able to start either from discovery or from an exact job posting
 
 ### Supported job inputs
 - aggregated job discovery from APIs and curated feeds
+- `newgrad-jobs.com` discovery with detail-page enrichment for accurate metadata
+- startup-first discovery from startup-specific sources
 - board-backed ATS search:
   - Greenhouse
   - Lever
@@ -67,10 +69,24 @@ Users should be able to start either from discovery or from an exact job posting
   - Workday exact-job URLs
   - proprietary careers pages when parseable metadata exists
 
+### Startup-first discovery scope
+- direct startup boards:
+  - Y Combinator Jobs
+  - VentureLoop
+  - Wellfound (best-effort; may return zero when blocked)
+- startup ecosystems that resolve into ATS/exact-job imports:
+  - Conviction Jobs / Mixture of Experts
+  - a16z Speedrun
+- startup provenance should be stored in reserved job tags:
+  - `startup`
+  - `startup_source:<source_key>`
+
 ### Product requirements
 - exact-job import must canonicalize tracked URLs and avoid duplicate jobs
+- non-ATS sources such as `newgrad-jobs.com` should dedupe by `source + external_id`, then canonical URL, then fingerprint
 - unsupported or broken pages should fail clearly instead of importing the wrong page
 - imported jobs must be usable immediately in the `Find People` flow
+- startup provenance must merge into an existing ATS/exact-job row on dedupe instead of creating a duplicate job
 
 ## Module 3: Company identity
 
@@ -214,6 +230,7 @@ The CRM should ensure the user always knows:
 - status tracking for each relationship
 - linkage between jobs, companies, people, messages, and outreach logs
 - saved contacts should be filterable by company
+- saved jobs should be filterable by country and startup status
 - imported LinkedIn graph rows must stay outside the saved-contact CRM model
 
 ## Module 10: Insights and cost-awareness
