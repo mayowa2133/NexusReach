@@ -27,6 +27,7 @@ import {
 import { toast } from 'sonner';
 import { sanitizeHTML } from '@/lib/sanitize';
 import { formatRelativeDate } from '@/lib/dateUtils';
+import { getJobCountry, getJobCountryOptions } from '@/lib/jobCountry';
 import type { Job, JobStage } from '@/types';
 
 const LAST_VISITED_KEY = 'nexusreach-jobs-last-visited';
@@ -136,6 +137,7 @@ export function JobsPage() {
   const [searchFilter, setSearchFilter] = useState('');
   const [employmentTypeFilter, setEmploymentTypeFilter] = useState('');
   const [experienceLevelFilter, setExperienceLevelFilter] = useState('');
+  const [countryFilter, setCountryFilter] = useState('');
   const [remoteFilter, setRemoteFilter] = useState(false);
   const [salaryMinFilter, setSalaryMinFilter] = useState('');
 
@@ -158,7 +160,17 @@ export function JobsPage() {
     remote: remoteFilter ? true : undefined,
     search: searchFilter || undefined,
   });
-  const savedJobs = savedJobsData?.items;
+  const baseSavedJobs = savedJobsData?.items ?? [];
+  const countryOptions = (() => {
+    const options = new Set(getJobCountryOptions(baseSavedJobs));
+    if (countryFilter) {
+      options.add(countryFilter);
+    }
+    return [...options].sort((a, b) => a.localeCompare(b));
+  })();
+  const savedJobs = countryFilter
+    ? baseSavedJobs.filter((job) => getJobCountry(job.location) === countryFilter)
+    : baseSavedJobs;
   const updateStage = useUpdateJobStage();
   const toggleStar = useToggleJobStar();
 
@@ -169,7 +181,7 @@ export function JobsPage() {
   const refreshJobs = useRefreshJobs();
   const discoverJobs = useDiscoverJobs();
 
-  const newJobCount = savedJobs && lastVisited
+  const newJobCount = lastVisited
     ? savedJobs.filter((j) => j.created_at > lastVisited).length
     : 0;
 
@@ -516,6 +528,20 @@ export function JobsPage() {
                   ))}
                 </select>
               </div>
+              <div className="flex items-center gap-2">
+                <Label className="text-sm">Country:</Label>
+                <select
+                  value={countryFilter}
+                  onChange={(e) => setCountryFilter(e.target.value)}
+                  className="h-8 rounded-lg border border-input bg-transparent px-2 text-sm outline-none"
+                  aria-label="Country filter"
+                >
+                  <option value="">All countries</option>
+                  {countryOptions.map((country) => (
+                    <option key={country} value={country}>{country}</option>
+                  ))}
+                </select>
+              </div>
               <Button
                 variant={starredFilter ? 'default' : 'outline'}
                 size="sm"
@@ -569,7 +595,7 @@ export function JobsPage() {
       <div className="grid gap-4 lg:grid-cols-5">
         {/* Job list */}
         <div className="lg:col-span-2 space-y-2">
-          {savedJobs && savedJobs.length > 0 ? (
+          {savedJobs.length > 0 ? (
             savedJobs.map((job) => (
               <JobListCard
                 key={job.id}
@@ -580,6 +606,12 @@ export function JobsPage() {
                 onToggleStar={(starred) => handleToggleStar(job.id, starred)}
               />
             ))
+          ) : baseSavedJobs.length > 0 ? (
+            <div className="rounded-lg border border-dashed p-8 text-center">
+              <p className="text-muted-foreground">
+                No jobs match the current filters.
+              </p>
+            </div>
           ) : (
             <div className="rounded-lg border border-dashed p-8 text-center">
               <p className="text-muted-foreground">

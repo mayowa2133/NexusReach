@@ -113,6 +113,14 @@ const sampleJob = {
   created_at: '2026-03-20T12:00:00Z',
 };
 
+const canadaJob = {
+  ...sampleJob,
+  id: 'job-2',
+  title: 'Platform Engineer',
+  company_name: 'Shopify',
+  location: 'Toronto, ON, CA',
+};
+
 beforeEach(() => {
   window.localStorage.clear();
   mockNavigate.mockReset();
@@ -274,8 +282,24 @@ describe('JobsPage', () => {
 
     expect(screen.getByPlaceholderText(/search saved jobs/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/employment type filter/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/country filter/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/minimum salary filter/i)).toBeInTheDocument();
     // Remote filter button (separate from search remote-only)
     expect(screen.getByRole('button', { name: /^remote$/i })).toBeInTheDocument();
+  });
+
+  it('filters saved jobs by derived country', async () => {
+    mockSavedJobs = { items: [sampleJob, canadaJob], total: 2, limit: null, offset: 0 };
+
+    renderJobs();
+
+    expect(screen.getByText('Backend Engineer')).toBeInTheDocument();
+    expect(screen.getByText('Platform Engineer')).toBeInTheDocument();
+
+    await userEvent.selectOptions(screen.getByLabelText(/country filter/i), 'Canada');
+
+    expect(screen.queryByText('Backend Engineer')).not.toBeInTheDocument();
+    expect(screen.getByText('Platform Engineer')).toBeInTheDocument();
+    expect(screen.getByText(/1 jobs/i)).toBeInTheDocument();
   });
 });
