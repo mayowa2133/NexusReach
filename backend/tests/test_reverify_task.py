@@ -28,10 +28,12 @@ def _make_company(name="TestCo"):
 
 def _mock_session(stale_people):
     """Build a mock async_session context manager returning given people."""
-    mock_db = AsyncMock()
+    mock_db = MagicMock()
     mock_result = MagicMock()
     mock_result.scalars.return_value.all.return_value = stale_people
-    mock_db.execute.return_value = mock_result
+    mock_db.execute = AsyncMock(return_value=mock_result)
+    mock_db.commit = AsyncMock()
+    mock_db.add = MagicMock()
 
     class FakeSession:
         async def __aenter__(self):
