@@ -1,6 +1,6 @@
 # NexusReach — Claude Context
 
-Last updated: 2026-04-02
+Last updated: 2026-04-04
 
 This file mirrors `AGENTS.md` so Claude and Codex see the same project state. If these files ever drift, update both together.
 
@@ -20,7 +20,10 @@ The human is always in the loop. Nothing is ever sent automatically.
 ## Current product snapshot
 
 ### Jobs and company intake
-- Job aggregation exists for JSearch, Adzuna, Dice, remote/public boards, and curated GitHub job lists.
+- Job aggregation exists for JSearch, Adzuna, Dice, remote/public boards, curated GitHub job lists, and `newgrad-jobs.com`.
+- `newgrad-jobs.com` ingestion is now two-stage:
+  - list-page discovery for title/company/date/URL
+  - detail-page enrichment for location, employment type, work mode, salary, level label, and description
 - Board-backed ATS support exists for:
   - Greenhouse
   - Lever
@@ -31,7 +34,18 @@ The human is always in the loop. Nothing is ever sent automatically.
   - Workday exact-job URLs on `*.myworkdayjobs.com`
   - generic exact-job hosts when metadata is parseable
 - Proprietary careers pages can import through the exact-job pipeline when the page exposes enough metadata. In practice this is how some Microsoft and Uber roles are handled.
-- Exact-job import canonicalizes URLs, dedupes by `ats + external_id` first, then canonical URL, then fingerprint.
+- Startup-first discovery now exists as a separate manual flow:
+  - direct startup boards:
+    - Y Combinator Jobs
+    - VentureLoop
+    - Wellfound (best-effort; may fail soft when blocked)
+  - startup ecosystems that resolve to ATS/exact-job imports:
+    - Conviction Jobs / Mixture of Experts
+    - a16z Speedrun companies
+- Startup provenance is source-based only in v1 and stored in reserved job tags:
+  - `startup`
+  - `startup_source:<source_key>`
+- Job import now canonicalizes URLs and dedupes by `source + external_id` first, then canonical URL, then fingerprint.
 
 ### People discovery
 - People discovery is no longer Apollo-only.
@@ -129,6 +143,12 @@ The human is always in the loop. Nothing is ever sent automatically.
 
 ### Frontend state and UX
 - Saved contacts are grouped by company on the People page.
+- Jobs now has separate `Discover Jobs` and `Discover Startup Jobs` actions.
+- Jobs now has:
+  - a server-backed `Startup` filter
+  - a client-side country filter derived from `location`
+  - startup badges and startup-source labels on cards and detail views
+- Dashboard latest jobs and top opportunities now show startup badges/source labels when startup tags are present.
 - Saved-contact company filters now exist on:
   - People
   - Messages
@@ -358,6 +378,11 @@ VITE_SUPABASE_ANON_KEY=...
 21. The server must never store LinkedIn cookies, session tokens, or credentials. Only normalized connection rows are uploaded.
 22. Warm-path ranking boosts cannot bless unsafe candidates. They operate only within already-safe same-company results.
 23. The local browser connector requires Playwright locally and can either attach to Chrome over CDP or use a dedicated persistent browser profile.
+24. `newgrad_jobs` now behaves like a first-class non-ATS source: enrich detail pages inline, derive `remote` from the detail-page work-mode signal, and dedupe by `source + external_id` / canonical URL instead of ATS-only assumptions.
+25. Startup state is tag-based, not schema-based. Reserved tags are `startup` and `startup_source:<source_key>`.
+26. `POST /api/jobs/discover` supports `mode: "default" | "startup"`. The startup mode is a dedicated discover flow; it does not yet change hourly saved-search refresh behavior.
+27. Startup ecosystem imports must preserve the underlying `source` / `ats` from the resolved posting while merging startup provenance into `job.tags` on dedupe.
+28. Wellfound is intentionally best-effort right now. Live fetches can return `403` anti-bot pages and should fail soft to `[]` rather than breaking startup discover.
 
 ## Pre-commit checklist
 

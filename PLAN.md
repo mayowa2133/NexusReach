@@ -1,6 +1,6 @@
 # NexusReach — Current Plan and Roadmap
 
-Last updated: 2026-04-02
+Last updated: 2026-04-04
 
 This file tracks what is already shipped, what is actively being hardened, and what still matters next.
 
@@ -78,6 +78,9 @@ NexusReach already has a working end-to-end loop:
 - [x] Apple Jobs support
 - [x] Workday exact-job support
 - [x] generic exact-job fallback for metadata-rich proprietary career pages
+- [x] high-accuracy `newgrad-jobs.com` detail-page enrichment
+- [x] source-aware non-ATS dedupe using `source + external_id` and canonical URL
+- [x] startup-first discover mode with startup-source tagging
 
 ## Completed infrastructure upgrades
 
@@ -97,15 +100,21 @@ NexusReach already has a working end-to-end loop:
 - [x] hide saved contacts during live people-search loading
 - [x] LinkedIn Graph settings card
 - [x] local connector command surface in Settings
+- [x] Jobs country filter derived from `location`
+- [x] Jobs startup filter and separate `Discover Startup Jobs` action
+- [x] startup badges/source badges on Jobs, Job Detail, and Dashboard
 
 ## Current priorities
 
 ### P1
+- [ ] Decide on the production-grade Wellfound path: stronger browser retrieval, sanctioned feed, or removal from the v1 source list
+- [ ] Decide whether startup sources should remain manual-only or join saved-search/hourly refresh behavior
 - [ ] Harden LinkedIn browser sync against more LinkedIn DOM variants and security-challenge flows
 - [ ] Add warm-intro-aware drafting suggestions without changing the no-auto-send rule
 - [ ] Add provider usage telemetry and easier cost/credit visibility
 
 ### P2
+- [ ] Add separate “startup-first” vs “venture-backed” taxonomy before onboarding broader VC portfolio boards
 - [ ] Add more first-class exact-job host adapters beyond Apple and Workday
 - [ ] Improve company-identity disambiguation for overloaded short brands
 - [ ] Add optional scheduled LinkedIn graph refresh on top of the current on-demand sync model
@@ -119,6 +128,10 @@ NexusReach already has a working end-to-end loop:
 
 - [ ] Zip ambiguous-company people search
 - [ ] Whatnot early-career recruiter discovery
+- [x] `newgrad-jobs.com` detail-page enrichment + hidden DOM stripping
+- [x] startup source parser fixtures for YC, VentureLoop, Conviction, and Speedrun
+- [x] startup tag merge into existing ATS jobs
+- [x] startup filter / badge rendering on Jobs and Dashboard
 - [ ] Apple exact-job import + people search
 - [ ] Fortune Media vs Fortune Brands identity split
 - [ ] Uber generic exact-job import + hierarchy output

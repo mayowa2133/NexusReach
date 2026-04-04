@@ -8,6 +8,8 @@ The product is designed around one rule: the human is always in the loop. NexusR
 
 ### Job intake
 - search broad job aggregators and curated sources
+- enrich `newgrad-jobs.com` jobs from detail pages for accurate location/salary/description metadata
+- run a separate startup-first discovery flow across YC, VentureLoop, Conviction, and a16z Speedrun
 - import board-backed ATS jobs from Greenhouse, Lever, and Ashby
 - import exact-job URLs from:
   - Workable
@@ -52,6 +54,7 @@ The product is designed around one rule: the human is always in the loop. NexusR
 ### CRM and UX
 - track outreach statuses and notes
 - filter saved contacts by company on People, Messages, and Outreach
+- filter saved jobs by country and startup status
 - keep contacts linked back to the jobs and companies that produced them
 - expose LinkedIn graph sync status and local connector commands in Settings
 
@@ -76,6 +79,18 @@ The product is designed around one rule: the human is always in the loop. NexusR
 - Apple Jobs
 - Workday exact-job URLs on `*.myworkdayjobs.com`
 - generic exact-job hosts when canonical metadata is parseable
+
+### Startup-first discovery
+- direct startup boards:
+  - Y Combinator Jobs
+  - VentureLoop
+  - Wellfound (best-effort; may return zero when blocked)
+- startup ecosystems that resolve into ATS/exact-job imports:
+  - Conviction Jobs / Mixture of Experts
+  - a16z Speedrun
+- startup provenance is stored in job tags:
+  - `startup`
+  - `startup_source:<source_key>`
 
 ## People discovery model
 
@@ -256,3 +271,5 @@ cd frontend && npm run build
 4. Imported LinkedIn graph data is separate from saved CRM contacts and from outreach-derived dashboard `warm_paths`.
 5. The server does not store LinkedIn browser auth material. The local connector uploads only normalized connection rows.
 6. Workday exact-job ingestion should fail honestly on maintenance/outage pages instead of importing the wrong landing page.
+7. Startup status is tag-based, not schema-based, and the startup filter is backed by `/api/jobs?startup=true`.
+8. Wellfound is best-effort only right now; live anti-bot responses should degrade to zero Wellfound jobs without breaking startup discovery.

@@ -1,23 +1,53 @@
 """Job intelligence service — aggregates, deduplicates, scores, and tracks jobs."""
 
+import asyncio
 import hashlib
 import logging
 import uuid
 from urllib.parse import urlparse, urlunparse
 
-from sqlalchemy import String, func as sa_func, select
+from sqlalchemy import String, func as sa_func, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.clients import jsearch_client, adzuna_client, ats_client, remote_jobs_client, newgrad_jobs_client
-from app.clients import lever_scrape_client, workday_client
+from app.clients import (
+    adzuna_client,
+    ats_client,
+    conviction_jobs_client,
+    jsearch_client,
+    lever_scrape_client,
+    newgrad_jobs_client,
+    public_page_client,
+    remote_jobs_client,
+    speedrun_jobs_client,
+    ventureloop_jobs_client,
+    wellfound_jobs_client,
+    workday_client,
+    yc_jobs_client,
+)
 from app.models.job import Job
 from app.models.profile import Profile
 from app.models.search_preference import SearchPreference
 from app.utils.experience_level import (
     classify_experience_level_for_job,
 )
+from app.utils.startup_jobs import (
+    STARTUP_TAG,
+    append_startup_tags,
+    extract_candidate_links,
+    is_supported_job_link,
+    job_matches_any_query,
+    looks_like_careers_page,
+    merge_startup_tags,
+    merge_tags,
+    startup_discover_queries,
+    startup_tags,
+)
 
 logger = logging.getLogger(__name__)
+
+STARTUP_BOARD_SOURCES = ["yc_jobs", "wellfound", "ventureloop"]
+STARTUP_LINK_RESOLVE_CONCURRENCY = 6
+STARTUP_MAX_RESOLVED_LINKS_PER_COMPANY = 3
 
 
 # --- Deduplication ---
@@ -98,6 +128,15 @@ def _apply_if_present(job: Job, attr: str, value) -> None:
         setattr(job, attr, value)
 
 
+def _with_extra_tags(data: dict, extra_tags: list[str] | None) -> dict:
+    if not extra_tags:
+        return data
+    return {
+        **data,
+        "tags": merge_tags(data.get("tags"), extra_tags),
+    }
+
+
 def _refresh_existing_job(
     job: Job,
     data: dict,
@@ -131,7 +170,7 @@ def _refresh_existing_job(
         job.salary_max = data.get("salary_max")
     _apply_if_present(job, "salary_currency", data.get("salary_currency"))
     if data.get("tags") is not None:
-        job.tags = data.get("tags")
+        job.tags = merge_startup_tags(job.tags, data.get("tags"))
     job.experience_level = experience_level
 
 
@@ -306,7 +345,8 @@ async def search_jobs(
 
     Args:
         sources: List of sources to search. None = all.
-                 Options: jsearch, adzuna, remotive, jobicy, dice, simplify, newgrad
+                 Options: jsearch, adzuna, remotive, jobicy, dice, simplify, newgrad,
+                 yc_jobs, wellfound, ventureloop
     """
     all_sources = sources or ["jsearch", "adzuna", "remotive", "dice", "newgrad"]
 
@@ -341,6 +381,12 @@ async def search_jobs(
         raw_jobs.extend(await newgrad_jobs_client.search_newgrad_jobs(
             query=query,
         ))
+    if "yc_jobs" in all_sources:
+        raw_jobs.extend(await yc_jobs_client.search_yc_jobs(query=query, limit=max(limit, 50)))
+    if "wellfound" in all_sources:
+        raw_jobs.extend(await wellfound_jobs_client.search_wellfound_jobs(query=query, limit=max(limit, 50)))
+    if "ventureloop" in all_sources:
+        raw_jobs.extend(await ventureloop_jobs_client.search_ventureloop_jobs(query=query, limit=max(limit, 100)))
 
     # Deduplicate and store
     stored_jobs: list[Job] = []
@@ -418,6 +464,9 @@ async def search_ats_jobs(
     ats_type: str | None,
     limit: int | None = None,
     job_url: str | None = None,
+    *,
+    extra_tags: list[str] | None = None,
+    include_existing_exact_matches: bool = True,
 ) -> list[Job]:
     """Search a supported board-backed ATS or ingest a single exact job URL."""
     target_external_id: str | None = None
@@ -460,7 +509,8 @@ async def search_ats_jobs(
     stored_jobs: list[Job] = []
     board_jobs: list[Job] = []
     seen_job_keys: set[str] = set()
-    for data in raw_jobs:
+    for raw_data in raw_jobs:
+        data = _with_extra_tags(raw_data, extra_tags)
         fp = _fingerprint(data.get("company_name", ""), data["title"], data.get("location", ""))
         job_key = _job_identity_key(data, fingerprint=fp)
         if job_key in seen_job_keys:
@@ -481,7 +531,7 @@ async def search_ats_jobs(
             fingerprint=fp,
         )
         if existing_job:
-            if exact_job_lookup:
+            if exact_job_lookup or extra_tags:
                 _refresh_existing_job(
                     existing_job,
                     data,
@@ -525,6 +575,10 @@ async def search_ats_jobs(
     if not exact_matches:
         return board_jobs
 
+    if not include_existing_exact_matches:
+        stored_ids = {job.id for job in stored_jobs}
+        return [job for job in exact_matches if job.id in stored_ids]
+
     exact_ids = {job.id for job in exact_matches}
     ordered_jobs = exact_matches + [job for job in board_jobs if job.id not in exact_ids]
     return ordered_jobs
@@ -561,6 +615,7 @@ async def get_jobs(
     experience_level: str | None = None,
     salary_min: float | None = None,
     remote: bool | None = None,
+    startup: bool | None = None,
     search: str | None = None,
     limit: int | None = None,
     offset: int = 0,
@@ -584,6 +639,11 @@ async def get_jobs(
         query = query.where(Job.salary_max >= salary_min)
     if remote is not None:
         query = query.where(Job.remote == remote)
+    if startup is not None:
+        if startup:
+            query = query.where(Job.tags.contains([STARTUP_TAG]))
+        else:
+            query = query.where(or_(Job.tags.is_(None), not_(Job.tags.contains([STARTUP_TAG]))))
     if search:
         term = f"%{search}%"
         query = query.where(
@@ -922,10 +982,211 @@ async def _store_raw_jobs(
     return stored
 
 
+async def _resolve_supported_job_links(url: str, *, max_depth: int = 1) -> list[str]:
+    if is_supported_job_link(url):
+        return [url]
+
+    visited_pages: set[str] = set()
+    queue: list[tuple[str, int]] = [(url, 0)]
+    resolved: list[str] = []
+    seen_links: set[str] = set()
+
+    while queue:
+        page_url, depth = queue.pop(0)
+        if page_url in visited_pages:
+            continue
+        visited_pages.add(page_url)
+
+        page = await public_page_client.fetch_direct_page(page_url, timeout_seconds=15)
+        if not page or not page.get("html"):
+            continue
+
+        for candidate in extract_candidate_links(str(page.get("url") or page_url), str(page.get("html") or "")):
+            if candidate in seen_links:
+                continue
+            seen_links.add(candidate)
+            if is_supported_job_link(candidate):
+                resolved.append(candidate)
+            elif depth < max_depth and looks_like_careers_page(candidate):
+                queue.append((candidate, depth + 1))
+
+    return resolved
+
+
+async def _discover_startup_direct_sources(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    profile: Profile | None,
+    queries: list[str],
+) -> int:
+    raw_jobs: list[dict] = []
+    fetchers = [
+        ("yc_jobs", yc_jobs_client.search_yc_jobs),
+        ("wellfound", wellfound_jobs_client.search_wellfound_jobs),
+        ("ventureloop", ventureloop_jobs_client.search_ventureloop_jobs),
+    ]
+
+    for source_key, fetcher in fetchers:
+        try:
+            raw_jobs.extend(await fetcher(limit=200))
+        except Exception:
+            logger.exception("Startup direct source failed: %s", source_key)
+
+    matching_jobs = [job for job in raw_jobs if job_matches_any_query(job, queries)]
+    stored = await _store_raw_jobs(db, user_id, matching_jobs, profile)
+    return len(stored)
+
+
+async def _import_startup_candidate_link(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    profile: Profile | None,
+    *,
+    startup_source: str,
+    candidate_url: str,
+    queries: list[str],
+) -> int:
+    parsed = ats_client.parse_ats_job_url(candidate_url)
+    if not parsed:
+        return 0
+
+    if (
+        parsed.company_slug
+        and parsed.external_id is None
+        and parsed.exact_url_only is False
+        and parsed.ats_type in {"greenhouse", "lever", "ashby"}
+    ):
+        adapter = ats_client.get_adapter(parsed.ats_type)
+        if adapter is None or adapter.search_board is None:
+            return 0
+        raw_jobs = await adapter.search_board(parsed.company_slug, None)
+        tagged_jobs = [
+            append_startup_tags(job, startup_source)
+            for job in raw_jobs
+            if job_matches_any_query(job, queries)
+        ]
+        stored = await _store_raw_jobs(db, user_id, tagged_jobs, profile)
+        return len(stored)
+
+    exact_jobs = await search_ats_jobs(
+        db,
+        user_id,
+        company_slug=None,
+        ats_type=None,
+        job_url=candidate_url,
+        extra_tags=startup_tags(startup_source),
+        include_existing_exact_matches=False,
+    )
+    return len(exact_jobs)
+
+
+async def _discover_startup_ecosystem_entries(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    profile: Profile | None,
+    *,
+    entries: list[dict],
+    url_key: str,
+    startup_source: str,
+    queries: list[str],
+) -> int:
+    semaphore = asyncio.Semaphore(STARTUP_LINK_RESOLVE_CONCURRENCY)
+
+    async def _process_entry(entry: dict) -> int:
+        raw_url = str(entry.get(url_key) or "").strip()
+        if not raw_url:
+            return 0
+
+        roles = entry.get("roles") or []
+        if roles:
+            matches_role = any(
+                job_matches_any_query(
+                    {
+                        "title": role.get("title"),
+                        "location": role.get("location"),
+                        "company_name": entry.get("company_name"),
+                    },
+                    queries,
+                )
+                for role in roles
+                if isinstance(role, dict)
+            )
+            if not matches_role:
+                return 0
+
+        async with semaphore:
+            links = await _resolve_supported_job_links(raw_url)
+
+        total_new = 0
+        for candidate in links[:STARTUP_MAX_RESOLVED_LINKS_PER_COMPANY]:
+            try:
+                total_new += await _import_startup_candidate_link(
+                    db,
+                    user_id,
+                    profile,
+                    startup_source=startup_source,
+                    candidate_url=candidate,
+                    queries=queries,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed importing startup candidate link from %s: %s",
+                    startup_source,
+                    candidate,
+                )
+        return total_new
+
+    if not entries:
+        return 0
+
+    counts = await asyncio.gather(*(_process_entry(entry) for entry in entries))
+    return sum(counts)
+
+
+async def _discover_startup_ecosystems(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    profile: Profile | None,
+    queries: list[str],
+) -> int:
+    total_new = 0
+
+    try:
+        conviction_entries = await conviction_jobs_client.fetch_conviction_startups()
+        total_new += await _discover_startup_ecosystem_entries(
+            db,
+            user_id,
+            profile,
+            entries=conviction_entries,
+            url_key="career_url",
+            startup_source="conviction",
+            queries=queries,
+        )
+    except Exception:
+        logger.exception("Conviction startup discover failed")
+
+    try:
+        speedrun_companies = await speedrun_jobs_client.fetch_speedrun_companies(limit=100)
+        total_new += await _discover_startup_ecosystem_entries(
+            db,
+            user_id,
+            profile,
+            entries=speedrun_companies,
+            url_key="website_url",
+            startup_source="a16z_speedrun",
+            queries=queries,
+        )
+    except Exception:
+        logger.exception("a16z Speedrun startup discover failed")
+
+    return total_new
+
+
 async def discover_jobs(
     db: AsyncSession,
     user_id: uuid.UUID,
     queries: list[str] | None = None,
+    mode: str = "default",
 ) -> int:
     """Run a batch of job searches across free sources and ATS boards.
 
@@ -937,6 +1198,17 @@ async def discover_jobs(
         queries: Optional custom list of search terms.  Falls back to
                  DISCOVER_QUERIES when not supplied.
     """
+    result = await db.execute(select(Profile).where(Profile.user_id == user_id))
+    profile = result.scalar_one_or_none()
+
+    if mode == "startup":
+        startup_queries = queries or startup_discover_queries(
+            profile.target_roles if profile is not None else None
+        )
+        total_new = await _discover_startup_direct_sources(db, user_id, profile, startup_queries)
+        total_new += await _discover_startup_ecosystems(db, user_id, profile, startup_queries)
+        return total_new
+
     search_list = (
         [{"query": q, "location": None, "remote_only": False} for q in queries]
         if queries
@@ -965,8 +1237,6 @@ async def discover_jobs(
     # 2. newgrad-jobs.com — single unfiltered scrape across all 5 categories
     #    (~500 unique jobs).  Deduplication is handled by _store_raw_jobs.
     try:
-        result = await db.execute(select(Profile).where(Profile.user_id == user_id))
-        profile = result.scalar_one_or_none()
         raw_newgrad = await newgrad_jobs_client.search_newgrad_jobs()
         ng_stored = await _store_raw_jobs(db, user_id, raw_newgrad, profile)
         if ng_stored:

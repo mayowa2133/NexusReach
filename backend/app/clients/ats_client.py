@@ -818,6 +818,14 @@ def _parse_greenhouse_url(job_url: str) -> ParsedATSJobURL | None:
                 canonical_url=_clean_url(job_url),
                 host=host,
             )
+    if len(path_parts) == 1:
+        return ParsedATSJobURL(
+            ats_type="greenhouse",
+            company_slug=path_parts[0],
+            external_id=None,
+            canonical_url=_clean_url(job_url),
+            host=host,
+        )
     return None
 
 

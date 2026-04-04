@@ -11,6 +11,7 @@ import { usePeopleSearch, useSavedPeople } from '@/hooks/usePeople';
 import { useFindEmail } from '@/hooks/useEmail';
 import { sanitizeHTML } from '@/lib/sanitize';
 import { formatRelativeDate } from '@/lib/dateUtils';
+import { getStartupSourceLabels, isStartupJob } from '@/lib/jobStartup';
 import {
   clampPeopleSearchTargetCount,
   getStoredPeopleSearchTargetCount,
@@ -34,6 +35,7 @@ const SOURCE_LABELS: Record<string, string> = {
   dice: 'Dice', simplify_github: 'SimplifyJobs', greenhouse: 'Greenhouse',
   lever: 'Lever', ashby: 'Ashby', workable: 'Workable',
   apple_jobs: 'Apple Jobs', workday: 'Workday', newgrad_jobs: 'NewGrad Jobs',
+  yc_jobs: 'Y Combinator', wellfound: 'Wellfound', ventureloop: 'VentureLoop',
 };
 
 const LEVEL_LABELS: Record<string, string> = {
@@ -314,6 +316,8 @@ export function JobDetailPage() {
     );
   }
 
+  const startupSourceLabels = getStartupSourceLabels(job);
+
   return (
     <div className="space-y-6">
       {/* Back nav */}
@@ -359,6 +363,10 @@ export function JobDetailPage() {
       <div className="flex flex-wrap gap-2">
         {job.location && <Badge variant="outline">{job.location}</Badge>}
         {job.remote && <Badge variant="secondary">Remote</Badge>}
+        {isStartupJob(job) && <Badge variant="secondary">Startup</Badge>}
+        {startupSourceLabels.map((label) => (
+          <Badge key={label} variant="outline">{label}</Badge>
+        ))}
         {job.employment_type && <Badge variant="outline">{job.employment_type}</Badge>}
         {job.experience_level && (
           <Badge variant="secondary">{LEVEL_LABELS[job.experience_level] || job.experience_level}</Badge>

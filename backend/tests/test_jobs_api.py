@@ -200,6 +200,20 @@ async def test_list_jobs_with_stage_filter(client, mock_user_id):
     assert call_args.kwargs.get("stage") == "applied" or call_args[1].get("stage") == "applied"
 
 
+async def test_list_jobs_with_startup_filter(client, mock_user_id):
+    """GET /api/jobs?startup=true filters startup-tagged jobs."""
+    job = _mock_job(mock_user_id, tags=["startup", "startup_source:yc_jobs"])
+
+    with patch("app.routers.jobs.get_jobs", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = ([job], 1)
+        resp = await client.get("/api/jobs", params={"startup": "true"})
+
+    assert resp.status_code == 200
+    mock_get.assert_called_once()
+    call_args = mock_get.call_args
+    assert call_args.kwargs.get("startup") is True or call_args[1].get("startup") is True
+
+
 async def test_get_single_job(client, mock_user_id):
     """GET /api/jobs/{id} returns a single job."""
     job = _mock_job(mock_user_id)
@@ -210,6 +224,19 @@ async def test_get_single_job(client, mock_user_id):
 
     assert resp.status_code == 200
     assert resp.json()["title"] == "Software Engineer"
+
+
+async def test_discover_jobs_startup_mode(client):
+    """POST /api/jobs/discover forwards startup mode to the service."""
+    with patch("app.routers.jobs.discover_jobs", new_callable=AsyncMock) as mock_discover:
+        mock_discover.return_value = 4
+        resp = await client.post("/api/jobs/discover", json={"mode": "startup"})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"new_jobs_found": 4}
+    mock_discover.assert_awaited_once()
+    call_kwargs = mock_discover.call_args.kwargs
+    assert call_kwargs["mode"] == "startup"
 
 
 async def test_get_job_not_found(client, mock_user_id):

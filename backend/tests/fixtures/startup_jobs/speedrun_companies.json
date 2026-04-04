@@ -1,0 +1,21 @@
+{
+  "count": 2,
+  "next": null,
+  "previous": null,
+  "results": [
+    {
+      "name": "Cartesia",
+      "website_url": "https://cartesia.ai",
+      "city": "San Francisco",
+      "state": "CA",
+      "country": "United States"
+    },
+    {
+      "name": "Baseten",
+      "website_url": "https://www.baseten.co",
+      "city": "San Francisco",
+      "state": "CA",
+      "country": "United States"
+    }
+  ]
+}

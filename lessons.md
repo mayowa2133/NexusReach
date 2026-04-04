@@ -1,6 +1,6 @@
 # NexusReach — Lessons Learned
 
-Last updated: 2026-04-02
+Last updated: 2026-04-04
 
 This is a curated list of the lessons that still matter for the current codebase. Older one-off historical notes were trimmed so this file stays useful to humans and AI tools.
 
@@ -65,6 +65,32 @@ This is a curated list of the lessons that still matter for the current codebase
 ### Workday outages should fail honestly
 - Workday can redirect to maintenance or outage pages that look superficially “successful” at the HTTP layer.
 - **Lesson:** detect those redirects explicitly and return a clean failure instead of importing the wrong landing page.
+
+### Some “job boards” are really two-stage scrapes
+- `newgrad-jobs.com` list pages are good for discovery but not for accurate stored metadata.
+- The detail page carries the real location, work mode, salary, level label, and description, and some misleading states can exist in hidden DOM.
+- **Lesson:** treat discovery pages and detail pages as different stages, and strip hidden markup before extracting visible job state.
+
+## Startup-source discovery
+
+### Startup status should be provenance, not inference
+- A job being at a small company is not enough to label it a startup reliably.
+- The current startup feature is deliberately source-based.
+- **Lesson:** use reserved tags like `startup` and `startup_source:<source_key>` instead of inventing a fragile schema field or guessing startup status from company text.
+
+### Startup provenance must survive dedupe
+- The same ATS job can be found through a startup ecosystem source and later through a normal ATS path.
+- Creating a duplicate job row for startup provenance is the wrong tradeoff.
+- **Lesson:** merge startup tags into the existing job on dedupe instead of overwriting tags or inserting a second copy.
+
+### VC ecosystem pages are company directories, not stable job boards
+- Conviction and Speedrun often point to a company site, a careers page, or an ATS board root rather than a clean listing API.
+- **Lesson:** crawl the ecosystem page for startup/company links, resolve careers/ATS links, and then import through the existing ATS/exact-job pipeline whenever possible.
+
+### Anti-bot startup sources should fail soft
+- Wellfound currently serves anti-bot pages in this environment.
+- Breaking the entire startup discover flow because one source is blocked is a bad product outcome.
+- **Lesson:** treat anti-bot failures as source-local empty results and keep the rest of startup discovery running.
 
 ## The Org and public verification
 
