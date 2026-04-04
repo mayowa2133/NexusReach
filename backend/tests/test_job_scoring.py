@@ -139,6 +139,16 @@ class TestScoreJob:
         _, breakdown = _score_job(job, profile)
         assert breakdown["level_fit"] == 5.0
 
+    def test_level_fit_newgrad_source_uses_source_aware_inference(self):
+        profile = _make_profile()
+        job = _make_job(
+            title="Software Engineer",
+            source="newgrad_jobs",
+            level_label="Entry Level",
+        )
+        _, breakdown = _score_job(job, profile)
+        assert breakdown["level_fit"] == 10.0
+
     def test_score_is_sum_of_breakdown(self):
         profile = _make_profile()
         job = _make_job()

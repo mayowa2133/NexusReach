@@ -3,7 +3,7 @@
 import hashlib
 import logging
 import uuid
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 from sqlalchemy import String, func as sa_func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,7 +13,9 @@ from app.clients import lever_scrape_client, workday_client
 from app.models.job import Job
 from app.models.profile import Profile
 from app.models.search_preference import SearchPreference
-from app.utils.experience_level import classify_experience_level
+from app.utils.experience_level import (
+    classify_experience_level_for_job,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +43,7 @@ def _canonical_job_url(url: str | None) -> str | None:
         return None
     parsed_url = urlparse(normalized)
     if parsed_url.scheme and parsed_url.netloc:
-        return normalized
+        return urlunparse(parsed_url._replace(query="", fragment="")).rstrip("/")
     return None
 
 
@@ -52,45 +54,138 @@ def _result_first(result) -> Job | None:
     return result.scalar_one_or_none()
 
 
-def _refresh_existing_exact_job(
+def _job_source_key(data: dict | None = None, *, source: str | None = None, ats: str | None = None) -> str | None:
+    if source:
+        return source
+    if data is not None and data.get("source"):
+        return data.get("source")
+    if ats:
+        return ats
+    if data is not None:
+        return data.get("ats")
+    return None
+
+
+def _job_identity_key(data: dict, *, fingerprint: str) -> str:
+    source_key = _job_source_key(data)
+    external_id = data.get("external_id")
+    if source_key and external_id:
+        return f"source:{source_key}:external:{external_id}"
+
+    canonical_url = _canonical_job_url(data.get("url"))
+    if source_key and canonical_url:
+        return f"source:{source_key}:url:{canonical_url}"
+    if canonical_url:
+        return f"url:{canonical_url}"
+
+    return f"fingerprint:{fingerprint}"
+
+
+def _experience_level_for_job(job_data: dict) -> str:
+    return classify_experience_level_for_job(
+        job_data.get("title", ""),
+        source=job_data.get("source"),
+        level_label=job_data.get("level_label"),
+    )
+
+
+def _apply_if_present(job: Job, attr: str, value) -> None:
+    if isinstance(value, str):
+        if value.strip():
+            setattr(job, attr, value)
+        return
+    if value is not None:
+        setattr(job, attr, value)
+
+
+def _refresh_existing_job(
     job: Job,
     data: dict,
     *,
     fingerprint: str,
     score: float,
     breakdown: dict,
+    experience_level: str,
 ) -> None:
-    job.external_id = data.get("external_id") or job.external_id
-    job.title = data.get("title") or job.title
-    job.company_name = data.get("company_name") or job.company_name
-    job.location = data.get("location")
-    job.remote = data.get("remote", job.remote)
-    job.url = data.get("url") or job.url
-    job.description = data.get("description")
-    job.source = data.get("source", job.source)
-    job.ats = data.get("ats", job.ats)
-    job.ats_slug = data.get("ats_slug", job.ats_slug)
-    job.posted_at = data.get("posted_at")
+    _apply_if_present(job, "external_id", data.get("external_id"))
+    _apply_if_present(job, "title", data.get("title"))
+    _apply_if_present(job, "company_name", data.get("company_name"))
+    _apply_if_present(job, "company_logo", data.get("company_logo"))
+    _apply_if_present(job, "location", data.get("location"))
+    if data.get("remote") is not None:
+        job.remote = bool(data.get("remote"))
+    _apply_if_present(job, "url", data.get("url"))
+    _apply_if_present(job, "description", data.get("description"))
+    _apply_if_present(job, "source", data.get("source"))
+    _apply_if_present(job, "ats", data.get("ats"))
+    _apply_if_present(job, "ats_slug", data.get("ats_slug"))
+    _apply_if_present(job, "posted_at", data.get("posted_at"))
     job.match_score = score
     job.score_breakdown = breakdown
     job.fingerprint = fingerprint
-    job.department = data.get("department")
-    job.employment_type = data.get("employment_type")
+    _apply_if_present(job, "department", data.get("department"))
+    _apply_if_present(job, "employment_type", data.get("employment_type"))
+    if data.get("salary_min") is not None:
+        job.salary_min = data.get("salary_min")
+    if data.get("salary_max") is not None:
+        job.salary_max = data.get("salary_max")
+    _apply_if_present(job, "salary_currency", data.get("salary_currency"))
+    if data.get("tags") is not None:
+        job.tags = data.get("tags")
+    job.experience_level = experience_level
+
+
+def _build_job(
+    *,
+    user_id: uuid.UUID,
+    data: dict,
+    score: float,
+    breakdown: dict,
+    fingerprint: str,
+) -> Job:
+    return Job(
+        user_id=user_id,
+        external_id=data.get("external_id"),
+        title=data.get("title", ""),
+        company_name=data.get("company_name", "Unknown"),
+        company_logo=data.get("company_logo"),
+        location=data.get("location"),
+        remote=data.get("remote", False),
+        url=data.get("url"),
+        description=data.get("description"),
+        employment_type=data.get("employment_type"),
+        experience_level=_experience_level_for_job(data),
+        salary_min=data.get("salary_min"),
+        salary_max=data.get("salary_max"),
+        salary_currency=data.get("salary_currency"),
+        source=data.get("source", "unknown"),
+        ats=data.get("ats"),
+        ats_slug=data.get("ats_slug"),
+        posted_at=data.get("posted_at"),
+        match_score=score,
+        score_breakdown=breakdown,
+        fingerprint=fingerprint,
+        tags=data.get("tags"),
+        department=data.get("department"),
+    )
 
 
 async def _find_existing_job(
     db: AsyncSession,
     *,
     user_id: uuid.UUID,
+    source: str | None,
     ats: str | None,
     external_id: str | None,
     url: str | None,
     fingerprint: str | None,
 ) -> Job | None:
-    if ats and external_id:
+    source_key = _job_source_key(source=source, ats=ats)
+
+    if source_key and external_id:
         result = await db.execute(
             select(Job)
-            .where(Job.user_id == user_id, Job.ats == ats, Job.external_id == external_id)
+            .where(Job.user_id == user_id, Job.source == source_key, Job.external_id == external_id)
             .order_by(Job.created_at.asc(), Job.id.asc())
         )
         existing = _result_first(result)
@@ -98,10 +193,13 @@ async def _find_existing_job(
             return existing
 
     normalized_url = _canonical_job_url(url)
-    if ats and normalized_url:
+    if normalized_url:
+        filters = [Job.user_id == user_id, Job.url.is_not(None)]
+        if source_key:
+            filters.append(Job.source == source_key)
         result = await db.execute(
             select(Job)
-            .where(Job.user_id == user_id, Job.ats == ats, Job.url.is_not(None))
+            .where(*filters)
             .order_by(Job.created_at.asc(), Job.id.asc())
         )
         for existing in result.scalars().all():
@@ -181,13 +279,12 @@ def _score_job(job_data: dict, profile: Profile | None) -> tuple[float, dict]:
     breakdown["location_match"] = location_score
 
     # 5. Experience level signals (0-10 points)
-    level_score = 5.0  # default mid
-    level_keywords = {"new grad", "entry level", "junior", "associate", "intern"}
-    senior_keywords = {"senior", "staff", "principal", "lead", "architect"}
-    if any(kw in title for kw in level_keywords):
-        level_score = 10.0  # great for new grads
-    elif any(kw in title for kw in senior_keywords):
-        level_score = 2.0  # likely too senior
+    inferred_level = _experience_level_for_job(job_data)
+    level_score = 5.0
+    if inferred_level in {"intern", "new_grad"}:
+        level_score = 10.0
+    elif inferred_level == "senior":
+        level_score = 2.0
     breakdown["level_fit"] = level_score
 
     total = sum(breakdown.values())
@@ -247,7 +344,7 @@ async def search_jobs(
 
     # Deduplicate and store
     stored_jobs: list[Job] = []
-    seen_fingerprints: set[str] = set()
+    seen_job_keys: set[str] = set()
 
     for data in raw_jobs:
         fp = _fingerprint(
@@ -255,50 +352,42 @@ async def search_jobs(
             data.get("title", ""),
             data.get("location", ""),
         )
+        job_key = _job_identity_key(data, fingerprint=fp)
 
-        if fp in seen_fingerprints:
+        if job_key in seen_job_keys:
             continue
-        seen_fingerprints.add(fp)
+        seen_job_keys.add(job_key)
 
-        # Check if already stored for this user
         existing = await _find_existing_job(
             db,
             user_id=user_id,
+            source=data.get("source"),
             ats=data.get("ats"),
             external_id=data.get("external_id"),
             url=data.get("url"),
             fingerprint=fp,
         )
+
+        score, breakdown = _score_job(data, profile)
+        experience_level = _experience_level_for_job(data)
+
         if existing:
+            _refresh_existing_job(
+                existing,
+                data,
+                fingerprint=fp,
+                score=score,
+                breakdown=breakdown,
+                experience_level=experience_level,
+            )
             continue
 
-        # Score
-        score, breakdown = _score_job(data, profile)
-
-        job = Job(
+        job = _build_job(
             user_id=user_id,
-            external_id=data.get("external_id"),
-            title=data["title"],
-            company_name=data.get("company_name", "Unknown"),
-            company_logo=data.get("company_logo"),
-            location=data.get("location"),
-            remote=data.get("remote", False),
-            url=data.get("url"),
-            description=data.get("description"),
-            employment_type=data.get("employment_type"),
-            experience_level=classify_experience_level(data["title"]),
-            salary_min=data.get("salary_min"),
-            salary_max=data.get("salary_max"),
-            salary_currency=data.get("salary_currency"),
-            source=data.get("source", "unknown"),
-            ats=data.get("ats"),
-            ats_slug=data.get("ats_slug"),
-            posted_at=data.get("posted_at"),
-            match_score=score,
-            score_breakdown=breakdown,
+            data=data,
+            score=score,
+            breakdown=breakdown,
             fingerprint=fp,
-            tags=data.get("tags"),
-            department=data.get("department"),
         )
         db.add(job)
         stored_jobs.append(job)
@@ -373,13 +462,7 @@ async def search_ats_jobs(
     seen_job_keys: set[str] = set()
     for data in raw_jobs:
         fp = _fingerprint(data.get("company_name", ""), data["title"], data.get("location", ""))
-        job_key = (
-            f"external:{data.get('external_id')}"
-            if data.get("external_id")
-            else f"url:{_canonical_job_url(data.get('url'))}"
-            if _canonical_job_url(data.get("url"))
-            else f"fingerprint:{fp}"
-        )
+        job_key = _job_identity_key(data, fingerprint=fp)
         if job_key in seen_job_keys:
             continue
         seen_job_keys.add(job_key)
@@ -387,9 +470,11 @@ async def search_ats_jobs(
         job_ats = data.get("ats", ats_type)
         job_ats_slug = data.get("ats_slug", company_slug)
         score, breakdown = _score_job(data, profile)
+        experience_level = _experience_level_for_job(data)
         existing_job = await _find_existing_job(
             db,
             user_id=user_id,
+            source=data.get("source", ats_type),
             ats=job_ats,
             external_id=data.get("external_id"),
             url=data.get("url"),
@@ -397,34 +482,29 @@ async def search_ats_jobs(
         )
         if existing_job:
             if exact_job_lookup:
-                _refresh_existing_exact_job(
+                _refresh_existing_job(
                     existing_job,
                     data,
                     fingerprint=fp,
                     score=score,
                     breakdown=breakdown,
+                    experience_level=experience_level,
                 )
             board_jobs.append(existing_job)
             continue
 
-        job = Job(
+        job = _build_job(
             user_id=user_id,
-            external_id=data.get("external_id"),
-            title=data["title"],
-            company_name=data.get("company_name", company_slug),
-            location=data.get("location"),
-            remote=data.get("remote", False),
-            url=data.get("url"),
-            description=data.get("description"),
-            source=data.get("source", ats_type),
-            ats=job_ats,
-            ats_slug=job_ats_slug,
-            posted_at=data.get("posted_at"),
-            match_score=score,
-            score_breakdown=breakdown,
+            data={
+                **data,
+                "company_name": data.get("company_name", company_slug),
+                "source": data.get("source", ats_type),
+                "ats": job_ats,
+                "ats_slug": job_ats_slug,
+            },
+            score=score,
+            breakdown=breakdown,
             fingerprint=fp,
-            department=data.get("department"),
-            employment_type=data.get("employment_type"),
         )
         db.add(job)
         stored_jobs.append(job)
@@ -795,44 +875,42 @@ async def _store_raw_jobs(
 ) -> list[Job]:
     """Deduplicate and store raw job dicts from any source."""
     stored: list[Job] = []
-    seen_fps: set[str] = set()
+    seen_job_keys: set[str] = set()
 
     for data in raw_jobs:
         fp = _fingerprint(data.get("company_name", ""), data.get("title", ""), data.get("location", ""))
-        if fp in seen_fps:
+        job_key = _job_identity_key(data, fingerprint=fp)
+        if job_key in seen_job_keys:
             continue
-        seen_fps.add(fp)
+        seen_job_keys.add(job_key)
 
         existing = await _find_existing_job(
             db,
             user_id=user_id,
+            source=data.get("source"),
             ats=data.get("ats"),
             external_id=data.get("external_id"),
             url=data.get("url"),
             fingerprint=fp,
         )
+        score, breakdown = _score_job(data, profile)
+        experience_level = _experience_level_for_job(data)
         if existing:
+            _refresh_existing_job(
+                existing,
+                data,
+                fingerprint=fp,
+                score=score,
+                breakdown=breakdown,
+                experience_level=experience_level,
+            )
             continue
 
-        score, breakdown = _score_job(data, profile)
-        level = classify_experience_level(data.get("title", ""))
-
-        job = Job(
+        job = _build_job(
             user_id=user_id,
-            title=data.get("title", ""),
-            company_name=data.get("company_name", ""),
-            location=data.get("location", ""),
-            remote=data.get("remote", False),
-            url=data.get("url", ""),
-            description=data.get("description", ""),
-            employment_type=data.get("employment_type"),
-            department=data.get("department"),
-            posted_at=data.get("posted_at") or None,
-            source=data.get("source", "unknown"),
-            ats=data.get("ats"),
-            match_score=score,
-            score_breakdown=breakdown,
-            experience_level=level,
+            data=data,
+            score=score,
+            breakdown=breakdown,
             fingerprint=fp,
         )
         db.add(job)
