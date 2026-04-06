@@ -57,7 +57,7 @@ async def search_jobs(
             "url": j.get("redirect_url", ""),
             "description": j.get("description", ""),
             "employment_type": j.get("contract_time", ""),
-            "posted_at": j.get("created", ""),
+            "posted_at": j.get("created") or None,
             "salary_min": j.get("salary_min"),
             "salary_max": j.get("salary_max"),
             "salary_currency": "USD" if country == "us" else "GBP" if country == "gb" else "USD",

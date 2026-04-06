@@ -40,7 +40,7 @@ async def search_dice(query: str, location: str | None = None, limit: int = 10) 
             "remote": j.get("isRemote", False),
             "url": j.get("detailsPageUrl", ""),
             "description": j.get("summary", ""),
-            "posted_at": j.get("postedDate", ""),
+            "posted_at": j.get("postedDate") or None,
             "source": "dice",
         }
         for j in jobs
@@ -86,7 +86,7 @@ async def search_remotive(query: str, limit: int = 10) -> list[dict]:
             "url": j.get("url", ""),
             "description": j.get("description", ""),
             "employment_type": j.get("job_type", ""),
-            "posted_at": j.get("publication_date", ""),
+            "posted_at": j.get("publication_date") or None,
             "salary": j.get("salary", ""),
             "tags": j.get("tags", []),
             "source": "remotive",
@@ -117,7 +117,7 @@ async def search_jobicy(query: str, limit: int = 10) -> list[dict]:
             "url": j.get("url", ""),
             "description": j.get("jobDescription", ""),
             "employment_type": j.get("jobType", ""),
-            "posted_at": j.get("pubDate", ""),
+            "posted_at": j.get("pubDate") or None,
             "salary_min": j.get("annualSalaryMin"),
             "salary_max": j.get("annualSalaryMax"),
             "salary_currency": j.get("salaryCurrency", "USD"),
@@ -184,7 +184,7 @@ async def fetch_simplify_jobs(repo: str = "SimplifyJobs/New-Grad-Positions", lim
             "remote": "remote" in location.lower(),
             "url": url,
             "description": f"{title} at {company} — {location}",
-            "posted_at": date_posted,
+            "posted_at": date_posted or None,
             "source": "simplify_github",
         })
 

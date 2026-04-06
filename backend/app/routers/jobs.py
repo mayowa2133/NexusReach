@@ -54,7 +54,7 @@ def _to_response(job) -> JobResponse:
         salary_currency=job.salary_currency,
         source=job.source,
         ats=job.ats,
-        posted_at=job.posted_at,
+        posted_at=job.posted_at if job.posted_at and job.posted_at.strip() else None,
         match_score=job.match_score,
         score_breakdown=job.score_breakdown,
         stage=job.stage,

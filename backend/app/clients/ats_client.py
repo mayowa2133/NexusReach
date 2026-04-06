@@ -214,6 +214,18 @@ def _coerce_posted_at(value: object) -> str | None:
     return None
 
 
+def _epoch_ms_to_iso(value: object) -> str | None:
+    """Convert a Unix epoch-millisecond timestamp to an ISO 8601 string."""
+    if not isinstance(value, (int, float)) or value <= 0:
+        return None
+    from datetime import datetime, timezone
+
+    try:
+        return datetime.fromtimestamp(value / 1000, tz=timezone.utc).isoformat()
+    except (OSError, ValueError, OverflowError):
+        return None
+
+
 def _json_ld_company(job_posting: dict, host: str) -> str:
     hiring = job_posting.get("hiringOrganization")
     if isinstance(hiring, dict):
@@ -966,7 +978,7 @@ async def search_greenhouse(company_slug: str, limit: int | None = None) -> list
             "remote": "remote" in (j.get("title", "") + (j.get("location", {}) or {}).get("name", "")).lower(),
             "url": j.get("absolute_url", ""),
             "description": j.get("content", ""),
-            "posted_at": j.get("updated_at", ""),
+            "posted_at": j.get("updated_at") or None,
             "source": "greenhouse",
             "ats": "greenhouse",
             "ats_slug": company_slug,
@@ -998,7 +1010,7 @@ async def search_lever(company_slug: str, limit: int | None = None) -> list[dict
             "url": p.get("hostedUrl", "") or p.get("applyUrl", ""),
             "description": p.get("descriptionPlain", "") or p.get("description", ""),
             "department": p.get("categories", {}).get("department", ""),
-            "posted_at": "",
+            "posted_at": _epoch_ms_to_iso(p.get("createdAt")),
             "source": "lever",
             "ats": "lever",
             "ats_slug": company_slug,
@@ -1027,7 +1039,7 @@ async def search_ashby(company_slug: str, limit: int | None = None) -> list[dict
             "url": j.get("jobUrl", ""),
             "description": j.get("descriptionHtml", "") or j.get("descriptionPlain", ""),
             "department": j.get("department", ""),
-            "posted_at": j.get("publishedAt", ""),
+            "posted_at": j.get("publishedAt") or None,
             "source": "ashby",
             "ats": "ashby",
             "ats_slug": company_slug,
@@ -1088,7 +1100,7 @@ async def search_workable(
             "description": raw_job.get("description", ""),
             "department": department_value,
             "employment_type": raw_job.get("type"),
-            "posted_at": raw_job.get("published", ""),
+            "posted_at": raw_job.get("published") or None,
             "source": "workable",
             "ats": "workable",
             "ats_slug": company_slug,

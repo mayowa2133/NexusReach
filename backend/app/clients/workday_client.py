@@ -9,6 +9,8 @@ This client queries that API for curated companies to bulk-discover jobs.
 """
 
 import logging
+import re
+from datetime import datetime, timedelta, timezone
 
 import httpx
 
@@ -19,6 +21,33 @@ _HEADERS = {
     "Accept": "application/json",
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
 }
+_DAYS_RE = re.compile(r"(\d+)\s*(?:\+\s*)?days?\s*ago", re.IGNORECASE)
+
+
+def _parse_posted_on(raw: str) -> str | None:
+    """Convert Workday relative date strings to approximate ISO 8601 timestamps.
+
+    Known values: "Posted Today", "Posted Yesterday",
+    "Posted 5 Days Ago", "Posted 30+ Days Ago".
+    """
+    if not raw:
+        return None
+    text = raw.lower().strip()
+    now = datetime.now(timezone.utc)
+
+    if "today" in text:
+        return now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    if "yesterday" in text:
+        dt = now - timedelta(days=1)
+        return dt.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+
+    m = _DAYS_RE.search(text)
+    if m:
+        days = int(m.group(1))
+        dt = now - timedelta(days=days)
+        return dt.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+
+    return None
 
 
 # Each entry defines how to reach a company's Workday careers API.
@@ -78,13 +107,7 @@ async def search_workday(
 
         external_path = p.get("externalPath", "")
         job_url = f"{base_url}/en-US{external_path}" if external_path else ""
-        bullet_fields = p.get("bulletFields", [])
-        posted_on = bullet_fields[0] if bullet_fields else ""
-
-        # Clean up "Posted 30+ Days Ago" style strings
-        posted_at = ""
-        if "posted" in posted_on.lower():
-            posted_at = ""  # Workday doesn't give exact dates in bulk
+        posted_at = _parse_posted_on(p.get("postedOn", ""))
 
         jobs.append({
             "external_id": f"wd_{external_path.split('/')[-1]}" if external_path else "",

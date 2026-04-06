@@ -111,6 +111,13 @@ def _job_identity_key(data: dict, *, fingerprint: str) -> str:
     return f"fingerprint:{fingerprint}"
 
 
+def _coerce_posted_at(value: str | None) -> str | None:
+    """Normalize posted_at to None when empty or whitespace-only."""
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
 def _experience_level_for_job(job_data: dict) -> str:
     return classify_experience_level_for_job(
         job_data.get("title", ""),
@@ -200,7 +207,7 @@ def _build_job(
         source=data.get("source", "unknown"),
         ats=data.get("ats"),
         ats_slug=data.get("ats_slug"),
-        posted_at=data.get("posted_at"),
+        posted_at=_coerce_posted_at(data.get("posted_at")),
         match_score=score,
         score_breakdown=breakdown,
         fingerprint=fingerprint,
@@ -1026,11 +1033,15 @@ async def _discover_startup_direct_sources(
         ("ventureloop", ventureloop_jobs_client.search_ventureloop_jobs),
     ]
 
-    for source_key, fetcher in fetchers:
-        try:
-            raw_jobs.extend(await fetcher(limit=200))
-        except Exception:
-            logger.exception("Startup direct source failed: %s", source_key)
+    results = await asyncio.gather(
+        *(fetcher(limit=200) for _, fetcher in fetchers),
+        return_exceptions=True,
+    )
+    for (source_key, _fetcher), result in zip(fetchers, results):
+        if isinstance(result, BaseException):
+            logger.error("Startup direct source failed: %s", source_key, exc_info=result)
+        else:
+            raw_jobs.extend(result)
 
     matching_jobs = [job for job in raw_jobs if job_matches_any_query(job, queries)]
     stored = await _store_raw_jobs(db, user_id, matching_jobs, profile)
@@ -1097,6 +1108,10 @@ async def _discover_startup_ecosystem_entries(
         if not raw_url:
             return 0
 
+        # Entries with roles (e.g. Conviction) are pre-filtered here.
+        # Entries without roles (e.g. Speedrun companies) intentionally skip
+        # this filter — role queries can't match bare company names, and the
+        # real query filtering happens downstream in _import_startup_candidate_link.
         roles = entry.get("roles") or []
         if roles:
             matches_role = any(

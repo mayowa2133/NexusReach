@@ -70,7 +70,7 @@ async def search_jobs(
             "url": j.get("job_apply_link", "") or j.get("job_google_link", ""),
             "description": j.get("job_description", ""),
             "employment_type": j.get("job_employment_type", ""),
-            "posted_at": j.get("job_posted_at_datetime_utc", ""),
+            "posted_at": j.get("job_posted_at_datetime_utc") or None,
             "salary_min": j.get("job_min_salary"),
             "salary_max": j.get("job_max_salary"),
             "salary_currency": j.get("job_salary_currency", "USD"),
