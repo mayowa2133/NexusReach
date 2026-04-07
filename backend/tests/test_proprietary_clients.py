@@ -164,16 +164,50 @@ class TestGoogleParsing:
         assert _strip_tags("<b>Hello</b> World") == "Hello World"
         assert _strip_tags("Plain text") == "Plain text"
 
-    def test_extract_job_id(self):
+    def test_extract_job_url_with_raw(self):
         from app.clients.google_client import _extract_job_url
-        url = _extract_job_url("https://example.com", "12345")
+        url = _extract_job_url("https://example.com/jobs/12345", "12345")
+        assert url == "https://example.com/jobs/12345"
+
+    def test_extract_job_url_fallback(self):
+        from app.clients.google_client import _extract_job_url
+        url = _extract_job_url("", "12345")
         assert "12345" in url
+
+    def test_matches_query_no_keywords(self):
+        from app.clients.google_client import _matches_query
+        assert _matches_query({"title": "Engineer"}, []) is True
+
+    def test_matches_query_with_keywords(self):
+        from app.clients.google_client import _matches_query
+        entry = {"title": "Software Engineer", "employer": "Google",
+                 "description_text": "", "location": "NYC", "_categories": []}
+        assert _matches_query(entry, ["software"]) is True
+        assert _matches_query(entry, ["software", "engineer"]) is True
+        assert _matches_query(entry, ["designer"]) is False
+
+    def test_parse_locations(self):
+        from app.clients.google_client import _parse_locations
+        entry = {"_locations": ["Mountain View, CA", "New York, NY"]}
+        assert _parse_locations(entry) == "Mountain View, CA; New York, NY"
+
+    def test_parse_locations_deduplicates(self):
+        from app.clients.google_client import _parse_locations
+        entry = {"_locations": ["Remote", "Remote"]}
+        assert _parse_locations(entry) == "Remote"
 
 
 async def test_google_search_handles_failure(monkeypatch):
     """search_google_jobs returns empty list on HTTP error."""
     import httpx
     from app.clients.google_client import search_google_jobs
+
+    class _FailStream:
+        status_code = 500
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            pass
 
     class _FailClient:
         async def __aenter__(self):
@@ -182,12 +216,140 @@ async def test_google_search_handles_failure(monkeypatch):
         async def __aexit__(self, *a):
             pass
 
-        async def get(self, *a, **kw):
-            raise httpx.ConnectError("offline")
+        def stream(self, *a, **kw):
+            return _FailStream()
 
     monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: _FailClient())
     result = await search_google_jobs(search_text="engineer", limit=5)
     assert result == []
+
+
+async def test_google_search_parses_xml_feed(monkeypatch):
+    """search_google_jobs correctly parses XML feed entries."""
+    import httpx
+    from app.clients.google_client import search_google_jobs
+
+    _MOCK_XML = b"""<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <title>Software Engineer, Cloud</title>
+    <jobid>123456789012</jobid>
+    <url>https://www.google.com/about/careers/applications/jobs/results/123456789012</url>
+    <employer>Google</employer>
+    <remote>onsite</remote>
+    <isRemote>No</isRemote>
+    <published>2026-03-17T09:00:15.503Z</published>
+    <description>&lt;p&gt;Build cloud infrastructure.&lt;/p&gt;</description>
+    <jobtype>FULL_TIME</jobtype>
+    <locations><location>Mountain View, CA, USA</location></locations>
+    <categories><category>SOFTWARE_ENGINEERING</category></categories>
+  </entry>
+  <entry>
+    <title>Research Scientist</title>
+    <jobid>987654321098</jobid>
+    <url>https://www.google.com/about/careers/applications/jobs/results/987654321098</url>
+    <employer>DeepMind</employer>
+    <remote>remote</remote>
+    <isRemote>Yes</isRemote>
+    <published>2026-04-01T12:00:00.000Z</published>
+    <description>&lt;p&gt;Advance AI research.&lt;/p&gt;</description>
+    <jobtype>FULL_TIME</jobtype>
+    <locations><location>London, UK</location><location>Remote</location></locations>
+    <categories><category>RESEARCH</category></categories>
+  </entry>
+</feed>"""
+
+    class _MockStream:
+        status_code = 200
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            pass
+        async def aiter_bytes(self, chunk_size=65536):
+            yield _MOCK_XML
+
+    class _MockClient:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            pass
+        def stream(self, *a, **kw):
+            return _MockStream()
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: _MockClient())
+    result = await search_google_jobs(search_text="", limit=10)
+    assert len(result) == 2
+
+    # First job
+    assert result[0]["external_id"] == "goog_123456789012"
+    assert result[0]["title"] == "Software Engineer, Cloud"
+    assert result[0]["company_name"] == "Google"
+    assert "Mountain View" in result[0]["location"]
+    assert result[0]["remote"] is False
+    assert result[0]["posted_at"].startswith("2026-03-17")
+
+    # Second job — DeepMind, remote
+    assert result[1]["company_name"] == "DeepMind"
+    assert result[1]["remote"] is True
+    assert "London" in result[1]["location"]
+
+
+async def test_google_search_filters_by_query(monkeypatch):
+    """search_google_jobs filters entries by keyword."""
+    import httpx
+    from app.clients.google_client import search_google_jobs
+
+    _MOCK_XML = b"""<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <title>Software Engineer</title>
+    <jobid>111</jobid>
+    <url>https://example.com/111</url>
+    <employer>Google</employer>
+    <remote>onsite</remote>
+    <isRemote>No</isRemote>
+    <published>2026-01-01</published>
+    <description>Build software</description>
+    <jobtype>FULL_TIME</jobtype>
+    <locations><location>NYC</location></locations>
+    <categories><category>SOFTWARE_ENGINEERING</category></categories>
+  </entry>
+  <entry>
+    <title>Marketing Manager</title>
+    <jobid>222</jobid>
+    <url>https://example.com/222</url>
+    <employer>Google</employer>
+    <remote>onsite</remote>
+    <isRemote>No</isRemote>
+    <published>2026-01-01</published>
+    <description>Lead marketing campaigns</description>
+    <jobtype>FULL_TIME</jobtype>
+    <locations><location>SF</location></locations>
+    <categories><category>MARKETING</category></categories>
+  </entry>
+</feed>"""
+
+    class _MockStream:
+        status_code = 200
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            pass
+        async def aiter_bytes(self, chunk_size=65536):
+            yield _MOCK_XML
+
+    class _MockClient:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            pass
+        def stream(self, *a, **kw):
+            return _MockStream()
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: _MockClient())
+    result = await search_google_jobs(search_text="software engineer", limit=10)
+    assert len(result) == 1
+    assert result[0]["title"] == "Software Engineer"
 
 
 # ---------- Tesla ----------
