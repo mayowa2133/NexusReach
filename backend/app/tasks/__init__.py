@@ -17,6 +17,8 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
+    task_acks_late=True,
+    task_reject_on_worker_lost=True,
     beat_schedule={
         "refresh-job-feeds": {
             "task": "app.tasks.jobs.refresh_all_job_feeds",
@@ -29,6 +31,10 @@ celery_app.conf.update(
         "reverify-stale-contacts": {
             "task": "app.tasks.reverify.reverify_stale_contacts",
             "schedule": crontab(minute=30, hour="*/6"),  # every 6 hours
+        },
+        "cleanup-orphaned-sync-sessions": {
+            "task": "app.tasks.linkedin_graph.cleanup_orphaned_sync_sessions",
+            "schedule": crontab(minute=0, hour="*/1"),  # every hour
         },
     },
 )

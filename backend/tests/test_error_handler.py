@@ -6,10 +6,14 @@ pytestmark = pytest.mark.asyncio
 
 
 async def test_health_endpoint(client, mock_user_id):
-    """GET /api/health returns OK."""
+    """GET /api/health returns dependency check results."""
     resp = await client.get("/api/health")
-    assert resp.status_code == 200
-    assert resp.json() == {"status": "ok"}
+    # Health check now verifies Postgres + Redis; may return 503 if unavailable
+    assert resp.status_code in (200, 503)
+    body = resp.json()
+    assert "status" in body
+    assert "checks" in body
+    assert body["status"] in ("ok", "degraded")
 
 
 async def test_not_found_returns_standard_error(client, mock_user_id):

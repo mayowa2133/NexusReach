@@ -29,6 +29,11 @@ async def _reverify_stale_contacts() -> dict:
     """Find and re-verify contacts whose verification has gone stale."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=settings.reverify_stale_days)
 
+    verified_count = 0
+    failed_count = 0
+    skipped_count = 0
+    total_stale = 0
+
     async with async_session() as db:
         query = (
             select(Person)
@@ -42,49 +47,44 @@ async def _reverify_stale_contacts() -> dict:
         )
         result = await db.execute(query)
         stale_people = list(result.scalars().all())
+        total_stale = len(stale_people)
 
-    verified_count = 0
-    failed_count = 0
-    skipped_count = 0
+        for person in stale_people:
+            if not person.company:
+                skipped_count += 1
+                continue
 
-    for person in stale_people:
-        if not person.company:
-            skipped_count += 1
-            continue
+            try:
+                company = person.company
+                company_name = company.name
+                company_domain = (
+                    company.domain
+                    if getattr(company, "domain_trusted", False)
+                    else None
+                )
+                company_slugs = effective_public_identity_slugs(
+                    company.name,
+                    getattr(company, "public_identity_slugs", None),
+                    identity_hints=getattr(company, "identity_hints", None),
+                )
 
-        try:
-            company = person.company
-            company_name = company.name
-            company_domain = (
-                company.domain
-                if getattr(company, "domain_trusted", False)
-                else None
-            )
-            company_slugs = effective_public_identity_slugs(
-                company.name,
-                getattr(company, "public_identity_slugs", None),
-                identity_hints=getattr(company, "identity_hints", None),
-            )
-
-            verification = await _verify_person(
-                person,
-                company_name=company_name,
-                company_domain=company_domain,
-                company_public_identity_slugs=company_slugs,
-            )
-            _apply_verification_result(person, verification)
-
-            async with async_session() as db:
-                db.add(person)
+                verification = await _verify_person(
+                    person,
+                    company_name=company_name,
+                    company_domain=company_domain,
+                    company_public_identity_slugs=company_slugs,
+                )
+                _apply_verification_result(person, verification)
                 await db.commit()
 
-            verified_count += 1
-        except Exception:
-            logger.exception("Failed to re-verify person %s", person.id)
-            failed_count += 1
+                verified_count += 1
+            except Exception:
+                logger.exception("Failed to re-verify person %s", person.id)
+                await db.rollback()
+                failed_count += 1
 
     summary = {
-        "total_stale": len(stale_people),
+        "total_stale": total_stale,
         "verified": verified_count,
         "failed": failed_count,
         "skipped": skipped_count,
@@ -93,7 +93,13 @@ async def _reverify_stale_contacts() -> dict:
     return summary
 
 
-@celery_app.task(name="app.tasks.reverify.reverify_stale_contacts")
+@celery_app.task(
+    name="app.tasks.reverify.reverify_stale_contacts",
+    autoretry_for=(Exception,),
+    retry_backoff=120,
+    retry_backoff_max=900,
+    max_retries=2,
+)
 def reverify_stale_contacts() -> dict:
     """Celery entry point for stale contact re-verification."""
     return asyncio.run(_reverify_stale_contacts())

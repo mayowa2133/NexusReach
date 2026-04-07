@@ -712,6 +712,66 @@ def connection_matches_company(
     return bool(company_slug and company_slug in trusted_slugs)
 
 
+async def cleanup_orphaned_sync_sessions(db: AsyncSession) -> dict[str, int]:
+    """Mark orphaned sync sessions as failed.
+
+    Targets two categories:
+    - ``awaiting_upload`` sessions whose ``session_expires_at`` has passed.
+    - ``syncing`` sessions that started more than 24 hours ago (stuck).
+
+    Also resets the corresponding ``UserSettings.linkedin_graph_sync_status``
+    back to ``idle`` so the user can start a new session.
+    """
+    now = _utcnow()
+    cutoff_syncing = now - timedelta(hours=24)
+
+    # Find orphaned runs
+    result = await db.execute(
+        select(LinkedInGraphSyncRun).where(
+            or_(
+                # Expired awaiting_upload sessions
+                (
+                    LinkedInGraphSyncRun.status == SYNC_STATUS_AWAITING_UPLOAD
+                ) & (
+                    LinkedInGraphSyncRun.session_expires_at <= now
+                ),
+                # Stuck syncing sessions (>24h)
+                (
+                    LinkedInGraphSyncRun.status == SYNC_STATUS_SYNCING
+                ) & (
+                    LinkedInGraphSyncRun.started_at <= cutoff_syncing
+                ),
+            )
+        )
+    )
+    orphaned_runs = list(result.scalars().all())
+
+    if not orphaned_runs:
+        return {"cleaned_up": 0}
+
+    affected_user_ids: set[uuid.UUID] = set()
+    for run in orphaned_runs:
+        run.status = SYNC_STATUS_FAILED
+        run.last_error = f"Session orphaned — cleaned up at {now.isoformat()}"
+        run.completed_at = now
+        run.session_token_hash = None
+        run.session_expires_at = None
+        affected_user_ids.add(run.user_id)
+
+    # Reset user settings sync status for affected users
+    for user_id in affected_user_ids:
+        user_settings = await _get_or_create_user_settings(db, user_id)
+        if user_settings.linkedin_graph_sync_status in (
+            SYNC_STATUS_AWAITING_UPLOAD,
+            SYNC_STATUS_SYNCING,
+        ):
+            user_settings.linkedin_graph_sync_status = SYNC_STATUS_IDLE
+            user_settings.linkedin_graph_last_error = "Sync session timed out."
+
+    await db.commit()
+    return {"cleaned_up": len(orphaned_runs)}
+
+
 def _warm_path_priority(person: Any) -> int:
     return {
         "direct_connection": 0,

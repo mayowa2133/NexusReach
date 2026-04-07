@@ -1,5 +1,6 @@
 import uuid
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -90,6 +91,30 @@ class Settings(BaseSettings):
     # Stale contact re-verification
     reverify_stale_days: int = 14
     reverify_batch_size: int = 20
+
+    @model_validator(mode="after")
+    def _validate_production_config(self) -> "Settings":
+        """Fail fast if production is missing critical config."""
+        if self.environment != "production":
+            return self
+        errors: list[str] = []
+        if "localhost" in self.database_url:
+            errors.append("NEXUSREACH_DATABASE_URL still points at localhost")
+        if "localhost" in self.redis_url:
+            errors.append("NEXUSREACH_REDIS_URL still points at localhost")
+        if not self.supabase_url:
+            errors.append("NEXUSREACH_SUPABASE_URL is empty")
+        if not self.supabase_key:
+            errors.append("NEXUSREACH_SUPABASE_KEY is empty")
+        if not self.supabase_jwt_secret:
+            errors.append("NEXUSREACH_SUPABASE_JWT_SECRET is empty")
+        if self.auth_mode == "dev":
+            errors.append("NEXUSREACH_AUTH_MODE=dev must not be used in production")
+        if errors:
+            raise ValueError(
+                "Production configuration errors:\n  - " + "\n  - ".join(errors)
+            )
+        return self
 
 
 settings = Settings()

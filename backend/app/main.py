@@ -77,7 +77,37 @@ app.include_router(linkedin_graph.router, prefix="/api")
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok"}
+    """Health check that verifies core dependencies."""
+    checks: dict[str, str] = {}
+
+    # Postgres
+    try:
+        from app.database import async_session as _session_factory
+        from sqlalchemy import text
+
+        async with _session_factory() as db:
+            await db.execute(text("SELECT 1"))
+        checks["postgres"] = "ok"
+    except Exception as exc:
+        checks["postgres"] = f"error: {exc}"
+
+    # Redis
+    try:
+        from app.clients import search_cache_client
+
+        pong = await search_cache_client.ping()
+        checks["redis"] = "ok" if pong else "error: no pong"
+    except Exception as exc:
+        checks["redis"] = f"error: {exc}"
+
+    healthy = all(v == "ok" for v in checks.values())
+    status_code = 200 if healthy else 503
+    from fastapi.responses import JSONResponse
+
+    return JSONResponse(
+        content={"status": "ok" if healthy else "degraded", "checks": checks},
+        status_code=status_code,
+    )
 
 
 @app.on_event("startup")

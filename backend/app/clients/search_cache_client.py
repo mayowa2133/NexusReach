@@ -26,6 +26,14 @@ def _client() -> Redis:
     return _redis_client
 
 
+async def ping() -> bool:
+    """Return True if Redis responds to PING."""
+    try:
+        return bool(await _client().ping())
+    except Exception:
+        return False
+
+
 async def get_json(key: str) -> Any | None:
     """Return cached JSON payload or ``None`` when unavailable."""
     try:

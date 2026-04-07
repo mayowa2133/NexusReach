@@ -9,12 +9,34 @@ from sqlalchemy import select
 
 from app.tasks import celery_app
 from app.database import async_session
+from app.models.notification import Notification
 from app.models.search_preference import SearchPreference
 from app.models.company import Company
 from app.services.job_service import search_jobs
 from app.services.notification_service import create_notification
 
 logger = logging.getLogger(__name__)
+
+
+async def _notification_exists(
+    db,
+    *,
+    user_id: uuid.UUID,
+    job_id: uuid.UUID,
+    type: str,
+) -> bool:
+    """Check whether a notification already exists for a job + type."""
+    stmt = (
+        select(Notification.id)
+        .where(
+            Notification.user_id == user_id,
+            Notification.job_id == job_id,
+            Notification.type == type,
+        )
+        .limit(1)
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none() is not None
 
 
 async def _refresh_user_feeds(user_id: uuid.UUID) -> int:
@@ -63,24 +85,29 @@ async def _refresh_user_feeds(user_id: uuid.UUID) -> int:
 
                     # Check if this job is from a starred company
                     if company_lower in starred_companies:
-                        await create_notification(
-                            db,
-                            user_id,
-                            type="starred_company_job",
-                            title=f"{job.company_name} posted: {job.title}",
-                            body=f"Your starred company has a new opening in {job.location or 'Unknown location'}",
-                            job_id=job.id,
-                        )
+                        if not await _notification_exists(
+                            db, user_id=user_id, job_id=job.id, type="starred_company_job",
+                        ):
+                            await create_notification(
+                                db,
+                                user_id,
+                                type="starred_company_job",
+                                title=f"{job.company_name} posted: {job.title}",
+                                body=f"Your starred company has a new opening in {job.location or 'Unknown location'}",
+                                job_id=job.id,
+                            )
                     elif job.match_score is not None and job.match_score >= 50:
-                        # Regular new job notification (only for good matches)
-                        await create_notification(
-                            db,
-                            user_id,
-                            type="new_job",
-                            title=f"New match: {job.title} at {job.company_name}",
-                            body=f"{int(job.match_score)}% match score",
-                            job_id=job.id,
-                        )
+                        if not await _notification_exists(
+                            db, user_id=user_id, job_id=job.id, type="new_job",
+                        ):
+                            await create_notification(
+                                db,
+                                user_id,
+                                type="new_job",
+                                title=f"New match: {job.title} at {job.company_name}",
+                                body=f"{int(job.match_score)}% match score",
+                                job_id=job.id,
+                            )
 
             except Exception:
                 logger.exception(
@@ -118,7 +145,13 @@ async def _refresh_all() -> None:
             logger.exception("Failed to refresh feeds for user %s", uid)
 
 
-@celery_app.task(name="app.tasks.jobs.refresh_all_job_feeds")
+@celery_app.task(
+    name="app.tasks.jobs.refresh_all_job_feeds",
+    autoretry_for=(Exception,),
+    retry_backoff=60,
+    retry_backoff_max=600,
+    max_retries=3,
+)
 def refresh_all_job_feeds() -> dict:
     """Celery task: refresh job feeds for all users with saved searches."""
     asyncio.run(_refresh_all())
@@ -155,7 +188,13 @@ async def _discover_all_boards() -> None:
             logger.exception("ATS auto-discover failed for user %s", uid)
 
 
-@celery_app.task(name="app.tasks.jobs.discover_ats_boards")
+@celery_app.task(
+    name="app.tasks.jobs.discover_ats_boards",
+    autoretry_for=(Exception,),
+    retry_backoff=60,
+    retry_backoff_max=600,
+    max_retries=3,
+)
 def discover_ats_boards() -> dict:
     """Celery task: poll all curated ATS boards for new postings."""
     asyncio.run(_discover_all_boards())

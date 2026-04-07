@@ -1,4 +1,4 @@
-import { useState, useEffect, type FormEvent } from 'react';
+import { useState, useEffect, useMemo, memo, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -167,17 +167,20 @@ export function JobsPage() {
     startup: startupFilter ? true : undefined,
     search: searchFilter || undefined,
   });
-  const baseSavedJobs = savedJobsData?.items ?? [];
-  const countryOptions = (() => {
+  const baseSavedJobs = useMemo(() => savedJobsData?.items ?? [], [savedJobsData?.items]);
+  const countryOptions = useMemo(() => {
     const options = new Set(getJobCountryOptions(baseSavedJobs));
     if (countryFilter) {
       options.add(countryFilter);
     }
     return [...options].sort((a, b) => a.localeCompare(b));
-  })();
-  const savedJobs = countryFilter
-    ? baseSavedJobs.filter((job) => getJobCountry(job.location) === countryFilter)
-    : baseSavedJobs;
+  }, [baseSavedJobs, countryFilter]);
+  const savedJobs = useMemo(
+    () => countryFilter
+      ? baseSavedJobs.filter((job) => getJobCountry(job.location) === countryFilter)
+      : baseSavedJobs,
+    [baseSavedJobs, countryFilter],
+  );
   const updateStage = useUpdateJobStage();
   const toggleStar = useToggleJobStar();
 
@@ -188,9 +191,10 @@ export function JobsPage() {
   const refreshJobs = useRefreshJobs();
   const discoverJobs = useDiscoverJobs();
 
-  const newJobCount = lastVisited
-    ? savedJobs.filter((j) => j.created_at > lastVisited).length
-    : 0;
+  const newJobCount = useMemo(
+    () => lastVisited ? savedJobs.filter((j) => j.created_at > lastVisited).length : 0,
+    [savedJobs, lastVisited],
+  );
 
   const handleSearch = async (e: FormEvent) => {
     e.preventDefault();
@@ -693,7 +697,7 @@ export function JobsPage() {
   );
 }
 
-function JobListCard({
+const JobListCard = memo(function JobListCard({
   job,
   isSelected,
   isNew,
@@ -777,7 +781,7 @@ function JobListCard({
       </CardContent>
     </Card>
   );
-}
+});
 
 function JobDetail({
   job,

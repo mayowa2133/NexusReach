@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -32,10 +33,17 @@ def _provider_order(raw: str, *, allowed: set[str], default: list[str]) -> list[
     return ordered or list(default)
 
 
+# Bump this version when the cached response schema changes to auto-invalidate stale entries.
+CACHE_KEY_VERSION = "v2"
+
+
 def _cache_key(family: str, provider: str, params: dict[str, Any]) -> str:
     payload = json.dumps(params, sort_keys=True, default=str)
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
-    return f"search:{family}:{provider}:{digest}"
+    return f"search:{CACHE_KEY_VERSION}:{family}:{provider}:{digest}"
+
+
+PROVIDER_TIMEOUT_SECONDS = 10
 
 
 async def _cached_provider_results(
@@ -50,7 +58,16 @@ async def _cached_provider_results(
         return cached, True
 
     try:
-        results = await fetcher(**params)
+        results = await asyncio.wait_for(
+            fetcher(**params),
+            timeout=PROVIDER_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "search provider timed out",
+            extra={"provider": provider, "family": family, "timeout": PROVIDER_TIMEOUT_SECONDS},
+        )
+        return [], False
     except Exception as exc:  # pragma: no cover - defensive logging only
         logger.warning(
             "search provider failed",

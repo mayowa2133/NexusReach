@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type FormEvent, type MouseEventHandler } from 'react';
+import { useState, useEffect, useRef, useMemo, type FormEvent, type MouseEventHandler } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -115,6 +115,7 @@ export function PeoplePage() {
   );
   const [searchResults, setSearchResults] = useState<PeopleSearchResult | null>(null);
   const [selectedPersonIds, setSelectedPersonIds] = useState<string[]>([]);
+  const selectedPersonIdSet = useMemo(() => new Set(selectedPersonIds), [selectedPersonIds]);
   const [savedContactsCompanyFilter, setSavedContactsCompanyFilter] = useState('');
 
   const search = usePeopleSearch();
@@ -189,14 +190,20 @@ export function PeoplePage() {
     (searchResults?.hiring_managers.length ?? 0) +
     (searchResults?.peers.length ?? 0);
   const normalizedSavedContactsCompanyFilter = savedContactsCompanyFilter.trim().toLowerCase();
-  const filteredSavedPeople = (savedPeople ?? []).filter((person) => {
-    if (!normalizedSavedContactsCompanyFilter) {
-      return true;
-    }
-    const companyLabel = person.company?.name?.toLowerCase() || 'unknown company';
-    return companyLabel.includes(normalizedSavedContactsCompanyFilter);
-  });
-  const groupedSavedPeople = groupSavedPeopleByCompany(filteredSavedPeople);
+  const filteredSavedPeople = useMemo(
+    () => (savedPeople ?? []).filter((person) => {
+      if (!normalizedSavedContactsCompanyFilter) {
+        return true;
+      }
+      const companyLabel = person.company?.name?.toLowerCase() || 'unknown company';
+      return companyLabel.includes(normalizedSavedContactsCompanyFilter);
+    }),
+    [savedPeople, normalizedSavedContactsCompanyFilter],
+  );
+  const groupedSavedPeople = useMemo(
+    () => groupSavedPeopleByCompany(filteredSavedPeople),
+    [filteredSavedPeople],
+  );
   const isJobAwareSearchPending = Boolean(jobId && jobCompany && !searchResults);
   const showSavedContacts = !searchResults && !search.isPending && !isJobAwareSearchPending && (savedPeople?.length ?? 0) > 0;
   const showSavedContactsEmptyState =
@@ -441,7 +448,7 @@ export function PeoplePage() {
                 description="Direct line into the hiring process"
                 people={searchResults.recruiters}
                 emptyMessage="No current-company-verified recruiter was found for this company yet."
-                selectedPersonIds={selectedPersonIds}
+                selectedPersonIdSet={selectedPersonIdSet}
                 onToggleSelect={togglePersonSelection}
               />
               <PersonSection
@@ -449,7 +456,7 @@ export function PeoplePage() {
                 description="Understand the role deeply, can champion you"
                 people={searchResults.hiring_managers}
                 emptyMessage="No current-company-verified hiring-side contact was found for this role."
-                selectedPersonIds={selectedPersonIds}
+                selectedPersonIdSet={selectedPersonIdSet}
                 onToggleSelect={togglePersonSelection}
               />
               <PersonSection
@@ -457,7 +464,7 @@ export function PeoplePage() {
                 description="Most likely to respond, most authentic conversation"
                 people={searchResults.peers}
                 emptyMessage="No current-company-verified teammate surfaced for this role."
-                selectedPersonIds={selectedPersonIds}
+                selectedPersonIdSet={selectedPersonIdSet}
                 onToggleSelect={togglePersonSelection}
               />
               </>
@@ -536,7 +543,7 @@ export function PeoplePage() {
                     <PersonCard
                       key={person.id}
                       person={person}
-                      selected={selectedPersonIds.includes(person.id)}
+                      selected={selectedPersonIdSet.has(person.id)}
                       onToggleSelect={togglePersonSelection}
                     />
                   ))}
@@ -614,14 +621,14 @@ function PersonSection({
   description,
   people,
   emptyMessage,
-  selectedPersonIds,
+  selectedPersonIdSet,
   onToggleSelect,
 }: {
   title: string;
   description: string;
   people: Person[];
   emptyMessage: string;
-  selectedPersonIds: string[];
+  selectedPersonIdSet: Set<string>;
   onToggleSelect: (personId: string) => void;
 }) {
   return (
@@ -640,7 +647,7 @@ function PersonSection({
             <PersonCard
               key={person.id}
               person={person}
-              selected={selectedPersonIds.includes(person.id)}
+              selected={selectedPersonIdSet.has(person.id)}
               onToggleSelect={onToggleSelect}
             />
           ))}

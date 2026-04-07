@@ -1,6 +1,35 @@
 import { useAuthStore } from '@/stores/auth';
+import { supabase, isDevAuthMode } from '@/lib/supabase';
 
 export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
+/**
+ * Get a valid access token, refreshing via Supabase if needed.
+ * In dev mode, returns the static dev token.
+ */
+async function getAccessToken(): Promise<string | null> {
+  if (isDevAuthMode) {
+    return useAuthStore.getState().session?.access_token ?? null;
+  }
+
+  if (!supabase) return null;
+
+  // getSession() returns the cached session and auto-refreshes if expired
+  const { data: { session }, error } = await supabase.auth.getSession();
+
+  if (error || !session) {
+    // Session is unrecoverable — clear auth state so ProtectedRoute redirects
+    useAuthStore.getState().signOut().catch(() => {});
+    return null;
+  }
+
+  // Keep the store in sync with the refreshed session
+  if (session.access_token !== useAuthStore.getState().session?.access_token) {
+    useAuthStore.setState({ session, user: session.user });
+  }
+
+  return session.access_token;
+}
 
 class ApiClient {
   private baseUrl: string;
@@ -13,7 +42,7 @@ class ApiClient {
     path: string,
     options: RequestInit = {}
   ): Promise<T> {
-    const token = useAuthStore.getState().session?.access_token;
+    const token = await getAccessToken();
     const isFormData = options.body instanceof FormData;
 
     const headers: Record<string, string> = {
@@ -31,6 +60,12 @@ class ApiClient {
       ...options,
       headers,
     });
+
+    // On 401, clear auth state so the UI redirects to login
+    if (response.status === 401) {
+      useAuthStore.getState().signOut().catch(() => {});
+      throw new Error('Session expired. Please sign in again.');
+    }
 
     if (!response.ok) {
       const errorBody = await response.json().catch(() => null);

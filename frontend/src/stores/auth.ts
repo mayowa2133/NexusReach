@@ -168,8 +168,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   signOut: async () => {
     if (isDevAuthMode) {
-      const user = buildDevUser();
-      set({ user, session: buildDevSession(user), initialized: true, devMode: true });
+      set({ user: null, session: null, initialized: true, devMode: true });
       return;
     }
 

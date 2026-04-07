@@ -33,6 +33,7 @@ def _mock_session(stale_people):
     mock_result.scalars.return_value.all.return_value = stale_people
     mock_db.execute = AsyncMock(return_value=mock_result)
     mock_db.commit = AsyncMock()
+    mock_db.rollback = AsyncMock()
     mock_db.add = MagicMock()
 
     class FakeSession:
@@ -52,15 +53,9 @@ _PATCH_PREFIX = "app.tasks.reverify"
 async def test_skips_contacts_without_company():
     person = _make_person(company=None)
     SessionCls, _ = _mock_session([person])
-    call_count = 0
-
-    def session_factory():
-        nonlocal call_count
-        call_count += 1
-        return SessionCls()
 
     with (
-        patch(f"{_PATCH_PREFIX}.async_session", side_effect=session_factory),
+        patch(f"{_PATCH_PREFIX}.async_session", return_value=SessionCls()),
         patch(f"{_PATCH_PREFIX}.settings") as mock_settings,
     ):
         mock_settings.reverify_stale_days = 14
@@ -80,20 +75,10 @@ async def test_verifies_stale_contact():
     person = _make_person(company=company)
     mock_verification = MagicMock()
 
-    QuerySession, _ = _mock_session([person])
-    CommitSession, mock_commit_db = _mock_session([])
-
-    call_count = 0
-
-    def session_factory():
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            return QuerySession()
-        return CommitSession()
+    SessionCls, mock_db = _mock_session([person])
 
     with (
-        patch(f"{_PATCH_PREFIX}.async_session", side_effect=session_factory),
+        patch(f"{_PATCH_PREFIX}.async_session", return_value=SessionCls()),
         patch(f"{_PATCH_PREFIX}.settings") as mock_settings,
         patch(f"{_PATCH_PREFIX}._verify_person", new_callable=AsyncMock) as mock_verify,
         patch(f"{_PATCH_PREFIX}._apply_verification_result") as mock_apply,
@@ -111,6 +96,7 @@ async def test_verifies_stale_contact():
     assert result["failed"] == 0
     mock_verify.assert_called_once()
     mock_apply.assert_called_once_with(person, mock_verification)
+    mock_db.commit.assert_called()
 
 
 @pytest.mark.asyncio()
@@ -119,20 +105,10 @@ async def test_isolates_individual_failures():
     person1 = _make_person(company=company)
     person2 = _make_person(company=company)
 
-    QuerySession, _ = _mock_session([person1, person2])
-    CommitSession, _ = _mock_session([])
-
-    call_count = 0
-
-    def session_factory():
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            return QuerySession()
-        return CommitSession()
+    SessionCls, mock_db = _mock_session([person1, person2])
 
     with (
-        patch(f"{_PATCH_PREFIX}.async_session", side_effect=session_factory),
+        patch(f"{_PATCH_PREFIX}.async_session", return_value=SessionCls()),
         patch(f"{_PATCH_PREFIX}.settings") as mock_settings,
         patch(f"{_PATCH_PREFIX}._verify_person", new_callable=AsyncMock) as mock_verify,
         patch(f"{_PATCH_PREFIX}._apply_verification_result"),
@@ -150,15 +126,18 @@ async def test_isolates_individual_failures():
     assert result["failed"] == 1
     assert result["verified"] == 1
     assert result["total_stale"] == 2
+    # First failure should trigger rollback, second should commit
+    mock_db.rollback.assert_called_once()
+    mock_db.commit.assert_called()
 
 
 @pytest.mark.asyncio()
 async def test_respects_batch_size():
     """The query should use settings.reverify_batch_size as limit."""
-    QuerySession, mock_db = _mock_session([])
+    SessionCls, mock_db = _mock_session([])
 
     with (
-        patch(f"{_PATCH_PREFIX}.async_session", return_value=QuerySession()),
+        patch(f"{_PATCH_PREFIX}.async_session", return_value=SessionCls()),
         patch(f"{_PATCH_PREFIX}.settings") as mock_settings,
     ):
         mock_settings.reverify_stale_days = 14

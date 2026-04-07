@@ -10,8 +10,15 @@ vi.mock('@/stores/auth', () => ({
   useAuthStore: {
     getState: () => ({
       session: { access_token: 'test-jwt-token' },
+      signOut: () => Promise.resolve(),
     }),
+    setState: () => {},
   },
+}));
+
+vi.mock('@/lib/supabase', () => ({
+  supabase: null,
+  isDevAuthMode: true,
 }));
 
 describe('ApiClient', () => {
@@ -64,7 +71,7 @@ describe('ApiClient', () => {
     });
     vi.stubGlobal('fetch', mockFetch);
 
-    await expect(api.get('/api/protected')).rejects.toThrow('Unauthorized');
+    await expect(api.get('/api/protected')).rejects.toThrow('Session expired');
   });
 
   it('sends POST with JSON body', async () => {
