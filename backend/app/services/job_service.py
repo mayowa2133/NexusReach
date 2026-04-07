@@ -11,10 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients import (
     adzuna_client,
+    amazon_client,
+    apple_client,
     ats_client,
     conviction_jobs_client,
     jsearch_client,
     lever_scrape_client,
+    microsoft_client,
     newgrad_jobs_client,
     public_page_client,
     remote_jobs_client,
@@ -823,6 +826,19 @@ ATS_DISCOVER_BOARDS: list[dict[str, str]] = [
     {"slug": "mongodb", "ats": "greenhouse"},
     {"slug": "lyft", "ats": "greenhouse"},
     {"slug": "okta", "ats": "greenhouse"},
+    {"slug": "waymo", "ats": "greenhouse"},
+    {"slug": "andurilindustries", "ats": "greenhouse"},
+    {"slug": "samsara", "ats": "greenhouse"},
+    {"slug": "uberfreight", "ats": "greenhouse"},
+    {"slug": "grammarly", "ats": "greenhouse"},
+    {"slug": "verkada", "ats": "greenhouse"},
+    {"slug": "niantic", "ats": "greenhouse"},
+    {"slug": "nuro", "ats": "greenhouse"},
+    {"slug": "canva", "ats": "greenhouse"},
+    {"slug": "wiz", "ats": "greenhouse"},
+    {"slug": "snyk", "ats": "greenhouse"},
+    {"slug": "applovin", "ats": "greenhouse"},
+    {"slug": "coreweave", "ats": "greenhouse"},
     # Ashby
     {"slug": "ramp", "ats": "ashby"},
     {"slug": "notion", "ats": "ashby"},
@@ -930,6 +946,22 @@ async def _discover_ats_boards(
         total_new += len(stored)
     except Exception:
         logger.exception("Workday discover failed")
+
+    # --- Proprietary career sites (best-effort) ---
+    proprietary_sources: list[tuple[str, object]] = [
+        ("Amazon", amazon_client.search_amazon_jobs),
+        ("Microsoft", microsoft_client.search_microsoft_jobs),
+        ("Apple", apple_client.search_apple_jobs),
+    ]
+    for source_label, fetcher in proprietary_sources:
+        try:
+            raw_jobs = await fetcher(limit=20)
+            stored = await _store_raw_jobs(db, user_id, raw_jobs, profile)
+            if stored:
+                logger.info("%s discover: %d new jobs", source_label, len(stored))
+            total_new += len(stored)
+        except Exception:
+            logger.exception("%s discover failed", source_label)
 
     return total_new
 

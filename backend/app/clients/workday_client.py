@@ -72,6 +72,13 @@ WORKDAY_COMPANIES: list[dict[str, str]] = [
     {"label": "Dell", "company": "dell", "wd": "wd1", "site": "External"},
     {"label": "CrowdStrike", "company": "crowdstrike", "wd": "wd5", "site": "CrowdStrikeCareers"},
     {"label": "Autodesk", "company": "autodesk", "wd": "wd1", "site": "Ext"},
+    {"label": "Snap", "company": "snapchat", "wd": "wd1", "site": "snap"},
+    {"label": "PayPal", "company": "paypal", "wd": "wd1", "site": "jobs"},
+    {"label": "Intuit", "company": "intuit", "wd": "wd1", "site": "Intuit"},
+    {"label": "Palo Alto Networks", "company": "paloaltonetworks", "wd": "wd1", "site": "Careers"},
+    {"label": "HP", "company": "hp", "wd": "wd5", "site": "ExternalCareerSite"},
+    {"label": "IBM", "company": "ibm", "wd": "wd5", "site": "External"},
+    {"label": "Accenture", "company": "accenture", "wd": "wd3", "site": "AccentureCareers"},
 ]
 
 
