@@ -21,6 +21,7 @@ import {
 } from '@/hooks/useLinkedInGraph';
 import { API_URL } from '@/lib/api';
 import { GuardrailsPanel } from '@/components/settings/GuardrailsPanel';
+import { JobAlertsPanel } from '@/components/settings/JobAlertsPanel';
 import { toast } from 'sonner';
 import type { LinkedInGraphSyncSession } from '@/types';
 
@@ -348,6 +349,11 @@ export function SettingsPage() {
           )}
         </CardContent>
       </Card>
+
+      <Separator />
+
+      {/* Job Alerts */}
+      <JobAlertsPanel />
 
       <Separator />
 

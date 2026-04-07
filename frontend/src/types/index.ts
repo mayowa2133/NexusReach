@@ -509,6 +509,25 @@ export interface Notification {
   created_at: string;
 }
 
+// Job Alert types
+export interface JobAlertPreference {
+  enabled: boolean;
+  frequency: 'immediate' | 'daily' | 'weekly';
+  watched_companies: string[];
+  use_starred_companies: boolean;
+  keyword_filters: string[];
+  email_provider: 'gmail' | 'outlook' | 'connected';
+  last_digest_sent_at: string | null;
+  total_alerts_sent: number;
+}
+
+export interface JobAlertDigestResult {
+  sent: boolean;
+  job_count: number;
+  provider: string | null;
+  error: string | null;
+}
+
 // Settings + Guardrails types (Phase 9)
 export interface GuardrailsSettings {
   min_message_gap_days: number;

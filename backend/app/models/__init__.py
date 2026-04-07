@@ -12,5 +12,6 @@ from app.models.search_preference import SearchPreference
 from app.models.smtp_domain_result import SmtpDomainResult
 from app.models.search_log import SearchLog
 from app.models.linkedin_graph import LinkedInGraphConnection, LinkedInGraphSyncRun
+from app.models.job_alert import JobAlertPreference
 
-__all__ = ["User", "Profile", "UserSettings", "Company", "Person", "Message", "Job", "OutreachLog", "ApiUsage", "Notification", "SearchPreference", "SmtpDomainResult", "SearchLog", "LinkedInGraphConnection", "LinkedInGraphSyncRun"]
+__all__ = ["User", "Profile", "UserSettings", "Company", "Person", "Message", "Job", "OutreachLog", "ApiUsage", "Notification", "SearchPreference", "SmtpDomainResult", "SearchLog", "LinkedInGraphConnection", "LinkedInGraphSyncRun", "JobAlertPreference"]

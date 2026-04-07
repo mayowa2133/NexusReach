@@ -27,6 +27,7 @@ from app.routers import (
     settings as settings_router,
     usage,
     linkedin_graph,
+    job_alerts,
 )
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,7 @@ app.include_router(insights.router, prefix="/api")
 app.include_router(settings_router.router, prefix="/api")
 app.include_router(usage.router, prefix="/api")
 app.include_router(linkedin_graph.router, prefix="/api")
+app.include_router(job_alerts.router, prefix="/api")
 
 
 @app.get("/api/health")

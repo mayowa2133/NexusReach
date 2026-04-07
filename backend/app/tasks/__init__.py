@@ -36,6 +36,10 @@ celery_app.conf.update(
             "task": "app.tasks.linkedin_graph.cleanup_orphaned_sync_sessions",
             "schedule": crontab(minute=0, hour="*/1"),  # every hour
         },
+        "send-job-alert-digests": {
+            "task": "app.tasks.job_alerts.send_job_alert_digests",
+            "schedule": crontab(minute=10, hour="*/1"),  # hourly at :10
+        },
     },
 )
 
