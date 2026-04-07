@@ -1,4 +1,4 @@
-"""Tests for proprietary career-site clients (Amazon, Microsoft, Apple)."""
+"""Tests for proprietary career-site clients (Amazon, Microsoft, Apple, Google, Tesla, Meta)."""
 
 import pytest
 
@@ -153,3 +153,124 @@ async def test_apple_search_handles_failure(monkeypatch):
     monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: _FailClient())
     result = await search_apple_jobs(search_text="engineer", limit=5)
     assert result == []
+
+
+# ---------- Google ----------
+
+
+class TestGoogleParsing:
+    def test_strip_tags(self):
+        from app.clients.google_client import _strip_tags
+        assert _strip_tags("<b>Hello</b> World") == "Hello World"
+        assert _strip_tags("Plain text") == "Plain text"
+
+    def test_extract_job_id(self):
+        from app.clients.google_client import _extract_job_url
+        url = _extract_job_url("https://example.com", "12345")
+        assert "12345" in url
+
+
+async def test_google_search_handles_failure(monkeypatch):
+    """search_google_jobs returns empty list on HTTP error."""
+    import httpx
+    from app.clients.google_client import search_google_jobs
+
+    class _FailClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            pass
+
+        async def get(self, *a, **kw):
+            raise httpx.ConnectError("offline")
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: _FailClient())
+    result = await search_google_jobs(search_text="engineer", limit=5)
+    assert result == []
+
+
+# ---------- Tesla ----------
+
+
+async def test_tesla_search_without_crawl4ai(monkeypatch):
+    """search_tesla_jobs returns empty list when Crawl4AI is not installed."""
+    import builtins
+    from app.clients.tesla_client import search_tesla_jobs
+
+    real_import = builtins.__import__
+
+    def _mock_import(name, *args, **kwargs):
+        if name == "crawl4ai":
+            raise ImportError("crawl4ai not installed")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _mock_import)
+    result = await search_tesla_jobs(search_text="engineer", limit=5)
+    assert result == []
+
+
+class TestTeslaParsing:
+    def test_parse_jobs_from_html(self):
+        from app.clients.tesla_client import _parse_jobs_from_html
+        html = '''
+        <a href="/careers/search/job/software-engineer-123456">Software Engineer</a>
+        <a href="/careers/search/job/data-scientist-789012">Data Scientist</a>
+        '''
+        jobs = _parse_jobs_from_html(html)
+        assert len(jobs) == 2
+        assert jobs[0]["title"] == "Software Engineer"
+        assert jobs[0]["company_name"] == "Tesla"
+        assert "123456" in jobs[0]["external_id"]
+
+    def test_deduplicates_same_path(self):
+        from app.clients.tesla_client import _parse_jobs_from_html
+        html = '''
+        <a href="/careers/search/job/sw-eng-123">SW Eng</a>
+        <a href="/careers/search/job/sw-eng-123">SW Eng</a>
+        '''
+        jobs = _parse_jobs_from_html(html)
+        assert len(jobs) == 1
+
+
+# ---------- Meta ----------
+
+
+async def test_meta_search_without_crawl4ai(monkeypatch):
+    """search_meta_jobs returns empty list when Crawl4AI is not installed."""
+    import builtins
+    from app.clients.meta_client import search_meta_jobs
+
+    real_import = builtins.__import__
+
+    def _mock_import(name, *args, **kwargs):
+        if name == "crawl4ai":
+            raise ImportError("crawl4ai not installed")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _mock_import)
+    result = await search_meta_jobs(search_text="engineer", limit=5)
+    assert result == []
+
+
+class TestMetaParsing:
+    def test_parse_jobs_from_structured_data(self):
+        from app.clients.meta_client import _parse_jobs_from_html
+        html = '''
+        {"jobId": "1234567890", "title": "Software Engineer", "location": "Menlo Park, CA"}
+        {"jobId": "9876543210", "title": "Data Scientist", "location": "Remote"}
+        '''
+        jobs = _parse_jobs_from_html(html)
+        assert len(jobs) == 2
+        assert jobs[0]["title"] == "Software Engineer"
+        assert jobs[0]["company_name"] == "Meta"
+        assert jobs[0]["location"] == "Menlo Park, CA"
+        assert jobs[1]["remote"] is True
+
+    def test_deduplicates_same_id(self):
+        from app.clients.meta_client import _parse_jobs_from_html
+        html = '''
+        {"jobId": "111", "title": "SWE"} {"jobId": "111", "title": "SWE"}
+        '''
+        jobs = _parse_jobs_from_html(html)
+        assert len(jobs) == 1

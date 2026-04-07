@@ -15,13 +15,16 @@ from app.clients import (
     apple_client,
     ats_client,
     conviction_jobs_client,
+    google_client,
     jsearch_client,
     lever_scrape_client,
+    meta_client,
     microsoft_client,
     newgrad_jobs_client,
     public_page_client,
     remote_jobs_client,
     speedrun_jobs_client,
+    tesla_client,
     ventureloop_jobs_client,
     wellfound_jobs_client,
     workday_client,
@@ -952,6 +955,9 @@ async def _discover_ats_boards(
         ("Amazon", amazon_client.search_amazon_jobs),
         ("Microsoft", microsoft_client.search_microsoft_jobs),
         ("Apple", apple_client.search_apple_jobs),
+        ("Google", google_client.search_google_jobs),
+        ("Tesla", tesla_client.search_tesla_jobs),
+        ("Meta", meta_client.search_meta_jobs),
     ]
     for source_label, fetcher in proprietary_sources:
         try:
