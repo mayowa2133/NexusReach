@@ -398,41 +398,207 @@ class TestTeslaParsing:
 # ---------- Meta ----------
 
 
-async def test_meta_search_without_crawl4ai(monkeypatch):
-    """search_meta_jobs returns empty list when Crawl4AI is not installed."""
-    import builtins
+class TestMetaHelpers:
+    def test_build_search_variables_with_text(self):
+        from app.clients.meta_client import _build_search_variables
+        import json
+        vars_str = _build_search_variables("software engineer")
+        parsed = json.loads(vars_str)
+        assert parsed["search_input"]["q"] == "software engineer"
+
+    def test_build_search_variables_empty(self):
+        from app.clients.meta_client import _build_search_variables
+        import json
+        vars_str = _build_search_variables("")
+        parsed = json.loads(vars_str)
+        assert parsed["search_input"]["q"] == ""
+
+    def test_parse_response_extracts_jobs(self):
+        from app.clients.meta_client import _parse_response
+        data = {
+            "data": {
+                "job_search": {
+                    "results": {
+                        "edges": [
+                            {"node": {
+                                "id": "123456",
+                                "title": "Software Engineer",
+                                "locations": [{"city": "Menlo Park", "state": "CA", "country": "US"}],
+                            }},
+                            {"node": {
+                                "id": "789012",
+                                "title": "Data Scientist",
+                                "locations": [{"city": "Remote", "state": "", "country": ""}],
+                            }},
+                        ]
+                    }
+                }
+            }
+        }
+        jobs = _parse_response(data, limit=10)
+        assert len(jobs) == 2
+        assert jobs[0]["title"] == "Software Engineer"
+        assert jobs[0]["company_name"] == "Meta"
+        assert jobs[0]["external_id"] == "meta_123456"
+        assert "Menlo Park" in jobs[0]["location"]
+        assert jobs[0]["url"] == "https://www.metacareers.com/jobs/123456"
+        assert jobs[0]["source"] == "meta"
+
+    def test_parse_response_deduplicates(self):
+        from app.clients.meta_client import _parse_response
+        edge = {"node": {"id": "111", "title": "SWE", "locations": []}}
+        data = {"data": {"job_search": {"results": {"edges": [edge, edge]}}}}
+        jobs = _parse_response(data, limit=10)
+        assert len(jobs) == 1
+
+    def test_parse_response_remote_detection(self):
+        from app.clients.meta_client import _parse_response
+        data = {
+            "data": {
+                "job_search": {
+                    "results": {
+                        "edges": [
+                            {"node": {
+                                "id": "999",
+                                "title": "Remote Software Engineer",
+                                "locations": [],
+                            }}
+                        ]
+                    }
+                }
+            }
+        }
+        jobs = _parse_response(data, limit=5)
+        assert jobs[0]["remote"] is True
+
+    def test_parse_response_respects_limit(self):
+        from app.clients.meta_client import _parse_response
+        edges = [{"node": {"id": str(i), "title": f"Job {i}", "locations": []}} for i in range(10)]
+        data = {"data": {"job_search": {"results": {"edges": edges}}}}
+        jobs = _parse_response(data, limit=3)
+        assert len(jobs) == 3
+
+    def test_parse_response_empty_edges(self):
+        from app.clients.meta_client import _parse_response
+        data = {"data": {"job_search": {"results": {"edges": []}}}}
+        jobs = _parse_response(data, limit=10)
+        assert jobs == []
+
+    def test_parse_response_missing_keys(self):
+        from app.clients.meta_client import _parse_response
+        jobs = _parse_response({}, limit=10)
+        assert jobs == []
+
+
+async def test_meta_search_handles_no_lsd_token(monkeypatch):
+    """search_meta_jobs returns empty list when LSD token cannot be obtained."""
+    import httpx
     from app.clients.meta_client import search_meta_jobs
 
-    real_import = builtins.__import__
+    class _MockResp:
+        status_code = 200
+        text = "no token here"
 
-    def _mock_import(name, *args, **kwargs):
-        if name == "crawl4ai":
-            raise ImportError("crawl4ai not installed")
-        return real_import(name, *args, **kwargs)
+    class _MockClient:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            pass
+        async def get(self, *a, **kw):
+            return _MockResp()
+        async def post(self, *a, **kw):
+            raise AssertionError("should not reach POST")
 
-    monkeypatch.setattr(builtins, "__import__", _mock_import)
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: _MockClient())
     result = await search_meta_jobs(search_text="engineer", limit=5)
     assert result == []
 
 
-class TestMetaParsing:
-    def test_parse_jobs_from_structured_data(self):
-        from app.clients.meta_client import _parse_jobs_from_html
-        html = '''
-        {"jobId": "1234567890", "title": "Software Engineer", "location": "Menlo Park, CA"}
-        {"jobId": "9876543210", "title": "Data Scientist", "location": "Remote"}
-        '''
-        jobs = _parse_jobs_from_html(html)
-        assert len(jobs) == 2
-        assert jobs[0]["title"] == "Software Engineer"
-        assert jobs[0]["company_name"] == "Meta"
-        assert jobs[0]["location"] == "Menlo Park, CA"
-        assert jobs[1]["remote"] is True
+async def test_meta_search_handles_graphql_error(monkeypatch):
+    """search_meta_jobs returns empty list on non-200 GraphQL response."""
+    import httpx
+    from app.clients.meta_client import search_meta_jobs
 
-    def test_deduplicates_same_id(self):
-        from app.clients.meta_client import _parse_jobs_from_html
-        html = '''
-        {"jobId": "111", "title": "SWE"} {"jobId": "111", "title": "SWE"}
-        '''
-        jobs = _parse_jobs_from_html(html)
-        assert len(jobs) == 1
+    class _MockGetResp:
+        status_code = 200
+        text = '"LSD",[],{"token":"abc123"}'
+
+    class _MockPostResp:
+        status_code = 500
+        text = "error"
+
+    class _MockClient:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            pass
+        async def get(self, *a, **kw):
+            return _MockGetResp()
+        async def post(self, *a, **kw):
+            return _MockPostResp()
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: _MockClient())
+    result = await search_meta_jobs(search_text="engineer", limit=5)
+    assert result == []
+
+
+async def test_meta_search_parses_graphql_response(monkeypatch):
+    """search_meta_jobs correctly parses a valid GraphQL response."""
+    import json
+    import httpx
+    from app.clients.meta_client import search_meta_jobs
+
+    _MOCK_PAYLOAD = json.dumps({
+        "data": {
+            "job_search": {
+                "results": {
+                    "edges": [
+                        {"node": {
+                            "id": "772656515477486",
+                            "title": "Software Engineer, Infrastructure",
+                            "locations": [
+                                {"city": "Menlo Park", "state": "CA", "country": "US"}
+                            ],
+                            "teams": ["Infrastructure"],
+                        }},
+                        {"node": {
+                            "id": "888999111222333",
+                            "title": "Research Scientist",
+                            "locations": [
+                                {"city": "New York", "state": "NY", "country": "US"}
+                            ],
+                            "teams": ["AI Research"],
+                        }},
+                    ]
+                }
+            }
+        }
+    })
+
+    class _MockGetResp:
+        status_code = 200
+        text = '"LSD",[],{"token":"tok_abc123"}'
+
+    class _MockPostResp:
+        status_code = 200
+        text = _MOCK_PAYLOAD
+
+    class _MockClient:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            pass
+        async def get(self, *a, **kw):
+            return _MockGetResp()
+        async def post(self, *a, **kw):
+            return _MockPostResp()
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: _MockClient())
+    result = await search_meta_jobs(search_text="software", limit=10)
+    assert len(result) == 2
+    assert result[0]["external_id"] == "meta_772656515477486"
+    assert result[0]["title"] == "Software Engineer, Infrastructure"
+    assert "Menlo Park" in result[0]["location"]
+    assert result[0]["company_name"] == "Meta"
+    assert result[0]["source"] == "meta"
+    assert result[1]["title"] == "Research Scientist"
