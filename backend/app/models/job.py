@@ -52,7 +52,16 @@ class Job(Base):
     # Kanban status
     stage: Mapped[str] = mapped_column(
         String(50), default="discovered"
-    )  # discovered | interested | researching | networking | applied | interviewing | offer
+    )
+    # discovered | interested | researching | networking |
+    # applied | interviewing | offer | accepted | rejected | withdrawn
+
+    # Application tracking
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Interview rounds: [{round, type, scheduled_at, completed, interviewer, notes}]
+    interview_rounds: Mapped[dict | None] = mapped_column(JSONB)
+    # Offer details: {salary, equity, bonus, deadline, status, notes}
+    offer_details: Mapped[dict | None] = mapped_column(JSONB)
 
     # Tags / metadata
     tags: Mapped[list[str] | None] = mapped_column(ARRAY(String))

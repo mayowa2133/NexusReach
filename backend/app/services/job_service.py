@@ -686,6 +686,9 @@ async def update_job_stage(
     notes: str | None = None,
 ) -> Job:
     """Update a job's kanban stage."""
+    from datetime import datetime as _dt
+    from datetime import timezone as _tz
+
     result = await db.execute(
         select(Job).where(Job.id == job_id, Job.user_id == user_id)
     )
@@ -693,9 +696,55 @@ async def update_job_stage(
     if not job:
         raise ValueError("Job not found.")
 
+    old_stage = job.stage
     job.stage = stage
     if notes is not None:
         job.notes = notes
+
+    # Auto-set applied_at when moving to 'applied' for the first time
+    if stage == "applied" and old_stage != "applied" and not job.applied_at:
+        job.applied_at = _dt.now(_tz.utc)
+
+    await db.commit()
+    await db.refresh(job)
+    return job
+
+
+async def update_interview_rounds(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    job_id: uuid.UUID,
+    rounds: list[dict],
+) -> Job:
+    """Update a job's interview rounds (full replacement)."""
+    result = await db.execute(
+        select(Job).where(Job.id == job_id, Job.user_id == user_id)
+    )
+    job = result.scalar_one_or_none()
+    if not job:
+        raise ValueError("Job not found.")
+
+    job.interview_rounds = rounds
+    await db.commit()
+    await db.refresh(job)
+    return job
+
+
+async def update_offer_details(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    job_id: uuid.UUID,
+    offer: dict,
+) -> Job:
+    """Update a job's offer details."""
+    result = await db.execute(
+        select(Job).where(Job.id == job_id, Job.user_id == user_id)
+    )
+    job = result.scalar_one_or_none()
+    if not job:
+        raise ValueError("Job not found.")
+
+    job.offer_details = offer
     await db.commit()
     await db.refresh(job)
     return job

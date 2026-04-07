@@ -19,6 +19,7 @@ import { Menu } from 'lucide-react';
 const navItems = [
   { path: '/dashboard', label: 'Dashboard' },
   { path: '/jobs', label: 'Jobs' },
+  { path: '/tracker', label: 'Tracker' },
   { path: '/people', label: 'People' },
   { path: '/messages', label: 'Messages' },
   { path: '/outreach', label: 'Outreach' },

@@ -18,6 +18,7 @@ const MessagesPage = lazy(() => import('@/pages/MessagesPage').then((m) => ({ de
 const OutreachPage = lazy(() => import('@/pages/OutreachPage').then((m) => ({ default: m.OutreachPage })));
 const ProfilePage = lazy(() => import('@/pages/ProfilePage').then((m) => ({ default: m.ProfilePage })));
 const SettingsPage = lazy(() => import('@/pages/SettingsPage').then((m) => ({ default: m.SettingsPage })));
+const TrackerPage = lazy(() => import('@/pages/TrackerPage').then((m) => ({ default: m.TrackerPage })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -67,6 +68,7 @@ function AppRoutes() {
         <Route path="/people" element={<ErrorBoundary><PageSuspense><PeoplePage /></PageSuspense></ErrorBoundary>} />
         <Route path="/messages" element={<ErrorBoundary><PageSuspense><MessagesPage /></PageSuspense></ErrorBoundary>} />
         <Route path="/outreach" element={<ErrorBoundary><PageSuspense><OutreachPage /></PageSuspense></ErrorBoundary>} />
+        <Route path="/tracker" element={<ErrorBoundary><PageSuspense><TrackerPage /></PageSuspense></ErrorBoundary>} />
         <Route path="/profile" element={<ErrorBoundary><PageSuspense><ProfilePage /></PageSuspense></ErrorBoundary>} />
         <Route path="/settings" element={<ErrorBoundary><PageSuspense><SettingsPage /></PageSuspense></ErrorBoundary>} />
       </Route>

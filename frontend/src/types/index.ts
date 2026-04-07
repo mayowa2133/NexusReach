@@ -330,7 +330,36 @@ export interface StageDraftsResult {
 }
 
 // Job Intelligence types
-export type JobStage = 'discovered' | 'interested' | 'researching' | 'networking' | 'applied' | 'interviewing' | 'offer';
+export type JobStage =
+  | 'discovered' | 'interested' | 'researching' | 'networking'
+  | 'applied' | 'interviewing' | 'offer'
+  | 'accepted' | 'rejected' | 'withdrawn';
+
+export type InterviewType =
+  | 'phone_screen' | 'technical' | 'behavioral' | 'system_design'
+  | 'onsite' | 'hiring_manager' | 'final' | 'take_home' | 'other';
+
+export interface InterviewRound {
+  round: number;
+  interview_type: InterviewType;
+  scheduled_at: string | null;
+  completed: boolean;
+  interviewer: string | null;
+  notes: string | null;
+}
+
+export type OfferStatus = 'pending' | 'accepted' | 'declined' | 'expired';
+
+export interface OfferDetails {
+  salary: number | null;
+  salary_currency: string | null;
+  equity: string | null;
+  bonus: number | null;
+  deadline: string | null;
+  status: OfferStatus;
+  start_date: string | null;
+  notes: string | null;
+}
 
 export interface Job {
   id: string;
@@ -356,6 +385,9 @@ export interface Job {
   department: string | null;
   notes: string | null;
   starred: boolean;
+  applied_at: string | null;
+  interview_rounds: InterviewRound[] | null;
+  offer_details: OfferDetails | null;
   created_at: string;
   updated_at: string;
 }

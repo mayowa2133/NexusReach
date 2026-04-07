@@ -3,9 +3,11 @@ import { api } from '@/lib/api';
 import type {
   ATSSearchRequest,
   DiscoverJobsRequest,
+  InterviewRound,
   Job,
   JobSearchRequest,
   JobStage,
+  OfferDetails,
   PaginatedResponse,
   SearchPreference,
 } from '@/types';
@@ -85,6 +87,32 @@ export function useUpdateJobStage() {
   return useMutation({
     mutationFn: ({ jobId, stage, notes }: { jobId: string; stage: JobStage; notes?: string }) =>
       api.put<Job>(`/api/jobs/${jobId}/stage`, { stage, notes }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+    },
+  });
+}
+
+// --- Interview & Offer ---
+
+export function useUpdateInterviewRounds() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ jobId, interview_rounds }: { jobId: string; interview_rounds: InterviewRound[] }) =>
+      api.put<Job>(`/api/jobs/${jobId}/interviews`, { interview_rounds }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+    },
+  });
+}
+
+export function useUpdateOfferDetails() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ jobId, offer_details }: { jobId: string; offer_details: OfferDetails }) =>
+      api.put<Job>(`/api/jobs/${jobId}/offer`, { offer_details }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['jobs'] });
     },

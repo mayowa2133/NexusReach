@@ -13,6 +13,8 @@ from app.schemas.jobs import (
     JobStageUpdate,
     JobStarToggle,
     JobResponse,
+    InterviewRoundsUpdate,
+    OfferDetailsUpdate,
     SearchPreferenceResponse,
     SearchPreferenceToggle,
     DiscoverRequest,
@@ -24,6 +26,8 @@ from app.services.job_service import (
     get_jobs,
     get_job,
     update_job_stage,
+    update_interview_rounds,
+    update_offer_details,
     toggle_job_starred,
     seed_default_feeds,
     discover_jobs,
@@ -63,6 +67,9 @@ def _to_response(job) -> JobResponse:
         notes=job.notes,
         experience_level=job.experience_level,
         starred=job.starred,
+        applied_at=job.applied_at.isoformat() if job.applied_at else None,
+        interview_rounds=job.interview_rounds,
+        offer_details=job.offer_details,
         created_at=job.created_at.isoformat(),
         updated_at=job.updated_at.isoformat(),
     )
@@ -297,6 +304,46 @@ async def star_job(
             user_id=user_id,
             job_id=uuid.UUID(job_id),
             starred=body.starred,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return _to_response(job)
+
+
+@router.put("/{job_id}/interviews", response_model=JobResponse)
+async def update_interviews(
+    job_id: str,
+    body: InterviewRoundsUpdate,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Update a job's interview rounds."""
+    try:
+        job = await update_interview_rounds(
+            db=db,
+            user_id=user_id,
+            job_id=uuid.UUID(job_id),
+            rounds=[r.model_dump() for r in body.interview_rounds],
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return _to_response(job)
+
+
+@router.put("/{job_id}/offer", response_model=JobResponse)
+async def update_offer(
+    job_id: str,
+    body: OfferDetailsUpdate,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Update a job's offer details."""
+    try:
+        job = await update_offer_details(
+            db=db,
+            user_id=user_id,
+            job_id=uuid.UUID(job_id),
+            offer=body.offer_details.model_dump(),
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

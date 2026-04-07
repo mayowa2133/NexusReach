@@ -1,5 +1,18 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Literal
+
+
+VALID_STAGES = {
+    "discovered", "interested", "researching", "networking",
+    "applied", "interviewing", "offer", "accepted", "rejected", "withdrawn",
+}
+
+VALID_INTERVIEW_TYPES = {
+    "phone_screen", "technical", "behavioral", "system_design",
+    "onsite", "hiring_manager", "final", "take_home", "other",
+}
+
+VALID_OFFER_STATUSES = {"pending", "accepted", "declined", "expired"}
 
 
 class JobSearchRequest(BaseModel):
@@ -16,8 +29,40 @@ class ATSSearchRequest(BaseModel):
 
 
 class JobStageUpdate(BaseModel):
-    stage: str  # discovered | interested | researching | networking | applied | interviewing | offer
+    stage: str
     notes: str | None = None
+
+
+# --- Interview round tracking ---
+
+class InterviewRound(BaseModel):
+    round: int = Field(ge=1, description="Round number (1-based)")
+    interview_type: str = Field(description="phone_screen | technical | behavioral | system_design | onsite | hiring_manager | final | take_home | other")
+    scheduled_at: str | None = None
+    completed: bool = False
+    interviewer: str | None = None
+    notes: str | None = None
+
+
+class InterviewRoundsUpdate(BaseModel):
+    interview_rounds: list[InterviewRound]
+
+
+# --- Offer tracking ---
+
+class OfferDetails(BaseModel):
+    salary: float | None = None
+    salary_currency: str | None = Field(default="USD", max_length=10)
+    equity: str | None = None
+    bonus: float | None = None
+    deadline: str | None = None
+    status: str = Field(default="pending", description="pending | accepted | declined | expired")
+    start_date: str | None = None
+    notes: str | None = None
+
+
+class OfferDetailsUpdate(BaseModel):
+    offer_details: OfferDetails
 
 
 class JobResponse(BaseModel):
@@ -44,6 +89,9 @@ class JobResponse(BaseModel):
     department: str | None
     notes: str | None
     starred: bool = False
+    applied_at: str | None = None
+    interview_rounds: list[InterviewRound] | None = None
+    offer_details: OfferDetails | None = None
     created_at: str
     updated_at: str
 

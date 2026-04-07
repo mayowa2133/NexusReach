@@ -68,9 +68,12 @@ const STAGES: { value: JobStage; label: string }[] = [
   { value: 'applied', label: 'Applied' },
   { value: 'interviewing', label: 'Interviewing' },
   { value: 'offer', label: 'Offer' },
+  { value: 'accepted', label: 'Accepted' },
+  { value: 'rejected', label: 'Rejected' },
+  { value: 'withdrawn', label: 'Withdrawn' },
 ];
 
-const STAGE_COLORS: Record<string, 'default' | 'secondary' | 'outline'> = {
+const STAGE_COLORS: Record<string, 'default' | 'secondary' | 'outline' | 'destructive'> = {
   discovered: 'outline',
   interested: 'secondary',
   researching: 'secondary',
@@ -78,6 +81,9 @@ const STAGE_COLORS: Record<string, 'default' | 'secondary' | 'outline'> = {
   applied: 'default',
   interviewing: 'default',
   offer: 'default',
+  accepted: 'default',
+  rejected: 'destructive',
+  withdrawn: 'outline',
 };
 
 const SOURCE_LABELS: Record<string, string> = {
