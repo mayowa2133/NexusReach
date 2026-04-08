@@ -2,6 +2,7 @@
 
 import asyncio
 import copy
+import logging
 import re
 import unicodedata
 import uuid
@@ -33,6 +34,8 @@ from app.utils.company_identity import (
 from app.utils.job_context import JobContext, extract_job_context
 from app.utils.linkedin import normalize_linkedin_url
 from app.utils.relevance_scorer import score_candidate_relevance
+
+logger = logging.getLogger(__name__)
 
 RECRUITER_TITLE_KEYWORDS = (
     "recruiter",
@@ -2114,8 +2117,28 @@ async def _search_candidates(
     company_domain: str | None = None,
     limit: int = 5,
     min_results: int = 2,
+    db: AsyncSession | None = None,
 ) -> list[dict]:
-    """Run Apollo plus routed SERP/public search with dedupe."""
+    """Run Apollo plus routed SERP/public search with dedupe.
+
+    When *db* is provided, checks the global known-people cache first.
+    If the cache has enough results, external API calls are skipped.
+    """
+    # --- Global cache lookup (when db available) ---
+    cached_results: list[dict] = []
+    if db is not None:
+        try:
+            from app.services.known_people_service import lookup_known_people
+            cached_results = await lookup_known_people(
+                db, company_name=company_name, limit=limit,
+            )
+        except Exception:
+            logger.debug("Known people cache lookup failed for %s", company_name, exc_info=True)
+            cached_results = []
+
+        if len(cached_results) >= min_results:
+            return cached_results[: max(limit, 8)]
+
     apollo_filtered = await apollo_client.search_people(
         company_name,
         titles=titles,
@@ -2156,7 +2179,7 @@ async def _search_candidates(
             min_results=min_results,
         )
 
-    deduped = _dedupe_candidates(apollo_filtered, apollo_unfiltered, brave_results, public_results)
+    deduped = _dedupe_candidates(cached_results, apollo_filtered, apollo_unfiltered, brave_results, public_results)
     return deduped[: max(limit, 8)]
 
 
@@ -2769,6 +2792,7 @@ async def search_people_at_company(
             public_identity_terms=public_identity_terms,
             limit=search_limit,
             min_results=minimum_results,
+            db=db,
         ),
         _search_candidates(
             company_name,
@@ -2777,6 +2801,7 @@ async def search_people_at_company(
             public_identity_terms=public_identity_terms,
             limit=search_limit,
             min_results=minimum_results,
+            db=db,
         ),
         _search_candidates(
             company_name,
@@ -2784,6 +2809,7 @@ async def search_people_at_company(
             public_identity_terms=public_identity_terms,
             limit=search_limit,
             min_results=minimum_results,
+            db=db,
         ),
     )
     # For early-career searches, run additional queries with common intern/new-grad
@@ -2833,6 +2859,19 @@ async def search_people_at_company(
         _recover_candidate_titles(manager_candidates, company=company, company_name=company_name),
         _recover_candidate_titles(peer_candidates, company=company, company_name=company_name),
     )
+
+    # --- Write-through to global known people cache ---
+    try:
+        from app.services.known_people_service import write_candidates_to_cache
+        all_candidates = recruiter_candidates + manager_candidates + peer_candidates
+        await write_candidates_to_cache(
+            db,
+            all_candidates,
+            company_name=company_name,
+            company_domain=company.domain if hasattr(company, "domain") else None,
+        )
+    except Exception:
+        logger.debug("Known people cache write-through failed for %s", company_name, exc_info=True)
 
     recruiter_results = _prepare_candidates(
         recruiter_candidates,

@@ -40,6 +40,10 @@ celery_app.conf.update(
             "task": "app.tasks.job_alerts.send_job_alert_digests",
             "schedule": crontab(minute=10, hour="*/1"),  # hourly at :10
         },
+        "maintain-known-people-cache": {
+            "task": "app.tasks.known_people.maintain_known_people_cache",
+            "schedule": crontab(minute=45, hour="*/8"),  # every 8 hours
+        },
     },
 )
 

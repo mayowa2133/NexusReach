@@ -20,6 +20,7 @@ import {
   getStoredPeopleSearchTargetCount,
   setStoredPeopleSearchTargetCount,
 } from '@/lib/peopleSearchCount';
+import { useKnownPeopleCount } from '@/hooks/useKnownPeople';
 import { toast } from 'sonner';
 import type { EmailFindResult, LinkedInGraphConnection, Person, PeopleSearchResult } from '@/types';
 
@@ -391,15 +392,10 @@ export function PeoplePage() {
           <Separator />
 
           {searchResults.company && (
-            <div className="flex items-center gap-3">
-              <h2 className="text-xl font-semibold">{searchResults.company.name}</h2>
-              {searchResults.company.industry && (
-                <Badge variant="outline">{searchResults.company.industry}</Badge>
-              )}
-              {searchResults.company.size && (
-                <Badge variant="secondary">{searchResults.company.size} employees</Badge>
-              )}
-            </div>
+            <CompanyHeader
+              company={searchResults.company}
+              companyName={companyName}
+            />
           )}
 
           {/* Partial-failure warning */}
@@ -560,6 +556,35 @@ export function PeoplePage() {
             Search for a company above to find people to connect with.
           </p>
         </div>
+      )}
+    </div>
+  );
+}
+
+function CompanyHeader({
+  company,
+  companyName,
+}: {
+  company: { name: string; industry?: string | null; size?: string | null };
+  companyName: string;
+}) {
+  const resolvedName = company.name || companyName;
+  const { data: knownCount } = useKnownPeopleCount(resolvedName);
+  const count = knownCount?.count ?? 0;
+
+  return (
+    <div className="flex items-center gap-3 flex-wrap">
+      <h2 className="text-xl font-semibold">{company.name}</h2>
+      {company.industry && (
+        <Badge variant="outline">{company.industry}</Badge>
+      )}
+      {company.size && (
+        <Badge variant="secondary">{company.size} employees</Badge>
+      )}
+      {count > 0 && (
+        <Badge variant="secondary">
+          {count} known {count === 1 ? 'person' : 'people'} in database
+        </Badge>
       )}
     </div>
   );

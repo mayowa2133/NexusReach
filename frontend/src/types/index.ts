@@ -541,6 +541,29 @@ export interface Notification {
   created_at: string;
 }
 
+// Known People (global cache) types
+export interface KnownPerson {
+  id: string;
+  full_name: string | null;
+  title: string | null;
+  department: string | null;
+  seniority: string | null;
+  linkedin_url: string | null;
+  github_url: string | null;
+  primary_source: string;
+  discovery_count: number;
+  last_verified_at: string | null;
+  verification_status: string | null;
+  company_name: string | null;
+  company_domain: string | null;
+}
+
+export interface KnownPeopleSearchResult {
+  items: KnownPerson[];
+  total: number;
+  cache_freshness: 'fresh' | 'mixed' | 'stale';
+}
+
 // Job Alert types
 export interface JobAlertPreference {
   enabled: boolean;
