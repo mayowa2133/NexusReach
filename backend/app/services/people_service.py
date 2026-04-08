@@ -48,6 +48,7 @@ RECRUITER_TITLE_KEYWORDS = (
     "talent acquisition",
     "talent operations",
     "talent partner",
+    "talent scout",
     "sourcer",
     "technical sourcer",
     "campus recruiter",
@@ -555,16 +556,18 @@ def _compute_usefulness_score(
     """Compute a 0-100 usefulness score for ranking people results.
 
     Factors:
-    - Company verification (0-30 pts)
-    - Team/department relevance (0-25 pts)
+    - Company verification (0-25 pts)
+    - Team/department relevance (0-20 pts)
     - Title/role fit for bucket (0-20 pts)
-    - Seniority match (0-15 pts)
+    - Seniority match (0-10 pts)
+    - Location match (0-10 pts)
+    - Recency for peers (0-5 pts)
     - LinkedIn profile presence (0-5 pts)
     - Source quality (0-5 pts)
     """
     score = 0
 
-    # --- Company verification (0-30) ---
+    # --- Company verification (0-25) ---
     employment_status = data.get("_employment_status")
     if not employment_status:
         employment_status = _classify_employment_status(data, company_name, public_identity_slugs)
@@ -572,14 +575,14 @@ def _compute_usefulness_score(
         trusted = _trusted_public_match(data, company_name, public_identity_slugs)
         source = data.get("source", "")
         if source in CURRENT_TRUSTED_SOURCES or trusted:
-            score += 30
-        else:
             score += 25
+        else:
+            score += 20
     elif employment_status == "ambiguous":
-        score += 12
+        score += 10
     # former gets 0
 
-    # --- Team/department relevance (0-25) ---
+    # --- Team/department relevance (0-20) ---
     if context:
         haystack = " ".join(
             part for part in [
@@ -593,15 +596,15 @@ def _compute_usefulness_score(
             if _keyword_in_text(keyword, haystack)
         )
         if team_keyword_hits >= 2:
-            score += 25
+            score += 20
         elif team_keyword_hits == 1:
-            score += 18
+            score += 14
         elif context.department.replace("_", " ") in haystack:
-            score += 12
+            score += 10
         else:
-            score += 4
+            score += 3
     else:
-        score += 12  # no context = neutral
+        score += 10  # no context = neutral
 
     # --- Title/role fit for bucket (0-20) ---
     title = data.get("title", "") or ""
@@ -640,14 +643,23 @@ def _compute_usefulness_score(
         else:
             score += 8
 
-    # --- Seniority match (0-15) ---
+    # --- Seniority match (0-10) ---
     seniority_rank = _seniority_fit_rank(data, bucket=bucket, context=context)
     if seniority_rank == 0:
-        score += 15
-    elif seniority_rank == 1:
         score += 10
+    elif seniority_rank == 1:
+        score += 7
     else:
-        score += 4
+        score += 3
+
+    # --- Location match (0-10) ---
+    if _location_match_rank(data, context=context) == 0:
+        score += 10
+    # unknown or no-match gets 0
+
+    # --- Recency for peers (0-5) ---
+    if bucket == "peers" and _recency_rank(data) == 0:
+        score += 5
 
     # --- LinkedIn presence (0-5) ---
     if data.get("linkedin_url"):
@@ -1685,6 +1697,62 @@ def _team_keyword_match_rank(data: dict, *, bucket: str, context: JobContext | N
     return 2
 
 
+def _location_match_rank(data: dict, *, context: JobContext | None) -> int:
+    """Return 0 if candidate location overlaps a job location, else 1.
+
+    Location data may come from Apollo, SERP snippets, or profile_data.
+    We do fuzzy city/metro matching: "San Francisco, CA" matches
+    "San Francisco" or "SF Bay Area".
+    """
+    if not context or not context.job_locations:
+        return 1  # neutral — no job location to compare
+    candidate_location = (
+        data.get("city")
+        or data.get("location")
+        or (data.get("profile_data") or {}).get("location")
+        or ""
+    ).lower()
+    if not candidate_location:
+        return 1  # unknown location — neutral
+    for job_loc in context.job_locations:
+        job_loc_lower = job_loc.lower()
+        # Direct substring match (handles "San Francisco" in "San Francisco, CA")
+        if job_loc_lower in candidate_location or candidate_location in job_loc_lower:
+            return 0
+        # City-level match: extract city part and compare
+        job_city = job_loc_lower.split(",")[0].strip()
+        candidate_city = candidate_location.split(",")[0].strip()
+        if job_city and candidate_city and (job_city in candidate_city or candidate_city in job_city):
+            return 0
+    return 1
+
+
+def _recency_rank(data: dict) -> int:
+    """Return 0 for recently-discovered/fresh candidates, 1 otherwise.
+
+    Uses Apollo employment start date, cache freshness, or discovery
+    recency as signals.
+    """
+    profile_data = data.get("profile_data") or {}
+
+    # Signal 1: Known people cache freshness
+    if profile_data.get("cache_freshness") == "fresh":
+        return 0
+
+    # Signal 2: Apollo employment start date (recent = better for peers)
+    start_date = data.get("employment_start_date") or profile_data.get("employment_start_date")
+    if start_date:
+        try:
+            start = datetime.fromisoformat(str(start_date).replace("Z", "+00:00"))
+            age_days = (datetime.now(timezone.utc) - start).days
+            if age_days <= 730:  # joined within last 2 years
+                return 0
+        except (ValueError, TypeError):
+            pass
+
+    return 1
+
+
 def _candidate_sort_key(data: dict, *, bucket: str, context: JobContext | None) -> tuple:
     title = data.get("title", "") or ""
     snippet = data.get("snippet", "") or ""
@@ -1696,12 +1764,17 @@ def _candidate_sort_key(data: dict, *, bucket: str, context: JobContext | None) 
     else:
         explicit_role_rank = 0
     team_rank = _team_keyword_match_rank(data, bucket=bucket, context=context) if bucket == "hiring_managers" else 1
+    # Boost candidates flagged as actively hiring (from supplementary search)
+    actively_hiring_rank = 0 if data.get("_actively_hiring") else 1
     return (
         _org_rank(bucket, data.get("_org_level", "ic")),
+        actively_hiring_rank,
         team_rank,
         _source_rank(data.get("source")),
         _context_rank(data, context),
+        _location_match_rank(data, context=context),
         _seniority_fit_rank(data, bucket=bucket, context=context),
+        _recency_rank(data) if bucket == "peers" else 0,
         explicit_role_rank,
         1 if data.get("_weak_title") else 0,
         0 if _role_like_title(title) else 1,
@@ -3188,6 +3261,13 @@ async def search_people_for_job(
         raise ValueError(f"Job not found: {job_id}")
 
     context = extract_job_context(job.title, job.description)
+
+    # Populate job locations for location-aware ranking
+    if job.location:
+        context.job_locations = [
+            loc.strip() for loc in re.split(r"[;|]", job.location) if loc.strip()
+        ]
+
     company = await get_or_create_company(
         db,
         user_id,
@@ -3309,6 +3389,31 @@ async def search_people_for_job(
         limit=max(5, min(target_count_per_bucket + 2, 8)),
         min_results=1,
     )
+
+    # Supplementary "actively hiring" search — looks for people who posted
+    # about hiring for similar roles.  We search with "hiring" as a team
+    # keyword alongside the job title keywords so the results surface
+    # managers/recruiters who are actively posting about open roles.
+    try:
+        hiring_signal_keywords = ["hiring", "open role"]
+        if context.early_career:
+            hiring_signal_keywords.extend(["new grad", "hiring new grads"])
+        actively_hiring_candidates = await search_router_client.search_hiring_team(
+            job.company_name,
+            job.title,
+            team_keywords=hiring_signal_keywords,
+            limit=3,
+            min_results=0,
+        )
+        for candidate in actively_hiring_candidates:
+            candidate["_actively_hiring"] = True
+            candidate["profile_data"] = {
+                **(candidate.get("profile_data") or {}),
+                "actively_hiring": True,
+            }
+        hiring_team_candidates = _dedupe_candidates(hiring_team_candidates, actively_hiring_candidates)
+    except Exception:
+        logger.debug("Actively-hiring supplementary search failed for %s", job.company_name, exc_info=True)
     recruiter_candidates = _dedupe_candidates(
         recruiter_candidates,
         [candidate for candidate in hiring_team_candidates if _classify_person(candidate.get("title", ""), snippet=candidate.get("snippet", ""), source=candidate.get("source", "")) == "recruiter"],

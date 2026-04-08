@@ -946,6 +946,107 @@ def _parse_workday_url(job_url: str) -> ParsedATSJobURL | None:
     )
 
 
+def _parse_icims_url(job_url: str) -> ParsedATSJobURL | None:
+    """Parse iCIMS job URLs like university-uber.icims.com/jobs/158009/job."""
+    parsed = urlparse((job_url or "").strip())
+    host = parsed.netloc.lower()
+    if ".icims.com" not in host:
+        return None
+    # Extract company slug from subdomain: "university-uber.icims.com" → "uber"
+    subdomain = host.replace(".icims.com", "")
+    # Many iCIMS subdomains have a prefix like "university-", "careers-", etc.
+    # Try to extract the company name from the last segment after a hyphen
+    slug_parts = subdomain.split("-")
+    company_slug = slug_parts[-1] if slug_parts else subdomain
+
+    # Extract job ID from path: /jobs/158009/... → "158009"
+    path_parts = [part for part in parsed.path.split("/") if part]
+    external_id: str | None = None
+    if len(path_parts) >= 2 and path_parts[0] == "jobs":
+        external_id = f"icims_{path_parts[1]}"
+
+    return ParsedATSJobURL(
+        ats_type="icims",
+        company_slug=company_slug,
+        external_id=external_id,
+        canonical_url=_clean_url(job_url),
+        host=host,
+        exact_url_only=True,
+    )
+
+
+def _normalize_icims_job(parsed: ParsedATSJobURL, page: dict) -> dict | None:
+    """Normalize an iCIMS job page.
+
+    iCIMS pages include JSON-LD with JobPosting schema, but the
+    ``hiringOrganization.name`` is often "UNAVAILABLE".  We fall back
+    to extracting the company name from the iCIMS subdomain.
+    """
+    html = page.get("html") or ""
+    json_ld = _extract_json_ld_job(html)
+
+    # Try JSON-LD first for structured fields
+    if json_ld:
+        ld_company = (
+            (json_ld.get("hiringOrganization") or {}).get("name") or ""
+        ).strip()
+        # iCIMS often returns "UNAVAILABLE" — fall back to subdomain
+        if not ld_company or ld_company.upper() == "UNAVAILABLE":
+            ld_company = _display_company_slug(parsed.company_slug)
+        json_ld_copy = dict(json_ld)
+        if "hiringOrganization" in json_ld_copy:
+            if isinstance(json_ld_copy["hiringOrganization"], dict):
+                json_ld_copy["hiringOrganization"]["name"] = ld_company
+            else:
+                json_ld_copy["hiringOrganization"] = {"@type": "Organization", "name": ld_company}
+        else:
+            json_ld_copy["hiringOrganization"] = {"@type": "Organization", "name": ld_company}
+
+        result = _normalize_json_ld_job(parsed, json_ld_copy)
+        if result:
+            result["source"] = "icims"
+            result["ats"] = "icims"
+            return result
+
+    # Fallback: HTML parsing (same as generic_exact but with better company name)
+    company_name = _display_company_slug(parsed.company_slug) or _generic_company_name(page, parsed)
+    raw_title = _extract_heading(html) or _extract_meta_content(html, "og:title") or page.get("title") or ""
+    title = _cleanup_generic_title(raw_title, company_name=company_name)
+    if not title or not company_name or not parsed.canonical_url:
+        return None
+
+    description = _normalize_text(
+        _extract_meta_content(html, "description")
+        or _extract_meta_content(html, "og:description")
+        or (page.get("content") or "")[:4000]
+    )
+    location = _extract_meta_content(html, "job:location") or None
+
+    return {
+        "external_id": parsed.external_id,
+        "title": title,
+        "company_name": company_name,
+        "location": location,
+        "remote": "remote" in f"{title} {description}".lower(),
+        "url": parsed.canonical_url,
+        "description": description or None,
+        "employment_type": None,
+        "posted_at": None,
+        "source": "icims",
+        "ats": "icims",
+        "ats_slug": parsed.company_slug or _domain_root(parsed.host),
+    }
+
+
+async def _fetch_icims_exact_job(parsed: ParsedATSJobURL) -> list[dict]:
+    return await _fetch_exact_job_with_normalizer(
+        parsed,
+        normalizer=_normalize_icims_job,
+        error_message="We found the iCIMS job page, but couldn't extract enough job details from it.",
+        allow_empty_content=True,
+    )
+
+
 def _parse_generic_exact_url(job_url: str) -> ParsedATSJobURL | None:
     parsed = urlparse((job_url or "").strip())
     host = parsed.netloc.lower()
@@ -1115,6 +1216,7 @@ ATS_ADAPTERS = (
     ATSAdapter("workable", _parse_workable_url, fetch_exact=_fetch_workable_exact_job),
     ATSAdapter("apple_jobs", _parse_apple_jobs_url, fetch_exact=_fetch_apple_exact_job),
     ATSAdapter("workday", _parse_workday_url, fetch_exact=_fetch_workday_exact_job),
+    ATSAdapter("icims", _parse_icims_url, fetch_exact=_fetch_icims_exact_job),
     ATSAdapter("generic_exact", _parse_generic_exact_url, fetch_exact=_fetch_generic_exact_job),
 )
 ATS_ADAPTERS_BY_TYPE = {adapter.ats_type: adapter for adapter in ATS_ADAPTERS}

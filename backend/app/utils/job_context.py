@@ -165,6 +165,7 @@ class JobContext:
     peer_titles: list[str] = field(default_factory=list)
     recruiter_titles: list[str] = field(default_factory=list)
     apollo_departments: list[str] = field(default_factory=list)
+    job_locations: list[str] = field(default_factory=list)
 
 
 def _strip_html(text: str) -> str:
@@ -612,6 +613,21 @@ def _build_peer_titles(
             if bp not in titles:
                 titles.append(bp)
 
+    # For early-career roles, add level-specific titles (e.g. "Software Engineer I",
+    # "SWE I") that many large companies use for new-grad positions.  These are more
+    # precise than generic "Software Engineer" and help surface same-cohort peers.
+    if seniority in {"junior", "intern"} and department == "engineering":
+        level_titles = [
+            "Software Engineer I",
+            "Software Engineer 1",
+            "SWE I",
+            "Junior Software Engineer",
+            "New Grad Software Engineer",
+        ]
+        for lt in level_titles:
+            if lt not in titles:
+                titles.append(lt)
+
     return list(dict.fromkeys(title for title in titles if title))
 
 
@@ -640,6 +656,9 @@ def _build_recruiter_titles(
     if "credit" in domain_keywords or "risk" in domain_keywords or "decisioning" in domain_keywords:
         titles.append("Fintech Recruiter")
 
+    # Talent Scout is used at companies like Uber, Meta, Google as a recruiter variant
+    titles.append("Talent Scout")
+
     if early_career:
         titles.extend(
             [
@@ -648,6 +667,7 @@ def _build_recruiter_titles(
                 "Early Careers Recruiter",
                 "University Programs Recruiter",
                 "Early Talent Recruiter",
+                "University Talent Scout",
                 "Recruiting Coordinator",
                 "University Programs",
                 "Technical Sourcer",
@@ -785,6 +805,11 @@ def extract_job_context(title: str, description: str | None = None) -> JobContex
         **{keyword: domain_scores[keyword] for keyword in domain_keywords},
     }
     team_keywords = _top_keywords(combined_scores, min_score=2, limit=3)
+
+    # For early-career roles, inject "new grad" as a team keyword so SERP-based
+    # peer searches surface recent new-grad hires instead of long-tenured staff.
+    if early_career and "new grad" not in team_keywords:
+        team_keywords.append("new grad")
 
     seniority = _detect_seniority(title_lower)
     if early_career and seniority == "mid":
