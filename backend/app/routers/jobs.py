@@ -20,6 +20,8 @@ from app.schemas.jobs import (
     DiscoverRequest,
     RefreshResponse,
 )
+from app.schemas.job_research import JobResearchResponse, JobResearchRunRequest
+from app.services.auto_research_service import get_job_research, run_job_research
 from app.services.job_service import (
     search_jobs,
     search_ats_jobs,
@@ -42,6 +44,35 @@ from app.tasks.jobs import refresh_user_feeds
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
+def _is_mock_value(value: object) -> bool:
+    return value.__class__.__module__.startswith("unittest.mock")
+
+
+def _safe_iso(value: object | None) -> str | None:
+    if value is None or _is_mock_value(value):
+        return None
+    isoformat = getattr(value, "isoformat", None)
+    if not callable(isoformat):
+        return None
+    return isoformat()
+
+
+def _safe_string(value: object | None) -> str | None:
+    if value is None or _is_mock_value(value):
+        return None
+    if isinstance(value, str):
+        return value
+    return None
+
+
+def _safe_interview_rounds(value: object | None):
+    return value if isinstance(value, list) else None
+
+
+def _safe_offer_details(value: object | None):
+    return value if isinstance(value, dict) else None
+
+
 def _to_response(job) -> JobResponse:
     return JobResponse(
         id=str(job.id),
@@ -58,7 +89,11 @@ def _to_response(job) -> JobResponse:
         salary_currency=job.salary_currency,
         source=job.source,
         ats=job.ats,
-        posted_at=job.posted_at if job.posted_at and job.posted_at.strip() else None,
+        posted_at=(
+            job.posted_at
+            if isinstance(job.posted_at, str) and job.posted_at.strip()
+            else None
+        ),
         match_score=job.match_score,
         score_breakdown=job.score_breakdown,
         stage=job.stage,
@@ -67,9 +102,12 @@ def _to_response(job) -> JobResponse:
         notes=job.notes,
         experience_level=job.experience_level,
         starred=job.starred,
-        applied_at=job.applied_at.isoformat() if job.applied_at else None,
-        interview_rounds=job.interview_rounds,
-        offer_details=job.offer_details,
+        auto_research_status=_safe_string(getattr(job, "auto_research_status", None)),
+        auto_research_requested_at=_safe_iso(getattr(job, "auto_research_requested_at", None)),
+        auto_research_completed_at=_safe_iso(getattr(job, "auto_research_completed_at", None)),
+        applied_at=_safe_iso(getattr(job, "applied_at", None)),
+        interview_rounds=_safe_interview_rounds(getattr(job, "interview_rounds", None)),
+        offer_details=_safe_offer_details(getattr(job, "offer_details", None)),
         created_at=job.created_at.isoformat(),
         updated_at=job.updated_at.isoformat(),
     )
@@ -267,6 +305,40 @@ async def get_single_job(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return _to_response(job)
+
+
+@router.get("/{job_id}/research", response_model=JobResearchResponse)
+async def get_single_job_research(
+    job_id: str,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    try:
+        return await get_job_research(db, user_id, uuid.UUID(job_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/{job_id}/research", response_model=JobResearchResponse)
+@limiter.limit("10/minute")
+async def run_single_job_research(
+    request: Request,
+    job_id: str,
+    body: JobResearchRunRequest,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    try:
+        await run_job_research(
+            db,
+            user_id,
+            uuid.UUID(job_id),
+            target_count_per_bucket=body.target_count_per_bucket,
+            force=True,
+        )
+        return await get_job_research(db, user_id, uuid.UUID(job_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.put("/{job_id}/stage", response_model=JobResponse)

@@ -3853,6 +3853,20 @@ async def search_people_for_job(
         company_name=job.company_name,
         public_identity_slugs=public_identity_terms,
     )
+    # Score and sort connections by relevance to the job
+    from app.utils.connection_relevance import score_connection_relevance
+
+    connection_scores: dict[str, tuple[int, object, str]] = {}
+    for conn in your_connections:
+        score, signals, label = score_connection_relevance(
+            conn.headline, conn.current_company_name, context,
+        )
+        connection_scores[str(conn.id)] = (score, signals, label)
+    your_connections.sort(
+        key=lambda c: connection_scores.get(str(c.id), (0,))[0],
+        reverse=True,
+    )
+
     direct_connections = await linkedin_graph_service.get_connections_by_linkedin_slugs(
         db,
         user_id,
@@ -3863,6 +3877,8 @@ async def search_people_for_job(
         company_name=job.company_name,
         your_connections=your_connections,
         direct_connections=direct_connections,
+        job_context=context,
+        connection_scores=connection_scores,
     )
     await db.commit()
 
@@ -3897,8 +3913,14 @@ async def search_people_for_job(
     return {
         "company": company,
         "your_connections": [
-            linkedin_graph_service.serialize_connection(connection)
-            for connection in your_connections
+            linkedin_graph_service.serialize_connection(
+                conn,
+                relevance_score=connection_scores[str(conn.id)][0],
+                relevance_label=connection_scores[str(conn.id)][2],
+            )
+            if str(conn.id) in connection_scores
+            else linkedin_graph_service.serialize_connection(conn)
+            for conn in your_connections
         ],
         **filtered_bucketed,
         "job_context": {

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class LinkedInGraphConnectionResponse(BaseModel):
@@ -12,6 +12,15 @@ class LinkedInGraphConnectionResponse(BaseModel):
     company_linkedin_url: str | None = None
     source: str
     last_synced_at: datetime | None = None
+    relevance_score: int | None = None
+    relevance_label: str | None = None
+
+    model_config = {"from_attributes": True}
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def _coerce_id(cls, value):
+        return None if value is None else str(value)
 
 
 class LinkedInGraphLastRunResponse(BaseModel):

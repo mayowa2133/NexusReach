@@ -469,6 +469,10 @@ async def search_jobs(
         ))
 
     await db.commit()
+    if stored_jobs:
+        from app.services.auto_research_service import enqueue_auto_research_for_jobs  # noqa: PLC0415
+
+        await enqueue_auto_research_for_jobs(db, user_id, stored_jobs)
     return stored_jobs
 
 
@@ -576,6 +580,10 @@ async def search_ats_jobs(
         board_jobs.append(job)
 
     await db.commit()
+    if stored_jobs:
+        from app.services.auto_research_service import enqueue_auto_research_for_jobs  # noqa: PLC0415
+
+        await enqueue_auto_research_for_jobs(db, user_id, stored_jobs)
 
     if not job_url:
         return stored_jobs
@@ -1074,6 +1082,9 @@ async def _store_raw_jobs(
 
     if stored:
         await db.commit()
+        from app.services.auto_research_service import enqueue_auto_research_for_jobs  # noqa: PLC0415
+
+        await enqueue_auto_research_for_jobs(db, user_id, stored)
 
     return stored
 

@@ -90,6 +90,9 @@ class JobResponse(BaseModel):
     department: str | None
     notes: str | None
     starred: bool = False
+    auto_research_status: str | None = None
+    auto_research_requested_at: str | None = None
+    auto_research_completed_at: str | None = None
     applied_at: str | None = None
     interview_rounds: list[InterviewRound] | None = None
     offer_details: OfferDetails | None = None

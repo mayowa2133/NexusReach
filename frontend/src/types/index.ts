@@ -81,6 +81,8 @@ export interface LinkedInGraphConnection {
   company_linkedin_url: string | null;
   source: 'local_sync' | 'manual_import' | string;
   last_synced_at: string | null;
+  relevance_score: number | null;
+  relevance_label: string | null;
 }
 
 export interface Person {
@@ -386,6 +388,9 @@ export interface Job {
   department: string | null;
   notes: string | null;
   starred: boolean;
+  auto_research_status?: string | null;
+  auto_research_requested_at?: string | null;
+  auto_research_completed_at?: string | null;
   applied_at: string | null;
   interview_rounds: InterviewRound[] | null;
   offer_details: OfferDetails | null;
@@ -421,6 +426,40 @@ export interface SearchPreference {
   new_jobs_found: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface CompanyAutoResearchPreference {
+  company_name: string;
+  normalized_company_name: string;
+  auto_find_people: boolean;
+  auto_find_emails: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export type JobResearchStatus =
+  | 'not_configured'
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'failed';
+
+export interface JobResearchResult {
+  status: JobResearchStatus;
+  enabled_for_company: boolean;
+  auto_find_emails: boolean;
+  requested_at: string | null;
+  completed_at: string | null;
+  error: string | null;
+  company: Company | null;
+  your_connections: LinkedInGraphConnection[];
+  recruiters: Person[];
+  hiring_managers: Person[];
+  peers: Person[];
+  job_context: JobContext | null;
+  errors?: SearchErrorDetail[] | null;
+  email_attempted_count: number;
+  email_found_count: number;
 }
 
 // Outreach Tracker types

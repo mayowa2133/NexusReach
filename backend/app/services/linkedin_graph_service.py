@@ -658,10 +658,15 @@ async def get_connections_by_linkedin_slugs(
     return list(result.scalars().all())
 
 
-def serialize_connection(connection: LinkedInGraphConnection | dict[str, Any]) -> dict[str, Any]:
+def serialize_connection(
+    connection: LinkedInGraphConnection | dict[str, Any],
+    *,
+    relevance_score: int | None = None,
+    relevance_label: str | None = None,
+) -> dict[str, Any]:
     if isinstance(connection, dict):
         connection_id = connection.get("id")
-        return {
+        result = {
             "id": str(connection_id) if connection_id is not None else "",
             "display_name": connection.get("display_name") or "",
             "headline": connection.get("headline"),
@@ -671,17 +676,21 @@ def serialize_connection(connection: LinkedInGraphConnection | dict[str, Any]) -
             "source": connection.get("source") or "manual_import",
             "last_synced_at": connection.get("last_synced_at"),
         }
-
-    return {
-        "id": str(connection.id),
-        "display_name": connection.display_name,
-        "headline": connection.headline,
-        "current_company_name": connection.current_company_name,
-        "linkedin_url": connection.linkedin_url,
-        "company_linkedin_url": connection.company_linkedin_url,
-        "source": connection.source,
-        "last_synced_at": connection.last_synced_at,
-    }
+    else:
+        result = {
+            "id": str(connection.id),
+            "display_name": connection.display_name,
+            "headline": connection.headline,
+            "current_company_name": connection.current_company_name,
+            "linkedin_url": connection.linkedin_url,
+            "company_linkedin_url": connection.company_linkedin_url,
+            "source": connection.source,
+            "last_synced_at": connection.last_synced_at,
+        }
+    if relevance_score is not None:
+        result["relevance_score"] = relevance_score
+        result["relevance_label"] = relevance_label
+    return result
 
 
 def connection_matches_company(
@@ -785,14 +794,31 @@ def apply_warm_path_annotations(
     company_name: str,
     your_connections: list[LinkedInGraphConnection],
     direct_connections: list[LinkedInGraphConnection] | None = None,
+    job_context: Any | None = None,
+    connection_scores: dict[str, tuple[int, Any, str]] | None = None,
 ) -> None:
+    from app.utils.connection_relevance import generate_warm_path_reason, parse_headline
+
     by_slug = {
         connection.linkedin_slug: connection
         for connection in (direct_connections or your_connections)
         if connection.linkedin_slug
     }
-    bridge_connection = your_connections[0] if your_connections else None
+
+    # Pick the best bridge: highest relevance score if available, else first
+    bridge_connection: LinkedInGraphConnection | None = None
+    if your_connections:
+        if connection_scores:
+            bridge_connection = max(
+                your_connections,
+                key=lambda c: connection_scores.get(str(c.id), (0,))[0],
+            )
+        else:
+            bridge_connection = your_connections[0]
     bridge_company_name = bridge_connection.current_company_name if bridge_connection else company_name
+
+    # Pre-parse bridge headline for reason generation
+    bridge_signals = parse_headline(bridge_connection.headline) if bridge_connection else None
 
     for people in bucketed.values():
         for person in people:
@@ -804,11 +830,19 @@ def apply_warm_path_annotations(
             direct_connection = by_slug.get(person_slug) if person_slug else None
             if direct_connection is not None:
                 setattr(person, "warm_path_type", "direct_connection")
-                setattr(
-                    person,
-                    "warm_path_reason",
-                    f"You are already connected to {direct_connection.display_name} on LinkedIn.",
-                )
+                if job_context:
+                    signals = parse_headline(direct_connection.headline)
+                    reason = generate_warm_path_reason(
+                        direct_connection.display_name,
+                        direct_connection.headline,
+                        signals,
+                        company_name,
+                        job_context,
+                        is_direct=True,
+                    )
+                else:
+                    reason = f"You are already connected to {direct_connection.display_name} on LinkedIn."
+                setattr(person, "warm_path_reason", reason)
                 setattr(person, "warm_path_connection", direct_connection)
                 continue
 
@@ -816,9 +850,16 @@ def apply_warm_path_annotations(
                 continue
 
             setattr(person, "warm_path_type", "same_company_bridge")
-            setattr(
-                person,
-                "warm_path_reason",
-                f"You already know {bridge_connection.display_name} at {bridge_company_name or company_name}.",
-            )
+            if job_context and bridge_signals:
+                reason = generate_warm_path_reason(
+                    bridge_connection.display_name,
+                    bridge_connection.headline,
+                    bridge_signals,
+                    bridge_company_name or company_name,
+                    job_context,
+                    is_direct=False,
+                )
+            else:
+                reason = f"You already know {bridge_connection.display_name} at {bridge_company_name or company_name}."
+            setattr(person, "warm_path_reason", reason)
             setattr(person, "warm_path_connection", bridge_connection)

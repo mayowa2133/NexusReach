@@ -123,14 +123,10 @@ class TestJobMatching:
 
         # Mock db
         db = AsyncMock()
-        # Mock starred companies query (empty)
-        starred_result = MagicMock()
-        starred_result.all.return_value = []
         # Mock jobs query
         jobs_result = MagicMock()
         jobs_result.scalars.return_value.all.return_value = [google_job, meta_job]
-
-        db.execute = AsyncMock(side_effect=[starred_result, jobs_result])
+        db.execute = AsyncMock(return_value=jobs_result)
 
         matched = await find_new_jobs_for_alert(db, uuid.uuid4(), prefs, since)
         assert len(matched) == 1
@@ -144,11 +140,9 @@ class TestJobMatching:
         job = _make_job(company_name="Google")
 
         db = AsyncMock()
-        starred_result = MagicMock()
-        starred_result.all.return_value = []
         jobs_result = MagicMock()
         jobs_result.scalars.return_value.all.return_value = [job]
-        db.execute = AsyncMock(side_effect=[starred_result, jobs_result])
+        db.execute = AsyncMock(return_value=jobs_result)
 
         matched = await find_new_jobs_for_alert(db, uuid.uuid4(), prefs, since)
         assert len(matched) == 1
@@ -167,11 +161,9 @@ class TestJobMatching:
         frontend_job.description = "Work on UI components at Google"
 
         db = AsyncMock()
-        starred_result = MagicMock()
-        starred_result.all.return_value = []
         jobs_result = MagicMock()
         jobs_result.scalars.return_value.all.return_value = [backend_job, frontend_job]
-        db.execute = AsyncMock(side_effect=[starred_result, jobs_result])
+        db.execute = AsyncMock(return_value=jobs_result)
 
         matched = await find_new_jobs_for_alert(db, uuid.uuid4(), prefs, since)
         assert len(matched) == 1

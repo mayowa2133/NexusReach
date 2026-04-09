@@ -47,5 +47,5 @@ celery_app.conf.update(
     },
 )
 
-# Auto-discover tasks
-celery_app.autodiscover_tasks(["app.tasks"])
+# Import task modules explicitly so Celery registers decorated tasks in this package.
+from . import job_alerts, job_research, jobs, known_people, linkedin_graph, reverify  # noqa: F401,E402

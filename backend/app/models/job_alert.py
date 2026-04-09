@@ -13,6 +13,23 @@ from app.database import Base
 class JobAlertPreference(Base):
     __tablename__ = "job_alert_preferences"
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        if "enabled" not in kwargs:
+            self.enabled = False
+        if "frequency" not in kwargs:
+            self.frequency = "daily"
+        if "watched_companies" not in kwargs:
+            self.watched_companies = []
+        if "use_starred_companies" not in kwargs:
+            self.use_starred_companies = True
+        if "keyword_filters" not in kwargs:
+            self.keyword_filters = []
+        if "email_provider" not in kwargs:
+            self.email_provider = "connected"
+        if "total_alerts_sent" not in kwargs:
+            self.total_alerts_sent = 0
+
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )

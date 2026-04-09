@@ -1,15 +1,17 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
-import { Label } from '@/components/ui/label';
-import { Input } from '@/components/ui/input';
+import { JobResearchSection } from '@/components/jobs/JobResearchSection';
+import {
+  useDeleteAutoResearchPreference,
+  useJobResearch,
+  useRunJobResearch,
+  useUpsertAutoResearchPreference,
+} from '@/hooks/useAutoResearch';
 import { useJobs, useUpdateJobStage, useToggleJobStar } from '@/hooks/useJobs';
-import { usePeopleSearch, useSavedPeople } from '@/hooks/usePeople';
-import { useFindEmail } from '@/hooks/useEmail';
-import { sanitizeHTML } from '@/lib/sanitize';
 import { formatRelativeDate } from '@/lib/dateUtils';
 import { getStartupSourceLabels, isStartupJob } from '@/lib/jobStartup';
 import {
@@ -17,8 +19,9 @@ import {
   getStoredPeopleSearchTargetCount,
   setStoredPeopleSearchTargetCount,
 } from '@/lib/peopleSearchCount';
+import { sanitizeHTML } from '@/lib/sanitize';
 import { toast } from 'sonner';
-import type { Job, JobStage, Person, PeopleSearchResult } from '@/types';
+import type { JobStage } from '@/types';
 
 const STAGES: { value: JobStage; label: string }[] = [
   { value: 'discovered', label: 'Discovered' },
@@ -53,217 +56,19 @@ function StarIcon({ filled, className }: { filled: boolean; className?: string }
   );
 }
 
-function PersonCard({
-  person,
-  jobId,
-}: {
-  person: Person;
-  jobId: string;
-}) {
-  const findEmail = useFindEmail();
-  const navigate = useNavigate();
-
-  const handleFindEmail = async () => {
-    try {
-      const result = await findEmail.mutateAsync(person.id);
-      if (result.email) {
-        toast.success(`Found email: ${result.email}`);
-      } else {
-        toast.info('No email found for this person');
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Email lookup failed');
-    }
-  };
-
-  const email = person.work_email;
-  const linkedinUrl = person.linkedin_url;
-
-  return (
-    <div className="flex items-start justify-between gap-3 rounded-lg border px-4 py-3">
-      <div className="min-w-0 flex-1">
-        <div className="font-medium text-sm">{person.full_name ?? 'Unknown'}</div>
-        {person.title && (
-          <div className="text-xs text-muted-foreground mt-0.5">{person.title}</div>
-        )}
-        <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-          {person.match_quality && (
-            <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-              {person.match_quality === 'direct' ? 'Direct' : person.match_quality === 'adjacent' ? 'Adjacent' : 'Next Best'}
-            </Badge>
-          )}
-          {person.org_level && (
-            <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-              {person.org_level === 'ic' ? 'IC' : person.org_level === 'manager' ? 'Manager' : 'Director+'}
-            </Badge>
-          )}
-          {email && (
-            <span className="text-[11px] text-muted-foreground font-mono">{email}</span>
-          )}
-        </div>
-      </div>
-      <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
-        {linkedinUrl && (
-          <a href={linkedinUrl} target="_blank" rel="noopener noreferrer">
-            <Button variant="outline" size="sm" className="h-7 text-xs">LinkedIn</Button>
-          </a>
-        )}
-        {!email && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 text-xs"
-            disabled={findEmail.isPending}
-            onClick={handleFindEmail}
-          >
-            {findEmail.isPending ? '...' : 'Find Email'}
-          </Button>
-        )}
-        <Button
-          size="sm"
-          className="h-7 text-xs"
-          onClick={() => navigate(`/messages?person_id=${person.id}&job_id=${jobId}`)}
-        >
-          Draft Message
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function PeopleSection({
-  job,
-  searchResults,
-  isSearching,
-  onFindPeople,
-  targetCount,
-  onTargetCountChange,
-}: {
-  job: Job;
-  searchResults: PeopleSearchResult | null;
-  isSearching: boolean;
-  onFindPeople: () => void;
-  targetCount: number;
-  onTargetCountChange: (v: number) => void;
-}) {
-  const { data: savedPeopleData } = useSavedPeople();
-  const savedPeople = savedPeopleData?.items ?? [];
-
-  // Show saved contacts at this company if no search results yet
-  const companyName = job.company_name.toLowerCase();
-  const savedAtCompany = savedPeople.filter(
-    (p) => p.company?.name?.toLowerCase().includes(companyName) || companyName.includes((p.company?.name ?? '').toLowerCase())
-  );
-
-  const recruiters = searchResults?.recruiters ?? [];
-  const managers = searchResults?.hiring_managers ?? [];
-  const peers = searchResults?.peers ?? [];
-  const hasResults = recruiters.length + managers.length + peers.length > 0;
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <h2 className="text-lg font-semibold">People at {job.company_name}</h2>
-          <p className="text-sm text-muted-foreground">
-            Find recruiters, hiring managers, and peers to reach out to.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5">
-            <Label htmlFor="target-count" className="text-sm whitespace-nowrap">Per category:</Label>
-            <Input
-              id="target-count"
-              type="number"
-              min={1}
-              max={10}
-              value={targetCount}
-              onChange={(e) => onTargetCountChange(Number(e.target.value))}
-              className="h-8 w-16 text-sm"
-            />
-          </div>
-          <Button onClick={onFindPeople} disabled={isSearching}>
-            {isSearching ? 'Searching...' : hasResults ? 'Re-run Search' : 'Find People'}
-          </Button>
-        </div>
-      </div>
-
-      {isSearching && (
-        <div className="rounded-lg border border-dashed p-8 text-center text-muted-foreground text-sm">
-          Searching for recruiters, hiring managers, and peers at {job.company_name}…
-        </div>
-      )}
-
-      {!isSearching && !hasResults && savedAtCompany.length > 0 && (
-        <div className="space-y-2">
-          <div className="text-sm font-medium text-muted-foreground">Saved contacts at this company</div>
-          <div className="space-y-2">
-            {savedAtCompany.map((p) => (
-              <PersonCard key={p.id} person={p} jobId={job.id} />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {!isSearching && !hasResults && savedAtCompany.length === 0 && (
-        <div className="rounded-lg border border-dashed p-8 text-center text-muted-foreground text-sm">
-          Click "Find People" to discover recruiters, hiring managers, and peers at {job.company_name}.
-        </div>
-      )}
-
-      {hasResults && (
-        <div className="space-y-6">
-          {recruiters.length > 0 && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <h3 className="font-medium">Recruiters</h3>
-                <Badge variant="secondary">{recruiters.length}</Badge>
-              </div>
-              <div className="space-y-2">
-                {recruiters.map((p) => <PersonCard key={p.id} person={p} jobId={job.id} />)}
-              </div>
-            </div>
-          )}
-          {managers.length > 0 && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <h3 className="font-medium">Hiring Managers</h3>
-                <Badge variant="secondary">{managers.length}</Badge>
-              </div>
-              <div className="space-y-2">
-                {managers.map((p) => <PersonCard key={p.id} person={p} jobId={job.id} />)}
-              </div>
-            </div>
-          )}
-          {peers.length > 0 && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <h3 className="font-medium">Peers</h3>
-                <Badge variant="secondary">{peers.length}</Badge>
-              </div>
-              <div className="space-y-2">
-                {peers.map((p) => <PersonCard key={p.id} person={p} jobId={job.id} />)}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 export function JobDetailPage() {
   const { jobId } = useParams<{ jobId: string }>();
   const navigate = useNavigate();
-  const [searchResults, setSearchResults] = useState<PeopleSearchResult | null>(null);
   const [targetCount, setTargetCount] = useState(() => getStoredPeopleSearchTargetCount());
 
   const { data: jobsData, isLoading } = useJobs();
-  const job = jobsData?.items.find((j) => j.id === jobId) ?? null;
-
+  const job = jobsData?.items.find((item) => item.id === jobId) ?? null;
   const updateStage = useUpdateJobStage();
   const toggleStar = useToggleJobStar();
-  const peopleSearch = usePeopleSearch();
+  const jobResearch = useJobResearch(job?.id);
+  const runJobResearch = useRunJobResearch();
+  const upsertAutoResearch = useUpsertAutoResearchPreference();
+  const deleteAutoResearch = useDeleteAutoResearchPreference();
 
   const handleStageChange = async (stage: JobStage) => {
     if (!job) return;
@@ -283,17 +88,52 @@ export function JobDetailPage() {
     }
   };
 
-  const handleFindPeople = async () => {
+  const handleRunResearch = async () => {
     if (!job) return;
     try {
-      const result = await peopleSearch.mutateAsync({
-        company_name: job.company_name,
-        job_id: job.id,
+      await runJobResearch.mutateAsync({
+        jobId: job.id,
         target_count_per_bucket: targetCount,
       });
-      setSearchResults(result);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'People search failed');
+    }
+  };
+
+  const handleToggleAutoFindPeople = async (enabled: boolean) => {
+    if (!job) return;
+    try {
+      if (enabled) {
+        await upsertAutoResearch.mutateAsync({
+          company_name: job.company_name,
+          auto_find_people: true,
+          auto_find_emails: jobResearch.data?.auto_find_emails ?? false,
+        });
+        toast.success(`Future jobs from ${job.company_name} will be researched automatically`);
+      } else {
+        await deleteAutoResearch.mutateAsync(job.company_name);
+        toast.success(`Auto research removed for ${job.company_name}`);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update auto research');
+    }
+  };
+
+  const handleToggleAutoFindEmails = async (enabled: boolean) => {
+    if (!job) return;
+    try {
+      await upsertAutoResearch.mutateAsync({
+        company_name: job.company_name,
+        auto_find_people: true,
+        auto_find_emails: enabled,
+      });
+      toast.success(
+        enabled
+          ? `Top-contact email lookup enabled for ${job.company_name}`
+          : `Top-contact email lookup disabled for ${job.company_name}`
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update auto email lookup');
     }
   };
 
@@ -320,12 +160,10 @@ export function JobDetailPage() {
 
   return (
     <div className="space-y-6">
-      {/* Back nav */}
       <Button variant="ghost" size="sm" className="-ml-2" onClick={() => navigate('/jobs')}>
         ← Back to Jobs
       </Button>
 
-      {/* Header */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div className="flex items-start gap-3">
           <button
@@ -359,7 +197,6 @@ export function JobDetailPage() {
         </div>
       </div>
 
-      {/* Meta badges */}
       <div className="flex flex-wrap gap-2">
         {job.location && <Badge variant="outline">{job.location}</Badge>}
         {job.remote && <Badge variant="secondary">Remote</Badge>}
@@ -378,7 +215,6 @@ export function JobDetailPage() {
         {job.department && <Badge variant="outline">{job.department}</Badge>}
       </div>
 
-      {/* Salary */}
       {(job.salary_min || job.salary_max) && (
         <div className="text-sm">
           <span className="text-muted-foreground">Salary: </span>
@@ -386,26 +222,25 @@ export function JobDetailPage() {
             {job.salary_min && job.salary_max
               ? `${job.salary_currency || '$'}${Math.round(job.salary_min).toLocaleString()} – ${Math.round(job.salary_max).toLocaleString()}`
               : job.salary_min
-              ? `From ${job.salary_currency || '$'}${Math.round(job.salary_min).toLocaleString()}`
-              : `Up to ${job.salary_currency || '$'}${Math.round(job.salary_max!).toLocaleString()}`}
+                ? `From ${job.salary_currency || '$'}${Math.round(job.salary_min).toLocaleString()}`
+                : `Up to ${job.salary_currency || '$'}${Math.round(job.salary_max!).toLocaleString()}`}
           </span>
         </div>
       )}
 
-      {/* Stage */}
       <Card>
         <CardContent className="pt-4 pb-4">
           <div className="flex items-center gap-3 flex-wrap">
             <span className="text-sm font-medium">Stage:</span>
-            {STAGES.map((s) => (
+            {STAGES.map((stage) => (
               <Button
-                key={s.value}
-                variant={job.stage === s.value ? 'default' : 'outline'}
+                key={stage.value}
+                variant={job.stage === stage.value ? 'default' : 'outline'}
                 size="sm"
                 className="text-xs h-7"
-                onClick={() => handleStageChange(s.value)}
+                onClick={() => handleStageChange(stage.value)}
               >
-                {s.label}
+                {stage.label}
               </Button>
             ))}
           </div>
@@ -414,23 +249,31 @@ export function JobDetailPage() {
 
       <Separator />
 
-      {/* People section */}
-      <PeopleSection
+      <JobResearchSection
         job={job}
-        searchResults={searchResults}
-        isSearching={peopleSearch.isPending}
-        onFindPeople={handleFindPeople}
+        research={jobResearch.data}
+        isLoading={jobResearch.isLoading}
+        isRunning={
+          runJobResearch.isPending ||
+          jobResearch.data?.status === 'queued' ||
+          jobResearch.data?.status === 'running'
+        }
         targetCount={targetCount}
-        onTargetCountChange={(v) => {
-          const clamped = clampPeopleSearchTargetCount(v);
+        onTargetCountChange={(value) => {
+          const clamped = clampPeopleSearchTargetCount(value);
           setTargetCount(clamped);
           setStoredPeopleSearchTargetCount(clamped);
         }}
+        onRunResearch={handleRunResearch}
+        autoFindPeople={jobResearch.data?.enabled_for_company ?? false}
+        autoFindEmails={jobResearch.data?.auto_find_emails ?? false}
+        onToggleAutoFindPeople={handleToggleAutoFindPeople}
+        onToggleAutoFindEmails={handleToggleAutoFindEmails}
+        isUpdatingPreference={upsertAutoResearch.isPending || deleteAutoResearch.isPending}
       />
 
       <Separator />
 
-      {/* Description */}
       {job.description && (
         <div className="space-y-2">
           <h2 className="text-lg font-semibold">Job Description</h2>
@@ -441,7 +284,6 @@ export function JobDetailPage() {
         </div>
       )}
 
-      {/* Apply CTA at bottom */}
       {(job.apply_url || job.url) && (
         <div className="pt-2 pb-8">
           <a href={job.apply_url || job.url!} target="_blank" rel="noopener noreferrer">

@@ -22,6 +22,7 @@ import {
 import { API_URL } from '@/lib/api';
 import { GuardrailsPanel } from '@/components/settings/GuardrailsPanel';
 import { JobAlertsPanel } from '@/components/settings/JobAlertsPanel';
+import { AutoResearchPanel } from '@/components/settings/AutoResearchPanel';
 import { toast } from 'sonner';
 import type { LinkedInGraphSyncSession } from '@/types';
 
@@ -354,6 +355,10 @@ export function SettingsPage() {
 
       {/* Job Alerts */}
       <JobAlertsPanel />
+
+      <Separator />
+
+      <AutoResearchPanel />
 
       <Separator />
 

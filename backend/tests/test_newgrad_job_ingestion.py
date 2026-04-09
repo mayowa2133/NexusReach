@@ -90,6 +90,10 @@ async def test_search_jobs_persists_enriched_newgrad_metadata():
             return_value=[_newgrad_job()],
         ),
         patch("app.services.job_service._find_existing_job", new_callable=AsyncMock, return_value=None),
+        patch(
+            "app.services.auto_research_service.enqueue_auto_research_for_jobs",
+            new_callable=AsyncMock,
+        ),
     ):
         jobs = await search_jobs(db, user_id, query="software engineer", sources=["newgrad"])
 

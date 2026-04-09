@@ -22,11 +22,11 @@ from app.schemas.people import (
 from app.schemas.linkedin_graph import LinkedInGraphConnectionResponse
 from app.services.people_service import (
     search_people_at_company,
-    search_people_for_job,
     enrich_person_from_linkedin,
     get_saved_people,
     get_search_history,
 )
+from app.services.auto_research_service import run_job_research
 from app.services.employment_verification_service import verify_current_company_for_person
 
 router = APIRouter(prefix="/people", tags=["people"])
@@ -136,12 +136,13 @@ async def search_people(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail="Invalid job_id format") from exc
         try:
-            result = await search_people_for_job(
+            result = await run_job_research(
                 db=db,
                 user_id=user_id,
                 job_id=job_uuid,
-                min_relevance_score=body.min_relevance_score,
                 target_count_per_bucket=body.target_count_per_bucket,
+                force=True,
+                auto_find_emails=False,
             )
         except ValueError:
             raise HTTPException(status_code=404, detail="Job not found")

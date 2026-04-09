@@ -615,9 +615,14 @@ function YourConnectionsSection({
                   {connection.headline || 'Imported LinkedIn connection'}
                 </div>
               </div>
-              {connection.current_company_name && (
-                <Badge variant="secondary">{connection.current_company_name}</Badge>
-              )}
+              <div className="flex flex-wrap gap-1.5">
+                {connection.current_company_name && (
+                  <Badge variant="secondary">{connection.current_company_name}</Badge>
+                )}
+                {connection.relevance_label && (
+                  <Badge variant="outline">{connection.relevance_label}</Badge>
+                )}
+              </div>
               <div className="flex gap-2 pt-1">
                 {connection.linkedin_url && (
                   <a

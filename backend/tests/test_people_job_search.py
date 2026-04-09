@@ -81,7 +81,7 @@ async def test_search_with_job_id(client, mock_user_id):
         },
     }
 
-    with patch("app.routers.people.search_people_for_job", new_callable=AsyncMock) as mock_search:
+    with patch("app.routers.people.run_job_research", new_callable=AsyncMock) as mock_search:
         mock_search.return_value = mock_result
         resp = await client.post(
             "/api/people/search",
@@ -99,6 +99,8 @@ async def test_search_with_job_id(client, mock_user_id):
     assert data["company"]["id"] == str(company.id)
     assert isinstance(data["peers"][0]["id"], str)
     assert mock_search.await_args.kwargs["target_count_per_bucket"] == 3
+    assert mock_search.await_args.kwargs["force"] is True
+    assert mock_search.await_args.kwargs["auto_find_emails"] is False
 
 
 async def test_search_with_job_id_passes_requested_target_count(client, mock_user_id):
@@ -115,7 +117,7 @@ async def test_search_with_job_id_passes_requested_target_count(client, mock_use
         },
     }
 
-    with patch("app.routers.people.search_people_for_job", new_callable=AsyncMock) as mock_search:
+    with patch("app.routers.people.run_job_research", new_callable=AsyncMock) as mock_search:
         mock_search.return_value = mock_result
         resp = await client.post(
             "/api/people/search",
@@ -169,7 +171,7 @@ async def test_search_invalid_job_id(client, mock_user_id):
 
 async def test_search_nonexistent_job_id(client, mock_user_id):
     """POST /api/people/search with non-existent job_id returns 404."""
-    with patch("app.routers.people.search_people_for_job", new_callable=AsyncMock) as mock_search:
+    with patch("app.routers.people.run_job_research", new_callable=AsyncMock) as mock_search:
         mock_search.side_effect = ValueError("Job not found")
         resp = await client.post(
             "/api/people/search",
