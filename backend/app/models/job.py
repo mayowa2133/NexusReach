@@ -26,6 +26,7 @@ class Job(Base):
     location: Mapped[str | None] = mapped_column(String(255))
     remote: Mapped[bool] = mapped_column(Boolean, default=False)
     url: Mapped[str | None] = mapped_column(String(1000))
+    apply_url: Mapped[str | None] = mapped_column(String(1000))
     description: Mapped[str | None] = mapped_column(Text)
     employment_type: Mapped[str | None] = mapped_column(String(50))
     experience_level: Mapped[str | None] = mapped_column(String(50))  # noqa: F821

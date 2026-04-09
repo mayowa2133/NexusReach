@@ -73,6 +73,7 @@ class JobResponse(BaseModel):
     location: str | None
     remote: bool
     url: str | None
+    apply_url: str | None = None
     description: str | None
     employment_type: str | None
     experience_level: str | None

@@ -167,6 +167,7 @@ def _refresh_existing_job(
     if data.get("remote") is not None:
         job.remote = bool(data.get("remote"))
     _apply_if_present(job, "url", data.get("url"))
+    _apply_if_present(job, "apply_url", data.get("apply_url"))
     _apply_if_present(job, "description", data.get("description"))
     _apply_if_present(job, "source", data.get("source"))
     _apply_if_present(job, "ats", data.get("ats"))
@@ -204,6 +205,7 @@ def _build_job(
         location=data.get("location"),
         remote=data.get("remote", False),
         url=data.get("url"),
+        apply_url=data.get("apply_url"),
         description=data.get("description"),
         employment_type=data.get("employment_type"),
         experience_level=_experience_level_for_job(data),

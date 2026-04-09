@@ -369,6 +369,7 @@ export interface Job {
   location: string | null;
   remote: boolean;
   url: string | null;
+  apply_url: string | null;
   description: string | null;
   employment_type: string | null;
   experience_level: string | null;

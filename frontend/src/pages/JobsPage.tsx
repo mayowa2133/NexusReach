@@ -930,13 +930,13 @@ function JobDetail({
           >
             Find People
           </Button>
-          {job.url && (
+          {(job.apply_url || job.url) && (
             <a
-              href={job.url}
+              href={job.apply_url || job.url!}
               target="_blank"
               rel="noopener noreferrer"
             >
-              <Button variant="outline" size="sm">View Posting</Button>
+              <Button variant="outline" size="sm">Apply</Button>
             </a>
           )}
         </div>

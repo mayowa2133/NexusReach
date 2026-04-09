@@ -351,8 +351,8 @@ export function JobDetailPage() {
               {Math.round(job.match_score)}% match
             </div>
           )}
-          {job.url && (
-            <a href={job.url} target="_blank" rel="noopener noreferrer">
+          {(job.apply_url || job.url) && (
+            <a href={job.apply_url || job.url!} target="_blank" rel="noopener noreferrer">
               <Button>Apply Now</Button>
             </a>
           )}
@@ -442,9 +442,9 @@ export function JobDetailPage() {
       )}
 
       {/* Apply CTA at bottom */}
-      {job.url && (
+      {(job.apply_url || job.url) && (
         <div className="pt-2 pb-8">
-          <a href={job.url} target="_blank" rel="noopener noreferrer">
+          <a href={job.apply_url || job.url!} target="_blank" rel="noopener noreferrer">
             <Button size="lg" className="w-full sm:w-auto">
               Apply Now — {job.company_name}
             </Button>
