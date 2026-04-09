@@ -3414,6 +3414,30 @@ async def search_people_for_job(
         hiring_team_candidates = _dedupe_candidates(hiring_team_candidates, actively_hiring_candidates)
     except Exception:
         logger.debug("Actively-hiring supplementary search failed for %s", job.company_name, exc_info=True)
+
+    # Second supplementary search: target linkedin.com/in profiles of engineers
+    # and managers who mention hiring in their profiles or posts.  This finds
+    # people like Spencer Chan (Quora) or Abhishek Sehgal (Uber) who post
+    # "I'm hiring" or "join my team" — especially valuable at smaller companies
+    # where engineers recruit directly.
+    try:
+        hiring_people_candidates = await search_router_client.search_people(
+            job.company_name,
+            titles=["hiring", "join my team", "we're hiring"],
+            team_keywords=context.team_keywords[:2],
+            limit=3,
+            min_results=0,
+        )
+        for candidate in hiring_people_candidates:
+            candidate["_actively_hiring"] = True
+            candidate["profile_data"] = {
+                **(candidate.get("profile_data") or {}),
+                "actively_hiring": True,
+            }
+        hiring_team_candidates = _dedupe_candidates(hiring_team_candidates, hiring_people_candidates)
+    except Exception:
+        logger.debug("Hiring-people supplementary search failed for %s", job.company_name, exc_info=True)
+
     recruiter_candidates = _dedupe_candidates(
         recruiter_candidates,
         [candidate for candidate in hiring_team_candidates if _classify_person(candidate.get("title", ""), snippet=candidate.get("snippet", ""), source=candidate.get("source", "")) == "recruiter"],
@@ -3841,6 +3865,31 @@ async def search_people_for_job(
         direct_connections=direct_connections,
     )
     await db.commit()
+
+    # Small-company recruiter fallback: when the recruiter bucket is thin
+    # (0-1 results) and the company is small/mid-size, promote hiring
+    # managers and peers who have an "actively hiring" signal into the
+    # recruiter bucket.  At companies with ≤500 employees, engineers and
+    # managers often do the recruiting directly.
+    company_size_str = (company.size or "").strip().lower()
+    _small_company = (
+        not company_size_str
+        or any(token in company_size_str for token in ("1-", "11-", "51-", "201-", "small", "micro"))
+        or (company_size_str.isdigit() and int(company_size_str) <= 500)
+    )
+    if _small_company and len(bucketed["recruiters"]) <= 1:
+        for bucket_name in ("hiring_managers", "peers"):
+            for person in bucketed[bucket_name]:
+                if len(bucketed["recruiters"]) >= target_count_per_bucket:
+                    break
+                profile_data = getattr(person, "profile_data", None) or {}
+                if profile_data.get("actively_hiring"):
+                    identity_key = getattr(person, "linkedin_url", None) or getattr(person, "full_name", "")
+                    if identity_key and identity_key not in seen["recruiters"]:
+                        setattr(person, "fallback_reason", "Identified as actively hiring on their team (small-company recruiter fallback).")
+                        bucketed["recruiters"].append(person)
+                        seen["recruiters"].add(identity_key)
+
     filtered_bucketed = _finalize_bucketed(
         bucketed,
         target_count_per_bucket=target_count_per_bucket,

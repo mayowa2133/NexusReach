@@ -5,6 +5,9 @@
 - Location-aware ranking
 - Recency ranking
 - iCIMS URL parsing
+- Product name extraction (single-word, title-embedded)
+- AI/LLM keyword categories
+- Department scoring specificity
 """
 
 from datetime import datetime, timedelta, timezone
@@ -16,7 +19,16 @@ from app.services.people_service import (
     _location_match_rank,
     _recency_rank,
 )
-from app.utils.job_context import JobContext, _build_peer_titles, _build_recruiter_titles, extract_job_context
+from app.utils.job_context import (
+    TECHNICAL_KEYWORDS_MAP,
+    JobContext,
+    _build_peer_titles,
+    _build_recruiter_titles,
+    _extract_product_team_names,
+    _extract_title_product_name,
+    _score_department,
+    extract_job_context,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -258,3 +270,137 @@ def test_job_context_has_job_locations():
 def test_job_context_default_empty_locations():
     ctx = JobContext(department="engineering")
     assert ctx.job_locations == []
+
+
+# ---------------------------------------------------------------------------
+# 9. Title-embedded product name extraction
+# ---------------------------------------------------------------------------
+
+
+def test_title_product_name_dash_separator():
+    assert _extract_title_product_name("AI Engineer New Grad 2025-2026 - Poe") == "Poe"
+
+
+def test_title_product_name_payments():
+    assert _extract_title_product_name("Software Engineer - Payments") == "Payments"
+
+
+def test_title_product_name_multi_word():
+    assert _extract_title_product_name("Senior Engineer - Uber Eats") == "Uber Eats"
+
+
+def test_title_product_name_filters_remote():
+    assert _extract_title_product_name("Engineer - Remote") is None
+
+
+def test_title_product_name_filters_country():
+    assert _extract_title_product_name("Engineer - US") is None
+
+
+def test_title_product_name_no_separator():
+    assert _extract_title_product_name("Software Engineer at Acme") is None
+
+
+def test_title_product_name_filters_company():
+    assert _extract_title_product_name("Engineer - Quora", company_name="Quora") is None
+
+
+# ---------------------------------------------------------------------------
+# 10. Single-word product names from description
+# ---------------------------------------------------------------------------
+
+
+def test_product_names_single_word_from_description():
+    desc = "Work on the Poe platform. Poe provides users with AI. Poe is great."
+    names = _extract_product_team_names(desc, company_name="Quora")
+    assert "Poe" in names
+
+
+def test_product_names_title_plus_description():
+    desc = "Work on Poe. Poe is an AI platform. Poe has millions of users."
+    names = _extract_product_team_names(desc, company_name="Quora", title="AI Engineer - Poe")
+    assert names[0] == "Poe"  # Title-embedded is first
+
+
+def test_product_names_filters_company_name():
+    desc = "Quora is a platform. Quora has users. Quora is great."
+    names = _extract_product_team_names(desc, company_name="Quora")
+    assert "Quora" not in names
+
+
+def test_product_names_empty_description():
+    names = _extract_product_team_names(None, title="AI Engineer - Poe")
+    assert names == ["Poe"]
+
+
+# ---------------------------------------------------------------------------
+# 11. AI/LLM keyword categories
+# ---------------------------------------------------------------------------
+
+
+def test_llm_keyword_category_exists():
+    assert "llm" in TECHNICAL_KEYWORDS_MAP
+    keywords = TECHNICAL_KEYWORDS_MAP["llm"]
+    assert "llm" in keywords
+    assert "rag" in keywords
+    assert "prompt engineering" in keywords
+    assert "agentic" in keywords
+    assert "fine-tuning" in keywords
+    assert "transformer" in keywords
+
+
+def test_ai_keyword_category_exists():
+    assert "ai" in TECHNICAL_KEYWORDS_MAP
+    keywords = TECHNICAL_KEYWORDS_MAP["ai"]
+    assert "ai" in keywords
+    assert "artificial intelligence" in keywords
+
+
+def test_ai_separated_from_ml():
+    """AI and ML should be distinct categories."""
+    assert "ai" not in TECHNICAL_KEYWORDS_MAP["ml"]
+
+
+def test_quora_poe_context_extracts_llm_keywords():
+    desc = """Work on AI tasks including prompt tuning, retrieval-augmented generation,
+    and agentic workflow optimization on the Poe platform. Build LLM applications.
+    Experience with transformer models and fine-tuning required. Own applied AI
+    systems from prototyping to deployment at scale."""
+    ctx = extract_job_context("AI Engineer New Grad 2025-2026 - Poe", desc)
+    assert "llm" in ctx.team_keywords or "ai" in ctx.team_keywords
+
+
+# ---------------------------------------------------------------------------
+# 12. Department scoring specificity bonus
+# ---------------------------------------------------------------------------
+
+
+def test_ai_engineer_maps_to_data_science():
+    """'ai engineer' (2 words) should beat 'engineer' (1 word) for department."""
+    result = _score_department("ai engineer new grad", "", "")
+    assert result == "data_science"
+
+
+def test_ml_engineer_maps_to_data_science():
+    result = _score_department("ml engineer", "", "")
+    assert result == "data_science"
+
+
+def test_software_engineer_maps_to_engineering():
+    result = _score_department("software engineer", "", "")
+    assert result == "engineering"
+
+
+def test_data_scientist_maps_to_data_science():
+    result = _score_department("data scientist", "", "")
+    assert result == "data_science"
+
+
+def test_specificity_bonus_title_wins_with_neutral_body():
+    """With AI-related body text, 'ai engineer' title specificity holds."""
+    result = _score_department(
+        "ai engineer",
+        "build ai systems and machine learning pipelines",
+        "deploy models at scale",
+    )
+    assert result == "data_science"

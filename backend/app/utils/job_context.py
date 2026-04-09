@@ -104,7 +104,9 @@ TECHNICAL_KEYWORDS_MAP: dict[str, list[str]] = {
     "mobile": ["mobile", "ios", "android", "react native", "flutter"],
     "devops": ["devops", "dev ops", "site reliability", "sre"],
     "platform": ["platform", "internal tools", "developer experience", "developer tools"],
-    "ml": ["machine learning", " ml ", "deep learning", "ai", "artificial intelligence", "nlp", "computer vision"],
+    "ml": ["machine learning", " ml ", "deep learning", "nlp", "computer vision"],
+    "llm": ["llm", "large language model", "rag", "retrieval augmented", "prompt engineering", "agentic", "fine-tuning", "fine tuning", "transformer", "generative ai", "gen ai"],
+    "ai": ["ai", "artificial intelligence", "ai engineer", "ai engineering"],
     "data": ["data engineering", "data pipeline", "etl", "analytics", "data warehouse", "big data"],
     "security": ["security", "cybersecurity", "infosec", "appsec", "devsecops"],
     "cloud": ["cloud", "aws", "gcp", "azure", "kubernetes", "k8s"],
@@ -252,12 +254,17 @@ def _extract_sections(title: str, description: str | None) -> tuple[str, str, st
 def _score_department(title_lower: str, lead_lower: str, body_lower: str) -> str:
     scores: dict[str, int] = {}
     for keyword, department in DEPARTMENT_MAP.items():
+        # Give a specificity bonus for multi-word keywords.  "ai engineer"
+        # (2 words) should outweigh "engineer" (1 word) when both match
+        # in the same section, so more-specific department signals win.
+        word_count = len(keyword.split())
+        specificity_bonus = word_count - 1  # 0 for single-word, 1 for 2-word, etc.
         if _contains_keyword(title_lower, keyword):
-            scores[department] = scores.get(department, 0) + SECTION_WEIGHTS["title"]
+            scores[department] = scores.get(department, 0) + SECTION_WEIGHTS["title"] + specificity_bonus
         if _contains_keyword(lead_lower, keyword):
-            scores[department] = scores.get(department, 0) + SECTION_WEIGHTS["lead"]
+            scores[department] = scores.get(department, 0) + SECTION_WEIGHTS["lead"] + specificity_bonus
         if _contains_keyword(body_lower, keyword):
-            scores[department] = scores.get(department, 0) + SECTION_WEIGHTS["body"]
+            scores[department] = scores.get(department, 0) + SECTION_WEIGHTS["body"] + specificity_bonus
 
     if not scores:
         return "engineering"
@@ -733,42 +740,122 @@ _PRODUCT_NAME_STOPWORDS = frozenset({
 })
 
 
+def _extract_title_product_name(title: str, company_name: str | None = None) -> str | None:
+    """Extract a product/team name embedded in the job title after a separator.
+
+    Many jobs use formats like:
+    - "AI Engineer New Grad 2025-2026 - Poe"
+    - "Software Engineer - Payments"
+    - "ML Engineer - Search/Ranking, Poe"
+    - "Senior Engineer - Uber Eats"
+
+    Returns the trailing product name, or None if not found.
+    """
+    # Split on common separators: " - ", " — ", " | "
+    for sep in (" - ", " — ", " | "):
+        if sep in title:
+            trailing = title.rsplit(sep, 1)[-1].strip()
+            # Filter out generic suffixes that are not product names
+            trailing_lower = trailing.lower()
+            if trailing_lower in {
+                "remote", "hybrid", "onsite", "on-site",
+                "us", "usa", "uk", "canada", "emea", "apac",
+                "full time", "full-time", "part time", "part-time",
+                "contract", "internship",
+            }:
+                return None
+            if company_name and trailing_lower == company_name.lower():
+                return None
+            # Must be a short-ish name (not a whole sentence)
+            if len(trailing) <= 30 and trailing[0].isupper():
+                return trailing
+    return None
+
+
 def _extract_product_team_names(
     description: str | None,
     company_name: str | None = None,
+    title: str | None = None,
     limit: int = 3,
 ) -> list[str]:
-    """Extract specific product/team/platform names from a job description.
+    """Extract specific product/team/platform names from a job title and description.
 
-    Looks for capitalized multi-word phrases that appear at least twice in
-    the description, indicating they are named products or teams rather than
-    one-off mentions.  Results are ranked by frequency.
+    Sources:
+    1. Title-embedded product name (text after " - " separator)
+    2. Multi-word capitalized phrases appearing 2+ times in description
+    3. Single-word capitalized names (3-20 chars) appearing 3+ times in
+       description, as long as they are not common English words
 
-    Examples: "Data Cloud", "Data 360", "Einstein Analytics", "Commerce Cloud"
+    Examples: "Poe", "Data Cloud", "Einstein Analytics", "Commerce Cloud"
     """
+    results: list[str] = []
+    seen_lower: set[str] = set()
+
+    # Source 1: Title-embedded product name (highest priority)
+    if title:
+        title_product = _extract_title_product_name(title, company_name)
+        if title_product and title_product.lower() not in seen_lower:
+            results.append(title_product)
+            seen_lower.add(title_product.lower())
+
     if not description:
-        return []
+        return results[:limit]
+
     desc_clean = _strip_html(description)
 
-    # Count occurrences of each capitalized phrase
+    # Source 2: Multi-word capitalized phrases (existing logic)
     counts: dict[str, int] = {}
     for match in _PRODUCT_NAME_RE.finditer(desc_clean):
         name = match.group(1).strip()
         if len(name) < 4 or name in _PRODUCT_NAME_STOPWORDS:
             continue
-        # Skip phrases that are just the company name
         if company_name and name.lower() == company_name.lower():
             continue
         counts[name] = counts.get(name, 0) + 1
 
-    # Only keep names mentioned 2+ times (to filter noise)
     frequent = [
         (name, count) for name, count in counts.items()
         if count >= 2
     ]
-    # Rank by frequency, then length (shorter product names are usually more specific)
     frequent.sort(key=lambda x: (-x[1], len(x[0])))
-    return [name for name, _ in frequent[:limit]]
+    for name, _ in frequent:
+        if name.lower() not in seen_lower:
+            results.append(name)
+            seen_lower.add(name.lower())
+
+    # Source 3: Single-word capitalized names (e.g. "Poe", "Slack", "Figma")
+    # Require 3+ mentions to filter noise, and skip common English words
+    _SINGLE_WORD_STOPWORDS = {
+        "the", "and", "for", "with", "our", "you", "your", "this",
+        "that", "will", "are", "can", "from", "have", "has", "not",
+        "all", "about", "team", "role", "work", "join", "help",
+        "build", "experience", "skills", "ability", "knowledge",
+        "strong", "years", "including", "working", "using",
+        "engineering", "engineer", "software", "senior", "junior",
+        "manager", "lead", "platform", "product", "data", "system",
+        "service", "design", "development", "technical", "technology",
+        "remote", "hybrid",
+    }
+    single_counts: dict[str, int] = {}
+    for match in re.finditer(r"\b([A-Z][a-z]{2,19})\b", desc_clean):
+        word = match.group(1)
+        if word.lower() in _SINGLE_WORD_STOPWORDS:
+            continue
+        if company_name and word.lower() == company_name.lower():
+            continue
+        single_counts[word] = single_counts.get(word, 0) + 1
+
+    single_frequent = [
+        (name, count) for name, count in single_counts.items()
+        if count >= 3
+    ]
+    single_frequent.sort(key=lambda x: (-x[1], len(x[0])))
+    for name, _ in single_frequent:
+        if name.lower() not in seen_lower:
+            results.append(name)
+            seen_lower.add(name.lower())
+
+    return results[:limit]
 
 
 def extract_job_context(title: str, description: str | None = None) -> JobContext:
@@ -822,7 +909,7 @@ def extract_job_context(title: str, description: str | None = None) -> JobContex
         domain_keywords,
         early_career=early_career,
     )
-    product_team_names = _extract_product_team_names(description)
+    product_team_names = _extract_product_team_names(description, title=title)
 
     return JobContext(
         department=department,
