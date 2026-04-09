@@ -8,48 +8,43 @@ from typing import Any
 from app.utils.linkedin import normalize_linkedin_url
 
 LINKEDIN_CONNECTIONS_URL = "https://www.linkedin.com/mynetwork/invite-connect/connections/"
-READY_SELECTOR = "li.mn-connection-card, .mn-connection-card"
+READY_SELECTOR = 'a[href*="/in/"]'
 
 SCRAPE_CONNECTION_CARDS_SCRIPT = r"""
 () => {
   const normalizeText = (value) => (value || "").replace(/\s+/g, " ").trim();
-  const pickText = (root, selectors) => {
-    for (const selector of selectors) {
-      const text = normalizeText(root.querySelector(selector)?.textContent || "");
-      if (text) {
-        return text;
-      }
-    }
-    return "";
-  };
 
-  const cards = Array.from(document.querySelectorAll("li.mn-connection-card, .mn-connection-card"));
-  return cards
-    .map((card) => {
-      const anchor = Array.from(card.querySelectorAll('a[href*="/in/"]')).find((link) => {
-        const href = link?.href || "";
-        return href.includes("/in/");
-      });
-      const fullName = pickText(card, [
-        ".mn-connection-card__name",
-        ".mn-person-info__name",
-        ".artdeco-entity-lockup__title",
-        ".artdeco-entity-lockup__title span[aria-hidden='true']",
-      ]);
-      const headline = pickText(card, [
-        ".mn-connection-card__occupation",
-        ".mn-person-info__occupation",
-        ".artdeco-entity-lockup__subtitle",
-        ".artdeco-entity-lockup__caption",
-      ]);
+  // LinkedIn uses hashed class names. Each connection card has two profile
+  // links: an avatar link (no text) and a name link (contains <p>Name</p>
+  // and <p>Headline</p>). We target the name links — those with text content.
+  const profileLinks = Array.from(document.querySelectorAll('a[href*="/in/"]'));
+  const seen = new Set();
 
-      if (!fullName || !anchor?.href) {
-        return null;
-      }
+  return profileLinks
+    .map((anchor) => {
+      const href = anchor.href || "";
+      if (!href.includes("/in/")) return null;
+
+      // Skip avatar-only links (no visible text, just SVG/img)
+      const linkText = normalizeText(anchor.textContent);
+      if (!linkText) return null;
+
+      // Dedupe by href within this scrape pass
+      const canonical = href.split("?")[0].replace(/\/+$/, "").toLowerCase();
+      if (seen.has(canonical)) return null;
+      seen.add(canonical);
+
+      // Extract name and headline from <p> tags inside the link.
+      // Structure: <a> > <div> > <p>Name</p> <div><p>Headline</p></div>
+      const paragraphs = anchor.querySelectorAll("p");
+      const fullName = paragraphs.length > 0 ? normalizeText(paragraphs[0].textContent) : "";
+      const headline = paragraphs.length > 1 ? normalizeText(paragraphs[1].textContent) : "";
+
+      if (!fullName) return null;
 
       return {
         full_name: fullName,
-        linkedin_url: anchor.href,
+        linkedin_url: href,
         headline,
       };
     })
@@ -59,17 +54,13 @@ SCRAPE_CONNECTION_CARDS_SCRIPT = r"""
 
 SCROLL_CONNECTIONS_SCRIPT = r"""
 () => {
-  const selectors = [
-    ".scaffold-finite-scroll__content",
-    ".mn-connections",
-    "main",
-  ];
-  const count = document.querySelectorAll("li.mn-connection-card, .mn-connection-card").length;
-  const container = selectors
-    .map((selector) => document.querySelector(selector))
-    .find((element) => element && element.scrollHeight > element.clientHeight)
-    || document.scrollingElement
-    || document.documentElement;
+  const count = document.querySelectorAll('a[href*="/in/"]').length;
+
+  // Try to find the scrollable container; fall back to window scroll
+  const main = document.querySelector("main");
+  const container = (main && main.scrollHeight > main.clientHeight)
+    ? main
+    : document.scrollingElement || document.documentElement;
 
   if (container === document.body || container === document.documentElement || container === document.scrollingElement) {
     window.scrollTo(0, document.body.scrollHeight);
