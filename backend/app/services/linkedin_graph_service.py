@@ -20,6 +20,7 @@ from app.config import settings
 from app.models.linkedin_graph import LinkedInGraphConnection, LinkedInGraphSyncRun
 from app.models.settings import UserSettings
 from app.utils.company_identity import (
+    company_family,
     extract_public_identity_hints,
     is_ambiguous_company_name,
     normalize_company_name,
@@ -600,6 +601,7 @@ async def get_connections_for_company(
 ) -> list[LinkedInGraphConnection]:
     normalized_company_name = normalize_company_name(company_name)
     trusted_slugs = [slug.strip().lower() for slug in (public_identity_slugs or []) if slug]
+    family = company_family(company_name)
     query = select(LinkedInGraphConnection).where(
         LinkedInGraphConnection.user_id == user_id
     )
@@ -612,7 +614,13 @@ async def get_connections_for_company(
         )
     else:
         company_filters = []
-        if normalized_company_name:
+        # Include all family names (e.g. ByteDance → also match TikTok)
+        family_names = [name for name in family if name] if len(family) > 1 else []
+        if family_names:
+            company_filters.append(
+                LinkedInGraphConnection.normalized_company_name.in_(family_names)
+            )
+        elif normalized_company_name:
             company_filters.append(
                 LinkedInGraphConnection.normalized_company_name == normalized_company_name
             )
@@ -709,7 +717,16 @@ def connection_matches_company(
 
     if connection_company_name and connection_company_name == normalized_company_name:
         return True
-    return bool(company_slug and company_slug in trusted_slugs)
+    if company_slug and company_slug in trusted_slugs:
+        return True
+
+    # Parent/subsidiary family match: e.g. ByteDance ↔ TikTok
+    if connection_company_name:
+        family = company_family(company_name)
+        if len(family) > 1 and connection_company_name in family:
+            return True
+
+    return False
 
 
 async def cleanup_orphaned_sync_sessions(db: AsyncSession) -> dict[str, int]:
@@ -779,19 +796,114 @@ def _warm_path_priority(person: Any) -> int:
     }.get(getattr(person, "warm_path_type", None), 2)
 
 
+def _score_bridge_relevance(
+    connection: LinkedInGraphConnection,
+    *,
+    job_title: str | None = None,
+    department: str | None = None,
+) -> tuple[int, str]:
+    """Score how relevant a connection is as a bridge for a given job.
+
+    Returns (score, display_name) — higher score = better bridge.
+    Recruiter/talent connections rank highest because they can actually
+    refer or forward internally.  Same-department peers rank next.
+    """
+    headline = (connection.headline or "").lower()
+    score = 0
+
+    # Recruiter/talent acquisition → best possible bridge
+    recruiter_signals = (
+        "recruiter", "recruiting", "talent acquisition",
+        "talent scout", "sourcer", "campus recruiter",
+        "university recruiter",
+    )
+    if any(signal in headline for signal in recruiter_signals):
+        score += 50
+
+    # HR / people ops → good bridge
+    hr_signals = ("human resources", " hr ", "people ops", "people operations")
+    if any(signal in headline for signal in hr_signals):
+        score += 40
+
+    # Same department signal from job title
+    if job_title:
+        job_lower = job_title.lower()
+        # Engineering roles
+        eng_signals = ("engineer", "developer", "swe", "sde", "devops", "infrastructure")
+        if any(s in job_lower for s in eng_signals) and any(s in headline for s in eng_signals):
+            score += 30
+        # Product roles
+        pm_signals = ("product manager", "product lead", "program manager")
+        if any(s in job_lower for s in pm_signals) and any(s in headline for s in pm_signals):
+            score += 30
+        # Data/ML roles
+        data_signals = ("data scien", "machine learning", " ml ", " ai ", "data engineer")
+        if any(s in job_lower for s in data_signals) and any(s in headline for s in data_signals):
+            score += 30
+        # Design roles
+        design_signals = ("designer", "design lead", "ux ", "ui ")
+        if any(s in job_lower for s in design_signals) and any(s in headline for s in design_signals):
+            score += 30
+
+    # Department-level match if explicit department provided
+    if department:
+        dept_headline_map: dict[str, tuple[str, ...]] = {
+            "engineering": ("engineer", "developer", "swe", "sde", "devops", "infrastructure"),
+            "data_science": ("data scien", "machine learning", " ml ", " ai "),
+            "product_management": ("product manager", "product lead"),
+            "design": ("designer", "design", "ux"),
+        }
+        dept_signals = dept_headline_map.get(department, ())
+        if any(s in headline for s in dept_signals):
+            score += 15
+
+    # Tie-break: prefer connections with LinkedIn URLs (more useful for intros)
+    if connection.linkedin_url:
+        score += 1
+
+    return (score, connection.display_name or "")
+
+
+def _select_best_bridge(
+    connections: list[LinkedInGraphConnection],
+    *,
+    job_title: str | None = None,
+    department: str | None = None,
+) -> LinkedInGraphConnection | None:
+    """Pick the most relevant bridge connection for a job."""
+    if not connections:
+        return None
+    if len(connections) == 1:
+        return connections[0]
+
+    scored = [
+        (
+            _score_bridge_relevance(c, job_title=job_title, department=department),
+            c,
+        )
+        for c in connections
+    ]
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    return scored[0][1]
+
+
 def apply_warm_path_annotations(
     bucketed: dict[str, list[Any]],
     *,
     company_name: str,
     your_connections: list[LinkedInGraphConnection],
     direct_connections: list[LinkedInGraphConnection] | None = None,
+    job_title: str | None = None,
+    department: str | None = None,
 ) -> None:
     by_slug = {
         connection.linkedin_slug: connection
         for connection in (direct_connections or your_connections)
         if connection.linkedin_slug
     }
-    bridge_connection = your_connections[0] if your_connections else None
+    bridge_connection = _select_best_bridge(
+        your_connections, job_title=job_title, department=department,
+    )
     bridge_company_name = bridge_connection.current_company_name if bridge_connection else company_name
 
     for people in bucketed.values():

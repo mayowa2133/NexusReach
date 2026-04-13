@@ -33,6 +33,9 @@ SYSTEM_PROMPT = """You are NexusReach, an AI assistant that helps job seekers wr
 RULES:
 - Be genuine and specific. Reference real details about the person, company, user, and role when available.
 - Keep the tone {tone}. Match the user's natural voice.
+- For emails, keep the body between 75 and 125 words. People scan emails; they don't read them. Cut every unnecessary word.
+- Use clean formatting: short paragraphs and bullet points where the RECIPIENT PLAYBOOK calls for them.
+- Always mention "I've attached my resume" near the close when channel is email.
 - Give the message one clear primary ask and at most one fallback ask.
 - The fallback ask should only appear as a brief redirect if this person is not the right owner.
 - Do not use generic "let's connect" wording unless the goal is explicitly warm_intro.
@@ -81,9 +84,35 @@ GOAL_CONTEXT = {
 }
 
 RECIPIENT_PLAYBOOKS = {
-    "recruiter": """Recruiter strategy: emphasize role fit, signal readiness, and ask for the next step toward interview consideration. If they are not the owner, briefly ask who on recruiting or the hiring team is best for this role.""",
-    "hiring_manager": """Hiring manager strategy: emphasize fit for the team, role, or problem space. Ask about the best path into the team or openness to brief consideration. If they are not the right contact, briefly ask which recruiter or teammate is best.""",
-    "peer": """Peer strategy: keep the tone collaborative. Ask for advice, referral comfort, or the best path to the right person. Do not ask the peer to give you an interview directly.""",
+    "recruiter": """RECRUITER — THE GATEKEEPER
+What they care about: filling the specific job requisition quickly with candidates who tick the exact boxes on the job description.
+Strategy: make their job as easy as possible. Do NOT get overly technical about project architecture. Instead, map the user's skills directly to keywords in the job posting. Include the Job ID if available.
+Email anatomy:
+1. State you applied and reach out directly. Include the job title and Job ID.
+2. Acknowledge what they are looking for (pull 2-3 key requirements from the JD).
+3. Bullet-point 2 matching qualifications — each bullet maps one JD requirement to one concrete user experience.
+4. Close with a clear ask: screening call or next step in the process.
+Keep the entire message between 75-125 words. Attach resume mention. If they are not the owner for this req, briefly ask who on the recruiting team owns it.""",
+
+    "hiring_manager": """HIRING MANAGER — THE DECISION MAKER
+What they care about: team velocity, solving technical bottlenecks, and hiring engineers who can ramp up quickly and ship features.
+Strategy: do NOT ask for a referral. Ask for an interview or consideration. Highlight a specific technical problem they are solving and connect it directly to the user's hands-on experience.
+Email anatomy:
+1. State you applied for the open role on their team.
+2. Reference something specific about their team — a product, feature, initiative, or technical challenge they are working on.
+3. Connect the user's strongest relevant achievement to that specific need (one concrete example with a result).
+4. Close by asking if the user's background aligns with their upcoming work and whether they would be open to a brief conversation.
+Keep the entire message between 75-125 words. Mention attached resume with links to GitHub/portfolio if available. If they are not the right contact, briefly ask which recruiter or teammate is best.""",
+
+    "peer": """PEER — THE POTENTIAL TEAMMATE
+What they care about: engineering culture, code quality, and working with someone who is competent and easy to get along with.
+Strategy: talk developer-to-developer. Since the user has already applied (or is about to), do NOT ask the peer to generate a referral link or go through a formal process. Instead, ask them to flag the user's name to the hiring manager if they think the user is a fit, or ask for candid thoughts on the team's engineering culture.
+Email anatomy:
+1. Introduce yourself as a fellow engineer/professional and mention that you applied for the role on their team.
+2. Reference something specific from their background (LinkedIn, GitHub, blog, a project they worked on) — show you did your homework.
+3. Briefly mention what you have been focused on technically (1 sentence, relevant to their team's stack).
+4. Close with one of: ask for candid thoughts on the team culture, OR ask if they would be comfortable flagging your name to the hiring manager after reviewing your attached resume.
+Keep the entire message between 75-125 words. Never ask a peer directly for an interview. Keep the tone collaborative and genuine.""",
 }
 
 PRIMARY_CTA_INSTRUCTIONS = {
@@ -94,9 +123,9 @@ PRIMARY_CTA_INSTRUCTIONS = {
 }
 
 STRATEGY_HINTS = {
-    "recruiter": "Recruiter strategy: fit + next step",
-    "hiring_manager": "Hiring manager strategy: team fit + best path in",
-    "peer": "Peer strategy: intro/referral path",
+    "recruiter": "Recruiter strategy: map skills to JD requirements, ask for screening call",
+    "hiring_manager": "Hiring manager strategy: reference their team's work, connect user's achievement to their need, ask for consideration",
+    "peer": "Peer strategy: dev-to-dev, reference their work, ask to flag name to hiring manager",
 }
 
 HTML_TAG_RE = re.compile(r"<[^>]+>")

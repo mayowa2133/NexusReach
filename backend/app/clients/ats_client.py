@@ -356,11 +356,40 @@ def _cleanup_generic_title(raw_title: str, company_name: str | None = None) -> s
     return title
 
 
+def _company_name_from_keywords(html: str) -> str:
+    """Extract company name from keywords meta tag.
+
+    Many career sites include the company name as the first keyword,
+    e.g. ``<meta name="keywords" content="ByteDance, Job, Careers...">``.
+    Only returns a candidate when the first keyword looks like a proper
+    company name (title-cased or all-caps, 2+ chars, no generic words).
+    """
+    raw = _extract_meta_content(html, "keywords")
+    if not raw:
+        return ""
+    first = raw.split(",")[0].strip()
+    if not first or len(first) < 2 or len(first) > 40:
+        return ""
+    # Reject generic leading keywords that aren't company names
+    generic = {
+        "jobs", "job", "careers", "career", "hiring", "employment",
+        "work", "apply", "openings", "opportunities", "vacancy",
+        "remote", "software", "engineering", "developer",
+    }
+    if first.lower() in generic:
+        return ""
+    # Require at least one uppercase letter (proper name signal)
+    if first == first.lower():
+        return ""
+    return first
+
+
 def _generic_company_name(page: dict, parsed: ParsedATSJobURL) -> str:
     html = page.get("html") or ""
     candidates = [
         _extract_meta_content(html, "og:site_name"),
         _extract_meta_content(html, "application-name"),
+        _company_name_from_keywords(html),
     ]
     for candidate in candidates:
         if candidate:
@@ -724,6 +753,22 @@ async def _probe_workday_job_redirect(parsed: ParsedATSJobURL) -> str | None:
     return "redirected"
 
 
+def _job_richness_score(job: dict) -> int:
+    """Score how much useful content a normalized job dict contains.
+
+    Higher = richer.  Used to pick the best result when multiple page
+    candidates (direct, Crawl4AI, Firecrawl) all produce a valid job.
+    """
+    score = 0
+    desc = job.get("description") or ""
+    score += min(len(desc), 4000)  # description length up to cap
+    if job.get("location"):
+        score += 200
+    if job.get("company_name") and job["company_name"] != _domain_root("").title():
+        score += 100
+    return score
+
+
 async def _fetch_exact_job_with_normalizer(
     parsed: ParsedATSJobURL,
     *,
@@ -735,12 +780,22 @@ async def _fetch_exact_job_with_normalizer(
     if not pages:
         raise ExactJobFetchError("Could not read the job posting page.")
 
+    # Collect all successful normalizations, pick the richest one.
+    candidates: list[dict] = []
     for page in pages:
         job = normalizer(parsed, page)
         if job:
-            return [job]
+            candidates.append(job)
 
-    raise ExactJobFetchError(error_message)
+    if not candidates:
+        raise ExactJobFetchError(error_message)
+
+    # When only one candidate or first is already rich, fast-path.
+    if len(candidates) == 1:
+        return [candidates[0]]
+
+    best = max(candidates, key=_job_richness_score)
+    return [best]
 
 
 async def _fetch_workable_exact_job(parsed: ParsedATSJobURL) -> list[dict]:

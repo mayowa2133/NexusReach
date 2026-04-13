@@ -59,6 +59,51 @@ GENERIC_CAREERS_HOST_ROOTS = {
     "myworkdayjobs",
 }
 
+# ---------------------------------------------------------------------------
+# Parent ↔ subsidiary / brand mapping
+#
+# Maps a *normalized* parent name to a frozenset of normalized subsidiary
+# names, and vice-versa.  ``company_family()`` returns the full family set
+# for any member (including itself).
+# ---------------------------------------------------------------------------
+
+_COMPANY_FAMILIES: list[frozenset[str]] = [
+    frozenset({"bytedance", "tiktok", "tiktok shop", "lark", "pico"}),
+    frozenset({"alphabet", "google", "deepmind", "waymo", "youtube", "google cloud", "verily", "wing"}),
+    frozenset({"meta", "facebook", "instagram", "whatsapp", "meta platforms", "oculus", "threads"}),
+    frozenset({"microsoft", "linkedin", "github", "azure", "nuance"}),
+    frozenset({"amazon", "aws", "amazon web services", "twitch", "whole foods", "ring", "audible"}),
+    frozenset({"apple", "apple inc"}),
+    frozenset({"salesforce", "slack", "tableau", "mulesoft"}),
+    frozenset({"broadcom", "vmware", "symantec"}),
+    frozenset({"oracle", "netsuite", "cerner"}),
+    frozenset({"uber", "uber eats", "uber freight"}),
+    frozenset({"snap", "snapchat"}),
+    frozenset({"block", "square", "cash app", "afterpay", "tidal"}),
+    frozenset({"paypal", "venmo", "braintree"}),
+    frozenset({"intuit", "turbotax", "quickbooks", "credit karma", "mailchimp"}),
+    frozenset({"cisco", "webex", "splunk"}),
+    frozenset({"ibm", "red hat", "hashicorp"}),
+    frozenset({"samsung", "samsung electronics", "samsung semiconductor"}),
+    frozenset({"jpmorgan", "jp morgan", "jpmorgan chase", "chase"}),
+]
+
+# Build a lookup: normalized_name → frozenset of the full family.
+_FAMILY_LOOKUP: dict[str, frozenset[str]] = {}
+for _family in _COMPANY_FAMILIES:
+    for _member in _family:
+        _FAMILY_LOOKUP[_member] = _family
+
+
+def company_family(name: str | None) -> frozenset[str]:
+    """Return the full family of related company names (normalized).
+
+    If the company isn't in any known family, returns a singleton set
+    containing the normalized name itself.
+    """
+    normalized = normalize_company_name(name)
+    return _FAMILY_LOOKUP.get(normalized, frozenset({normalized}))
+
 
 @dataclass
 class PublicIdentityHints:

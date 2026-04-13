@@ -3863,6 +3863,8 @@ async def search_people_for_job(
         company_name=job.company_name,
         your_connections=your_connections,
         direct_connections=direct_connections,
+        job_title=job.title,
+        department=context.department,
     )
     await db.commit()
 
