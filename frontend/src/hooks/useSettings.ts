@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import type { GuardrailsSettings } from '@/types';
+import type { AutoProspectSettings, GuardrailsSettings } from '@/types';
 
 export function useGuardrails() {
   return useQuery({
@@ -18,6 +18,26 @@ export function useUpdateGuardrails() {
       api.put<GuardrailsSettings>('/api/settings/guardrails', payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['settings', 'guardrails'] });
+    },
+  });
+}
+
+export function useAutoProspect() {
+  return useQuery({
+    queryKey: ['settings', 'auto-prospect'],
+    queryFn: () => api.get<AutoProspectSettings>('/api/settings/auto-prospect'),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useUpdateAutoProspect() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: Partial<AutoProspectSettings>) =>
+      api.put<AutoProspectSettings>('/api/settings/auto-prospect', payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['settings', 'auto-prospect'] });
     },
   });
 }

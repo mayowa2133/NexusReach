@@ -20,6 +20,7 @@ import {
   useUploadLinkedInGraphFile,
 } from '@/hooks/useLinkedInGraph';
 import { API_URL } from '@/lib/api';
+import { AutoProspectPanel } from '@/components/settings/AutoProspectPanel';
 import { GuardrailsPanel } from '@/components/settings/GuardrailsPanel';
 import { JobAlertsPanel } from '@/components/settings/JobAlertsPanel';
 import { toast } from 'sonner';
@@ -349,6 +350,11 @@ export function SettingsPage() {
           )}
         </CardContent>
       </Card>
+
+      <Separator />
+
+      {/* Auto-Prospect */}
+      <AutoProspectPanel />
 
       <Separator />
 

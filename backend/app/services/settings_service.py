@@ -23,6 +23,12 @@ TOGGLE_FIELDS = (
     "response_rate_warnings_enabled",
 )
 
+AUTO_PROSPECT_FIELDS = (
+    "auto_prospect_enabled",
+    "auto_prospect_company_names",
+    "auto_draft_on_apply",
+)
+
 
 async def get_guardrails(db: AsyncSession, user_id: uuid.UUID) -> dict:
     """Return current guardrails settings for a user."""
@@ -43,6 +49,73 @@ async def get_guardrails(db: AsyncSession, user_id: uuid.UUID) -> dict:
         }
 
     return {field: getattr(settings, field) for field in GUARDRAIL_FIELDS}
+
+
+async def get_auto_prospect(db: AsyncSession, user_id: uuid.UUID) -> dict:
+    """Return current auto-prospect settings for a user."""
+    result = await db.execute(
+        select(UserSettings).where(UserSettings.user_id == user_id)
+    )
+    settings = result.scalar_one_or_none()
+
+    if not settings:
+        return {
+            "auto_prospect_enabled": False,
+            "auto_prospect_company_names": None,
+            "auto_draft_on_apply": False,
+        }
+
+    return {field: getattr(settings, field) for field in AUTO_PROSPECT_FIELDS}
+
+
+async def update_auto_prospect(
+    db: AsyncSession, user_id: uuid.UUID, payload: dict,
+) -> dict:
+    """Partially update auto-prospect settings."""
+    result = await db.execute(
+        select(UserSettings).where(UserSettings.user_id == user_id)
+    )
+    settings = result.scalar_one_or_none()
+
+    if not settings:
+        settings = UserSettings(user_id=user_id)
+        db.add(settings)
+        await db.flush()
+
+    for key, value in payload.items():
+        if key in AUTO_PROSPECT_FIELDS and value is not None:
+            setattr(settings, key, value)
+
+    await db.commit()
+    await db.refresh(settings)
+
+    return {field: getattr(settings, field) for field in AUTO_PROSPECT_FIELDS}
+
+
+async def is_auto_prospect_enabled(
+    db: AsyncSession, user_id: uuid.UUID, company_name: str | None = None,
+) -> bool:
+    """Check if auto-prospect is enabled, optionally for a specific company."""
+    result = await db.execute(
+        select(UserSettings).where(UserSettings.user_id == user_id)
+    )
+    settings = result.scalar_one_or_none()
+    if not settings or not settings.auto_prospect_enabled:
+        return False
+
+    # null company list = all companies
+    if not settings.auto_prospect_company_names:
+        return True
+
+    if not company_name:
+        return True
+
+    # Check if company matches any in the list (case-insensitive)
+    company_lower = company_name.lower().strip()
+    return any(
+        name.lower().strip() == company_lower
+        for name in settings.auto_prospect_company_names
+    )
 
 
 async def complete_onboarding(db: AsyncSession, user_id: uuid.UUID) -> None:

@@ -352,9 +352,15 @@ export function JobDetailPage() {
             </div>
           )}
           {(job.apply_url || job.url) && (
-            <a href={job.apply_url || job.url!} target="_blank" rel="noopener noreferrer">
-              <Button>Apply Now</Button>
-            </a>
+            <Button onClick={() => {
+              // Mark as applied (triggers auto-draft if enabled) then open URL
+              if (job.stage !== 'applied') {
+                updateStage.mutate({ jobId: job.id, stage: 'applied' });
+              }
+              window.open(job.apply_url || job.url!, '_blank', 'noopener,noreferrer');
+            }}>
+              Apply Now
+            </Button>
           )}
         </div>
       </div>

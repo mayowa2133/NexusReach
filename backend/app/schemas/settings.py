@@ -47,3 +47,30 @@ class OnboardingCompleteResponse(BaseModel):
     """Response after marking onboarding as complete."""
 
     onboarding_completed: bool = True
+
+
+class AutoProspectResponse(BaseModel):
+    """Current auto-prospect configuration."""
+
+    auto_prospect_enabled: bool = Field(
+        default=False,
+        description="Auto-find people and emails when new jobs arrive",
+    )
+    auto_prospect_company_names: list[str] | None = Field(
+        default=None,
+        description="Company names to auto-prospect for. null = all companies.",
+    )
+    auto_draft_on_apply: bool = Field(
+        default=False,
+        description="Auto-draft outreach emails when marking a job as applied",
+    )
+
+    model_config = {"from_attributes": True}
+
+
+class AutoProspectUpdate(BaseModel):
+    """Partial update for auto-prospect settings."""
+
+    auto_prospect_enabled: Optional[bool] = None
+    auto_prospect_company_names: Optional[list[str]] = None
+    auto_draft_on_apply: Optional[bool] = None

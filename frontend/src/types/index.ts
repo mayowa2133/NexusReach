@@ -594,6 +594,12 @@ export interface GuardrailsSettings {
   onboarding_completed: boolean;
 }
 
+export interface AutoProspectSettings {
+  auto_prospect_enabled: boolean;
+  auto_prospect_company_names: string[] | null;
+  auto_draft_on_apply: boolean;
+}
+
 export interface LinkedInGraphSyncRun {
   id: string;
   source: 'local_sync' | 'manual_import' | string;

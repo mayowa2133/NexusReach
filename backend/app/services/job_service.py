@@ -709,6 +709,22 @@ async def update_job_stage(
 
     await db.commit()
     await db.refresh(job)
+
+    # Auto-draft outreach when moving to 'applied' (if enabled)
+    if stage == "applied" and old_stage != "applied":
+        try:
+            from app.services.settings_service import get_auto_prospect  # noqa: PLC0415
+
+            auto_settings = await get_auto_prospect(db, user_id)
+            if auto_settings.get("auto_draft_on_apply"):
+                from app.tasks.auto_prospect import auto_draft_for_job  # noqa: PLC0415
+                auto_draft_for_job.delay(str(user_id), str(job_id))
+                logger.info(
+                    "Auto-draft queued on apply: user=%s job=%s", user_id, job_id,
+                )
+        except Exception:
+            logger.debug("Auto-draft trigger check failed", exc_info=True)
+
     return job
 
 
@@ -1075,7 +1091,36 @@ async def _store_raw_jobs(
     if stored:
         await db.commit()
 
+        # Trigger auto-prospect for newly stored jobs (if enabled)
+        try:
+            await _maybe_auto_prospect(db, user_id, stored)
+        except Exception:
+            logger.debug("Auto-prospect trigger check failed", exc_info=True)
+
     return stored
+
+
+async def _maybe_auto_prospect(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    jobs: list,
+) -> None:
+    """Queue auto-prospect Celery tasks for new jobs if the user has it enabled."""
+    from app.services.settings_service import is_auto_prospect_enabled  # noqa: PLC0415
+
+    for job in jobs:
+        company = getattr(job, "company_name", None) or ""
+        if not await is_auto_prospect_enabled(db, user_id, company):
+            continue
+        try:
+            from app.tasks.auto_prospect import auto_prospect_job  # noqa: PLC0415
+            auto_prospect_job.delay(str(user_id), str(job.id))
+            logger.info(
+                "Auto-prospect queued: user=%s job=%s company=%s",
+                user_id, job.id, company,
+            )
+        except Exception:
+            logger.debug("Failed to queue auto-prospect task", exc_info=True)
 
 
 async def _resolve_supported_job_links(url: str, *, max_depth: int = 1) -> list[str]:
