@@ -82,6 +82,22 @@ class StageDraftsResponse(BaseModel):
     items: list[StageDraftsItem]
 
 
+class SendMessageRequest(BaseModel):
+    message_id: str
+    provider: str | None = None  # gmail | outlook — auto-detected if omitted
+
+
+class SendMessageResponse(BaseModel):
+    message_id: str
+    provider: str
+    status: str
+
+
+class CancelSendResponse(BaseModel):
+    message_id: str
+    status: str
+
+
 class EmailConnectionStatus(BaseModel):
     gmail_connected: bool
     outlook_connected: bool

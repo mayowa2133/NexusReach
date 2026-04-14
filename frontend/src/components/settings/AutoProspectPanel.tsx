@@ -121,7 +121,7 @@ export function AutoProspectPanel() {
             </Label>
             <p className="text-sm text-muted-foreground">
               When you click Apply on a job, automatically draft personalized outreach emails
-              for contacts who have been found. Drafts are never sent automatically.
+              for contacts who have been found.
             </p>
           </div>
           <Switch
@@ -132,6 +132,86 @@ export function AutoProspectPanel() {
             }
           />
         </div>
+
+        {/* Auto-stage toggle — shown when auto-draft is on */}
+        {settings.auto_draft_on_apply && (
+          <div className="flex items-center justify-between rounded-lg border border-dashed p-4 ml-4">
+            <div className="space-y-1 flex-1">
+              <Label htmlFor="auto-stage-toggle" className="font-medium">
+                Auto-Stage to Inbox
+              </Label>
+              <p className="text-sm text-muted-foreground">
+                Automatically stage drafted emails as inbox drafts in your connected
+                Gmail or Outlook account so they are ready to review and send.
+              </p>
+            </div>
+            <Switch
+              id="auto-stage-toggle"
+              checked={settings.auto_stage_on_apply}
+              onCheckedChange={(checked: boolean) =>
+                handleToggle('auto_stage_on_apply', checked)
+              }
+            />
+          </div>
+        )}
+
+        {/* Auto-send toggle — shown when auto-stage is on */}
+        {settings.auto_draft_on_apply && settings.auto_stage_on_apply && (
+          <div className="ml-8 space-y-3">
+            <div className="flex items-center justify-between rounded-lg border border-dashed p-4">
+              <div className="space-y-1 flex-1">
+                <Label htmlFor="auto-send-toggle" className="font-medium">
+                  Auto-Send After Delay
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  Automatically send staged emails after a configurable delay.
+                  You can cancel any scheduled send before it goes out.
+                </p>
+              </div>
+              <Switch
+                id="auto-send-toggle"
+                checked={settings.auto_send_enabled}
+                onCheckedChange={(checked: boolean) =>
+                  handleToggle('auto_send_enabled', checked)
+                }
+              />
+            </div>
+
+            {settings.auto_send_enabled && (
+              <>
+                <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+                  <p className="text-sm text-destructive font-medium">
+                    Auto-send is enabled. Emails will be sent automatically after the delay
+                    below. You can cancel individual sends from the Messages page.
+                  </p>
+                </div>
+                <div className="flex items-center gap-3 px-1">
+                  <Label htmlFor="send-delay" className="text-sm whitespace-nowrap">
+                    Send delay (minutes):
+                  </Label>
+                  <Input
+                    id="send-delay"
+                    type="number"
+                    min={5}
+                    max={1440}
+                    value={settings.auto_send_delay_minutes}
+                    onChange={async (e) => {
+                      const val = parseInt(e.target.value, 10);
+                      if (val >= 5 && val <= 1440) {
+                        try {
+                          await updateSettings.mutateAsync({ auto_send_delay_minutes: val });
+                        } catch {
+                          toast.error('Failed to update delay');
+                        }
+                      }
+                    }}
+                    className="w-24"
+                  />
+                </div>
+              </>
+            )}
+          </div>
+        )}
 
         {/* Company filter */}
         {settings.auto_prospect_enabled && (

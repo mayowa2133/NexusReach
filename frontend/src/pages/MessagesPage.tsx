@@ -22,6 +22,8 @@ import {
   useStageDraft,
   useStageDrafts,
   useVerifyEmail,
+  useSendMessage,
+  useCancelScheduledSend,
 } from '@/hooks/useEmail';
 import {
   formatEmailVerificationLabel,
@@ -230,6 +232,8 @@ function SingleMessagesView() {
   const findEmail = useFindEmail();
   const verifyEmail = useVerifyEmail();
   const stageDraft = useStageDraft();
+  const sendMessage = useSendMessage();
+  const cancelSend = useCancelScheduledSend();
   const { data: savedPeopleData } = useSavedPeople();
   const savedPeople = savedPeopleData?.items;
   const { data: jobsData } = useJobs();
@@ -358,6 +362,28 @@ function SingleMessagesView() {
       );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to stage draft');
+    }
+  };
+
+  const handleSendNow = async () => {
+    if (!activeDraft) return;
+    try {
+      await sendMessage.mutateAsync({ message_id: activeDraft.id });
+      setActiveDraft((current) => (current ? { ...current, status: 'sent', scheduled_send_at: null } : current));
+      toast.success('Email sent!');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to send');
+    }
+  };
+
+  const handleCancelSend = async () => {
+    if (!activeDraft) return;
+    try {
+      await cancelSend.mutateAsync(activeDraft.id);
+      setActiveDraft((current) => (current ? { ...current, scheduled_send_at: null } : current));
+      toast.success('Scheduled send cancelled');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to cancel');
     }
   };
 
@@ -706,6 +732,51 @@ function SingleMessagesView() {
                           </p>
                         )}
                       </div>
+
+                      {/* Send / Cancel for staged messages */}
+                      {activeDraft.status === 'staged' && (
+                        <div className="space-y-2 pt-2">
+                          <Separator />
+                          {activeDraft.scheduled_send_at ? (
+                            <div className="flex items-center justify-between">
+                              <p className="text-xs text-muted-foreground">
+                                Scheduled to send at{' '}
+                                {new Date(activeDraft.scheduled_send_at).toLocaleString()}
+                              </p>
+                              <div className="flex gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={handleCancelSend}
+                                  disabled={cancelSend.isPending}
+                                >
+                                  {cancelSend.isPending ? 'Cancelling...' : 'Cancel Send'}
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  onClick={handleSendNow}
+                                  disabled={sendMessage.isPending}
+                                >
+                                  {sendMessage.isPending ? 'Sending...' : 'Send Now'}
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex items-center justify-between">
+                              <p className="text-xs text-muted-foreground">
+                                Staged in inbox. Send directly from here or from your email client.
+                              </p>
+                              <Button
+                                size="sm"
+                                onClick={handleSendNow}
+                                disabled={sendMessage.isPending}
+                              >
+                                {sendMessage.isPending ? 'Sending...' : 'Send Now'}
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -1391,6 +1462,11 @@ function MessageHistoryCard({
             <Badge variant={STATUS_COLORS[message.status] || 'outline'} className="text-xs">
               {message.status}
             </Badge>
+            {message.scheduled_send_at && (
+              <Badge variant="secondary" className="text-xs">
+                Sends {new Date(message.scheduled_send_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </Badge>
+            )}
           </div>
           {message.person_title && <div className="text-xs text-muted-foreground">{message.person_title}</div>}
           <div className="text-sm text-muted-foreground truncate">

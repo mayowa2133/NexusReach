@@ -13,7 +13,7 @@ from app.models.settings import UserSettings
 MS_AUTH_URL = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
 MS_TOKEN_URL = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
 GRAPH_API_URL = "https://graph.microsoft.com/v1.0"
-SCOPES = "Mail.ReadWrite offline_access"
+SCOPES = "Mail.ReadWrite Mail.Send offline_access"
 
 
 def get_auth_url(redirect_uri: str, state: str = "") -> str:
@@ -163,5 +163,71 @@ async def create_draft(
     return {
         "draft_id": draft_data.get("id", ""),
         "message_id": draft_data.get("id", ""),
+        "provider": "outlook",
+    }
+
+
+async def send_message(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    to_email: str,
+    subject: str,
+    body: str,
+    from_name: str | None = None,
+) -> dict:
+    """Send an email directly via the user's Outlook account using Microsoft Graph.
+
+    Returns:
+        {"message_id": str, "provider": "outlook"} on success.
+    """
+    result = await db.execute(
+        select(UserSettings).where(UserSettings.user_id == user_id)
+    )
+    user_settings = result.scalar_one_or_none()
+    if not user_settings or not user_settings.outlook_refresh_token:
+        raise ValueError("Outlook not connected. Please connect Outlook in Settings.")
+
+    try:
+        access_token = await refresh_access_token(user_settings.outlook_refresh_token)
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError(
+            "Outlook session expired. Please reconnect Outlook in Settings."
+        ) from exc
+
+    html_body = body.replace("\n\n", "</p><p>").replace("\n", "<br>")
+    send_payload = {
+        "message": {
+            "subject": subject,
+            "body": {
+                "contentType": "HTML",
+                "content": f"<p>{html_body}</p>",
+            },
+            "toRecipients": [
+                {"emailAddress": {"address": to_email}}
+            ],
+        },
+        "saveToSentItems": True,
+    }
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.post(
+            f"{GRAPH_API_URL}/me/sendMail",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json",
+            },
+            json=send_payload,
+        )
+        if resp.status_code == 403:
+            raise ValueError(
+                "Outlook lacks send permission. Please disconnect and reconnect "
+                "Outlook in Settings to grant the Mail.Send scope."
+            )
+        resp.raise_for_status()
+
+    return {
+        "message_id": "",
         "provider": "outlook",
     }

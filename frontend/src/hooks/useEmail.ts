@@ -128,3 +128,33 @@ export function useOutlookAuthUrl(redirectUri: string) {
     enabled: !!redirectUri,
   });
 }
+
+export function useSendMessage() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (params: { message_id: string; provider?: string }) =>
+      api.post<{ message_id: string; provider: string; status: string }>(
+        '/api/email/send',
+        params,
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['messages'] });
+      queryClient.invalidateQueries({ queryKey: ['outreach'] });
+    },
+  });
+}
+
+export function useCancelScheduledSend() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (messageId: string) =>
+      api.post<{ message_id: string; status: string }>(
+        `/api/email/cancel-send/${messageId}`,
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['messages'] });
+    },
+  });
+}

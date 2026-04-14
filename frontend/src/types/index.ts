@@ -213,6 +213,7 @@ export interface Message {
   job_id?: string | null;
   person_name: string | null;
   person_title: string | null;
+  scheduled_send_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -598,6 +599,9 @@ export interface AutoProspectSettings {
   auto_prospect_enabled: boolean;
   auto_prospect_company_names: string[] | null;
   auto_draft_on_apply: boolean;
+  auto_stage_on_apply: boolean;
+  auto_send_enabled: boolean;
+  auto_send_delay_minutes: number;
 }
 
 export interface LinkedInGraphSyncRun {

@@ -27,6 +27,9 @@ AUTO_PROSPECT_FIELDS = (
     "auto_prospect_enabled",
     "auto_prospect_company_names",
     "auto_draft_on_apply",
+    "auto_stage_on_apply",
+    "auto_send_enabled",
+    "auto_send_delay_minutes",
 )
 
 
@@ -63,6 +66,9 @@ async def get_auto_prospect(db: AsyncSession, user_id: uuid.UUID) -> dict:
             "auto_prospect_enabled": False,
             "auto_prospect_company_names": None,
             "auto_draft_on_apply": False,
+            "auto_stage_on_apply": False,
+            "auto_send_enabled": False,
+            "auto_send_delay_minutes": 30,
         }
 
     return {field: getattr(settings, field) for field in AUTO_PROSPECT_FIELDS}

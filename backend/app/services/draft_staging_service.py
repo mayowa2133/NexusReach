@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 
 from sqlalchemy import select
@@ -10,8 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.message import Message
 from app.models.outreach import OutreachLog
 from app.models.person import Person
+from app.models.settings import UserSettings
 from app.services import gmail_service, outlook_service
 from app.services.outreach_service import create_outreach_log
+
+logger = logging.getLogger(__name__)
 
 
 def _message_job_id(message: Message) -> uuid.UUID | None:
@@ -190,4 +194,118 @@ async def stage_message_drafts(
         "staged_count": staged_count,
         "failed_count": failed_count,
         "items": items,
+    }
+
+
+async def resolve_connected_provider(
+    db: AsyncSession, user_id: uuid.UUID,
+) -> str | None:
+    """Return 'gmail' or 'outlook' if connected, else None."""
+    result = await db.execute(
+        select(UserSettings).where(UserSettings.user_id == user_id)
+    )
+    settings = result.scalar_one_or_none()
+    if not settings:
+        return None
+    if settings.gmail_connected and settings.gmail_refresh_token:
+        return "gmail"
+    if settings.outlook_connected and settings.outlook_refresh_token:
+        return "outlook"
+    return None
+
+
+async def _send_via_provider(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    provider: str,
+    to_email: str,
+    subject: str,
+    body: str,
+) -> dict:
+    if provider == "gmail":
+        return await gmail_service.send_message(
+            db=db,
+            user_id=user_id,
+            to_email=to_email,
+            subject=subject,
+            body=body,
+        )
+    if provider == "outlook":
+        return await outlook_service.send_message(
+            db=db,
+            user_id=user_id,
+            to_email=to_email,
+            subject=subject,
+            body=body,
+        )
+    raise ValueError("Invalid provider. Use 'gmail' or 'outlook'.")
+
+
+async def send_staged_message(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    message_id: uuid.UUID,
+    provider: str | None = None,
+) -> dict:
+    """Send a staged message via connected email provider.
+
+    Updates message status to 'sent' and outreach log status.
+    """
+    result = await db.execute(
+        select(Message).where(
+            Message.id == message_id,
+            Message.user_id == user_id,
+        )
+    )
+    message = result.scalar_one_or_none()
+    if not message:
+        raise ValueError("Message not found.")
+    if message.status == "sent":
+        raise ValueError("Message already sent.")
+    if message.channel != "email":
+        raise ValueError("Only email messages can be sent.")
+
+    result = await db.execute(select(Person).where(Person.id == message.person_id))
+    person = result.scalar_one_or_none()
+    if not person or not person.work_email:
+        raise ValueError("Recipient has no email address.")
+
+    if not provider:
+        provider = await resolve_connected_provider(db, user_id)
+    if not provider:
+        raise ValueError("No email provider connected. Connect Gmail or Outlook in Settings.")
+
+    subject = message.subject or "No subject"
+    send_result = await _send_via_provider(
+        db=db,
+        user_id=user_id,
+        provider=provider,
+        to_email=person.work_email,
+        subject=subject,
+        body=message.body,
+    )
+
+    message.status = "sent"
+    message.scheduled_send_at = None
+
+    # Update outreach log if exists
+    outreach_result = await db.execute(
+        select(OutreachLog).where(
+            OutreachLog.user_id == user_id,
+            OutreachLog.message_id == message_id,
+        )
+    )
+    outreach_log = outreach_result.scalar_one_or_none()
+    if outreach_log:
+        outreach_log.status = "sent"
+
+    await db.commit()
+
+    return {
+        "message_id": str(message_id),
+        "provider": provider,
+        "status": "sent",
+        "provider_message_id": send_result.get("message_id", ""),
     }

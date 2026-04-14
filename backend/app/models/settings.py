@@ -37,6 +37,9 @@ class UserSettings(Base):
     auto_prospect_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     auto_prospect_company_names: Mapped[list | None] = mapped_column(JSONB)
     auto_draft_on_apply: Mapped[bool] = mapped_column(Boolean, default=False)
+    auto_stage_on_apply: Mapped[bool] = mapped_column(Boolean, default=False)
+    auto_send_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    auto_send_delay_minutes: Mapped[int] = mapped_column(Integer, default=30)
     api_keys: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

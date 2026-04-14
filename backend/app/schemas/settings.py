@@ -64,6 +64,18 @@ class AutoProspectResponse(BaseModel):
         default=False,
         description="Auto-draft outreach emails when marking a job as applied",
     )
+    auto_stage_on_apply: bool = Field(
+        default=False,
+        description="Auto-stage drafted emails to inbox when applying",
+    )
+    auto_send_enabled: bool = Field(
+        default=False,
+        description="Auto-send staged emails after a delay",
+    )
+    auto_send_delay_minutes: int = Field(
+        default=30,
+        description="Delay in minutes before auto-sending staged emails",
+    )
 
     model_config = {"from_attributes": True}
 
@@ -74,3 +86,8 @@ class AutoProspectUpdate(BaseModel):
     auto_prospect_enabled: Optional[bool] = None
     auto_prospect_company_names: Optional[list[str]] = None
     auto_draft_on_apply: Optional[bool] = None
+    auto_stage_on_apply: Optional[bool] = None
+    auto_send_enabled: Optional[bool] = None
+    auto_send_delay_minutes: Optional[int] = Field(
+        default=None, ge=5, le=1440, description="Delay in minutes (5–1440)"
+    )

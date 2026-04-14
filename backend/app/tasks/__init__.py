@@ -44,6 +44,10 @@ celery_app.conf.update(
             "task": "app.tasks.known_people.maintain_known_people_cache",
             "schedule": crontab(minute=45, hour="*/8"),  # every 8 hours
         },
+        "process-pending-sends": {
+            "task": "app.tasks.auto_prospect.process_pending_sends",
+            "schedule": crontab(minute="*/5"),  # every 5 minutes
+        },
     },
 )
 

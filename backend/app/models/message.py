@@ -36,8 +36,11 @@ class Message(Base):
     context_snapshot: Mapped[dict | None] = mapped_column(JSONB)
 
     # Status tracking
-    status: Mapped[str] = mapped_column(String(50), default="draft")  # draft | edited | copied | sent
+    status: Mapped[str] = mapped_column(String(50), default="draft")  # draft | edited | copied | staged | sent
     version: Mapped[int] = mapped_column(Integer, default=1)
+    scheduled_send_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     parent_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("messages.id"), nullable=True
     )  # for re-drafts / follow-ups

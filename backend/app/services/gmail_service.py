@@ -250,3 +250,56 @@ async def create_draft(
         "message_id": draft_data.get("message", {}).get("id", ""),
         "provider": "gmail",
     }
+
+
+async def send_message(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    to_email: str,
+    subject: str,
+    body: str,
+    from_name: str | None = None,
+) -> dict:
+    """Send an email directly via the user's Gmail account.
+
+    Returns:
+        {"message_id": str, "provider": "gmail"} on success.
+    """
+    result = await db.execute(
+        select(UserSettings).where(UserSettings.user_id == user_id)
+    )
+    user_settings = result.scalar_one_or_none()
+    if not user_settings or not user_settings.gmail_refresh_token:
+        raise ValueError("Gmail not connected. Please connect Gmail in Settings.")
+
+    access_token = await _get_access_token(db, user_id, user_settings)
+
+    # Build MIME email
+    message = MIMEMultipart("alternative")
+    message["to"] = to_email
+    message["subject"] = subject
+    if from_name:
+        message["from"] = from_name
+
+    text_part = MIMEText(body, "plain")
+    message.attach(text_part)
+
+    html_body = body.replace("\n\n", "</p><p>").replace("\n", "<br>")
+    html_part = MIMEText(f"<p>{html_body}</p>", "html")
+    message.attach(html_part)
+
+    raw = base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.post(
+            f"{GMAIL_API_URL}/users/me/messages/send",
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={"raw": raw},
+        )
+        resp.raise_for_status()
+        send_data = resp.json()
+
+    return {
+        "message_id": send_data.get("id", ""),
+        "provider": "gmail",
+    }

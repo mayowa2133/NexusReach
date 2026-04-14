@@ -84,6 +84,8 @@ vi.mock('@/hooks/useEmail', () => ({
   useEmailConnectionStatus: () => ({ data: mockEmailConnectionStatus }),
   useStageDraft: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useStageDrafts: () => mockStageDrafts,
+  useSendMessage: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useCancelScheduledSend: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 function renderMessages(initialEntries: string[] = ['/messages']) {

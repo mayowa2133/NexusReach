@@ -33,6 +33,7 @@ class MessageResponse(BaseModel):
     job_id: str | None = None
     person_name: str | None = None
     person_title: str | None = None
+    scheduled_send_at: str | None = None
     created_at: str
     updated_at: str
 

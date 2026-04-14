@@ -18,10 +18,17 @@ from app.schemas.email import (
     StageDraftsResponse,
     StageDraftRequest,
     StageDraftResponse,
+    SendMessageRequest,
+    SendMessageResponse,
+    CancelSendResponse,
     EmailConnectionStatus,
 )
 from app.services import gmail_service, outlook_service
-from app.services.draft_staging_service import stage_message_draft, stage_message_drafts
+from app.services.draft_staging_service import (
+    stage_message_draft,
+    stage_message_drafts,
+    send_staged_message,
+)
 from app.services.email_finder_service import find_email_for_person, verify_person_email
 
 router = APIRouter(prefix="/email", tags=["email"])
@@ -204,4 +211,64 @@ async def stage_drafts(
         staged_count=result["staged_count"],
         failed_count=result["failed_count"],
         items=result["items"],
+    )
+
+
+# --- Sending ---
+
+
+@router.post("/send", response_model=SendMessageResponse)
+@limiter.limit("5/minute")
+async def send_message(
+    request: Request,
+    body: SendMessageRequest,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Send a staged email message via connected provider (Gmail or Outlook)."""
+    try:
+        result = await send_staged_message(
+            db=db,
+            user_id=user_id,
+            message_id=uuid.UUID(body.message_id),
+            provider=body.provider,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return SendMessageResponse(
+        message_id=result["message_id"],
+        provider=result["provider"],
+        status=result["status"],
+    )
+
+
+@router.post("/cancel-send/{message_id}", response_model=CancelSendResponse)
+async def cancel_scheduled_send(
+    message_id: str,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Cancel a scheduled auto-send for a message."""
+    from app.models.message import Message  # noqa: PLC0415
+
+    result = await db.execute(
+        select(Message).where(
+            Message.id == uuid.UUID(message_id),
+            Message.user_id == user_id,
+        )
+    )
+    message = result.scalar_one_or_none()
+    if not message:
+        raise HTTPException(status_code=404, detail="Message not found.")
+
+    if not message.scheduled_send_at:
+        raise HTTPException(status_code=400, detail="Message has no scheduled send.")
+
+    message.scheduled_send_at = None
+    await db.commit()
+
+    return CancelSendResponse(
+        message_id=str(message.id),
+        status=message.status,
     )
