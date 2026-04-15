@@ -19,6 +19,25 @@ class ProfileResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class AutofillProfileResponse(BaseModel):
+    """Lightweight profile for the Chrome extension autofill."""
+    full_name: str | None
+    first_name: str | None
+    last_name: str | None
+    email: str | None
+    phone: str | None
+    linkedin_url: str | None
+    github_url: str | None
+    portfolio_url: str | None
+    location: str | None
+    current_company: str | None
+    current_title: str | None
+    years_experience: str | None
+    education: str | None
+    skills: list[str]
+    target_roles: list[str]
+
+
 class ProfileUpdate(BaseModel):
     full_name: str | None = None
     bio: str | None = None

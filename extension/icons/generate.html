@@ -1,0 +1,44 @@
+<!--
+  Open this file in a browser to generate icon PNGs.
+  Right-click each canvas → "Save Image As" → icon16.png, icon48.png, icon128.png.
+  Or use the script below to auto-download.
+-->
+<!DOCTYPE html>
+<html>
+<body>
+<script>
+function drawIcon(size) {
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+
+  // Background
+  const r = size * 0.2;
+  ctx.beginPath();
+  ctx.roundRect(0, 0, size, size, r);
+  ctx.fillStyle = '#6366f1';
+  ctx.fill();
+
+  // Letter N
+  ctx.fillStyle = '#ffffff';
+  ctx.font = `bold ${size * 0.6}px -apple-system, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('N', size / 2, size / 2 + size * 0.02);
+
+  return canvas;
+}
+
+[16, 48, 128].forEach(size => {
+  const canvas = drawIcon(size);
+  const link = document.createElement('a');
+  link.download = `icon${size}.png`;
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+});
+
+document.body.textContent = 'Icons downloaded! Move them to extension/icons/';
+</script>
+</body>
+</html>
