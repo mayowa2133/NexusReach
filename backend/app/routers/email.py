@@ -13,6 +13,8 @@ from app.schemas.email import (
     OAuthCallbackRequest,
     OAuthUrlResponse,
     EmailFindResponse,
+    EmailLookupRequest,
+    EmailLookupResponse,
     EmailVerifyResponse,
     StageDraftsRequest,
     StageDraftsResponse,
@@ -23,6 +25,7 @@ from app.schemas.email import (
     CancelSendResponse,
     EmailConnectionStatus,
 )
+from app.services.email_lookup_service import lookup_email
 from app.services import gmail_service, outlook_service
 from app.services.draft_staging_service import (
     stage_message_draft,
@@ -70,6 +73,30 @@ async def verify_email(
         result = await verify_person_email(db, user_id, uuid.UUID(person_id))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    return result
+
+
+@router.post("/lookup", response_model=EmailLookupResponse)
+@limiter.limit("20/minute")
+async def lookup_hiring_manager_email(
+    request: Request,
+    body: EmailLookupRequest,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Look up a hiring manager's email from a LinkedIn URL or name + company.
+
+    Free-only: SMTP RCPT TO verification, then ranked pattern suggestions.
+    No Hunter, no Proxycurl. If verification fails, returns top 3 best guesses.
+    """
+    result = await lookup_email(
+        db,
+        linkedin_url=body.linkedin_url,
+        first_name=body.first_name,
+        last_name=body.last_name,
+        company_name=body.company_name,
+        company_domain=body.company_domain,
+    )
     return result
 
 

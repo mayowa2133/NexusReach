@@ -19,6 +19,7 @@ const OutreachPage = lazy(() => import('@/pages/OutreachPage').then((m) => ({ de
 const ProfilePage = lazy(() => import('@/pages/ProfilePage').then((m) => ({ default: m.ProfilePage })));
 const SettingsPage = lazy(() => import('@/pages/SettingsPage').then((m) => ({ default: m.SettingsPage })));
 const TrackerPage = lazy(() => import('@/pages/TrackerPage').then((m) => ({ default: m.TrackerPage })));
+const FindEmailPage = lazy(() => import('@/pages/FindEmailPage').then((m) => ({ default: m.FindEmailPage })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -71,6 +72,7 @@ function AppRoutes() {
         <Route path="/tracker" element={<ErrorBoundary><PageSuspense><TrackerPage /></PageSuspense></ErrorBoundary>} />
         <Route path="/profile" element={<ErrorBoundary><PageSuspense><ProfilePage /></PageSuspense></ErrorBoundary>} />
         <Route path="/settings" element={<ErrorBoundary><PageSuspense><SettingsPage /></PageSuspense></ErrorBoundary>} />
+        <Route path="/find-email" element={<ErrorBoundary><PageSuspense><FindEmailPage /></PageSuspense></ErrorBoundary>} />
       </Route>
 
       <Route path="*" element={<Navigate to="/dashboard" replace />} />

@@ -23,6 +23,7 @@ const navItems = [
   { path: '/people', label: 'People' },
   { path: '/messages', label: 'Messages' },
   { path: '/outreach', label: 'Outreach' },
+  { path: '/find-email', label: 'Find Email' },
 ];
 
 export function AppLayout() {

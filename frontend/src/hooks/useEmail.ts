@@ -145,6 +145,33 @@ export function useSendMessage() {
   });
 }
 
+export interface EmailLookupRequest {
+  linkedin_url?: string;
+  first_name?: string;
+  last_name?: string;
+  company_name?: string;
+  company_domain?: string;
+}
+
+export interface EmailLookupResult {
+  verified: boolean;
+  email: string | null;
+  domain: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  domain_status: string;
+  suggestions: { email: string; confidence: number }[];
+  known_company: boolean;
+  source: string;
+}
+
+export function useLookupEmail() {
+  return useMutation({
+    mutationFn: (params: EmailLookupRequest) =>
+      api.post<EmailLookupResult>('/api/email/lookup', params),
+  });
+}
+
 export function useCancelScheduledSend() {
   const queryClient = useQueryClient();
 
