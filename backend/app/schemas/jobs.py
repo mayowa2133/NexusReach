@@ -137,3 +137,31 @@ class MatchAnalysisResponse(BaseModel):
     recommendations: list[str]
     match_score: float | None = None
     model: str | None = None
+
+
+# --- Resume Tailoring ---
+
+class BulletRewrite(BaseModel):
+    original: str
+    rewritten: str
+    reason: str
+    experience_index: int | None = None
+
+
+class SectionSuggestion(BaseModel):
+    section: str
+    suggestion: str
+
+
+class TailoredResumeResponse(BaseModel):
+    id: str | None = None
+    job_id: str
+    summary: str
+    skills_to_emphasize: list[str]
+    skills_to_add: list[str]
+    keywords_to_add: list[str]
+    bullet_rewrites: list[BulletRewrite]
+    section_suggestions: list[SectionSuggestion]
+    overall_strategy: str
+    model: str | None = None
+    created_at: str | None = None

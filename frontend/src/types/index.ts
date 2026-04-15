@@ -403,6 +403,32 @@ export interface MatchAnalysis {
   model: string | null;
 }
 
+export interface BulletRewrite {
+  original: string;
+  rewritten: string;
+  reason: string;
+  experience_index: number | null;
+}
+
+export interface SectionSuggestion {
+  section: string;
+  suggestion: string;
+}
+
+export interface TailoredResume {
+  id: string | null;
+  job_id: string;
+  summary: string;
+  skills_to_emphasize: string[];
+  skills_to_add: string[];
+  keywords_to_add: string[];
+  bullet_rewrites: BulletRewrite[];
+  section_suggestions: SectionSuggestion[];
+  overall_strategy: string;
+  model: string | null;
+  created_at: string | null;
+}
+
 export interface JobSearchRequest {
   query: string;
   location?: string;

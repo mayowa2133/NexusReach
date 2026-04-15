@@ -11,6 +11,7 @@ import type {
   OfferDetails,
   PaginatedResponse,
   SearchPreference,
+  TailoredResume,
 } from '@/types';
 
 export function useJobSearch() {
@@ -202,5 +203,27 @@ export function useAnalyzeMatch() {
   return useMutation({
     mutationFn: (jobId: string) =>
       api.post<MatchAnalysis>(`/api/jobs/${jobId}/analyze-match`),
+  });
+}
+
+// --- Resume Tailoring ---
+
+export function useTailoredResume(jobId: string | undefined) {
+  return useQuery({
+    queryKey: ['tailored-resume', jobId],
+    queryFn: () => api.get<TailoredResume | null>(`/api/jobs/${jobId}/tailor-resume`),
+    enabled: !!jobId,
+  });
+}
+
+export function useTailorResume() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (jobId: string) =>
+      api.post<TailoredResume>(`/api/jobs/${jobId}/tailor-resume`),
+    onSuccess: (_data, jobId) => {
+      queryClient.invalidateQueries({ queryKey: ['tailored-resume', jobId] });
+    },
   });
 }
