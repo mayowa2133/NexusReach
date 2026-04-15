@@ -34,6 +34,8 @@ def _mock_job(user_id, **overrides):
     j.experience_level = overrides.get("experience_level", None)
     j.notes = overrides.get("notes", None)
     j.starred = overrides.get("starred", False)
+    j.applied_at = overrides.get("applied_at", None)
+    j.offer_details = overrides.get("offer_details", None)
     j.created_at = datetime(2024, 1, 15, tzinfo=timezone.utc)
     j.updated_at = datetime(2024, 1, 15, tzinfo=timezone.utc)
     return j
