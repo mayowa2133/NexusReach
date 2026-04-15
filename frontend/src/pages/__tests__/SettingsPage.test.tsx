@@ -50,6 +50,8 @@ const mockClearLinkedInGraph = { mutateAsync: vi.fn(), isPending: false };
 vi.mock('@/hooks/useSettings', () => ({
   useGuardrails: () => mockGuardrails,
   useUpdateGuardrails: () => mockUpdateGuardrails,
+  useAutoProspect: () => ({ data: undefined, isLoading: false }),
+  useUpdateAutoProspect: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 vi.mock('@/hooks/useEmail', () => ({
