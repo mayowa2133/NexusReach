@@ -394,6 +394,15 @@ export interface Job {
   updated_at: string;
 }
 
+export interface MatchAnalysis {
+  summary: string;
+  strengths: string[];
+  gaps: string[];
+  recommendations: string[];
+  match_score: number | null;
+  model: string | null;
+}
+
 export interface JobSearchRequest {
   query: string;
   location?: string;

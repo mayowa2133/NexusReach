@@ -19,6 +19,7 @@ from app.schemas.jobs import (
     SearchPreferenceToggle,
     DiscoverRequest,
     RefreshResponse,
+    MatchAnalysisResponse,
 )
 from app.services.job_service import (
     search_jobs,
@@ -267,6 +268,58 @@ async def get_single_job(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return _to_response(job)
+
+
+@router.post("/{job_id}/analyze-match", response_model=MatchAnalysisResponse)
+@limiter.limit("5/minute")
+async def analyze_match(
+    request: Request,
+    job_id: str,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get AI-powered match analysis for a job against the user's resume."""
+    from sqlalchemy import select  # noqa: PLC0415
+    from app.models.profile import Profile  # noqa: PLC0415
+    from app.services.match_scoring import score_job, deep_analyze_match  # noqa: PLC0415
+
+    job = await get_job(db, user_id, uuid.UUID(job_id))
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    result = await db.execute(
+        select(Profile).where(Profile.user_id == user_id)
+    )
+    profile = result.scalar_one_or_none()
+    if not profile or not profile.resume_parsed:
+        raise HTTPException(
+            status_code=400,
+            detail="Upload a resume in your profile first to analyze match.",
+        )
+
+    job_data = {
+        "title": job.title,
+        "company_name": job.company_name,
+        "location": job.location,
+        "description": job.description,
+        "remote": job.remote,
+        "experience_level": job.experience_level,
+    }
+    score, breakdown = score_job(job_data, profile)
+
+    try:
+        analysis = await deep_analyze_match(job_data, profile, score, breakdown)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return MatchAnalysisResponse(
+        summary=analysis.get("summary", ""),
+        strengths=analysis.get("strengths", []),
+        gaps=analysis.get("gaps", []),
+        recommendations=analysis.get("recommendations", []),
+        match_score=score,
+        model=analysis.get("model"),
+    )
 
 
 @router.put("/{job_id}/stage", response_model=JobResponse)

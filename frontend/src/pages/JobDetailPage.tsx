@@ -6,7 +6,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { useJobs, useUpdateJobStage, useToggleJobStar } from '@/hooks/useJobs';
+import { useJobs, useUpdateJobStage, useToggleJobStar, useAnalyzeMatch } from '@/hooks/useJobs';
 import { usePeopleSearch, useSavedPeople } from '@/hooks/usePeople';
 import { useFindEmail } from '@/hooks/useEmail';
 import { sanitizeHTML } from '@/lib/sanitize';
@@ -18,7 +18,7 @@ import {
   setStoredPeopleSearchTargetCount,
 } from '@/lib/peopleSearchCount';
 import { toast } from 'sonner';
-import type { Job, JobStage, Person, PeopleSearchResult } from '@/types';
+import type { Job, JobStage, MatchAnalysis, Person, PeopleSearchResult } from '@/types';
 
 const STAGES: { value: JobStage; label: string }[] = [
   { value: 'discovered', label: 'Discovered' },
@@ -257,6 +257,7 @@ export function JobDetailPage() {
   const navigate = useNavigate();
   const [searchResults, setSearchResults] = useState<PeopleSearchResult | null>(null);
   const [targetCount, setTargetCount] = useState(() => getStoredPeopleSearchTargetCount());
+  const [matchAnalysis, setMatchAnalysis] = useState<MatchAnalysis | null>(null);
 
   const { data: jobsData, isLoading } = useJobs();
   const job = jobsData?.items.find((j) => j.id === jobId) ?? null;
@@ -264,6 +265,7 @@ export function JobDetailPage() {
   const updateStage = useUpdateJobStage();
   const toggleStar = useToggleJobStar();
   const peopleSearch = usePeopleSearch();
+  const analyzeMatch = useAnalyzeMatch();
 
   const handleStageChange = async (stage: JobStage) => {
     if (!job) return;
@@ -395,6 +397,124 @@ export function JobDetailPage() {
               ? `From ${job.salary_currency || '$'}${Math.round(job.salary_min).toLocaleString()}`
               : `Up to ${job.salary_currency || '$'}${Math.round(job.salary_max!).toLocaleString()}`}
           </span>
+        </div>
+      )}
+
+      {/* Match Score Breakdown + Analyze */}
+      {job.match_score != null && job.score_breakdown && (
+        <Card>
+          <CardContent className="pt-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="font-medium text-sm">Match Breakdown</div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  try {
+                    const result = await analyzeMatch.mutateAsync(job.id);
+                    setMatchAnalysis(result);
+                  } catch (err) {
+                    toast.error(err instanceof Error ? err.message : 'Failed to analyze match');
+                  }
+                }}
+                disabled={analyzeMatch.isPending}
+              >
+                {analyzeMatch.isPending ? 'Analyzing...' : 'AI Analysis'}
+              </Button>
+            </div>
+
+            {/* Progress bars */}
+            <div className="space-y-1.5">
+              {(() => {
+                const maxes = (job.score_breakdown as Record<string, unknown>).category_maxes as Record<string, number> | undefined;
+                const labels: Record<string, string> = {
+                  skills_match: 'Skills',
+                  experience_match: 'Experience',
+                  role_match: 'Role Fit',
+                  location_match: 'Location',
+                  education_match: 'Education',
+                  level_fit: 'Level',
+                  industry_match: 'Industry',
+                };
+                const scoreKeys = ['skills_match', 'experience_match', 'role_match', 'location_match', 'education_match', 'level_fit'];
+                const entries = Object.entries(job.score_breakdown!)
+                  .filter(([key]) => scoreKeys.includes(key) || (!['category_maxes', 'max_possible', 'skills_detail', 'experience_detail', 'resume_not_uploaded'].includes(key) && typeof job.score_breakdown![key] === 'number'));
+                return entries.map(([key, value]) => {
+                  const max = maxes?.[key] ?? 10;
+                  const pct = max > 0 ? ((value as number) / max) * 100 : 0;
+                  return (
+                    <div key={key} className="space-y-0.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-muted-foreground">{labels[key] || key.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}</span>
+                        <span className="font-medium">{Number(value)}/{max}</span>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all ${pct >= 70 ? 'bg-green-500' : pct >= 40 ? 'bg-yellow-500' : 'bg-gray-400'}`}
+                          style={{ width: `${Math.min(pct, 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+
+            {/* Skills detail */}
+            {(() => {
+              const bd = job.score_breakdown as Record<string, unknown>;
+              const detail = bd.skills_detail as Record<string, unknown> | undefined;
+              const matched = detail?.matched as string[] | undefined;
+              if (!matched) return null;
+              return (
+                <div className="text-xs text-muted-foreground">
+                  Matched skills: {matched.length > 0 ? matched.join(', ') : 'none'}
+                </div>
+              );
+            })()}
+
+            {/* AI Analysis results */}
+            {matchAnalysis && (
+              <div className="space-y-2 pt-2 border-t">
+                <div className="text-sm font-medium">AI Match Analysis</div>
+                <p className="text-sm text-muted-foreground">{matchAnalysis.summary}</p>
+
+                {matchAnalysis.strengths.length > 0 && (
+                  <div>
+                    <div className="text-xs font-medium text-green-700 dark:text-green-400 mb-1">Strengths</div>
+                    <ul className="text-xs text-muted-foreground space-y-0.5">
+                      {matchAnalysis.strengths.map((s, i) => <li key={i}>+ {s}</li>)}
+                    </ul>
+                  </div>
+                )}
+
+                {matchAnalysis.gaps.length > 0 && (
+                  <div>
+                    <div className="text-xs font-medium text-red-700 dark:text-red-400 mb-1">Gaps</div>
+                    <ul className="text-xs text-muted-foreground space-y-0.5">
+                      {matchAnalysis.gaps.map((g, i) => <li key={i}>- {g}</li>)}
+                    </ul>
+                  </div>
+                )}
+
+                {matchAnalysis.recommendations.length > 0 && (
+                  <div>
+                    <div className="text-xs font-medium text-blue-700 dark:text-blue-400 mb-1">Recommendations</div>
+                    <ul className="text-xs text-muted-foreground space-y-0.5">
+                      {matchAnalysis.recommendations.map((r, i) => <li key={i}>→ {r}</li>)}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* No resume prompt */}
+      {job.match_score == null && (
+        <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground text-center">
+          Upload your resume in your Profile for match scores and AI analysis.
         </div>
       )}
 

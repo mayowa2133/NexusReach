@@ -100,6 +100,12 @@ async def update_profile(
     if "target_roles" in update_data or "target_locations" in update_data:
         await _seed_saved_searches(db, user_id, profile)
 
+    # Re-score jobs if scoring-relevant fields changed
+    scoring_fields = {"target_roles", "target_locations", "target_industries"}
+    if scoring_fields & set(update_data.keys()):
+        from app.tasks.jobs import rescore_user_jobs  # noqa: PLC0415
+        rescore_user_jobs.delay(str(user_id))
+
     return ProfileResponse(
         id=str(profile.id),
         full_name=profile.full_name,
@@ -146,4 +152,9 @@ async def upload_resume(
 
     await db.commit()
     await db.refresh(profile)
+
+    # Trigger background re-scoring of all jobs against the new resume
+    from app.tasks.jobs import rescore_user_jobs  # noqa: PLC0415
+    rescore_user_jobs.delay(str(user_id))
+
     return profile

@@ -275,74 +275,18 @@ async def _find_existing_job(
 
 # --- Scoring ---
 
+
 def _score_job(job_data: dict, profile: Profile | None) -> tuple[float, dict]:
-    """Score a job against the user's profile.
+    """Score a job against the user's profile using the enhanced scorer.
+
+    Delegates to match_scoring.score_job for multi-axis algorithmic matching
+    with skill synonyms, word-boundary matching, experience relevance, etc.
 
     Returns:
         (score 0-100, breakdown dict)
     """
-    if not profile:
-        return 0.0, {}
-
-    breakdown: dict[str, float] = {}
-    title = (job_data.get("title") or "").lower()
-    description = (job_data.get("description") or "").lower()
-    company = (job_data.get("company_name") or "").lower()
-    location = (job_data.get("location") or "").lower()
-    combined = f"{title} {description}"
-
-    # 1. Role match (0-30 points)
-    role_score = 0.0
-    if profile.target_roles:
-        for role in profile.target_roles:
-            if role.lower() in title:
-                role_score = 30.0
-                break
-            elif role.lower() in description:
-                role_score = 15.0
-    breakdown["role_match"] = role_score
-
-    # 2. Skills match (0-30 points)
-    skills_score = 0.0
-    if profile.resume_parsed and profile.resume_parsed.get("skills"):
-        skills = profile.resume_parsed["skills"]
-        matches = sum(1 for s in skills if s.lower() in combined)
-        skills_score = min(30.0, (matches / max(len(skills), 1)) * 60.0)
-    breakdown["skills_match"] = skills_score
-
-    # 3. Industry match (0-15 points)
-    industry_score = 0.0
-    if profile.target_industries:
-        for ind in profile.target_industries:
-            if ind.lower() in combined or ind.lower() in company:
-                industry_score = 15.0
-                break
-    breakdown["industry_match"] = industry_score
-
-    # 4. Location match (0-15 points)
-    location_score = 0.0
-    if profile.target_locations:
-        for loc in profile.target_locations:
-            if loc.lower() in location:
-                location_score = 15.0
-                break
-        if job_data.get("remote"):
-            location_score = max(location_score, 10.0)
-    elif job_data.get("remote"):
-        location_score = 10.0
-    breakdown["location_match"] = location_score
-
-    # 5. Experience level signals (0-10 points)
-    inferred_level = _experience_level_for_job(job_data)
-    level_score = 5.0
-    if inferred_level in {"intern", "new_grad"}:
-        level_score = 10.0
-    elif inferred_level == "senior":
-        level_score = 2.0
-    breakdown["level_fit"] = level_score
-
-    total = sum(breakdown.values())
-    return round(total, 1), breakdown
+    from app.services.match_scoring import score_job  # noqa: PLC0415
+    return score_job(job_data, profile)
 
 
 # --- Aggregation ---

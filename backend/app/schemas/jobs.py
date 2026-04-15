@@ -128,3 +128,12 @@ class DiscoverRequest(BaseModel):
 
 class RefreshResponse(BaseModel):
     new_jobs_found: int
+
+
+class MatchAnalysisResponse(BaseModel):
+    summary: str
+    strengths: list[str]
+    gaps: list[str]
+    recommendations: list[str]
+    match_score: float | None = None
+    model: str | None = None

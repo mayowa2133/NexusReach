@@ -3,6 +3,7 @@ import { api } from '@/lib/api';
 import type {
   ATSSearchRequest,
   DiscoverJobsRequest,
+  MatchAnalysis,
   InterviewRound,
   Job,
   JobSearchRequest,
@@ -194,5 +195,12 @@ export function useDeleteSavedSearch() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['saved-searches'] });
     },
+  });
+}
+
+export function useAnalyzeMatch() {
+  return useMutation({
+    mutationFn: (jobId: string) =>
+      api.post<MatchAnalysis>(`/api/jobs/${jobId}/analyze-match`),
   });
 }
