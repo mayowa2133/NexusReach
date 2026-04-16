@@ -50,6 +50,20 @@ MOCK_DASHBOARD = {
     "company_openness": [
         {"company_name": "TechCorp", "total_outreach": 4, "responses": 2, "rate": 50.0},
     ],
+    "job_pipeline": [
+        {"stage": "discovered", "count": 20},
+        {"stage": "applied", "count": 8},
+        {"stage": "interviewing", "count": 3},
+        {"stage": "offer", "count": 1},
+    ],
+    "api_usage_by_service": [
+        {"service": "hunter", "calls": 14, "cost_cents": 0},
+        {"service": "anthropic", "calls": 9, "cost_cents": 42},
+    ],
+    "graph_warm_paths": [
+        {"company_name": "TechCorp", "connection_count": 6},
+        {"company_name": "Acme Inc", "connection_count": 2},
+    ],
 }
 
 
@@ -78,6 +92,9 @@ async def test_dashboard_returns_full_data(client, mock_user_id):
     assert "network_gaps" in data
     assert "warm_paths" in data
     assert "company_openness" in data
+    assert "job_pipeline" in data
+    assert "api_usage_by_service" in data
+    assert "graph_warm_paths" in data
 
 
 async def test_dashboard_summary_fields(client, mock_user_id):
@@ -183,6 +200,50 @@ async def test_dashboard_company_openness(client, mock_user_id):
     assert openness[0]["rate"] == 50.0
 
 
+async def test_dashboard_job_pipeline(client, mock_user_id):
+    """Job pipeline returns counts grouped by stage."""
+    with patch(
+        "app.routers.insights.get_full_dashboard", new_callable=AsyncMock
+    ) as m:
+        m.return_value = MOCK_DASHBOARD
+        resp = await client.get("/api/insights/dashboard")
+
+    pipeline = resp.json()["job_pipeline"]
+    stages = {row["stage"]: row["count"] for row in pipeline}
+    assert stages["discovered"] == 20
+    assert stages["applied"] == 8
+    assert stages["interviewing"] == 3
+    assert stages["offer"] == 1
+
+
+async def test_dashboard_api_usage_by_service(client, mock_user_id):
+    """API usage breakdown groups by service over the rolling window."""
+    with patch(
+        "app.routers.insights.get_full_dashboard", new_callable=AsyncMock
+    ) as m:
+        m.return_value = MOCK_DASHBOARD
+        resp = await client.get("/api/insights/dashboard")
+
+    usage = resp.json()["api_usage_by_service"]
+    services = {row["service"]: row for row in usage}
+    assert services["hunter"]["calls"] == 14
+    assert services["anthropic"]["cost_cents"] == 42
+
+
+async def test_dashboard_graph_warm_paths(client, mock_user_id):
+    """Graph warm paths surface companies from the imported LinkedIn graph."""
+    with patch(
+        "app.routers.insights.get_full_dashboard", new_callable=AsyncMock
+    ) as m:
+        m.return_value = MOCK_DASHBOARD
+        resp = await client.get("/api/insights/dashboard")
+
+    graph = resp.json()["graph_warm_paths"]
+    assert len(graph) == 2
+    assert graph[0]["company_name"] == "TechCorp"
+    assert graph[0]["connection_count"] == 6
+
+
 async def test_dashboard_empty_state(client, mock_user_id):
     """Dashboard returns zeros and empty lists for new users."""
     empty = {
@@ -202,6 +263,9 @@ async def test_dashboard_empty_state(client, mock_user_id):
         "network_gaps": [],
         "warm_paths": [],
         "company_openness": [],
+        "job_pipeline": [],
+        "api_usage_by_service": [],
+        "graph_warm_paths": [],
     }
     with patch(
         "app.routers.insights.get_full_dashboard", new_callable=AsyncMock

@@ -55,6 +55,27 @@ class CompanyOpenness(BaseModel):
     rate: float
 
 
+class JobPipelineStage(BaseModel):
+    stage: str
+    count: int
+
+
+class ApiUsageByService(BaseModel):
+    service: str
+    calls: int
+    cost_cents: int
+
+
+class GraphWarmPathCompany(BaseModel):
+    """A company present in the user's imported LinkedIn graph.
+
+    Distinct from `WarmPath`, which is outreach-derived.
+    """
+
+    company_name: str
+    connection_count: int
+
+
 class InsightsDashboard(BaseModel):
     summary: DashboardSummary
     response_by_channel: list[ResponseRateBreakdown]
@@ -65,3 +86,6 @@ class InsightsDashboard(BaseModel):
     network_gaps: list[NetworkGap]
     warm_paths: list[WarmPath]
     company_openness: list[CompanyOpenness]
+    job_pipeline: list[JobPipelineStage]
+    api_usage_by_service: list[ApiUsageByService]
+    graph_warm_paths: list[GraphWarmPathCompany]

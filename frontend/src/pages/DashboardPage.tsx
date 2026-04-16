@@ -20,6 +20,9 @@ import { NetworkGrowthChart } from '@/components/dashboard/NetworkGrowthChart';
 import { NetworkGapsCard } from '@/components/dashboard/NetworkGapsCard';
 import { WarmPathsCard } from '@/components/dashboard/WarmPathsCard';
 import { CompanyOpennessTable } from '@/components/dashboard/CompanyOpennessTable';
+import { JobPipelineCard } from '@/components/dashboard/JobPipelineCard';
+import { ApiUsageCard } from '@/components/dashboard/ApiUsageCard';
+import { GraphWarmPathsCard } from '@/components/dashboard/GraphWarmPathsCard';
 
 const STATUS_COLORS: Record<string, 'default' | 'secondary' | 'outline' | 'destructive'> = {
   draft: 'outline',
@@ -139,6 +142,15 @@ export function DashboardPage() {
         <WarmPathsCard paths={insights?.warm_paths ?? []} />
         <NetworkGapsCard gaps={insights?.network_gaps ?? []} />
       </div>
+
+      {/* Row 4: Job Pipeline + Graph Warm Paths */}
+      <div className="grid gap-4 md:grid-cols-2">
+        <JobPipelineCard stages={insights?.job_pipeline ?? []} />
+        <GraphWarmPathsCard companies={insights?.graph_warm_paths ?? []} />
+      </div>
+
+      {/* Row 5: API Usage */}
+      <ApiUsageCard usage={insights?.api_usage_by_service ?? []} />
 
       {/* Job Feed: Latest Jobs + Refresh */}
       <Card>

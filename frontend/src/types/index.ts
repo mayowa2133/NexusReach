@@ -670,6 +670,22 @@ export interface LinkedInGraphSyncSession {
   max_batch_size: number;
 }
 
+export interface JobPipelineStage {
+  stage: string;
+  count: number;
+}
+
+export interface ApiUsageByService {
+  service: string;
+  calls: number;
+  cost_cents: number;
+}
+
+export interface GraphWarmPathCompany {
+  company_name: string;
+  connection_count: number;
+}
+
 export interface InsightsDashboard {
   summary: DashboardSummary;
   response_by_channel: ResponseRateBreakdown[];
@@ -680,4 +696,7 @@ export interface InsightsDashboard {
   network_gaps: NetworkGap[];
   warm_paths: WarmPath[];
   company_openness: CompanyOpenness[];
+  job_pipeline: JobPipelineStage[];
+  api_usage_by_service: ApiUsageByService[];
+  graph_warm_paths: GraphWarmPathCompany[];
 }
