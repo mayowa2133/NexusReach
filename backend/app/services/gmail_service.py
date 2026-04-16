@@ -303,3 +303,47 @@ async def send_message(
         "message_id": send_data.get("id", ""),
         "provider": "gmail",
     }
+
+
+async def check_draft_sent(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    provider_message_id: str,
+) -> dict:
+    """Check whether a staged Gmail draft has actually been sent.
+
+    Gmail converts a draft to a real message keeping the same message.id;
+    once the user hits send, the message gains the ``SENT`` label. A 404
+    response means the underlying message no longer exists (e.g. the draft
+    was discarded) — treat that as "unknown" so we don't flip status.
+
+    Returns:
+        {"sent": bool, "message_id": str | None, "label_ids": list[str]}
+    """
+    result = await db.execute(
+        select(UserSettings).where(UserSettings.user_id == user_id)
+    )
+    user_settings = result.scalar_one_or_none()
+    if not user_settings or not user_settings.gmail_refresh_token:
+        raise ValueError("Gmail not connected.")
+
+    access_token = await _get_access_token(db, user_id, user_settings)
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.get(
+            f"{GMAIL_API_URL}/users/me/messages/{provider_message_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={"format": "minimal"},
+        )
+
+    if resp.status_code == 404:
+        return {"sent": False, "message_id": None, "label_ids": []}
+    resp.raise_for_status()
+    data = resp.json()
+    label_ids = data.get("labelIds") or []
+    return {
+        "sent": "SENT" in label_ids and "DRAFT" not in label_ids,
+        "message_id": data.get("id"),
+        "label_ids": label_ids,
+    }

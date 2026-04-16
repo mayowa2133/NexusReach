@@ -10,11 +10,47 @@ from app.services.message_service import (
     _build_person_context,
     _build_history_context,
     _build_job_context,
+    _build_warm_path_context,
     _normalize_goal,
     _resolve_cta_plan,
     CHANNEL_INSTRUCTIONS,
     GOAL_CONTEXT,
 )
+
+
+def test_build_warm_path_context_none_returns_empty():
+    assert _build_warm_path_context(None) == ""
+    assert _build_warm_path_context({}) == ""
+    assert _build_warm_path_context({"type": "mystery"}) == ""
+
+
+def test_build_warm_path_context_direct_connection_mentions_existing_tie():
+    out = _build_warm_path_context(
+        {
+            "type": "direct_connection",
+            "connection_name": "Jane Doe",
+            "connection_headline": "Recruiter",
+            "connection_linkedin_url": "https://www.linkedin.com/in/jane-doe",
+        }
+    )
+    assert "WARM PATH" in out
+    assert "1st-degree LinkedIn connection with the recipient" in out
+    assert "Jane Doe" in out
+    assert "do NOT fabricate" in out
+
+
+def test_build_warm_path_context_bridge_warns_against_implying_intro():
+    out = _build_warm_path_context(
+        {
+            "type": "same_company_bridge",
+            "connection_name": "Maria Chan",
+            "connection_headline": "Senior Recruiter",
+            "connection_linkedin_url": None,
+        }
+    )
+    assert "same company" in out
+    assert "Maria Chan (Senior Recruiter)" in out
+    assert "Do not ask the recipient to vouch" in out
 
 
 def _make_profile(**overrides):

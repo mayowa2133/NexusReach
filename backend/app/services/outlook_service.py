@@ -231,3 +231,48 @@ async def send_message(
         "message_id": "",
         "provider": "outlook",
     }
+
+
+async def check_draft_sent(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    provider_message_id: str,
+) -> dict:
+    """Check whether a staged Outlook draft has actually been sent.
+
+    Microsoft Graph exposes an ``isDraft`` boolean and a ``sentDateTime``
+    on the message. When the user sends from the Outlook UI the draft is
+    moved out of the Drafts folder and ``isDraft`` flips to False. A 404
+    likely means the draft was discarded — treat as "not sent" / unknown.
+
+    Returns:
+        {"sent": bool, "message_id": str | None, "is_draft": bool}
+    """
+    result = await db.execute(
+        select(UserSettings).where(UserSettings.user_id == user_id)
+    )
+    user_settings = result.scalar_one_or_none()
+    if not user_settings or not user_settings.outlook_refresh_token:
+        raise ValueError("Outlook not connected.")
+
+    access_token = await refresh_access_token(user_settings.outlook_refresh_token)
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.get(
+            f"{GRAPH_API_URL}/me/messages/{provider_message_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={"$select": "id,isDraft,sentDateTime,parentFolderId"},
+        )
+
+    if resp.status_code == 404:
+        return {"sent": False, "message_id": None, "is_draft": False}
+    resp.raise_for_status()
+    data = resp.json()
+    is_draft = bool(data.get("isDraft", True))
+    sent_date = data.get("sentDateTime")
+    return {
+        "sent": (not is_draft) and bool(sent_date),
+        "message_id": data.get("id"),
+        "is_draft": is_draft,
+    }

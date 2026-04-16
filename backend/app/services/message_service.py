@@ -17,7 +17,7 @@ from app.models.outreach import OutreachLog
 from app.models.person import Person
 from app.models.profile import Profile
 from app.models.settings import UserSettings
-from app.services import api_usage_service
+from app.services import api_usage_service, linkedin_graph_service
 from app.services.email_finder_service import find_email_for_person
 from app.utils.job_context import extract_job_context
 
@@ -350,6 +350,43 @@ def _build_history_context(prior_messages: list[Message]) -> str:
     return "\n".join(lines)
 
 
+def _build_warm_path_context(warm_path: dict | None) -> str:
+    """Build a WARM PATH section for the drafting prompt."""
+    if not warm_path:
+        return ""
+
+    wp_type = warm_path.get("type")
+    name = warm_path.get("connection_name") or "a mutual connection"
+    headline = warm_path.get("connection_headline")
+
+    lines = ["WARM PATH (use naturally; do NOT fabricate details):"]
+    if wp_type == "direct_connection":
+        lines.append(
+            f"- You are already a 1st-degree LinkedIn connection with the recipient ({name})."
+        )
+        lines.append(
+            "- Acknowledge the existing connection briefly and warmly; do not pretend you are strangers."
+        )
+    elif wp_type == "same_company_bridge":
+        bridge_desc = f"{name}"
+        if headline:
+            bridge_desc += f" ({headline})"
+        lines.append(
+            f"- You have a 1st-degree LinkedIn connection at the same company: {bridge_desc}."
+        )
+        lines.append(
+            "- If it fits, mention that you already know this mutual contact as shared context. "
+            "Do not ask the recipient to vouch for them or imply an intro has been arranged."
+        )
+    else:
+        return ""
+
+    lines.append(
+        "- Keep it subtle. One short sentence is enough; never invent the nature of the relationship."
+    )
+    return "\n".join(lines)
+
+
 async def _load_guardrails(db: AsyncSession, user_id: uuid.UUID) -> tuple[bool, int]:
     result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
     settings = result.scalar_one_or_none()
@@ -626,6 +663,15 @@ async def draft_message(
     history_context = _build_history_context(prior_messages)
     job_context_text, job_context_snapshot = _build_job_context(job)
 
+    warm_path = await linkedin_graph_service.resolve_warm_path_for_person(
+        db,
+        user_id,
+        person,
+        job_title=(job.title if job else None),
+        department=person.department,
+    )
+    warm_path_context = _build_warm_path_context(warm_path)
+
     user_prompt_sections = [
         f"Draft a {channel.replace('_', ' ')} message.",
         "",
@@ -650,6 +696,9 @@ async def draft_message(
             job_context_text,
             "Prefer wording like 'this role' or 'this team' over generic references to opportunities at the company.",
         ])
+
+    if warm_path_context:
+        user_prompt_sections.extend(["", warm_path_context])
 
     if history_context:
         user_prompt_sections.extend(["", history_context])
@@ -701,6 +750,7 @@ async def draft_message(
             "job_id": str(job.id) if job else None,
             "job_context": job_context_snapshot,
             "strategy_hint": strategy_hint,
+            "warm_path": warm_path,
         },
         status="draft",
         version=version,

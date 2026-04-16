@@ -210,6 +210,7 @@ def _pref_to_response(pref) -> SearchPreferenceResponse:
         location=pref.location,
         remote_only=pref.remote_only,
         enabled=pref.enabled,
+        mode=pref.mode or "default",
         last_refreshed_at=pref.last_refreshed_at.isoformat() if pref.last_refreshed_at else None,
         new_jobs_found=pref.new_jobs_found or 0,
         created_at=pref.created_at.isoformat(),

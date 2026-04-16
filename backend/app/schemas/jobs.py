@@ -109,6 +109,7 @@ class SearchPreferenceResponse(BaseModel):
     location: str | None
     remote_only: bool
     enabled: bool
+    mode: Literal["default", "startup"] = "default"
     last_refreshed_at: str | None = None
     new_jobs_found: int = 0
     created_at: str

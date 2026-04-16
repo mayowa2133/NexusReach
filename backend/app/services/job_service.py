@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import logging
 import uuid
+from datetime import datetime, timezone
 from urllib.parse import urlparse, urlunparse
 
 from sqlalchemy import String, func as sa_func, not_, or_, select
@@ -40,12 +41,14 @@ from app.utils.startup_jobs import (
     STARTUP_TAG,
     append_startup_tags,
     extract_candidate_links,
+    has_startup_tag,
     is_supported_job_link,
     job_matches_any_query,
     looks_like_careers_page,
     merge_startup_tags,
     merge_tags,
     startup_discover_queries,
+    startup_source_tag,
     startup_tags,
 )
 
@@ -350,8 +353,12 @@ async def search_jobs(
     # Deduplicate and store
     stored_jobs: list[Job] = []
     seen_job_keys: set[str] = set()
+    known_startup_companies = (
+        await _load_known_startup_company_names(db, user_id) if raw_jobs else set()
+    )
 
     for data in raw_jobs:
+        _infer_startup_tags_for_job(data, known_startup_companies)
         fp = _fingerprint(
             data.get("company_name", ""),
             data.get("title", ""),
@@ -401,6 +408,7 @@ async def search_jobs(
     pref_stmt = select(SearchPreference).where(
         SearchPreference.user_id == user_id,
         SearchPreference.query == query.strip(),
+        SearchPreference.mode == "default",
     )
     pref_result = await db.execute(pref_stmt)
     existing_pref = pref_result.scalar_one_or_none()
@@ -410,6 +418,7 @@ async def search_jobs(
             query=query.strip(),
             location=location,
             remote_only=remote_only,
+            mode="default",
         ))
 
     await db.commit()
@@ -983,6 +992,49 @@ async def _discover_ats_boards(
     return total_new
 
 
+async def _load_known_startup_company_names(
+    db: AsyncSession, user_id: uuid.UUID
+) -> set[str]:
+    """Return the lowercased company names this user already has startup jobs for.
+
+    Used by ``_infer_startup_tags_for_job`` to tag new postings from the same
+    company even when they arrive via non-startup ingestion paths (e.g. a YC
+    company posting via Greenhouse).
+    """
+    try:
+        stmt = (
+            select(sa_func.lower(Job.company_name))
+            .where(
+                Job.user_id == user_id,
+                Job.tags.contains([STARTUP_TAG]),
+            )
+            .distinct()
+        )
+        result = await db.execute(stmt)
+        return {row.strip() for row in result.scalars().all() if row}
+    except Exception:
+        logger.debug("known-startup company lookup failed", exc_info=True)
+        return set()
+
+
+def _infer_startup_tags_for_job(
+    data: dict, known_startup_companies: set[str]
+) -> None:
+    """If a job's company is a known startup, merge inferred startup tags in-place.
+
+    Skips jobs that already carry authoritative startup tags from their
+    source-based ingestion path.
+    """
+    tags = data.get("tags") or []
+    if has_startup_tag(tags):
+        return
+    company = (data.get("company_name") or "").strip().lower()
+    if not company or company not in known_startup_companies:
+        return
+    inferred = [STARTUP_TAG, startup_source_tag("inferred")]
+    data["tags"] = merge_tags(tags, inferred)
+
+
 async def _store_raw_jobs(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -992,8 +1044,12 @@ async def _store_raw_jobs(
     """Deduplicate and store raw job dicts from any source."""
     stored: list[Job] = []
     seen_job_keys: set[str] = set()
+    known_startup_companies = (
+        await _load_known_startup_company_names(db, user_id) if raw_jobs else set()
+    )
 
     for data in raw_jobs:
+        _infer_startup_tags_for_job(data, known_startup_companies)
         fp = _fingerprint(data.get("company_name", ""), data.get("title", ""), data.get("location", ""))
         job_key = _job_identity_key(data, fingerprint=fp)
         if job_key in seen_job_keys:
@@ -1275,6 +1331,78 @@ async def _discover_startup_ecosystems(
     return total_new
 
 
+async def run_startup_refresh_for_query(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    query: str,
+) -> list[Job]:
+    """Re-run the startup discover flow for a single saved-search query.
+
+    Returns the list of Job rows that were newly created by this run so the
+    caller (Celery refresh task) can fire notifications. Matches the
+    snapshotting approach used by ``search_jobs`` but scoped to the startup
+    sources + ecosystems rather than standard job boards.
+    """
+    trimmed = (query or "").strip()
+    if not trimmed:
+        return []
+
+    result = await db.execute(select(Profile).where(Profile.user_id == user_id))
+    profile = result.scalar_one_or_none()
+
+    snapshot_time = datetime.now(timezone.utc)
+    queries = [trimmed]
+
+    try:
+        await _discover_startup_direct_sources(db, user_id, profile, queries)
+    except Exception:
+        logger.exception("Startup refresh: direct sources failed for query '%s'", trimmed)
+    try:
+        await _discover_startup_ecosystems(db, user_id, profile, queries)
+    except Exception:
+        logger.exception("Startup refresh: ecosystems failed for query '%s'", trimmed)
+
+    await db.commit()
+
+    new_rows = await db.execute(
+        select(Job)
+        .where(
+            Job.user_id == user_id,
+            Job.created_at >= snapshot_time,
+        )
+        .order_by(Job.created_at.desc())
+    )
+    return list(new_rows.scalars().all())
+
+
+async def _ensure_startup_search_preferences(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    queries: list[str],
+) -> None:
+    """Persist a SearchPreference(mode="startup") per query if not already stored."""
+    for raw_query in queries:
+        query = (raw_query or "").strip()
+        if not query:
+            continue
+        stmt = select(SearchPreference).where(
+            SearchPreference.user_id == user_id,
+            SearchPreference.query == query,
+            SearchPreference.mode == "startup",
+        )
+        result = await db.execute(stmt)
+        if result.scalar_one_or_none() is None:
+            db.add(
+                SearchPreference(
+                    user_id=user_id,
+                    query=query,
+                    location=None,
+                    remote_only=False,
+                    mode="startup",
+                )
+            )
+
+
 async def discover_jobs(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -1300,6 +1428,11 @@ async def discover_jobs(
         )
         total_new = await _discover_startup_direct_sources(db, user_id, profile, startup_queries)
         total_new += await _discover_startup_ecosystems(db, user_id, profile, startup_queries)
+        # Persist search preferences with mode="startup" so the hourly Celery
+        # refresh can re-run the startup discover flow instead of falling back
+        # to the default job-board search.
+        await _ensure_startup_search_preferences(db, user_id, startup_queries)
+        await db.commit()
         return total_new
 
     search_list = (

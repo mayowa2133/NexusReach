@@ -12,7 +12,7 @@ from app.database import async_session
 from app.models.notification import Notification
 from app.models.search_preference import SearchPreference
 from app.models.company import Company
-from app.services.job_service import search_jobs
+from app.services.job_service import run_startup_refresh_for_query, search_jobs
 from app.services.notification_service import create_notification
 
 logger = logging.getLogger(__name__)
@@ -66,13 +66,21 @@ async def _refresh_user_feeds(user_id: uuid.UUID) -> int:
 
         for pref in preferences:
             try:
-                new_jobs = await search_jobs(
-                    db=db,
-                    user_id=user_id,
-                    query=pref.query,
-                    location=pref.location,
-                    remote_only=pref.remote_only,
-                )
+                pref_mode = getattr(pref, "mode", "default") or "default"
+                if pref_mode == "startup":
+                    new_jobs = await run_startup_refresh_for_query(
+                        db=db,
+                        user_id=user_id,
+                        query=pref.query,
+                    )
+                else:
+                    new_jobs = await search_jobs(
+                        db=db,
+                        user_id=user_id,
+                        query=pref.query,
+                        location=pref.location,
+                        remote_only=pref.remote_only,
+                    )
 
                 # Record refresh metadata
                 pref.last_refreshed_at = datetime.now(timezone.utc)
