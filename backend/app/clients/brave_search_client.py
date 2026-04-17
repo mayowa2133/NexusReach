@@ -9,6 +9,7 @@ uses 1 query and returns up to 20 results.
 """
 
 import re
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
@@ -27,6 +28,17 @@ PUBLIC_RESULT_REJECTION_TERMS = (
     "directory",
 )
 
+LOCATION_SNIPPET_PATTERNS = (
+    re.compile(
+        r"\b([A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+){0,3},\s*"
+        r"(?:[A-Z]{2}|[A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+){0,2})"
+        r"(?:,\s*(?:[A-Z]{2}|[A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+){0,2}))?)\b"
+    ),
+    re.compile(r"\b(Greater\s+[A-Z][A-Za-z.'-]+\s+Area(?:,\s*[A-Z][A-Za-z.'-]+)?)\b"),
+    re.compile(r"\b([A-Z][A-Za-z.'-]+\s+Bay\s+Area)\b"),
+    re.compile(r"\b(Remote)\b", re.IGNORECASE),
+)
+
 
 def _clean_profile_url(url: str) -> str:
     return re.split(r"[?#]", url or "")[0].rstrip("/")
@@ -39,6 +51,40 @@ def _quoted_or_clause(terms: list[str] | None, *, limit: int) -> str:
     if len(filtered) == 1:
         return filtered[0]
     return f'({" OR ".join(filtered)})'
+
+
+def _geo_query_clause(geo_terms: list[str] | None, *, limit: int = 4) -> str:
+    clause = _quoted_or_clause(geo_terms, limit=limit)
+    return f" {clause}" if clause else ""
+
+
+def _extract_candidate_location(*values: str) -> str | None:
+    for value in values:
+        text = (value or "").strip()
+        if not text:
+            continue
+        for pattern in LOCATION_SNIPPET_PATTERNS:
+            match = pattern.search(text)
+            if match:
+                return match.group(1).strip()
+    return None
+
+
+def _attach_search_query_metadata(
+    result: dict,
+    *,
+    query: str,
+    query_index: int,
+    geo_terms: list[str] | None = None,
+) -> dict:
+    updated = dict(result)
+    profile_data = dict(updated.get("profile_data") or {})
+    profile_data["search_query"] = query
+    profile_data["search_query_index"] = query_index
+    if geo_terms:
+        profile_data["search_geo_terms"] = geo_terms
+    updated["profile_data"] = profile_data
+    return updated
 
 
 def _is_product_family(normalized: str) -> bool:
@@ -71,6 +117,69 @@ def _public_role_hint(titles: list[str] | None) -> str:
     if any(keyword in normalized for keyword in ("manager", "director", "lead")):
         return '("manager" OR "director" OR "lead")'
     return ""
+
+
+def _is_manager_public_search(titles: list[str] | None) -> bool:
+    normalized = " ".join(title.lower() for title in (titles or []) if title)
+    return any(
+        keyword in normalized
+        for keyword in (
+            "engineering manager",
+            "software engineering manager",
+            "director of engineering",
+            "head of engineering",
+            "group engineering manager",
+            "manager",
+            "director",
+            "lead",
+        )
+    )
+
+
+def _manager_public_leader_queries(
+    company_name: str,
+    *,
+    titles: list[str] | None = None,
+    geo_terms: list[str] | None = None,
+    public_identity_terms: list[str] | None = None,
+) -> list[str]:
+    if not _is_manager_public_search(titles) or not geo_terms:
+        return []
+
+    geo_clause = _quoted_or_clause(geo_terms, limit=4)
+    if not geo_clause:
+        return []
+
+    leader_clause = (
+        '("Engineering Manager" OR "Software Engineering Manager" OR '
+        '"Software Development Manager" OR '
+        '"Senior Engineering Manager" OR "Group Engineering Manager" OR '
+        '"Director of Engineering" OR "Head of Engineering" OR '
+        '"VP Engineering" OR "Engineering Leader")'
+    )
+    current_clause = f'("current" OR "at {company_name}" OR "{company_name}")'
+    queries: list[str] = []
+
+    for slug in public_identity_terms[:2] if public_identity_terms else []:
+        clean_slug = (slug or "").strip().lower()
+        if not clean_slug:
+            continue
+        queries.append(
+            f'site:theorg.com/org/{clean_slug} "{company_name}" {leader_clause} {geo_clause}'
+        )
+        queries.append(
+            f'site:theorg.com/org/{clean_slug} "{company_name}" {leader_clause} {geo_clause} {current_clause}'
+        )
+
+    queries.append(
+        f'("{company_name}" {leader_clause} {geo_clause} {current_clause}) '
+        '(site:theorg.com OR site:linkedin.com/in OR site:linkedin.com/posts)'
+    )
+    queries.append(
+        f'("{company_name}" {leader_clause} {geo_clause}) '
+        '(site:theorg.com OR site:linkedin.com/in OR site:linkedin.com/posts)'
+    )
+    return queries
 
 
 def _broad_role_queries(company_name: str, titles: list[str] | None) -> list[str]:
@@ -114,6 +223,40 @@ def _broad_role_queries(company_name: str, titles: list[str] | None) -> list[str
         queries.append(f'site:linkedin.com/in "at {company_name}" "VP of Engineering"')
 
     return queries
+
+
+def _recruiter_recovery_profile_queries(
+    company_name: str,
+    *,
+    geo_terms: list[str] | None = None,
+    team_keywords: list[str] | None = None,
+) -> list[str]:
+    geo_part = _geo_query_clause(geo_terms)
+    team_part = f' "{team_keywords[0]}"' if team_keywords else ""
+    queries = [
+        f'site:linkedin.com/in "{company_name}" recruiter{geo_part}',
+        f'site:linkedin.com/in "{company_name}" "talent acquisition"{geo_part}',
+        f'site:linkedin.com/in "{company_name}" ("lead talent acquisition" OR "head of talent acquisition" OR "talent acquisition leader"){geo_part}',
+        f'site:linkedin.com/in "{company_name}" ("hiring in Canada" OR "responsible for hiring in Canada" OR "hiring in Canada and the US"){geo_part}',
+    ]
+    if team_part:
+        queries.append(f'site:linkedin.com/in "{company_name}" recruiter{team_part}{geo_part}')
+        queries.append(f'site:linkedin.com/in "{company_name}" "talent acquisition"{team_part}{geo_part}')
+    return list(dict.fromkeys(query for query in queries if query))
+
+
+def _recruiter_recovery_post_queries(
+    company_name: str,
+    *,
+    geo_terms: list[str] | None = None,
+) -> list[str]:
+    geo_part = _geo_query_clause(geo_terms)
+    queries = [
+        f'site:linkedin.com/posts "{company_name}" ("hiring in Canada" OR "responsible for hiring in Canada" OR "hiring in Canada and the US"){geo_part}',
+        f'site:linkedin.com/posts "{company_name}" ("talent acquisition" OR recruiter){geo_part}',
+        f'site:linkedin.com/posts "{company_name}" ("Toronto" OR "Canada") ("talent acquisition" OR recruiter)',
+    ]
+    return list(dict.fromkeys(query for query in queries if query))
 
 
 async def _run_brave_query(query: str, count: int) -> list[dict]:
@@ -250,6 +393,7 @@ def _parse_linkedin_result(item: dict, company_name: str) -> dict | None:
     company_in_title = _company_name_in_title(company_name, title_raw)
     snippet = item.get("description", "")
     company_in_snippet = company_name.lower() in (snippet or "").lower()
+    location = _extract_candidate_location(title_clean, snippet)
 
     return {
         "full_name": full_name,
@@ -262,9 +406,12 @@ def _parse_linkedin_result(item: dict, company_name: str) -> dict | None:
         "apollo_id": "",
         "source": "brave_search",
         "snippet": snippet,
+        "location": location,
         "profile_data": {
             "linkedin_result_title": title_clean,
             "company_match_confidence": "strong_signal" if company_in_title else ("weak_signal" if company_in_snippet else "unverified"),
+            "location": location,
+            "location_source": "serp_snippet" if location else None,
         },
     }
 
@@ -319,6 +466,7 @@ def _parse_public_people_result(item: dict, company_name: str) -> dict | None:
     public_identity = extract_public_identity_hints(public_url)
     if public_identity.get("page_type") in {"team", "org"}:
         return None
+    location = _extract_candidate_location(clean_title, description)
 
     return {
         "full_name": full_name,
@@ -330,11 +478,16 @@ def _parse_public_people_result(item: dict, company_name: str) -> dict | None:
         "apollo_id": "",
         "source": source,
         "snippet": description,
+        "location": location,
         "profile_data": {
             "public_url": public_url,
             "public_host": public_identity.get("host"),
             "public_identity_slug": public_identity.get("company_slug"),
             "public_page_type": public_identity.get("page_type"),
+            "linkedin_result_title": clean_title if "linkedin.com" in parsed_url.netloc else None,
+            "public_snippet": description,
+            "location": location,
+            "location_source": "serp_snippet" if location else None,
         },
     }
 
@@ -343,8 +496,10 @@ async def search_people(
     company_name: str,
     titles: list[str] | None = None,
     team_keywords: list[str] | None = None,
+    geo_terms: list[str] | None = None,
     limit: int = 10,
     company_domain: str | None = None,
+    debug_trace: dict[str, Any] | None = None,
 ) -> list[dict]:
     """Search for people at a company via Brave Web Search LinkedIn X-ray.
 
@@ -371,28 +526,50 @@ async def search_people(
         team_part = f' "{team_keywords[0]}"'
 
     domain_part = f' "{company_domain}"' if company_domain else ""
+    geo_part = _geo_query_clause(geo_terms)
 
     # Broad role-family queries first — they catch non-standard titles
-    queries: list[str] = _broad_role_queries(company_name, titles)
+    queries: list[str] = []
+    for query in _broad_role_queries(company_name, titles):
+        if geo_part:
+            queries.append(f"{query}{geo_part}")
+        queries.append(query)
     # Title-specific queries: scoped (with team keyword) then unscoped for recall
     for batch in _title_batches(titles, batch_size=2):
         title_clause = _quoted_or_clause(batch, limit=2)
         title_part = f" {title_clause}" if title_clause else ""
         if team_part:
+            if geo_part:
+                queries.append(f'site:linkedin.com/in "at {company_name}"{title_part}{team_part}{geo_part}')
+                queries.append(f'site:linkedin.com/in "{company_name}"{domain_part}{title_part}{team_part}{geo_part}')
             queries.append(f'site:linkedin.com/in "at {company_name}"{title_part}{team_part}')
             queries.append(f'site:linkedin.com/in "{company_name}"{domain_part}{title_part}{team_part}')
         if company_domain:
+            if geo_part:
+                queries.append(f'site:linkedin.com/in "at {company_name}"{title_part}{geo_part}')
+                queries.append(f'"{company_name}" "{company_domain}" site:linkedin.com/in{title_part}{geo_part}')
             queries.append(f'site:linkedin.com/in "at {company_name}"{title_part}')
             queries.append(f'"{company_name}" "{company_domain}" site:linkedin.com/in{title_part}')
+        if geo_part:
+            queries.append(f'site:linkedin.com/in "{company_name}"{domain_part}{title_part}{geo_part}')
         queries.append(f'site:linkedin.com/in "{company_name}"{domain_part}{title_part}')
 
     results: list[dict] = []
     seen_urls: set[str] = set()
-    for query in dict.fromkeys(queries):
+    unique_queries = list(dict.fromkeys(queries))
+    if debug_trace is not None:
+        debug_trace["queries"] = unique_queries
+    for query_index, query in enumerate(unique_queries):
         for item in await _run_brave_query(query, limit):
             person = _parse_linkedin_result(item, company_name)
             if not person:
                 continue
+            person = _attach_search_query_metadata(
+                person,
+                query=query,
+                query_index=query_index,
+                geo_terms=geo_terms,
+            )
             url = person.get("linkedin_url") or ""
             if url and url in seen_urls:
                 continue
@@ -411,6 +588,7 @@ async def search_exact_linkedin_profile(
     name_variants: list[str] | None = None,
     title_hints: list[str] | None = None,
     team_keywords: list[str] | None = None,
+    geo_terms: list[str] | None = None,
     limit: int = 3,
 ) -> list[dict]:
     """Search Brave for one person's LinkedIn profile at a target company."""
@@ -426,18 +604,19 @@ async def search_exact_linkedin_profile(
         seen_names.add(clean_name)
         ordered_names.append(clean_name)
 
-    queries: list[str] = [f'site:linkedin.com/in "{name}" "{company_name}"' for name in ordered_names]
+    geo_part = _geo_query_clause(geo_terms)
+    queries: list[str] = [f'site:linkedin.com/in "{name}" "{company_name}"{geo_part}' for name in ordered_names]
     title_clause = _quoted_or_clause(title_hints, limit=2)
     if title_clause:
         queries.extend(
-            f'site:linkedin.com/in "{name}" "{company_name}" {title_clause}'
+            f'site:linkedin.com/in "{name}" "{company_name}" {title_clause}{geo_part}'
             for name in ordered_names
         )
 
     keyword_clause = _quoted_or_clause(team_keywords, limit=2)
     if keyword_clause:
         queries.extend(
-            f'site:linkedin.com/in "{name}" "{company_name}" {keyword_clause}'
+            f'site:linkedin.com/in "{name}" "{company_name}" {keyword_clause}{geo_part}'
             for name in ordered_names
         )
 
@@ -469,7 +648,9 @@ async def search_public_people(
     titles: list[str] | None = None,
     team_keywords: list[str] | None = None,
     public_identity_terms: list[str] | None = None,
+    geo_terms: list[str] | None = None,
     limit: int = 5,
+    debug_trace: dict[str, Any] | None = None,
 ) -> list[dict]:
     """Search public web sources such as org charts and recruiter posts."""
     from app.clients.serper_search_client import _title_batches
@@ -477,6 +658,7 @@ async def search_public_people(
     team_part = ""
     if team_keywords:
         team_part = f' "{team_keywords[0]}"'
+    geo_part = _geo_query_clause(geo_terms)
 
     identity_part = ""
     if public_identity_terms:
@@ -485,6 +667,14 @@ async def search_public_people(
             identity_part = " " + " OR ".join(quoted_terms)
 
     queries: list[str] = []
+    queries.extend(
+        _manager_public_leader_queries(
+            company_name,
+            titles=titles,
+            geo_terms=geo_terms,
+            public_identity_terms=public_identity_terms,
+        )
+    )
     role_hint = _public_role_hint(titles)
     for slug in public_identity_terms[:2] if public_identity_terms else []:
         clean_slug = (slug or "").strip().lower()
@@ -495,14 +685,23 @@ async def search_public_people(
             first_clause = _quoted_or_clause((titles or [])[:2], limit=2)
             scoped_hint = first_clause
         if scoped_hint:
+            if geo_part:
+                queries.append(f'site:theorg.com/org/{clean_slug} "{company_name}" {scoped_hint}{geo_part}')
             queries.append(f'site:theorg.com/org/{clean_slug} "{company_name}" {scoped_hint}')
         else:
+            if geo_part:
+                queries.append(f'site:theorg.com/org/{clean_slug} "{company_name}"{geo_part}')
             queries.append(f'site:theorg.com/org/{clean_slug} "{company_name}"')
 
     # Build one public-web query per title batch to cover the full list
     for batch in _title_batches(titles, batch_size=2):
         title_clause = _quoted_or_clause(batch, limit=2)
         title_part = f" {title_clause}" if title_clause else ""
+        if geo_part:
+            queries.append(
+                f'("{company_name}"{title_part}{team_part}{identity_part}{geo_part}) '
+                '(site:theorg.com OR site:linkedin.com/posts OR site:clay.earth OR site:contactout.com)'
+            )
         queries.append(
             f'("{company_name}"{title_part}{team_part}{identity_part}) '
             '(site:theorg.com OR site:linkedin.com/posts OR site:clay.earth OR site:contactout.com)'
@@ -510,20 +709,117 @@ async def search_public_people(
 
     items: list[dict] = []
     seen_urls: set[str] = set()
-    for query in dict.fromkeys(queries):
+    unique_queries = list(dict.fromkeys(queries))
+    if debug_trace is not None:
+        debug_trace["queries"] = unique_queries
+    for query_index, query in enumerate(unique_queries):
         for item in await _run_brave_query(query, limit):
             clean_url = _clean_profile_url(item.get("url", ""))
             key = clean_url or f'{item.get("title", "")}|{item.get("description", "")}'
             if key in seen_urls:
                 continue
             seen_urls.add(key)
-            items.append(item)
+            normalized = dict(item)
+            normalized["_search_query"] = query
+            normalized["_search_query_index"] = query_index
+            items.append(normalized)
 
     results = []
     for item in items:
         person = _parse_public_people_result(item, company_name)
         if person:
+            results.append(
+                _attach_search_query_metadata(
+                    person,
+                    query=item.get("_search_query", ""),
+                    query_index=item.get("_search_query_index", 0),
+                    geo_terms=geo_terms,
+                )
+            )
+    return results[:limit]
+
+
+async def search_recruiter_recovery_profiles(
+    company_name: str,
+    *,
+    team_keywords: list[str] | None = None,
+    geo_terms: list[str] | None = None,
+    limit: int = 5,
+    debug_trace: dict[str, Any] | None = None,
+) -> list[dict]:
+    results: list[dict] = []
+    seen_urls: set[str] = set()
+    queries = _recruiter_recovery_profile_queries(
+        company_name,
+        geo_terms=geo_terms,
+        team_keywords=team_keywords,
+    )
+    if debug_trace is not None:
+        debug_trace["queries"] = queries
+    for query_index, query in enumerate(queries):
+        for item in await _run_brave_query(query, limit):
+            person = _parse_linkedin_result(item, company_name)
+            if not person:
+                continue
+            person = _attach_search_query_metadata(
+                person,
+                query=query,
+                query_index=query_index,
+                geo_terms=geo_terms,
+            )
+            url = person.get("linkedin_url") or ""
+            if url and url in seen_urls:
+                continue
+            if url:
+                seen_urls.add(url)
             results.append(person)
+        if len(results) >= limit:
+            break
+    return results[:limit]
+
+
+async def search_recruiter_recovery_posts(
+    company_name: str,
+    *,
+    geo_terms: list[str] | None = None,
+    limit: int = 5,
+    debug_trace: dict[str, Any] | None = None,
+) -> list[dict]:
+    items: list[dict] = []
+    seen_urls: set[str] = set()
+    queries = _recruiter_recovery_post_queries(
+        company_name,
+        geo_terms=geo_terms,
+    )
+    if debug_trace is not None:
+        debug_trace["queries"] = queries
+    for query_index, query in enumerate(queries):
+        for item in await _run_brave_query(query, limit):
+            clean_url = _clean_profile_url(item.get("url", ""))
+            key = clean_url or f'{item.get("title", "")}|{item.get("description", "")}'
+            if key in seen_urls:
+                continue
+            seen_urls.add(key)
+            normalized = dict(item)
+            normalized["_search_query"] = query
+            normalized["_search_query_index"] = query_index
+            items.append(normalized)
+        if len(items) >= limit:
+            break
+
+    results: list[dict] = []
+    for item in items:
+        person = _parse_public_people_result(item, company_name)
+        if not person:
+            continue
+        results.append(
+            _attach_search_query_metadata(
+                person,
+                query=item.get("_search_query", ""),
+                query_index=item.get("_search_query_index", 0),
+                geo_terms=geo_terms,
+            )
+        )
     return results[:limit]
 
 
@@ -544,6 +840,7 @@ def _parse_hiring_team_result(item: dict, company_name: str) -> list[dict]:
     description = item.get("description", "")
     url = item.get("url", "")
     results: list[dict] = []
+    location = _extract_candidate_location(description)
 
     if not description and not url:
         return results
@@ -576,6 +873,11 @@ def _parse_hiring_team_result(item: dict, company_name: str) -> list[dict]:
                     "apollo_id": "",
                     "source": "brave_hiring_team",
                     "snippet": description[:200],
+                    "location": location,
+                    "profile_data": {
+                        "location": location,
+                        "location_source": "serp_snippet" if location else None,
+                    },
                 })
 
     # Also look for LinkedIn /in/ profile URLs embedded in the description
@@ -599,6 +901,11 @@ def _parse_hiring_team_result(item: dict, company_name: str) -> list[dict]:
                 "apollo_id": "",
                 "source": "brave_hiring_team",
                 "snippet": description[:200],
+                "location": location,
+                "profile_data": {
+                    "location": location,
+                    "location_source": "serp_snippet" if location else None,
+                },
             })
 
     return results
@@ -608,7 +915,9 @@ async def search_hiring_team(
     company_name: str,
     job_title: str,
     team_keywords: list[str] | None = None,
+    geo_terms: list[str] | None = None,
     limit: int = 5,
+    debug_trace: dict[str, Any] | None = None,
 ) -> list[dict]:
     """Search for the LinkedIn job posting to find hiring team members.
 
@@ -628,12 +937,23 @@ async def search_hiring_team(
     team_part = ""
     if team_keywords:
         team_part = f' "{team_keywords[0]}"'
+    geo_part = _geo_query_clause(geo_terms)
 
-    query = f'site:linkedin.com/jobs "{company_name}" "{job_title}"{team_part}'
+    query = f'site:linkedin.com/jobs "{company_name}" "{job_title}"{team_part}{geo_part}'
+    if debug_trace is not None:
+        debug_trace["queries"] = [query]
     items = await _run_brave_query(query, 5)
     results: list[dict] = []
     for item in items:
-        results.extend(_parse_hiring_team_result(item, company_name))
+        for parsed in _parse_hiring_team_result(item, company_name):
+            results.append(
+                _attach_search_query_metadata(
+                    parsed,
+                    query=query,
+                    query_index=0,
+                    geo_terms=geo_terms,
+                )
+            )
 
     return results[:limit]
 

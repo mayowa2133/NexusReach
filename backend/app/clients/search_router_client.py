@@ -34,7 +34,7 @@ def _provider_order(raw: str, *, allowed: set[str], default: list[str]) -> list[
 
 
 # Bump this version when the cached response schema changes to auto-invalidate stale entries.
-CACHE_KEY_VERSION = "v2"
+CACHE_KEY_VERSION = "v3"
 
 
 def _cache_key(family: str, provider: str, params: dict[str, Any]) -> str:
@@ -43,7 +43,41 @@ def _cache_key(family: str, provider: str, params: dict[str, Any]) -> str:
     return f"search:{CACHE_KEY_VERSION}:{family}:{provider}:{digest}"
 
 
-PROVIDER_TIMEOUT_SECONDS = 10
+DEFAULT_PROVIDER_TIMEOUT_SECONDS = 10
+INTERACTIVE_PROVIDER_TIMEOUT_SECONDS = 4
+FAST_INTERACTIVE_PROVIDER_TIMEOUT_SECONDS = 2
+INTERACTIVE_PROVIDER_ORDERS: dict[str, list[str]] = {
+    "search_people": ["searxng", "brave"],
+    "search_exact_linkedin_profile": ["searxng", "brave"],
+    "search_public_people": ["brave", "searxng"],
+    "search_hiring_team": ["searxng", "brave"],
+}
+INTERACTIVE_MAX_PROVIDERS = 2
+FAST_INTERACTIVE_MAX_PROVIDERS = 1
+
+
+def _effective_provider_order(
+    family: str,
+    *,
+    order: list[str],
+    search_profile: str,
+) -> list[str]:
+    if search_profile != "interactive":
+        if search_profile != "interactive_fast":
+            return order
+    preferred = INTERACTIVE_PROVIDER_ORDERS.get(family) or []
+    prioritized = [provider for provider in preferred if provider in order]
+    remaining = [provider for provider in order if provider not in prioritized]
+    max_providers = INTERACTIVE_MAX_PROVIDERS if search_profile == "interactive" else FAST_INTERACTIVE_MAX_PROVIDERS
+    return (prioritized + remaining)[:max_providers]
+
+
+def _provider_timeout_seconds(*, search_profile: str) -> int:
+    if search_profile == "interactive_fast":
+        return FAST_INTERACTIVE_PROVIDER_TIMEOUT_SECONDS
+    if search_profile == "interactive":
+        return INTERACTIVE_PROVIDER_TIMEOUT_SECONDS
+    return DEFAULT_PROVIDER_TIMEOUT_SECONDS
 
 
 async def _cached_provider_results(
@@ -51,8 +85,15 @@ async def _cached_provider_results(
     provider: str,
     fetcher: ProviderFetcher,
     params: dict[str, Any],
+    *,
+    timeout_seconds: int,
 ) -> tuple[list[dict], bool]:
-    key = _cache_key(family, provider, params)
+    cacheable_params = {
+        key: value
+        for key, value in params.items()
+        if key != "debug_trace"
+    }
+    key = _cache_key(family, provider, cacheable_params)
     cached = await search_cache_client.get_json(key)
     if isinstance(cached, list):
         return cached, True
@@ -60,12 +101,12 @@ async def _cached_provider_results(
     try:
         results = await asyncio.wait_for(
             fetcher(**params),
-            timeout=PROVIDER_TIMEOUT_SECONDS,
+            timeout=timeout_seconds,
         )
     except asyncio.TimeoutError:
         logger.warning(
             "search provider timed out",
-            extra={"provider": provider, "family": family, "timeout": PROVIDER_TIMEOUT_SECONDS},
+            extra={"provider": provider, "family": family, "timeout": timeout_seconds},
         )
         return [], False
     except Exception as exc:  # pragma: no cover - defensive logging only
@@ -77,6 +118,19 @@ async def _cached_provider_results(
 
     await search_cache_client.set_json(key, results, ttl_seconds=settings.search_cache_ttl_seconds)
     return results, False
+
+
+def _debug_result_summary(item: dict) -> dict[str, Any]:
+    profile_data = item.get("profile_data") if isinstance(item.get("profile_data"), dict) else {}
+    return {
+        "full_name": item.get("full_name"),
+        "title": item.get("title"),
+        "source": item.get("source"),
+        "linkedin_url": item.get("linkedin_url"),
+        "location": item.get("location") or profile_data.get("location"),
+        "search_query": profile_data.get("search_query"),
+        "search_query_index": profile_data.get("search_query_index"),
+    }
 
 
 def _annotate_result(
@@ -142,19 +196,56 @@ async def _run_family(
     min_results: int,
     limit: int,
     params: dict[str, Any],
+    debug_traces: list[dict[str, Any]] | None = None,
+    search_profile: str = "standard",
 ) -> list[dict]:
     aggregated: list[dict] = []
     target_count = max(1, min(limit, min_results))
-    for depth, provider in enumerate(order):
+    effective_order = _effective_provider_order(
+        family,
+        order=order,
+        search_profile=search_profile,
+    )
+    timeout_seconds = _provider_timeout_seconds(search_profile=search_profile)
+    for depth, provider in enumerate(effective_order):
         fetcher = providers.get(provider)
         if fetcher is None:
             continue
-        results, cache_hit = await _cached_provider_results(family, provider, fetcher, params)
+        provider_trace: dict[str, Any] | None = None
+        if debug_traces is not None:
+            provider_trace = {
+                "family": family,
+                "provider": provider,
+                "fallback_depth": depth,
+                "search_profile": search_profile,
+                "timeout_seconds": timeout_seconds,
+                "params": {
+                    key: value
+                    for key, value in params.items()
+                    if key != "debug_trace"
+                },
+                "queries": [],
+            }
+            debug_traces.append(provider_trace)
+        call_params = dict(params)
+        if provider_trace is not None:
+            call_params["debug_trace"] = provider_trace
+        results, cache_hit = await _cached_provider_results(
+            family,
+            provider,
+            fetcher,
+            call_params,
+            timeout_seconds=timeout_seconds,
+        )
         if not results:
             logger.info(
                 "search provider empty",
                 extra={"provider": provider, "family": family, "fallback_depth": depth, "cache_hit": cache_hit},
             )
+            if provider_trace is not None:
+                provider_trace["cache_hit"] = cache_hit
+                provider_trace["result_count"] = 0
+                provider_trace["sample_results"] = []
             continue
 
         annotated = [
@@ -179,6 +270,14 @@ async def _run_family(
                 "aggregate_count": len(aggregated),
             },
         )
+        if provider_trace is not None:
+            provider_trace["cache_hit"] = cache_hit
+            provider_trace["result_count"] = len(results)
+            provider_trace["aggregate_count"] = len(aggregated)
+            provider_trace["sample_results"] = [
+                _debug_result_summary(item)
+                for item in annotated[:5]
+            ]
         if len(aggregated) >= target_count:
             break
 
@@ -189,9 +288,12 @@ async def search_people(
     company_name: str,
     titles: list[str] | None = None,
     team_keywords: list[str] | None = None,
+    geo_terms: list[str] | None = None,
     limit: int = 10,
     min_results: int = 1,
     company_domain: str | None = None,
+    debug_traces: list[dict[str, Any]] | None = None,
+    search_profile: str = "standard",
 ) -> list[dict]:
     providers: dict[str, ProviderFetcher] = {
         "searxng": searxng_search_client.search_people,
@@ -210,10 +312,13 @@ async def search_people(
         order=order,
         min_results=max(1, min_results),
         limit=limit,
+        debug_traces=debug_traces,
+        search_profile=search_profile,
         params={
             "company_name": company_name,
             "titles": titles,
             "team_keywords": team_keywords,
+            "geo_terms": geo_terms,
             "limit": limit,
             "company_domain": company_domain,
         },
@@ -227,7 +332,9 @@ async def search_exact_linkedin_profile(
     name_variants: list[str] | None = None,
     title_hints: list[str] | None = None,
     team_keywords: list[str] | None = None,
+    geo_terms: list[str] | None = None,
     limit: int = 3,
+    search_profile: str = "standard",
 ) -> list[dict]:
     providers: dict[str, ProviderFetcher] = {
         "searxng": searxng_search_client.search_exact_linkedin_profile,
@@ -246,12 +353,14 @@ async def search_exact_linkedin_profile(
         order=order,
         min_results=1,
         limit=limit,
+        search_profile=search_profile,
         params={
             "full_name": full_name,
             "company_name": company_name,
             "name_variants": name_variants,
             "title_hints": title_hints,
             "team_keywords": team_keywords,
+            "geo_terms": geo_terms,
             "limit": limit,
         },
     )
@@ -262,8 +371,11 @@ async def search_public_people(
     titles: list[str] | None = None,
     team_keywords: list[str] | None = None,
     public_identity_terms: list[str] | None = None,
+    geo_terms: list[str] | None = None,
     limit: int = 5,
     min_results: int = 1,
+    debug_traces: list[dict[str, Any]] | None = None,
+    search_profile: str = "standard",
 ) -> list[dict]:
     providers: dict[str, ProviderFetcher] = {
         "searxng": searxng_search_client.search_public_people,
@@ -282,11 +394,84 @@ async def search_public_people(
         order=order,
         min_results=max(1, min_results),
         limit=limit,
+        debug_traces=debug_traces,
+        search_profile=search_profile,
         params={
             "company_name": company_name,
             "titles": titles,
             "team_keywords": team_keywords,
             "public_identity_terms": public_identity_terms,
+            "geo_terms": geo_terms,
+            "limit": limit,
+        },
+    )
+
+
+async def search_recruiter_recovery_profiles(
+    company_name: str,
+    *,
+    team_keywords: list[str] | None = None,
+    geo_terms: list[str] | None = None,
+    limit: int = 5,
+    min_results: int = 1,
+    debug_traces: list[dict[str, Any]] | None = None,
+    search_profile: str = "standard",
+) -> list[dict]:
+    providers: dict[str, ProviderFetcher] = {
+        "searxng": searxng_search_client.search_recruiter_recovery_profiles,
+        "brave": brave_search_client.search_recruiter_recovery_profiles,
+    }
+    order = _provider_order(
+        settings.search_linkedin_provider_order,
+        allowed=set(providers),
+        default=["searxng", "brave"],
+    )
+    return await _run_family(
+        "search_recruiter_recovery_profiles",
+        providers=providers,
+        order=order,
+        min_results=max(1, min_results),
+        limit=limit,
+        debug_traces=debug_traces,
+        search_profile=search_profile,
+        params={
+            "company_name": company_name,
+            "team_keywords": team_keywords,
+            "geo_terms": geo_terms,
+            "limit": limit,
+        },
+    )
+
+
+async def search_recruiter_recovery_posts(
+    company_name: str,
+    *,
+    geo_terms: list[str] | None = None,
+    limit: int = 5,
+    min_results: int = 1,
+    debug_traces: list[dict[str, Any]] | None = None,
+    search_profile: str = "standard",
+) -> list[dict]:
+    providers: dict[str, ProviderFetcher] = {
+        "searxng": searxng_search_client.search_recruiter_recovery_posts,
+        "brave": brave_search_client.search_recruiter_recovery_posts,
+    }
+    order = _provider_order(
+        settings.search_public_provider_order,
+        allowed=set(providers),
+        default=["searxng", "brave"],
+    )
+    return await _run_family(
+        "search_recruiter_recovery_posts",
+        providers=providers,
+        order=order,
+        min_results=max(1, min_results),
+        limit=limit,
+        debug_traces=debug_traces,
+        search_profile=search_profile,
+        params={
+            "company_name": company_name,
+            "geo_terms": geo_terms,
             "limit": limit,
         },
     )
@@ -296,8 +481,11 @@ async def search_hiring_team(
     company_name: str,
     job_title: str,
     team_keywords: list[str] | None = None,
+    geo_terms: list[str] | None = None,
     limit: int = 5,
     min_results: int = 1,
+    debug_traces: list[dict[str, Any]] | None = None,
+    search_profile: str = "standard",
 ) -> list[dict]:
     providers: dict[str, ProviderFetcher] = {
         "searxng": searxng_search_client.search_hiring_team,
@@ -315,10 +503,13 @@ async def search_hiring_team(
         order=order,
         min_results=max(1, min_results),
         limit=limit,
+        debug_traces=debug_traces,
+        search_profile=search_profile,
         params={
             "company_name": company_name,
             "job_title": job_title,
             "team_keywords": team_keywords,
+            "geo_terms": geo_terms,
             "limit": limit,
         },
     )

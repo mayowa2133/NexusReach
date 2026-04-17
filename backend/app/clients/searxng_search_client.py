@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from typing import Any
 
 import httpx
 
@@ -68,14 +69,21 @@ async def search_people(
     company_name: str,
     titles: list[str] | None = None,
     team_keywords: list[str] | None = None,
+    geo_terms: list[str] | None = None,
     limit: int = 10,
     company_domain: str | None = None,
+    debug_trace: dict[str, Any] | None = None,
 ) -> list[dict]:
     team_part = f' "{team_keywords[0]}"' if team_keywords else ""
     domain_part = f' "{company_domain}"' if company_domain else ""
+    geo_part = brave_search_client._geo_query_clause(geo_terms)
 
     # Broad role-family queries first — they catch non-standard titles
-    queries: list[str] = brave_search_client._broad_role_queries(company_name, titles)
+    queries: list[str] = []
+    for query in brave_search_client._broad_role_queries(company_name, titles):
+        if geo_part:
+            queries.append(f"{query}{geo_part}")
+        queries.append(query)
 
     # Title-specific queries: generate BOTH scoped (with team keyword) and
     # unscoped variants.  Scoped queries run first for precision (e.g. finding
@@ -85,18 +93,29 @@ async def search_people(
         title_part = f" {title_clause}" if title_clause else ""
         # Scoped queries first (with team keyword for precision)
         if team_part:
+            if geo_part:
+                queries.append(f'site:linkedin.com/in "at {company_name}"{title_part}{team_part}{geo_part}')
+                queries.append(f'site:linkedin.com/in "{company_name}"{domain_part}{title_part}{team_part}{geo_part}')
             queries.append(f'site:linkedin.com/in "at {company_name}"{title_part}{team_part}')
             queries.append(f'site:linkedin.com/in "{company_name}"{domain_part}{title_part}{team_part}')
         # Unscoped queries for recall (without team keyword)
         if company_domain:
+            if geo_part:
+                queries.append(f'site:linkedin.com/in "at {company_name}"{title_part}{geo_part}')
+                queries.append(f'"{company_name}" "{company_domain}" site:linkedin.com/in{title_part}{geo_part}')
             queries.append(f'site:linkedin.com/in "at {company_name}"{title_part}')
             queries.append(f'"{company_name}" "{company_domain}" site:linkedin.com/in{title_part}')
+        if geo_part:
+            queries.append(f'site:linkedin.com/in "{company_name}"{domain_part}{title_part}{geo_part}')
         queries.append(f'site:linkedin.com/in "{company_name}"{domain_part}{title_part}')
 
     results: list[dict] = []
     seen_urls: set[str] = set()
     first_query = True
-    for query in dict.fromkeys(queries):
+    unique_queries = list(dict.fromkeys(queries))
+    if debug_trace is not None:
+        debug_trace["queries"] = unique_queries
+    for query_index, query in enumerate(unique_queries):
         if not first_query:
             await asyncio.sleep(0.5)
         first_query = False
@@ -107,6 +126,12 @@ async def search_people(
             )
             if not parsed:
                 continue
+            parsed = brave_search_client._attach_search_query_metadata(
+                parsed,
+                query=query,
+                query_index=query_index,
+                geo_terms=geo_terms,
+            )
             url = parsed.get("linkedin_url") or ""
             if url and url in seen_urls:
                 continue
@@ -118,6 +143,100 @@ async def search_people(
     return results[:limit]
 
 
+async def search_recruiter_recovery_profiles(
+    company_name: str,
+    *,
+    team_keywords: list[str] | None = None,
+    geo_terms: list[str] | None = None,
+    limit: int = 5,
+    debug_trace: dict[str, Any] | None = None,
+) -> list[dict]:
+    results: list[dict] = []
+    seen_urls: set[str] = set()
+    queries = brave_search_client._recruiter_recovery_profile_queries(
+        company_name,
+        geo_terms=geo_terms,
+        team_keywords=team_keywords,
+    )
+    if debug_trace is not None:
+        debug_trace["queries"] = queries
+    first_query = True
+    for query_index, query in enumerate(queries):
+        if not first_query:
+            await asyncio.sleep(0.5)
+        first_query = False
+        for item in await _run_searxng_query(query, limit):
+            parsed = brave_search_client._parse_linkedin_result(
+                _searxng_item_to_brave_item(item),
+                company_name,
+            )
+            if not parsed:
+                continue
+            parsed = brave_search_client._attach_search_query_metadata(
+                parsed,
+                query=query,
+                query_index=query_index,
+                geo_terms=geo_terms,
+            )
+            url = parsed.get("linkedin_url") or ""
+            if url and url in seen_urls:
+                continue
+            if url:
+                seen_urls.add(url)
+            results.append(_relabel_result(parsed, source="searxng_search"))
+        if len(results) >= limit:
+            break
+    return results[:limit]
+
+
+async def search_recruiter_recovery_posts(
+    company_name: str,
+    *,
+    geo_terms: list[str] | None = None,
+    limit: int = 5,
+    debug_trace: dict[str, Any] | None = None,
+) -> list[dict]:
+    items: list[dict] = []
+    seen_urls: set[str] = set()
+    queries = brave_search_client._recruiter_recovery_post_queries(
+        company_name,
+        geo_terms=geo_terms,
+    )
+    if debug_trace is not None:
+        debug_trace["queries"] = queries
+    first_query = True
+    for query_index, query in enumerate(queries):
+        if not first_query:
+            await asyncio.sleep(0.5)
+        first_query = False
+        for item in await _run_searxng_query(query, limit):
+            clean_url = brave_search_client._clean_profile_url(item.get("url", ""))
+            key = clean_url or f'{item.get("title", "")}|{item.get("content", "")}'
+            if key in seen_urls:
+                continue
+            seen_urls.add(key)
+            normalized = _searxng_item_to_brave_item(item)
+            normalized["_search_query"] = query
+            normalized["_search_query_index"] = query_index
+            items.append(normalized)
+        if len(items) >= limit:
+            break
+
+    results: list[dict] = []
+    for item in items:
+        parsed = brave_search_client._parse_public_people_result(item, company_name)
+        if not parsed:
+            continue
+        parsed = brave_search_client._attach_search_query_metadata(
+            parsed,
+            query=item.get("_search_query", ""),
+            query_index=item.get("_search_query_index", 0),
+            geo_terms=geo_terms,
+        )
+        results.append(_relabel_result(parsed, source="searxng_public_web"))
+    return results[:limit]
+
+
 async def search_exact_linkedin_profile(
     full_name: str,
     company_name: str,
@@ -125,6 +244,7 @@ async def search_exact_linkedin_profile(
     name_variants: list[str] | None = None,
     title_hints: list[str] | None = None,
     team_keywords: list[str] | None = None,
+    geo_terms: list[str] | None = None,
     limit: int = 3,
 ) -> list[dict]:
     if not full_name or not company_name:
@@ -139,18 +259,19 @@ async def search_exact_linkedin_profile(
         seen_names.add(clean_name)
         ordered_names.append(clean_name)
 
-    queries: list[str] = [f'site:linkedin.com/in "{name}" "{company_name}"' for name in ordered_names]
+    geo_part = brave_search_client._geo_query_clause(geo_terms)
+    queries: list[str] = [f'site:linkedin.com/in "{name}" "{company_name}"{geo_part}' for name in ordered_names]
     title_clause = brave_search_client._quoted_or_clause(title_hints, limit=2)
     if title_clause:
         queries.extend(
-            f'site:linkedin.com/in "{name}" "{company_name}" {title_clause}'
+            f'site:linkedin.com/in "{name}" "{company_name}" {title_clause}{geo_part}'
             for name in ordered_names
         )
 
     keyword_clause = brave_search_client._quoted_or_clause(team_keywords, limit=2)
     if keyword_clause:
         queries.extend(
-            f'site:linkedin.com/in "{name}" "{company_name}" {keyword_clause}'
+            f'site:linkedin.com/in "{name}" "{company_name}" {keyword_clause}{geo_part}'
             for name in ordered_names
         )
 
@@ -188,9 +309,12 @@ async def search_public_people(
     titles: list[str] | None = None,
     team_keywords: list[str] | None = None,
     public_identity_terms: list[str] | None = None,
+    geo_terms: list[str] | None = None,
     limit: int = 5,
+    debug_trace: dict[str, Any] | None = None,
 ) -> list[dict]:
     team_part = f' "{team_keywords[0]}"' if team_keywords else ""
+    geo_part = brave_search_client._geo_query_clause(geo_terms)
 
     identity_part = ""
     if public_identity_terms:
@@ -199,6 +323,14 @@ async def search_public_people(
             identity_part = " " + " OR ".join(quoted_terms)
 
     queries: list[str] = []
+    queries.extend(
+        brave_search_client._manager_public_leader_queries(
+            company_name,
+            titles=titles,
+            geo_terms=geo_terms,
+            public_identity_terms=public_identity_terms,
+        )
+    )
     role_hint = brave_search_client._public_role_hint(titles)
     for slug in public_identity_terms[:2] if public_identity_terms else []:
         clean_slug = (slug or "").strip().lower()
@@ -211,13 +343,22 @@ async def search_public_people(
             )
             scoped_hint = first_clause
         if scoped_hint:
+            if geo_part:
+                queries.append(f'site:theorg.com/org/{clean_slug} "{company_name}" {scoped_hint}{geo_part}')
             queries.append(f'site:theorg.com/org/{clean_slug} "{company_name}" {scoped_hint}')
         else:
+            if geo_part:
+                queries.append(f'site:theorg.com/org/{clean_slug} "{company_name}"{geo_part}')
             queries.append(f'site:theorg.com/org/{clean_slug} "{company_name}"')
 
     for batch in _title_batches(titles, batch_size=2):
         title_clause = brave_search_client._quoted_or_clause(batch, limit=2)
         title_part = f" {title_clause}" if title_clause else ""
+        if geo_part:
+            queries.append(
+                f'("{company_name}"{title_part}{team_part}{identity_part}{geo_part}) '
+                '(site:theorg.com OR site:linkedin.com/posts OR site:clay.earth OR site:contactout.com)'
+            )
         queries.append(
             f'("{company_name}"{title_part}{team_part}{identity_part}) '
             '(site:theorg.com OR site:linkedin.com/posts OR site:clay.earth OR site:contactout.com)'
@@ -226,7 +367,10 @@ async def search_public_people(
     items: list[dict] = []
     seen_urls: set[str] = set()
     first_query = True
-    for query in dict.fromkeys(queries):
+    unique_queries = list(dict.fromkeys(queries))
+    if debug_trace is not None:
+        debug_trace["queries"] = unique_queries
+    for query_index, query in enumerate(unique_queries):
         if not first_query:
             await asyncio.sleep(0.5)
         first_query = False
@@ -236,7 +380,10 @@ async def search_public_people(
             if key in seen_urls:
                 continue
             seen_urls.add(key)
-            items.append(item)
+            normalized = dict(item)
+            normalized["_search_query"] = query
+            normalized["_search_query_index"] = query_index
+            items.append(normalized)
 
     results: list[dict] = []
     for item in items:
@@ -245,7 +392,17 @@ async def search_public_people(
             company_name,
         )
         if parsed:
-            results.append(_relabel_result(parsed, source="searxng_public_web"))
+            results.append(
+                _relabel_result(
+                    brave_search_client._attach_search_query_metadata(
+                        parsed,
+                        query=item.get("_search_query", ""),
+                        query_index=item.get("_search_query_index", 0),
+                        geo_terms=geo_terms,
+                    ),
+                    source="searxng_public_web",
+                )
+            )
     return results[:limit]
 
 
@@ -253,10 +410,15 @@ async def search_hiring_team(
     company_name: str,
     job_title: str,
     team_keywords: list[str] | None = None,
+    geo_terms: list[str] | None = None,
     limit: int = 5,
+    debug_trace: dict[str, Any] | None = None,
 ) -> list[dict]:
     team_part = f' "{team_keywords[0]}"' if team_keywords else ""
-    query = f'site:linkedin.com/jobs "{company_name}" "{job_title}"{team_part}'
+    geo_part = brave_search_client._geo_query_clause(geo_terms)
+    query = f'site:linkedin.com/jobs "{company_name}" "{job_title}"{team_part}{geo_part}'
+    if debug_trace is not None:
+        debug_trace["queries"] = [query]
 
     results: list[dict] = []
     for item in await _run_searxng_query(query, 5):
@@ -265,7 +427,17 @@ async def search_hiring_team(
             company_name,
         )
         for parsed in parsed_results:
-            results.append(_relabel_result(parsed, source="searxng_hiring_team"))
+            results.append(
+                _relabel_result(
+                    brave_search_client._attach_search_query_metadata(
+                        parsed,
+                        query=query,
+                        query_index=0,
+                        geo_terms=geo_terms,
+                    ),
+                    source="searxng_hiring_team",
+                )
+            )
     return results[:limit]
 
 

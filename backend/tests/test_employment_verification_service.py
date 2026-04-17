@@ -65,6 +65,17 @@ def test_analyze_linkedin_content_marks_unclear_result_unverified():
     assert result.current_company_verification_status == "unverified"
 
 
+def test_analyze_linkedin_content_marks_former_signal_unverified():
+    result = _analyze_linkedin_content(
+        "I recently wrapped up my time at Twitch and this message took some reflection to write.",
+        "Twitch",
+    )
+
+    assert result.current_company_verified is False
+    assert result.current_company_verification_status == "unverified"
+    assert "wrapped up my time at twitch" in (result.current_company_verification_evidence or "").lower()
+
+
 def test_analyze_public_content_verifies_strong_current_signal():
     result = _analyze_public_content(
         "Currently serving as an Engineering Manager at Twitch since 2022.",
@@ -73,6 +84,17 @@ def test_analyze_public_content_verifies_strong_current_signal():
 
     assert result.current_company_verified is True
     assert result.current_company_verification_source == "public_web"
+
+
+def test_analyze_public_content_marks_former_signal_unverified():
+    result = _analyze_public_content(
+        "Rex posted that he recently wrapped up my time at Intuit after several years there.",
+        "Intuit",
+    )
+
+    assert result.current_company_verified is False
+    assert result.current_company_verification_status == "unverified"
+    assert "wrapped up my time at intuit" in (result.current_company_verification_evidence or "").lower()
 
 
 def test_analyze_public_content_verifies_theorg_slug_match_for_ambiguous_company():
@@ -193,6 +215,42 @@ async def test_verify_people_current_company_reorders_verified_people_first():
     assert bucketed["hiring_managers"][0].current_company_verified is True
     assert bucketed["recruiters"][0].current_company_verification_status == "unverified"
     assert [person.full_name for person in bucketed["peers"]] == ["Peer 2", "Peer 1"]
+
+
+async def test_verify_people_current_company_rechecks_verified_people_with_former_signal_evidence():
+    manager = _person("Manager")
+    manager.current_company_verified = True
+    manager.current_company_verification_status = "verified"
+    manager.current_company_verification_source = "public_web"
+    manager.current_company_verification_evidence = "I recently wrapped up my time at Twitch."
+    bucketed = {
+        "recruiters": [],
+        "hiring_managers": [manager],
+        "peers": [],
+    }
+
+    with patch(
+        "app.services.employment_verification_service._verify_person",
+        new_callable=AsyncMock,
+        return_value=SimpleNamespace(
+            current_company_verified=False,
+            current_company_verification_status="unverified",
+            current_company_verification_source="public_web",
+            current_company_verification_confidence=5,
+            current_company_verification_evidence="wrapped up my time at twitch",
+            current_company_verified_at=None,
+            debug=None,
+        ),
+    ) as mock_verify:
+        await verify_people_current_company(
+            bucketed,
+            company_name="Twitch",
+            company_domain="twitch.tv",
+        )
+
+    mock_verify.assert_awaited_once()
+    assert bucketed["hiring_managers"][0].current_company_verified is False
+    assert bucketed["hiring_managers"][0].current_company_verification_status == "unverified"
 
 
 async def test_verify_current_company_for_person_refreshes_person():
@@ -358,3 +416,37 @@ async def test_verify_people_current_company_records_crawl4ai_public_fallback():
     assert bucketed["recruiters"][0].current_company_verification_source == "public_web"
     assert verification["retrieval_method"] == "crawl4ai"
     assert verification["fallback_used"] is True
+
+
+async def test_verify_people_current_company_respects_max_candidates_override():
+    bucketed = {
+        "recruiters": [_person("Recruiter 1"), _person("Recruiter 2")],
+        "hiring_managers": [_person("Manager 1"), _person("Manager 2")],
+        "peers": [_person("Peer 1"), _person("Peer 2")],
+    }
+
+    with (
+        patch(
+            "app.services.employment_verification_service._verify_person",
+            new_callable=AsyncMock,
+            return_value=SimpleNamespace(
+                current_company_verified=True,
+                current_company_verification_status="verified",
+                current_company_verification_source="crawl4ai_linkedin",
+                current_company_verification_confidence=90,
+                current_company_verification_evidence="Currently at Twitch.",
+                current_company_verified_at=None,
+                debug=None,
+            ),
+        ) as mock_verify,
+        patch("app.services.employment_verification_service.settings") as mock_settings,
+    ):
+        mock_settings.employment_verify_top_n = 10
+        await verify_people_current_company(
+            bucketed,
+            company_name="Twitch",
+            company_domain="twitch.tv",
+            max_candidates=2,
+        )
+
+    assert mock_verify.await_count == 2

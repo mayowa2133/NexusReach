@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 import uuid
 
 from pydantic import BaseModel, field_validator
@@ -67,8 +68,10 @@ class PeopleSearchRequest(BaseModel):
     roles: list[str] | None = None
     github_org: str | None = None
     job_id: str | None = None
+    search_depth: Literal["fast", "deep"] = "deep"
     min_relevance_score: int = 1
     target_count_per_bucket: int = 3
+    include_debug: bool = False
 
     @field_validator("target_count_per_bucket", mode="before")
     @classmethod
@@ -105,6 +108,7 @@ class PeopleSearchResponse(BaseModel):
     peers: list[PersonResponse]
     job_context: JobContextResponse | None = None
     errors: list[SearchErrorDetail] | None = None
+    debug: dict | None = None
 
 
 class SearchLogResponse(BaseModel):

@@ -176,6 +176,7 @@ export interface PeopleSearchResult {
   peers: Person[];
   job_context: JobContext | null;
   errors?: SearchErrorDetail[] | null;
+  debug?: Record<string, unknown> | null;
 }
 
 // Message Drafting types

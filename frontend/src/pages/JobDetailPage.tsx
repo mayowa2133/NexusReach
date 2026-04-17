@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -6,9 +6,11 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { useJobs, useUpdateJobStage, useToggleJobStar, useAnalyzeMatch, useTailoredResume, useTailorResume } from '@/hooks/useJobs';
+import { useJob, useUpdateJobStage, useToggleJobStar, useAnalyzeMatch, useTailoredResume, useTailorResume } from '@/hooks/useJobs';
 import { usePeopleSearch, useSavedPeople } from '@/hooks/usePeople';
 import { useFindEmail } from '@/hooks/useEmail';
+import { PeopleSearchDebugPanel } from '@/components/people/PeopleSearchDebugPanel';
+import { getPeopleSearchDebugEnabled, setPeopleSearchDebugEnabled } from '@/lib/peopleSearchDebug';
 import { sanitizeHTML } from '@/lib/sanitize';
 import { formatRelativeDate } from '@/lib/dateUtils';
 import { getStartupSourceLabels, isStartupJob } from '@/lib/jobStartup';
@@ -138,6 +140,7 @@ function PeopleSection({
   onFindPeople,
   targetCount,
   onTargetCountChange,
+  debugModeEnabled,
 }: {
   job: Job;
   searchResults: PeopleSearchResult | null;
@@ -145,6 +148,7 @@ function PeopleSection({
   onFindPeople: () => void;
   targetCount: number;
   onTargetCountChange: (v: number) => void;
+  debugModeEnabled: boolean;
 }) {
   const { data: savedPeopleData } = useSavedPeople();
   const savedPeople = savedPeopleData?.items ?? [];
@@ -246,6 +250,11 @@ function PeopleSection({
               </div>
             </div>
           )}
+
+          <PeopleSearchDebugPanel
+            debug={searchResults?.debug}
+            visible={debugModeEnabled}
+          />
         </div>
       )}
     </div>
@@ -397,15 +406,34 @@ export function JobDetailPage() {
   const navigate = useNavigate();
   const [searchResults, setSearchResults] = useState<PeopleSearchResult | null>(null);
   const [targetCount, setTargetCount] = useState(() => getStoredPeopleSearchTargetCount());
+  const [debugModeEnabled, setDebugModeEnabled] = useState(() => getPeopleSearchDebugEnabled());
+  const latestPeopleSearchRequest = useRef(0);
   const [matchAnalysis, setMatchAnalysis] = useState<MatchAnalysis | null>(null);
 
-  const { data: jobsData, isLoading } = useJobs();
-  const job = jobsData?.items.find((j) => j.id === jobId) ?? null;
+  const { data: job, isLoading } = useJob(jobId);
 
   const updateStage = useUpdateJobStage();
   const toggleStar = useToggleJobStar();
   const peopleSearch = usePeopleSearch();
   const analyzeMatch = useAnalyzeMatch();
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!(event.shiftKey && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'd')) {
+        return;
+      }
+      event.preventDefault();
+      setDebugModeEnabled((current) => {
+        const next = !current;
+        setPeopleSearchDebugEnabled(next);
+        toast.success(next ? 'People search debug enabled' : 'People search debug hidden');
+        return next;
+      });
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const handleStageChange = async (stage: JobStage) => {
     if (!job) return;
@@ -428,12 +456,35 @@ export function JobDetailPage() {
   const handleFindPeople = async () => {
     if (!job) return;
     try {
+      const requestId = latestPeopleSearchRequest.current + 1;
+      latestPeopleSearchRequest.current = requestId;
       const result = await peopleSearch.mutateAsync({
         company_name: job.company_name,
         job_id: job.id,
+        search_depth: 'fast',
         target_count_per_bucket: targetCount,
+        include_debug: debugModeEnabled,
       });
+      if (latestPeopleSearchRequest.current !== requestId) {
+        return;
+      }
       setSearchResults(result);
+      void peopleSearch
+        .mutateAsync({
+          company_name: job.company_name,
+          job_id: job.id,
+          search_depth: 'deep',
+          target_count_per_bucket: targetCount,
+          include_debug: debugModeEnabled,
+        })
+        .then((deepResult) => {
+          if (latestPeopleSearchRequest.current === requestId) {
+            setSearchResults(deepResult);
+          }
+        })
+        .catch(() => {
+          // Preserve the fast shortlist if the deep refresh fails.
+        });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'People search failed');
     }
@@ -692,6 +743,7 @@ export function JobDetailPage() {
         isSearching={peopleSearch.isPending}
         onFindPeople={handleFindPeople}
         targetCount={targetCount}
+        debugModeEnabled={debugModeEnabled}
         onTargetCountChange={(v) => {
           const clamped = clampPeopleSearchTargetCount(v);
           setTargetCount(clamped);

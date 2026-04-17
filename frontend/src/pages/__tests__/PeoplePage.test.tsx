@@ -495,6 +495,7 @@ describe('PeoplePage', () => {
         company_name: 'Uber',
         github_org: undefined,
         target_count_per_bucket: 4,
+        include_debug: false,
       })
     );
     expect(window.localStorage.getItem('nexusreach-target-count-per-bucket')).toBe('4');
@@ -505,13 +506,21 @@ describe('PeoplePage', () => {
       '/people?job_id=job-123&company=AppLovin&title=Backend%20Engineer&target_count=5',
     ]);
 
-    await waitFor(() =>
-      expect(mockPeopleSearch.mutateAsync).toHaveBeenCalledWith({
-        company_name: 'AppLovin',
-        job_id: 'job-123',
-        target_count_per_bucket: 5,
-      })
-    );
+    await waitFor(() => expect(mockPeopleSearch.mutateAsync).toHaveBeenCalledTimes(2));
+    expect(mockPeopleSearch.mutateAsync).toHaveBeenNthCalledWith(1, {
+      company_name: 'AppLovin',
+      job_id: 'job-123',
+      search_depth: 'fast',
+      target_count_per_bucket: 5,
+      include_debug: false,
+    });
+    expect(mockPeopleSearch.mutateAsync).toHaveBeenNthCalledWith(2, {
+      company_name: 'AppLovin',
+      job_id: 'job-123',
+      search_depth: 'deep',
+      target_count_per_bucket: 5,
+      include_debug: false,
+    });
     expect(window.localStorage.getItem('nexusreach-target-count-per-bucket')).toBe('5');
   });
 });

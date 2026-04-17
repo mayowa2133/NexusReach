@@ -30,6 +30,15 @@ BLOCKED_CORROBORATION_HOSTS = {
 }
 AMBIGUOUS_COMPANY_NEGATIVE_SUFFIXES = ("co", "company", "limited", "ltd", "corp", "corporation")
 PUBLIC_WEB_VERIFICATION_SOURCE = "public_web"
+FORMER_SIGNAL_PATTERNS = (
+    r"\bformer\b",
+    r"\bformerly\b",
+    r"\bpreviously\b",
+    r"\bleft\b",
+    r"\bdepart(?:ed|ing)\b",
+    r"\bwrapped up my time at\b",
+    r"\bno longer at\b",
+)
 
 
 @dataclass
@@ -101,6 +110,13 @@ def _enrich_public_debug(result: EmploymentVerificationResult, page: dict | None
     result.debug = debug
 
 
+def _has_former_signal(text: str | None) -> bool:
+    normalized = _normalize_text(text).lower()
+    if not normalized:
+        return False
+    return any(re.search(pattern, normalized, flags=re.IGNORECASE) for pattern in FORMER_SIGNAL_PATTERNS)
+
+
 def _analyze_linkedin_content(content: str, company_name: str) -> EmploymentVerificationResult:
     normalized = _normalize_text(content)
     company_normalized = _normalize_company_name(company_name)
@@ -116,6 +132,26 @@ def _analyze_linkedin_content(content: str, company_name: str) -> EmploymentVeri
             current_company_verification_evidence="Conflicting company variant found in public profile evidence.",
             current_company_verified_at=None,
             debug={"kind": "linkedin", "conflict": True},
+        )
+
+    negative_patterns = [
+        (rf"\b(?:former|formerly|previously)\b[^.:\n]{{0,80}}\b{company_pattern}\b", 5),
+        (rf"\bleft\b[^.:\n]{{0,80}}\b{company_pattern}\b", 5),
+        (rf"\bdepart(?:ed|ing)\b[^.:\n]{{0,80}}\b{company_pattern}\b", 5),
+        (rf"\bwrapped up my time at\b[^.:\n]{{0,40}}\b{company_pattern}\b", 5),
+        (rf"\bno longer at\b[^.:\n]{{0,40}}\b{company_pattern}\b", 5),
+    ]
+    negative_match = _match_patterns(haystack, negative_patterns)
+    if negative_match:
+        confidence, evidence = negative_match
+        return EmploymentVerificationResult(
+            current_company_verified=False,
+            current_company_verification_status="unverified",
+            current_company_verification_source="crawl4ai_linkedin",
+            current_company_verification_confidence=confidence,
+            current_company_verification_evidence=evidence,
+            current_company_verified_at=None,
+            debug={"kind": "linkedin", "former_signal": True},
         )
 
     positive_patterns = [
@@ -173,6 +209,25 @@ def _analyze_public_content(
             current_company_verification_evidence="Conflicting company variant found in public corroboration.",
             current_company_verified_at=None,
             debug={"kind": "public_web", "conflict": True},
+        )
+
+    negative_patterns = [
+        (rf"\b(?:former|formerly|previously)\b[^.:\n]{{0,100}}\b{company_pattern}\b", 5),
+        (rf"\bleft\b[^.:\n]{{0,100}}\b{company_pattern}\b", 5),
+        (rf"\bwrapped up my time at\b[^.:\n]{{0,50}}\b{company_pattern}\b", 5),
+        (rf"\bno longer at\b[^.:\n]{{0,50}}\b{company_pattern}\b", 5),
+    ]
+    negative_match = _match_patterns(haystack, negative_patterns)
+    if negative_match:
+        confidence, evidence = negative_match
+        return EmploymentVerificationResult(
+            current_company_verified=False,
+            current_company_verification_status="unverified",
+            current_company_verification_source=PUBLIC_WEB_VERIFICATION_SOURCE,
+            current_company_verification_confidence=confidence,
+            current_company_verification_evidence=evidence,
+            current_company_verified_at=None,
+            debug={"kind": "public_web", "former_signal": True},
         )
 
     public_identity_hints = extract_public_identity_hints(public_url)
@@ -280,6 +335,8 @@ def _apply_verification_result(person: Person, result: EmploymentVerificationRes
 
 
 def _verification_sort_key(person: Person) -> tuple[int, int]:
+    if _has_former_signal(getattr(person, "current_company_verification_evidence", None)):
+        return (1, -1)
     if person.current_company_verified is True:
         return (0, 0)
     if person.current_company_verification_status == "unverified":
@@ -440,6 +497,7 @@ async def verify_people_current_company(
     company_domain: str | None,
     company_public_identity_slugs: list[str] | None = None,
     force: bool = False,
+    max_candidates: int | None = None,
 ) -> None:
     """Verify current employment for the top-ranked people in a result set."""
     all_people = [person for bucket in bucketed.values() for person in bucket]
@@ -448,7 +506,7 @@ async def verify_people_current_company(
 
     shortlist = shortlist_people_for_verification(
         bucketed,
-        max_candidates=settings.employment_verify_top_n,
+        max_candidates=max_candidates or settings.employment_verify_top_n,
     )
     shortlisted_ids = {person.id for person in shortlist}
 
@@ -458,6 +516,7 @@ async def verify_people_current_company(
         if (
             not force
             and person.current_company_verification_status in {"verified", "unverified", "failed"}
+            and not _has_former_signal(person.current_company_verification_evidence)
         ):
             continue
         task_people.append(person)

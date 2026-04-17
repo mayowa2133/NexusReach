@@ -130,6 +130,35 @@ async def test_search_with_job_id_passes_requested_target_count(client, mock_use
     assert mock_search.await_args.kwargs["target_count_per_bucket"] == 6
 
 
+async def test_search_with_job_id_passes_search_depth(client, mock_user_id):
+    company = _mock_company(mock_user_id)
+    mock_result = {
+        "company": company,
+        "recruiters": [],
+        "hiring_managers": [],
+        "peers": [],
+        "job_context": {
+            "department": "engineering",
+            "team_keywords": [],
+            "seniority": "junior",
+        },
+    }
+
+    with patch("app.routers.people.search_people_for_job", new_callable=AsyncMock) as mock_search:
+        mock_search.return_value = mock_result
+        resp = await client.post(
+            "/api/people/search",
+            json={
+                "company_name": "Stripe",
+                "job_id": str(uuid.uuid4()),
+                "search_depth": "fast",
+            },
+        )
+
+    assert resp.status_code == 200
+    assert mock_search.await_args.kwargs["search_depth"] == "fast"
+
+
 async def test_search_without_job_id_still_works(client, mock_user_id):
     """POST /api/people/search without job_id uses generic search (backward compat)."""
     company = _mock_company(mock_user_id)
