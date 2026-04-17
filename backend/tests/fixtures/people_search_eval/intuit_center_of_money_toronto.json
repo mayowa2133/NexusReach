@@ -1,0 +1,121 @@
+{
+  "company_name": "Intuit",
+  "public_identity_terms": ["intuit"],
+  "context": {
+    "department": "engineering",
+    "team_keywords": ["fullstack", "qa", "new grad"],
+    "domain_keywords": [],
+    "product_team_names": ["Center of Money"],
+    "seniority": "junior",
+    "early_career": true,
+    "manager_titles": [],
+    "peer_titles": [],
+    "recruiter_titles": [],
+    "apollo_departments": ["engineering_technical"],
+    "job_locations": ["Toronto, ON, CA"],
+    "job_geo_terms": [
+      "Toronto, ON, CA",
+      "Toronto",
+      "Greater Toronto Area",
+      "GTA",
+      "Ontario",
+      "Canada"
+    ]
+  },
+  "recruiters": [
+    {
+      "full_name": "Greeshma Lal",
+      "title": "Recruiter",
+      "source": "searxng_search",
+      "snippet": "Recruiter at Intuit helping teams hire across product and engineering.",
+      "location": "Mountain View, California, United States",
+      "linkedin_url": "https://www.linkedin.com/in/greeshmalal",
+      "profile_data": {
+        "company_match_confidence": "strong_signal"
+      }
+    },
+    {
+      "full_name": "Tiffany Hudson",
+      "title": "Recruiter",
+      "source": "searxng_search",
+      "snippet": "Technical recruiter at Intuit.",
+      "location": "San Diego, California, United States",
+      "linkedin_url": "https://www.linkedin.com/in/tiffanyhudson",
+      "profile_data": {
+        "company_match_confidence": "strong_signal"
+      }
+    },
+    {
+      "full_name": "Reiss Simmons",
+      "title": "Director, Talent Acquisition",
+      "source": "searxng_search",
+      "snippet": "Leads Intuit's Talent Acquisition team hiring across Canada and the US.",
+      "location": "Toronto, Ontario, Canada",
+      "linkedin_url": "https://ca.linkedin.com/in/reisssimmons",
+      "profile_data": {
+        "company_match_confidence": "strong_signal"
+      }
+    }
+  ],
+  "hiring_managers": [
+    {
+      "full_name": "Amit Sethiya",
+      "title": "Engineering Manager",
+      "source": "searxng_search",
+      "snippet": "Engineering Manager at Intuit.",
+      "location": "Bengaluru, Karnataka, India",
+      "linkedin_url": "https://www.linkedin.com/in/amit-sethiya-22217a1a3",
+      "profile_data": {
+        "company_match_confidence": "strong_signal"
+      }
+    },
+    {
+      "full_name": "Ankur Agrawal",
+      "title": "Software Engineering Manager",
+      "source": "searxng_search",
+      "snippet": "Software Engineering Manager at Intuit.",
+      "location": "Mountain View, California, United States",
+      "linkedin_url": "https://www.linkedin.com/in/ankuragrawal2",
+      "profile_data": {
+        "company_match_confidence": "strong_signal"
+      }
+    },
+    {
+      "full_name": "Billy Kneuper",
+      "title": "Engineering Manager",
+      "source": "searxng_search",
+      "snippet": "Engineering Manager at Intuit.",
+      "location": "Atlanta, Georgia, United States",
+      "linkedin_url": "https://www.linkedin.com/in/billykneuper",
+      "profile_data": {
+        "company_match_confidence": "strong_signal"
+      }
+    },
+    {
+      "full_name": "Hugo Godoy",
+      "title": "Software Engineering Manager",
+      "source": "searxng_search",
+      "snippet": "Software Engineering Manager at Intuit.",
+      "location": "Toronto, Ontario, Canada",
+      "linkedin_url": "https://ca.linkedin.com/in/godoyhugopereira",
+      "profile_data": {
+        "company_match_confidence": "strong_signal"
+      }
+    },
+    {
+      "full_name": "David Van Noten",
+      "title": "Director of Engineering",
+      "source": "searxng_search",
+      "snippet": "Engineering leader at Intuit in the Greater Toronto Area.",
+      "location": "Greater Toronto Area, Canada",
+      "linkedin_url": "https://ca.linkedin.com/in/davidvn",
+      "profile_data": {
+        "company_match_confidence": "strong_signal"
+      }
+    }
+  ],
+  "expected": {
+    "top_recruiter": "Reiss Simmons",
+    "top_hiring_managers": ["Hugo Godoy", "David Van Noten"]
+  }
+}

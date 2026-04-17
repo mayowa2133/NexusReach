@@ -69,14 +69,23 @@ export function useJobs(filters: JobFilters = {}) {
   });
 }
 
+export function useJob(jobId?: string) {
+  return useQuery({
+    queryKey: ['job', jobId],
+    queryFn: () => api.get<Job>(`/api/jobs/${jobId}`),
+    enabled: Boolean(jobId),
+  });
+}
+
 export function useToggleJobStar() {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: ({ jobId, starred }: { jobId: string; starred: boolean }) =>
       api.put<Job>(`/api/jobs/${jobId}/star`, { starred }),
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      queryClient.invalidateQueries({ queryKey: ['job', variables.jobId] });
     },
   });
 }
@@ -87,8 +96,9 @@ export function useUpdateJobStage() {
   return useMutation({
     mutationFn: ({ jobId, stage, notes }: { jobId: string; stage: JobStage; notes?: string }) =>
       api.put<Job>(`/api/jobs/${jobId}/stage`, { stage, notes }),
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      queryClient.invalidateQueries({ queryKey: ['job', variables.jobId] });
     },
   });
 }
@@ -101,8 +111,9 @@ export function useUpdateInterviewRounds() {
   return useMutation({
     mutationFn: ({ jobId, interview_rounds }: { jobId: string; interview_rounds: InterviewRound[] }) =>
       api.put<Job>(`/api/jobs/${jobId}/interviews`, { interview_rounds }),
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      queryClient.invalidateQueries({ queryKey: ['job', variables.jobId] });
     },
   });
 }
@@ -113,8 +124,9 @@ export function useUpdateOfferDetails() {
   return useMutation({
     mutationFn: ({ jobId, offer_details }: { jobId: string; offer_details: OfferDetails }) =>
       api.put<Job>(`/api/jobs/${jobId}/offer`, { offer_details }),
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      queryClient.invalidateQueries({ queryKey: ['job', variables.jobId] });
     },
   });
 }

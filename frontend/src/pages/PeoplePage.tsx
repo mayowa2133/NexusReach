@@ -21,6 +21,8 @@ import {
   setStoredPeopleSearchTargetCount,
 } from '@/lib/peopleSearchCount';
 import { useKnownPeopleCount } from '@/hooks/useKnownPeople';
+import { PeopleSearchDebugPanel } from '@/components/people/PeopleSearchDebugPanel';
+import { getPeopleSearchDebugEnabled, setPeopleSearchDebugEnabled } from '@/lib/peopleSearchDebug';
 import { toast } from 'sonner';
 import type { EmailFindResult, LinkedInGraphConnection, Person, PeopleSearchResult } from '@/types';
 
@@ -115,6 +117,7 @@ export function PeoplePage() {
     clampPeopleSearchTargetCount(jobTargetCount ?? getStoredPeopleSearchTargetCount())
   );
   const [searchResults, setSearchResults] = useState<PeopleSearchResult | null>(null);
+  const [debugModeEnabled, setDebugModeEnabled] = useState(() => getPeopleSearchDebugEnabled());
   const [selectedPersonIds, setSelectedPersonIds] = useState<string[]>([]);
   const selectedPersonIdSet = useMemo(() => new Set(selectedPersonIds), [selectedPersonIds]);
   const [savedContactsCompanyFilter, setSavedContactsCompanyFilter] = useState('');
@@ -127,20 +130,62 @@ export function PeoplePage() {
 
   // Auto-trigger job-aware search when arriving from a job card
   const autoSearchTriggered = useRef(false);
+  const latestJobAwareSearchRequest = useRef(0);
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!(event.shiftKey && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'd')) {
+        return;
+      }
+      event.preventDefault();
+      setDebugModeEnabled((current) => {
+        const next = !current;
+        setPeopleSearchDebugEnabled(next);
+        toast.success(next ? 'People search debug enabled' : 'People search debug hidden');
+        return next;
+      });
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   useEffect(() => {
     if (jobId && jobCompany && !autoSearchTriggered.current) {
       autoSearchTriggered.current = true;
       const resolvedTargetCount = clampPeopleSearchTargetCount(jobTargetCount ?? targetCountPerBucket);
       setStoredPeopleSearchTargetCount(resolvedTargetCount);
+      const requestId = latestJobAwareSearchRequest.current + 1;
+      latestJobAwareSearchRequest.current = requestId;
       search
         .mutateAsync({
           company_name: jobCompany,
           job_id: jobId,
+          search_depth: 'fast',
           target_count_per_bucket: resolvedTargetCount,
+          include_debug: debugModeEnabled,
         })
         .then((result) => {
+          if (latestJobAwareSearchRequest.current !== requestId) {
+            return;
+          }
           setSearchResults(result);
           setActiveJobId(jobId);
+          void search
+            .mutateAsync({
+              company_name: jobCompany,
+              job_id: jobId,
+              search_depth: 'deep',
+              target_count_per_bucket: resolvedTargetCount,
+              include_debug: debugModeEnabled,
+            })
+            .then((deepResult) => {
+              if (latestJobAwareSearchRequest.current === requestId) {
+                setSearchResults(deepResult);
+              }
+            })
+            .catch(() => {
+              // Keep the fast shortlist if the deeper refresh fails.
+            });
           // Clear job params from URL after search completes
           setSearchParams({}, { replace: true });
         })
@@ -149,7 +194,7 @@ export function PeoplePage() {
           toast.error(err instanceof Error ? err.message : 'Job-aware search failed');
         });
     }
-  }, [jobId, jobCompany, jobTargetCount, search, setSearchParams, targetCountPerBucket]);
+  }, [debugModeEnabled, jobId, jobCompany, jobTargetCount, search, setSearchParams, targetCountPerBucket]);
 
   const handleTargetCountChange = (value: string) => {
     const nextCount = clampPeopleSearchTargetCount(value || DEFAULT_TARGET_COUNT_PER_BUCKET);
@@ -166,6 +211,7 @@ export function PeoplePage() {
         company_name: companyName.trim(),
         github_org: githubOrg.trim() || undefined,
         target_count_per_bucket: targetCountPerBucket,
+        include_debug: debugModeEnabled,
       });
       setSearchResults(result);
     } catch (err) {
@@ -466,6 +512,11 @@ export function PeoplePage() {
               </>
             )}
           </div>
+
+          <PeopleSearchDebugPanel
+            debug={searchResults.debug}
+            visible={debugModeEnabled}
+          />
         </div>
       )}
 

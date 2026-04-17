@@ -11,7 +11,9 @@ export function usePeopleSearch() {
       roles?: string[];
       github_org?: string;
       job_id?: string;
+      search_depth?: 'fast' | 'deep';
       target_count_per_bucket?: number;
+      include_debug?: boolean;
     }) => api.post<PeopleSearchResult>('/api/people/search', params),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['people'] });

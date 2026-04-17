@@ -168,6 +168,7 @@ class JobContext:
     recruiter_titles: list[str] = field(default_factory=list)
     apollo_departments: list[str] = field(default_factory=list)
     job_locations: list[str] = field(default_factory=list)
+    job_geo_terms: list[str] = field(default_factory=list)
 
 
 def _strip_html(text: str) -> str:
@@ -222,6 +223,39 @@ LOCATION_QUALIFIER_PATTERNS = (
     r"onsite",
 )
 
+COUNTRY_ALIASES = {
+    "ca": "Canada",
+    "can": "Canada",
+    "canada": "Canada",
+    "us": "United States",
+    "usa": "United States",
+    "united states": "United States",
+    "uk": "United Kingdom",
+    "united kingdom": "United Kingdom",
+}
+
+REGION_ALIASES = {
+    "on": "Ontario",
+    "ontario": "Ontario",
+    "bc": "British Columbia",
+    "british columbia": "British Columbia",
+    "qc": "Quebec",
+    "quebec": "Quebec",
+    "ny": "New York",
+    "ca-us": "California",
+    "california": "California",
+    "wa": "Washington",
+    "washington": "Washington",
+}
+
+CITY_METRO_ALIASES = {
+    "toronto": ["Greater Toronto Area", "GTA"],
+    "san francisco": ["San Francisco Bay Area", "Bay Area"],
+    "new york": ["New York City", "Greater New York City Area"],
+    "seattle": ["Greater Seattle Area"],
+    "vancouver": ["Greater Vancouver Metropolitan Area"],
+}
+
 
 def _detect_early_career(title_lower: str, description_lower: str) -> bool:
     haystack = f"{title_lower} {description_lower}".strip()
@@ -239,6 +273,47 @@ def _strip_boilerplate_sentences(text: str) -> str:
             continue
         kept.append(sentence.strip())
     return " ".join(kept)
+
+
+def normalize_job_locations(raw_location: str | None) -> list[str]:
+    locations: list[str] = []
+    for part in re.split(r"[;|/]+", raw_location or ""):
+        clean = WHITESPACE_RE.sub(" ", (part or "").strip(" ,"))
+        if not clean:
+            continue
+        locations.append(clean)
+    return list(dict.fromkeys(locations))
+
+
+def build_job_geo_terms(job_locations: list[str]) -> list[str]:
+    terms: list[str] = []
+    for raw_location in job_locations:
+        clean_location = WHITESPACE_RE.sub(" ", (raw_location or "").strip(" ,"))
+        if not clean_location:
+            continue
+        terms.append(clean_location)
+
+        parts = [segment.strip() for segment in clean_location.split(",") if segment.strip()]
+        if not parts:
+            continue
+
+        city = parts[0]
+        city_key = city.lower()
+        terms.append(city)
+        terms.extend(CITY_METRO_ALIASES.get(city_key, []))
+
+        for segment in parts[1:]:
+            normalized_key = segment.lower()
+            if normalized_key in COUNTRY_ALIASES:
+                terms.append(COUNTRY_ALIASES[normalized_key])
+                continue
+            if normalized_key in REGION_ALIASES:
+                terms.append(REGION_ALIASES[normalized_key])
+                continue
+            if len(segment) > 2:
+                terms.append(segment)
+
+    return list(dict.fromkeys(term for term in terms if term))
 
 
 def _extract_sections(title: str, description: str | None) -> tuple[str, str, str]:

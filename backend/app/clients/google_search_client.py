@@ -58,6 +58,8 @@ def _parse_linkedin_result(item: dict, company_name: str) -> dict | None:
     # Skip if the "name" looks like a company page or generic result
     if not full_name or full_name.lower() == company_name.lower():
         return None
+    snippet = item.get("snippet", "")
+    location = brave_search_client._extract_candidate_location(title_clean, snippet)
 
     return {
         "full_name": full_name,
@@ -69,6 +71,12 @@ def _parse_linkedin_result(item: dict, company_name: str) -> dict | None:
         "photo_url": "",
         "apollo_id": "",
         "source": "google_cse",
+        "snippet": snippet,
+        "location": location,
+        "profile_data": {
+            "location": location,
+            "location_source": "serp_snippet" if location else None,
+        },
     }
 
 
@@ -76,8 +84,10 @@ async def search_people(
     company_name: str,
     titles: list[str] | None = None,
     team_keywords: list[str] | None = None,
+    geo_terms: list[str] | None = None,
     limit: int = 10,
     company_domain: str | None = None,
+    debug_trace: dict[str, object] | None = None,
 ) -> list[dict]:
     """Search for people at a company via Google CSE LinkedIn X-ray search.
 
@@ -101,23 +111,36 @@ async def search_people(
     from app.clients.serper_search_client import _title_batches
 
     domain_part = f' "{company_domain}"' if company_domain else ""
+    geo_part = brave_search_client._geo_query_clause(geo_terms)
 
     # Broad role-family queries first — they catch non-standard titles
-    queries: list[str] = brave_search_client._broad_role_queries(company_name, titles)
+    queries: list[str] = []
+    for query in brave_search_client._broad_role_queries(company_name, titles):
+        if geo_part:
+            queries.append(f"{query}{geo_part}")
+        queries.append(query)
     # Then title-specific queries for each batch
     for batch in _title_batches(titles, batch_size=2):
         quoted = [f'"{t}"' for t in batch if t]
         title_part = (" " + " OR ".join(quoted)) if quoted else ""
         if company_domain:
+            if geo_part:
+                queries.append(f'site:linkedin.com/in "at {company_name}"{title_part}{geo_part}')
+                queries.append(f'"{company_name}" "{company_domain}" site:linkedin.com/in{title_part}{geo_part}')
             queries.append(f'site:linkedin.com/in "at {company_name}"{title_part}')
             queries.append(f'"{company_name}" "{company_domain}" site:linkedin.com/in{title_part}')
+        if geo_part:
+            queries.append(f'site:linkedin.com/in "{company_name}"{domain_part}{title_part}{geo_part}')
         queries.append(f'site:linkedin.com/in "{company_name}"{domain_part}{title_part}')
 
     results: list[dict] = []
     seen_urls: set[str] = set()
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            for query in dict.fromkeys(queries):
+            unique_queries = list(dict.fromkeys(queries))
+            if debug_trace is not None:
+                debug_trace["queries"] = unique_queries
+            for query_index, query in enumerate(unique_queries):
                 resp = await client.get(
                     GOOGLE_CSE_URL,
                     params={
@@ -135,6 +158,12 @@ async def search_people(
                     person = _parse_linkedin_result(item, company_name)
                     if not person:
                         continue
+                    person = brave_search_client._attach_search_query_metadata(
+                        person,
+                        query=query,
+                        query_index=query_index,
+                        geo_terms=geo_terms,
+                    )
                     url = person.get("linkedin_url") or ""
                     if url and url in seen_urls:
                         continue
@@ -156,6 +185,7 @@ async def search_exact_linkedin_profile(
     name_variants: list[str] | None = None,
     title_hints: list[str] | None = None,
     team_keywords: list[str] | None = None,
+    geo_terms: list[str] | None = None,
     limit: int = 3,
 ) -> list[dict]:
     """Search Google CSE for one exact LinkedIn profile."""
@@ -171,19 +201,20 @@ async def search_exact_linkedin_profile(
         seen_names.add(clean_name)
         ordered_names.append(clean_name)
 
-    queries: list[str] = [f'site:linkedin.com/in "{name}" "{company_name}"' for name in ordered_names]
+    geo_part = brave_search_client._geo_query_clause(geo_terms)
+    queries: list[str] = [f'site:linkedin.com/in "{name}" "{company_name}"{geo_part}' for name in ordered_names]
     if title_hints:
         quoted = [f'"{t}"' for t in title_hints[:2] if t]
         if quoted:
             queries.extend(
-                f'site:linkedin.com/in "{name}" "{company_name}" ' + " OR ".join(quoted)
+                f'site:linkedin.com/in "{name}" "{company_name}" ' + " OR ".join(quoted) + geo_part
                 for name in ordered_names
             )
     if team_keywords:
         quoted_keywords = [f'"{keyword}"' for keyword in team_keywords[:2] if keyword]
         if quoted_keywords:
             queries.extend(
-                f'site:linkedin.com/in "{name}" "{company_name}" ' + " OR ".join(quoted_keywords)
+                f'site:linkedin.com/in "{name}" "{company_name}" ' + " OR ".join(quoted_keywords) + geo_part
                 for name in ordered_names
             )
 

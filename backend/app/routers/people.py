@@ -113,6 +113,7 @@ def _serialize_people_search_result(result: dict) -> PeopleSearchResponse:
         peers=[_serialize_person(person) for person in result.get("peers", [])],
         job_context=result.get("job_context"),
         errors=errors,
+        debug=result.get("debug"),
     )
 
 
@@ -140,8 +141,10 @@ async def search_people(
                 db=db,
                 user_id=user_id,
                 job_id=job_uuid,
+                search_depth=body.search_depth,
                 min_relevance_score=body.min_relevance_score,
                 target_count_per_bucket=body.target_count_per_bucket,
+                include_debug=body.include_debug,
             )
         except ValueError:
             raise HTTPException(status_code=404, detail="Job not found")

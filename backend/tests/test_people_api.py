@@ -140,6 +140,48 @@ async def test_search_people_clamps_target_count(client, mock_user_id):
     assert mock_search.await_args_list[1].kwargs["target_count_per_bucket"] == 10
 
 
+async def test_search_people_for_job_passes_debug_flag_and_serializes_debug(client, mock_user_id):
+    company = _mock_company(mock_user_id)
+    recruiter = _mock_person(mock_user_id, full_name="Reiss Simmons", person_type="recruiter")
+    mock_result = {
+        "company": company,
+        "your_connections": [],
+        "recruiters": [recruiter],
+        "hiring_managers": [],
+        "peers": [],
+        "job_context": {
+            "department": "engineering",
+            "team_keywords": ["fullstack"],
+            "seniority": "junior",
+        },
+        "debug": {
+            "geo": {
+                "job_locations": ["Toronto, ON, CA"],
+            },
+            "timings": [
+                {"stage": "job_load_and_context", "duration_ms": 12.5},
+            ],
+        },
+    }
+
+    with patch("app.routers.people.search_people_for_job", new_callable=AsyncMock) as mock_search:
+        mock_search.return_value = mock_result
+        resp = await client.post(
+            "/api/people/search",
+            json={
+                "company_name": "Intuit",
+                "job_id": str(uuid.uuid4()),
+                "include_debug": True,
+            },
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["debug"]["geo"]["job_locations"] == ["Toronto, ON, CA"]
+    assert data["debug"]["timings"][0]["stage"] == "job_load_and_context"
+    assert mock_search.await_args.kwargs["include_debug"] is True
+
+
 async def test_enrich_person(client, mock_user_id):
     """POST /api/people/enrich returns enriched person."""
     person = _mock_person(mock_user_id, full_name="Enriched User")

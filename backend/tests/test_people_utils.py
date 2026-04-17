@@ -11,8 +11,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.services.people_service import (
+    _append_bucket,
+    _backfill_top_candidates,
     _backfill_linkedin_profiles,
     _broaden_peer_titles_for_retry,
+    _candidate_geo_signal_match,
+    _candidate_bucket_assignment_rank,
     _candidate_matches_company,
     _merge_company_public_identity_slugs,
     _saved_theorg_slug_candidates,
@@ -25,9 +29,16 @@ from app.services.people_service import (
     _finalize_bucketed,
     _linkedin_backfill_name_variants,
     _name_match_score,
+    _initial_manager_titles,
+    _manager_geo_recovery_titles,
+    _manager_context_search_titles,
     _prioritize_titles_for_search,
     _prepare_candidates,
     _recover_candidate_titles,
+    _recover_title_from_snippet,
+    _score_contextual_candidates_fast,
+    _sanitize_search_keywords,
+    _should_run_manager_geo_recovery,
     _store_person,
     get_or_create_company,
 )
@@ -325,6 +336,54 @@ class TestEmploymentAndRanking:
 
         assert status == "current"
 
+    def test_classify_employment_status_marks_public_linkedin_about_lead_signal_current(self):
+        status = _classify_employment_status(
+            {
+                "title": "Talent Acquisition Lead, Canada",
+                "snippet": (
+                    "Reiss Simmons Intuit Canada About I lead the Talent Acquisition team at "
+                    "Intuit responsible for hiring in Canada & the US."
+                ),
+                "source": "tavily_public_web",
+                "linkedin_url": "https://ca.linkedin.com/in/reisssimmons",
+                "profile_data": {
+                    "public_url": "https://ca.linkedin.com/in/reisssimmons",
+                    "linkedin_result_title": "Reiss Simmons - Intuit | LinkedIn",
+                    "public_snippet": (
+                        "Reiss Simmons Intuit Canada About I lead the Talent Acquisition team at "
+                        "Intuit responsible for hiring in Canada & the US."
+                    ),
+                },
+            },
+            "Intuit",
+        )
+
+        assert status == "current"
+
+    def test_recover_title_from_snippet_promotes_linkedin_about_recruiter_lead(self):
+        recovered = _recover_title_from_snippet(
+            {
+                "full_name": "Reiss Simmons",
+                "title": "Intuit",
+                "snippet": (
+                    "Reiss Simmons Intuit Canada About I lead the Talent Acquisition team at "
+                    "Intuit responsible for hiring in Canada & the US."
+                ),
+                "linkedin_url": "https://ca.linkedin.com/in/reisssimmons",
+                "profile_data": {
+                    "public_url": "https://ca.linkedin.com/in/reisssimmons",
+                    "linkedin_result_title": "Reiss Simmons - Intuit | LinkedIn",
+                    "public_snippet": (
+                        "Reiss Simmons Intuit Canada About I lead the Talent Acquisition team at "
+                        "Intuit responsible for hiring in Canada & the US."
+                    ),
+                },
+            },
+            company_name="Intuit",
+        )
+
+        assert recovered == ("Talent Acquisition Lead, Canada", 74)
+
     def test_classify_org_level(self):
         assert _classify_org_level("Software Engineer") == "ic"
         assert _classify_org_level("Engineering Manager") == "manager"
@@ -595,6 +654,251 @@ class TestEmploymentAndRanking:
             "Alex Org",
         ]
 
+    def test_finalize_bucketed_prefers_local_software_peer_over_remote_ml_peer(self):
+        people = [
+            SimpleNamespace(
+                id=uuid.uuid4(),
+                full_name="Remote ML",
+                title="Senior Machine Learning Engineer",
+                linkedin_url=None,
+                current_company_verified=True,
+                match_quality="direct",
+                fallback_reason=None,
+                employment_status="current",
+                org_level="ic",
+                person_type="peer",
+                usefulness_score=61,
+                warm_path_type=None,
+                profile_data={"location": "Mountain View, California"},
+            ),
+            SimpleNamespace(
+                id=uuid.uuid4(),
+                full_name="Toronto Fullstack",
+                title="Full Stack Developer @ Intuit",
+                linkedin_url="https://ca.linkedin.com/in/toronto-fullstack",
+                current_company_verified=None,
+                match_quality="adjacent",
+                fallback_reason=None,
+                employment_status="current",
+                org_level="ic",
+                person_type="peer",
+                usefulness_score=64,
+                warm_path_type=None,
+                profile_data={"location": "Toronto, Ontario, Canada"},
+            ),
+        ]
+
+        finalized = _finalize_bucketed(
+            {
+                "recruiters": [],
+                "hiring_managers": [],
+                "peers": people,
+            },
+            target_count_per_bucket=3,
+        )
+
+        assert [person.full_name for person in finalized["peers"][:2]] == [
+            "Toronto Fullstack",
+            "Remote ML",
+        ]
+
+    def test_finalize_bucketed_prefers_recruiter_lead_scope_over_local_ic_recruiter(self):
+        people = [
+            SimpleNamespace(
+                id=uuid.uuid4(),
+                full_name="Greeshma Lal",
+                title="Talent Acquisition",
+                linkedin_url="https://ca.linkedin.com/in/greeshma-lal-879551139",
+                current_company_verified=True,
+                match_quality="adjacent",
+                fallback_reason=None,
+                employment_status="current",
+                org_level="ic",
+                person_type="recruiter",
+                usefulness_score=69,
+                warm_path_type=None,
+                profile_data={"location": "Toronto, Ontario, Canada"},
+            ),
+            SimpleNamespace(
+                id=uuid.uuid4(),
+                full_name="Reiss Simmons",
+                title="Talent Acquisition Lead, Canada",
+                linkedin_url="https://ca.linkedin.com/in/reisssimmons",
+                current_company_verified=None,
+                match_quality="adjacent",
+                fallback_reason=None,
+                employment_status="current",
+                org_level="manager",
+                person_type="recruiter",
+                usefulness_score=68,
+                warm_path_type=None,
+                profile_data={
+                    "location": "Canada",
+                    "public_snippet": "I lead the Talent Acquisition team at Intuit responsible for hiring in Canada & the US.",
+                },
+            ),
+        ]
+
+        finalized = _finalize_bucketed(
+            {
+                "recruiters": people,
+                "hiring_managers": [],
+                "peers": [],
+            },
+            target_count_per_bucket=3,
+        )
+
+        assert [person.full_name for person in finalized["recruiters"][:2]] == [
+            "Reiss Simmons",
+            "Greeshma Lal",
+        ]
+
+    def test_finalize_bucketed_prefers_explicit_engineering_manager_over_generic_engineering_leader(self):
+        people = [
+            SimpleNamespace(
+                id=uuid.uuid4(),
+                full_name="Rex Su",
+                title="Engineering Leader | Intuit",
+                linkedin_url="https://ca.linkedin.com/in/rexsu",
+                current_company_verified=True,
+                match_quality="direct",
+                fallback_reason=None,
+                employment_status="current",
+                org_level="manager",
+                person_type="hiring_manager",
+                usefulness_score=67,
+                warm_path_type=None,
+                profile_data={"location": "Toronto, Ontario, Canada"},
+            ),
+            SimpleNamespace(
+                id=uuid.uuid4(),
+                full_name="Hugo Godoy",
+                title="Software Engineering Manager",
+                linkedin_url="https://ca.linkedin.com/in/godoyhugopereira",
+                current_company_verified=True,
+                match_quality="direct",
+                fallback_reason=None,
+                employment_status="current",
+                org_level="manager",
+                person_type="hiring_manager",
+                usefulness_score=67,
+                warm_path_type=None,
+                profile_data={"location": "Toronto, Ontario, Canada"},
+            ),
+        ]
+
+        finalized = _finalize_bucketed(
+            {
+                "recruiters": [],
+                "hiring_managers": people,
+                "peers": [],
+            },
+            target_count_per_bucket=3,
+        )
+
+        assert [person.full_name for person in finalized["hiring_managers"][:2]] == [
+            "Hugo Godoy",
+            "Rex Su",
+        ]
+
+    def test_prepare_candidates_excludes_generic_manager_without_engineering_context(self):
+        context = JobContext(
+            department="engineering",
+            team_keywords=["fullstack"],
+            domain_keywords=["qa"],
+            seniority="junior",
+            early_career=False,
+        )
+        results = _prepare_candidates(
+            [
+                {
+                    "full_name": "John Smith",
+                    "title": "Manager",
+                    "snippet": "John Smith Intuit Toronto, Ontario, Canada",
+                    "source": "tavily_public_web",
+                    "linkedin_url": "https://ca.linkedin.com/in/john-smith-b58a26234",
+                    "profile_data": {
+                        "public_url": "https://ca.linkedin.com/in/john-smith-b58a26234",
+                        "public_snippet": "John Smith Intuit Toronto, Ontario, Canada",
+                        "location": "Toronto, Ontario, Canada",
+                    },
+                },
+                {
+                    "full_name": "Hugo Godoy",
+                    "title": "Software Engineering Manager",
+                    "snippet": "Software Engineering Manager at Intuit in Toronto.",
+                    "source": "tavily_public_web",
+                    "linkedin_url": "https://ca.linkedin.com/in/godoyhugopereira",
+                    "profile_data": {
+                        "public_url": "https://ca.linkedin.com/in/godoyhugopereira",
+                        "public_snippet": "Software Engineering Manager at Intuit in Toronto.",
+                        "location": "Toronto, Ontario, Canada",
+                    },
+                },
+            ],
+            company_name="Intuit",
+            public_identity_slugs=["intuit"],
+            bucket="hiring_managers",
+            context=context,
+            limit=5,
+        )
+
+        assert [candidate["full_name"] for candidate in results] == ["Hugo Godoy"]
+
+    def test_append_bucket_does_not_drop_multiple_unsaved_people_with_none_ids(self):
+        bucketed = {"recruiters": [], "hiring_managers": [], "peers": []}
+        seen = {"recruiters": set(), "hiring_managers": set(), "peers": set()}
+        context = JobContext(
+            department="engineering",
+            team_keywords=["fullstack"],
+            domain_keywords=[],
+            seniority="junior",
+            early_career=False,
+        )
+
+        first = SimpleNamespace(
+            id=None,
+            full_name="Jacky Zhang",
+            title="iOS/Full stack software developer",
+            linkedin_url="https://ca.linkedin.com/in/jackydocode/es",
+            profile_data={"public_url": "https://ca.linkedin.com/in/jackydocode/es"},
+            person_type="peer",
+        )
+        second = SimpleNamespace(
+            id=None,
+            full_name="Navneet Kahlon",
+            title="Full Stack Developer @ Intuit",
+            linkedin_url="https://ca.linkedin.com/in/navneetskahlon",
+            profile_data={"public_url": "https://ca.linkedin.com/in/navneetskahlon"},
+            person_type="peer",
+        )
+
+        _append_bucket(
+            bucketed,
+            seen,
+            first,
+            {"full_name": "Jacky Zhang", "title": first.title, "linkedin_url": first.linkedin_url},
+            explicit_type="peer",
+            context=context,
+            company_name="Intuit",
+            public_identity_slugs=["intuit"],
+        )
+        _append_bucket(
+            bucketed,
+            seen,
+            second,
+            {"full_name": "Navneet Kahlon", "title": second.title, "linkedin_url": second.linkedin_url},
+            explicit_type="peer",
+            context=context,
+            company_name="Intuit",
+            public_identity_slugs=["intuit"],
+        )
+
+        assert [person.full_name for person in bucketed["peers"]] == [
+            "Jacky Zhang",
+            "Navneet Kahlon",
+        ]
+
     def test_prepare_candidates_allows_senior_ic_fallback_for_hiring_managers(self):
         context = JobContext(
             department="engineering",
@@ -683,6 +987,89 @@ class TestEmploymentAndRanking:
         )
 
         assert results == []
+
+    def test_prepare_candidates_allows_public_linkedin_peers_with_current_company_and_local_geo(self):
+        context = JobContext(
+            department="engineering",
+            team_keywords=["fullstack"],
+            domain_keywords=[],
+            seniority="junior",
+            early_career=True,
+            job_locations=["Toronto, Ontario, Canada"],
+            job_geo_terms=["Toronto", "Greater Toronto Area", "Ontario", "Canada"],
+        )
+        results = _prepare_candidates(
+            [
+                {
+                    "full_name": "Delna Bijo",
+                    "title": "Software Engineer @ Intuit",
+                    "snippet": "Software Engineer at Intuit in Toronto, Ontario, Canada. Currently building product experiences.",
+                    "source": "tavily_public_web",
+                    "linkedin_url": "https://ca.linkedin.com/in/delna-bijo",
+                    "location": "Toronto, Ontario, Canada",
+                    "profile_data": {
+                        "public_url": "https://ca.linkedin.com/in/delna-bijo",
+                        "linkedin_result_title": "Delna Bijo - Software Engineer @ Intuit",
+                        "location": "Toronto, Ontario, Canada",
+                    },
+                }
+            ],
+            company_name="Intuit",
+            public_identity_slugs=["intuit"],
+            bucket="peers",
+            context=context,
+            limit=5,
+        )
+
+        assert [candidate["full_name"] for candidate in results] == ["Delna Bijo"]
+
+    def test_prepare_candidates_prefers_local_software_peers_over_generic_nonlocal_engineers(self):
+        context = JobContext(
+            department="engineering",
+            team_keywords=["fullstack"],
+            domain_keywords=[],
+            seniority="junior",
+            early_career=True,
+            job_locations=["Toronto, Ontario, Canada"],
+            job_geo_terms=["Toronto", "Greater Toronto Area", "Ontario", "Canada"],
+        )
+        results = _prepare_candidates(
+            [
+                {
+                    "full_name": "Mehdi Mohammadi",
+                    "title": "Senior Machine Learning Engineer",
+                    "snippet": "Current engineer at Intuit working on machine learning.",
+                    "source": "brave_public_web",
+                    "profile_data": {
+                        "public_url": "https://theorg.com/org/intuit/org-chart/mehdi-mohammadi",
+                        "public_identity_slug": "intuit",
+                    },
+                },
+                {
+                    "full_name": "Peter Smith",
+                    "title": "Software Developer",
+                    "snippet": "Software Developer at Intuit in Toronto, Ontario, Canada.",
+                    "source": "tavily_public_web",
+                    "linkedin_url": "https://ca.linkedin.com/in/peter-smith-8a402581",
+                    "location": "Toronto, Ontario, Canada",
+                    "profile_data": {
+                        "public_url": "https://ca.linkedin.com/in/peter-smith-8a402581",
+                        "linkedin_result_title": "Peter Smith - Software Developer at Intuit",
+                        "location": "Toronto, Ontario, Canada",
+                    },
+                },
+            ],
+            company_name="Intuit",
+            public_identity_slugs=["intuit"],
+            bucket="peers",
+            context=context,
+            limit=5,
+        )
+
+        assert [candidate["full_name"] for candidate in results[:2]] == [
+            "Peter Smith",
+            "Mehdi Mohammadi",
+        ]
 
     def test_compute_match_metadata_marks_weak_peer_title_next_best(self):
         match_quality, match_reason = _compute_match_metadata(
@@ -1102,6 +1489,7 @@ class TestEmploymentAndRanking:
                         "title": "Global Talent Acquisition Partner",
                         "snippet": "Current recruiter at AppLovin.",
                         "source": "theorg_traversal",
+                        "location": "Toronto, Ontario, Canada",
                         "_weak_title": False,
                         "_employment_status": "current",
                         "profile_data": {
@@ -1109,18 +1497,395 @@ class TestEmploymentAndRanking:
                             "public_identity_slug": "applovin",
                             "theorg_team_name": "People and Talent",
                             "theorg_team_slug": "people-and-talent",
+                            "location": "Toronto, Ontario, Canada",
                         },
                     }
                 ],
                 company_name="AppLovin",
                 public_identity_slugs=["applovin"],
                 bucket="recruiters",
+                context=JobContext(
+                    department="engineering",
+                    team_keywords=[],
+                    domain_keywords=[],
+                    product_team_names=[],
+                    seniority="junior",
+                    early_career=False,
+                    manager_titles=[],
+                    peer_titles=[],
+                    recruiter_titles=[],
+                    apollo_departments=[],
+                    job_locations=["Toronto, Ontario, Canada"],
+                    job_geo_terms=["Toronto", "Ontario", "Canada"],
+                ),
+                geo_terms=["Toronto", "Ontario", "Canada"],
+                search_profile="interactive",
             )
 
         _, kwargs = mock_exact.await_args
         assert kwargs["name_variants"] == ["Xu Ting"]
         assert "Global Talent Acquisition Partner" in kwargs["title_hints"]
         assert "talent acquisition" in kwargs["team_keywords"]
+        assert kwargs["geo_terms"] == ["Toronto", "Ontario", "Canada"]
+        assert kwargs["search_profile"] == "interactive"
+
+    @pytest.mark.asyncio
+    async def test_backfill_linkedin_profiles_prioritizes_geo_matched_public_candidates(self):
+        observed_names: list[str] = []
+
+        async def _mock_exact(full_name, company_name, **kwargs):
+            observed_names.append(full_name)
+            return []
+
+        with (
+            patch(
+                "app.services.people_service.search_router_client.search_exact_linkedin_profile",
+                new_callable=AsyncMock,
+                side_effect=_mock_exact,
+            ),
+            patch(
+                "app.services.people_service.search_router_client.search_people",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+        ):
+            await _backfill_linkedin_profiles(
+                [
+                    {
+                        "full_name": "Generic Recruiter",
+                        "title": "Recruiter",
+                        "snippet": "Recruiter at Intuit.",
+                        "source": "theorg_traversal",
+                        "location": "New York, New York, United States",
+                        "_employment_status": "current",
+                        "profile_data": {
+                            "public_url": "https://theorg.com/org/intuit/org-chart/generic-recruiter",
+                            "public_identity_slug": "intuit",
+                            "location": "New York, New York, United States",
+                        },
+                    },
+                    {
+                        "full_name": "Reiss Simmons",
+                        "title": "Senior Talent Acquisition Manager",
+                        "snippet": "Senior Talent Acquisition Manager at Intuit in Toronto.",
+                        "source": "brave_public_web",
+                        "location": "Toronto, Ontario, Canada",
+                        "_employment_status": "current",
+                        "profile_data": {
+                            "public_url": "https://theorg.com/org/intuit/org-chart/reiss-simmons",
+                            "public_identity_slug": "intuit",
+                            "location": "Toronto, Ontario, Canada",
+                        },
+                    },
+                ],
+                company_name="Intuit",
+                public_identity_slugs=["intuit"],
+                bucket="recruiters",
+                context=JobContext(
+                    department="engineering",
+                    team_keywords=[],
+                    domain_keywords=[],
+                    product_team_names=[],
+                    seniority="junior",
+                    early_career=False,
+                    manager_titles=[],
+                    peer_titles=[],
+                    recruiter_titles=[],
+                    apollo_departments=[],
+                    job_locations=["Toronto, Ontario, Canada"],
+                    job_geo_terms=["Toronto", "Ontario", "Canada"],
+                ),
+                geo_terms=["Toronto", "Ontario", "Canada"],
+                search_profile="interactive",
+            )
+
+        assert observed_names[0] == "Reiss Simmons"
+
+    @pytest.mark.asyncio
+    async def test_backfill_top_candidates_only_backfills_provisional_top_slice(self):
+        with patch(
+            "app.services.people_service._backfill_linkedin_profiles",
+            new_callable=AsyncMock,
+        ) as mock_backfill:
+            mock_backfill.return_value = [
+                {"full_name": "Top 1", "linkedin_url": "https://linkedin.com/in/top1"},
+                {"full_name": "Top 2", "linkedin_url": "https://linkedin.com/in/top2"},
+            ]
+            results = await _backfill_top_candidates(
+                [
+                    {"full_name": "Top 1"},
+                    {"full_name": "Top 2"},
+                    {"full_name": "Keep 3"},
+                    {"full_name": "Keep 4"},
+                ],
+                top_n=2,
+                company_name="Intuit",
+                public_identity_slugs=["intuit"],
+                bucket="recruiters",
+            )
+
+        assert [item["full_name"] for item in results] == ["Top 1", "Top 2", "Keep 3", "Keep 4"]
+        assert len(mock_backfill.await_args.args[0]) == 2
+
+    def test_score_contextual_candidates_fast_orders_by_heuristics(self):
+        job = SimpleNamespace(title="Software Developer 1", company_name="Intuit")
+        context = JobContext(
+            department="engineering",
+            team_keywords=["fullstack"],
+            domain_keywords=["payments"],
+            product_team_names=[],
+            seniority="junior",
+            early_career=False,
+            manager_titles=[],
+            peer_titles=[],
+            recruiter_titles=[],
+            apollo_departments=[],
+            job_locations=["Toronto, Ontario, Canada"],
+            job_geo_terms=["Toronto", "Ontario", "Canada"],
+        )
+        ranked = _score_contextual_candidates_fast(
+            [
+                {
+                    "full_name": "Generic Manager",
+                    "title": "Engineering Manager",
+                    "snippet": "Engineering Manager at Intuit.",
+                    "location": "Mountain View, California, United States",
+                },
+                {
+                    "full_name": "Toronto Fullstack Manager",
+                    "title": "Fullstack Engineering Manager",
+                    "snippet": "Payments engineering leader at Intuit.",
+                    "location": "Toronto, Ontario, Canada",
+                },
+            ],
+            job=job,
+            context=context,
+            min_relevance_score=1,
+            bucket="hiring_managers",
+        )
+
+        assert ranked[0]["full_name"] == "Toronto Fullstack Manager"
+        assert ranked[0]["relevance_score"] >= ranked[1]["relevance_score"]
+
+    def test_candidate_geo_signal_match_uses_title_and_snippet_when_location_missing(self):
+        context = JobContext(
+            department="engineering",
+            team_keywords=["fullstack"],
+            domain_keywords=[],
+            product_team_names=[],
+            seniority="junior",
+            early_career=False,
+            manager_titles=[],
+            peer_titles=[],
+            recruiter_titles=[],
+            apollo_departments=[],
+            job_locations=["Toronto, Ontario, Canada"],
+            job_geo_terms=["Toronto", "Greater Toronto Area", "Ontario", "Canada"],
+        )
+
+        assert _candidate_geo_signal_match(
+            {
+                "title": "Software Engineering Manager",
+                "snippet": "Current Software Engineering Manager at Intuit in Toronto.",
+                "profile_data": {},
+            },
+            context=context,
+        ) is True
+
+    def test_initial_manager_titles_prioritize_engineering_leadership_variants(self):
+        context = JobContext(
+            department="engineering",
+            team_keywords=["fullstack"],
+            domain_keywords=["payments"],
+            product_team_names=[],
+            seniority="junior",
+            early_career=False,
+            manager_titles=["Engineering Manager"],
+            peer_titles=[],
+            recruiter_titles=[],
+            apollo_departments=[],
+            job_locations=["Toronto, Ontario, Canada"],
+            job_geo_terms=["Toronto", "Ontario", "Canada"],
+        )
+
+        titles = _initial_manager_titles(context)
+
+        assert "Engineering Manager" in titles[:2]
+        assert "Software Engineering Manager" in titles
+        assert "Team Lead" in titles
+        assert "Technical Lead" in titles
+        assert "Senior Engineering Manager" in titles
+        assert "Director of Engineering" in titles
+
+    def test_manager_context_search_titles_drops_non_manageric_job_title_derivatives(self):
+        context = JobContext(
+            department="engineering",
+            team_keywords=["fullstack", "qa"],
+            domain_keywords=[],
+            product_team_names=[],
+            seniority="junior",
+            early_career=False,
+            manager_titles=[
+                "Engineering Manager",
+                "Senior Software Developer 1 (Center of Money)",
+                "Software Developer 1 (Center of Money) Team Lead",
+                "Director of Engineering",
+            ],
+            peer_titles=[],
+            recruiter_titles=[],
+            apollo_departments=[],
+            job_locations=["Toronto, Ontario, Canada"],
+            job_geo_terms=["Toronto", "Ontario", "Canada"],
+        )
+
+        assert _manager_context_search_titles(context) == [
+            "Engineering Manager",
+            "Director of Engineering",
+        ]
+
+    def test_manager_geo_recovery_titles_adds_broader_leadership_variants_without_dropping_core_manager_titles(self):
+        context = JobContext(
+            department="engineering",
+            team_keywords=["fullstack"],
+            domain_keywords=["payments"],
+            product_team_names=[],
+            seniority="junior",
+            early_career=False,
+            manager_titles=["Engineering Manager"],
+            peer_titles=[],
+            recruiter_titles=[],
+            apollo_departments=[],
+            job_locations=["Toronto, Ontario, Canada"],
+            job_geo_terms=["Toronto", "Ontario", "Canada"],
+        )
+
+        titles = _manager_geo_recovery_titles(context)
+
+        assert "Engineering Manager" in titles[:2]
+        assert "Software Engineering Manager" in titles
+        assert "Software Development Manager" in titles
+        assert "VP Engineering" in titles
+
+    def test_sanitize_search_keywords_drops_company_name_noise(self):
+        assert _sanitize_search_keywords(
+            ["Intuit", "fullstack", "payments", "Intuit"],
+            company_name="Intuit",
+        ) == ["fullstack", "payments"]
+
+    def test_should_run_manager_geo_recovery_when_bucket_underfilled(self):
+        context = JobContext(
+            department="engineering",
+            team_keywords=["fullstack"],
+            domain_keywords=[],
+            product_team_names=[],
+            seniority="junior",
+            early_career=False,
+            manager_titles=[],
+            peer_titles=[],
+            recruiter_titles=[],
+            apollo_departments=[],
+            job_locations=["Toronto, Ontario, Canada"],
+            job_geo_terms=["Toronto", "Greater Toronto Area", "Ontario", "Canada"],
+        )
+
+        assert _should_run_manager_geo_recovery(
+            [
+                {
+                    "title": "Engineering Manager",
+                    "snippet": "Engineering Manager at Intuit in Toronto.",
+                    "profile_data": {},
+                }
+            ],
+            context=context,
+            target_count_per_bucket=3,
+        ) is True
+
+    def test_should_skip_manager_geo_recovery_when_bucket_is_full_and_local(self):
+        context = JobContext(
+            department="engineering",
+            team_keywords=["fullstack"],
+            domain_keywords=[],
+            product_team_names=[],
+            seniority="junior",
+            early_career=False,
+            manager_titles=[],
+            peer_titles=[],
+            recruiter_titles=[],
+            apollo_departments=[],
+            job_locations=["Toronto, Ontario, Canada"],
+            job_geo_terms=["Toronto", "Greater Toronto Area", "Ontario", "Canada"],
+        )
+
+        assert _should_run_manager_geo_recovery(
+            [
+                {
+                    "title": "Engineering Manager",
+                    "snippet": "Engineering Manager at Intuit in Toronto.",
+                    "profile_data": {},
+                },
+                {
+                    "title": "Software Engineering Manager",
+                    "snippet": "Software Engineering Manager at Intuit in Greater Toronto Area.",
+                    "profile_data": {},
+                },
+                {
+                    "title": "Group Engineering Manager",
+                    "snippet": "Group Engineering Manager at Intuit in Toronto.",
+                    "profile_data": {},
+                },
+            ],
+            context=context,
+            target_count_per_bucket=3,
+        ) is False
+
+    def test_candidate_bucket_assignment_rank_prefers_explicit_manager_titles_over_generic_leaders(self):
+        context = JobContext(
+            department="engineering",
+            team_keywords=[],
+            domain_keywords=[],
+            product_team_names=[],
+            seniority="junior",
+            early_career=False,
+            manager_titles=[],
+            peer_titles=[],
+            recruiter_titles=[],
+            apollo_departments=[],
+            job_locations=["Toronto, Ontario, Canada"],
+            job_geo_terms=["Toronto", "Greater Toronto Area", "Ontario", "Canada"],
+        )
+
+        explicit_manager = {
+            "full_name": "David Van Noten",
+            "title": "Senior Engineering Manager - Intuit",
+            "snippet": "Greater Toronto Area, Canada",
+            "source": "tavily_public_web",
+            "linkedin_url": "https://ca.linkedin.com/in/davidvn",
+            "location": "Greater Toronto Area, Canada",
+            "profile_data": {},
+        }
+        generic_leader = {
+            "full_name": "Rex Su",
+            "title": "Engineering Leader | Intuit",
+            "snippet": "Toronto, Ontario, Canada",
+            "source": "tavily_public_web",
+            "linkedin_url": "https://ca.linkedin.com/in/rexsu",
+            "location": "Toronto, Ontario, Canada",
+            "profile_data": {},
+        }
+
+        assert _candidate_bucket_assignment_rank(
+            "hiring_managers",
+            explicit_manager,
+            context=context,
+            company_name="Intuit",
+            public_identity_slugs=["intuit"],
+        ) < _candidate_bucket_assignment_rank(
+            "hiring_managers",
+            generic_leader,
+            context=context,
+            company_name="Intuit",
+            public_identity_slugs=["intuit"],
+        )
 
     @pytest.mark.asyncio
     async def test_store_person_merges_linkedin_into_existing_public_profile(self):

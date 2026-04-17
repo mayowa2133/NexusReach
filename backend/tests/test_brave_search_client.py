@@ -6,6 +6,7 @@ from unittest.mock import patch, AsyncMock, MagicMock
 from app.clients.brave_search_client import (
     search_people, _parse_linkedin_result,
     search_hiring_team, _parse_hiring_team_result,
+    _manager_public_leader_queries,
     _parse_public_people_result, search_public_people, search_exact_linkedin_profile,
 )
 
@@ -159,6 +160,22 @@ class TestSearchPeople:
             s.brave_api_key = ""
             results = await search_people("Google")
         assert results == []
+
+
+def test_manager_public_leader_queries_adds_geo_targeted_engineering_leader_template():
+    queries = _manager_public_leader_queries(
+        "Intuit",
+        titles=["Engineering Manager", "Director of Engineering"],
+        geo_terms=["Toronto", "Ontario", "Canada", "Greater Toronto Area"],
+        public_identity_terms=["intuit"],
+    )
+
+    assert queries
+    assert any('site:theorg.com/org/intuit' in query for query in queries)
+    assert any('"Engineering Manager"' in query for query in queries)
+    assert any('"Software Development Manager"' in query for query in queries)
+    assert any('"Toronto"' in query for query in queries)
+    assert any('site:linkedin.com/in' in query for query in queries)
 
     async def test_returns_empty_on_401(self):
         mock_client = _mock_client_with(_mock_httpx_response({}, status_code=401))
