@@ -15,6 +15,7 @@ from app.schemas.messages import (
     EditRequest,
     DraftResponse,
     MessageResponse,
+    MessageWarmPathResponse,
 )
 from app.schemas.people import PersonResponse
 from app.services.message_service import (
@@ -34,8 +35,9 @@ def _snapshot(msg) -> dict:
     return snapshot if isinstance(snapshot, dict) else {}
 
 
-def _to_response(msg, person=None) -> MessageResponse:
+def _to_response(msg, person=None, warm_path_override=None) -> MessageResponse:
     snapshot = _snapshot(msg)
+    warm_path = warm_path_override if warm_path_override is not None else snapshot.get("warm_path")
     return MessageResponse(
         id=str(msg.id),
         person_id=str(msg.person_id),
@@ -52,6 +54,7 @@ def _to_response(msg, person=None) -> MessageResponse:
         primary_cta=snapshot.get("primary_cta"),
         fallback_cta=snapshot.get("fallback_cta"),
         job_id=snapshot.get("job_id"),
+        warm_path=MessageWarmPathResponse.model_validate(warm_path) if warm_path else None,
         person_name=person.full_name if person else None,
         person_title=person.title if person else None,
         created_at=msg.created_at.isoformat(),
@@ -92,13 +95,14 @@ async def create_draft(
         raise HTTPException(status_code=400, detail=str(e))
 
     return DraftResponse(
-        message=_to_response(result["message"], result["person"]),
+        message=_to_response(result["message"], result["person"], result.get("warm_path")),
         reasoning=result["reasoning"],
         token_usage=result["token_usage"],
         recipient_strategy=result.get("recipient_strategy"),
         primary_cta=result.get("primary_cta"),
         fallback_cta=result.get("fallback_cta"),
         job_id=result.get("job_id"),
+        warm_path=MessageWarmPathResponse.model_validate(result["warm_path"]) if result.get("warm_path") else None,
     )
 
 

@@ -81,6 +81,11 @@ export interface LinkedInGraphConnection {
   company_linkedin_url: string | null;
   source: 'local_sync' | 'manual_import' | string;
   last_synced_at: string | null;
+  freshness?: 'empty' | 'fresh' | 'aging' | 'stale' | string | null;
+  days_since_sync?: number | null;
+  refresh_recommended?: boolean;
+  stale?: boolean;
+  caution?: string | null;
 }
 
 export interface Person {
@@ -211,6 +216,7 @@ export interface Message {
   primary_cta?: MessageCTA | null;
   fallback_cta?: 'referral' | 'redirect' | null;
   job_id?: string | null;
+  warm_path?: MessageWarmPath | null;
   person_name: string | null;
   person_title: string | null;
   scheduled_send_at: string | null;
@@ -233,6 +239,20 @@ export interface DraftResponse {
   primary_cta?: MessageCTA | null;
   fallback_cta?: 'referral' | 'redirect' | null;
   job_id?: string | null;
+  warm_path?: MessageWarmPath | null;
+}
+
+export interface MessageWarmPath {
+  type: 'direct_connection' | 'same_company_bridge' | string;
+  reason: string | null;
+  connection_name: string | null;
+  connection_headline: string | null;
+  connection_linkedin_url: string | null;
+  freshness: 'empty' | 'fresh' | 'aging' | 'stale' | string | null;
+  days_since_sync: number | null;
+  refresh_recommended: boolean;
+  stale: boolean;
+  caution: string | null;
 }
 
 export interface BatchDraftRequest {
@@ -659,6 +679,12 @@ export interface LinkedInGraphStatus {
   sync_status: 'idle' | 'awaiting_upload' | 'syncing' | 'completed' | 'failed' | string;
   last_error: string | null;
   connection_count: number;
+  freshness: 'empty' | 'fresh' | 'aging' | 'stale' | string;
+  days_since_last_sync: number | null;
+  refresh_recommended: boolean;
+  stale_after_days: number;
+  recommended_resync_every_days: number;
+  status_message: string | null;
   last_run: LinkedInGraphSyncRun | null;
 }
 
@@ -684,6 +710,19 @@ export interface ApiUsageByService {
 export interface GraphWarmPathCompany {
   company_name: string;
   connection_count: number;
+  freshness?: 'empty' | 'fresh' | 'aging' | 'stale' | string | null;
+  days_since_sync?: number | null;
+  refresh_recommended?: boolean;
+}
+
+export interface UnifiedWarmPathCompany {
+  company_name: string;
+  connected_persons: WarmPathPerson[];
+  outreach_connection_count: number;
+  graph_connection_count: number;
+  graph_freshness: 'empty' | 'fresh' | 'aging' | 'stale' | string | null;
+  graph_days_since_sync: number | null;
+  graph_refresh_recommended: boolean;
 }
 
 export interface InsightsDashboard {
@@ -695,6 +734,7 @@ export interface InsightsDashboard {
   network_growth: NetworkGrowthPoint[];
   network_gaps: NetworkGap[];
   warm_paths: WarmPath[];
+  warm_path_companies: UnifiedWarmPathCompany[];
   company_openness: CompanyOpenness[];
   job_pipeline: JobPipelineStage[];
   api_usage_by_service: ApiUsageByService[];

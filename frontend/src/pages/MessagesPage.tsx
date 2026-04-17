@@ -130,6 +130,12 @@ function formatCompanyVerificationStatus(status: string | null | undefined): str
   return null;
 }
 
+function formatWarmPathType(type: string | null | undefined): string | null {
+  if (type === 'direct_connection') return 'Direct connection';
+  if (type === 'same_company_bridge') return 'Same-company bridge';
+  return null;
+}
+
 function formatBatchReason(reason: string | null | undefined): string {
   if (!reason) {
     return 'Unknown issue';
@@ -637,7 +643,37 @@ function SingleMessagesView() {
                         Saved job context
                       </Badge>
                     )}
+                    {activeDraft.warm_path && formatWarmPathType(activeDraft.warm_path.type) && (
+                      <Badge variant="outline" className="text-xs">
+                        {formatWarmPathType(activeDraft.warm_path.type)}
+                      </Badge>
+                    )}
                   </div>
+
+                  {activeDraft.warm_path && (
+                    <div className="rounded-md bg-muted/50 p-3 text-sm space-y-1">
+                      <div className="font-medium">
+                        Warm-path context
+                        {activeDraft.warm_path.connection_name ? `: ${activeDraft.warm_path.connection_name}` : ''}
+                      </div>
+                      {activeDraft.warm_path.reason && (
+                        <div className="text-muted-foreground">{activeDraft.warm_path.reason}</div>
+                      )}
+                      {activeDraft.warm_path.connection_headline && (
+                        <div className="text-xs text-muted-foreground">
+                          {activeDraft.warm_path.connection_headline}
+                        </div>
+                      )}
+                      {activeDraft.warm_path.days_since_sync != null && (
+                        <div className="text-xs text-muted-foreground">
+                          LinkedIn graph synced {activeDraft.warm_path.days_since_sync} day{activeDraft.warm_path.days_since_sync === 1 ? '' : 's'} ago.
+                        </div>
+                      )}
+                      {activeDraft.warm_path.caution && (
+                        <div className="text-xs text-amber-700">{activeDraft.warm_path.caution}</div>
+                      )}
+                    </div>
+                  )}
 
                   {activeDraft.channel === 'email' && (
                     <div className="space-y-1">
@@ -1307,6 +1343,11 @@ function BatchMessagesView({
                               Primary: {CTA_LABELS[message.primary_cta] || message.primary_cta}
                             </Badge>
                           )}
+                          {message?.warm_path && formatWarmPathType(message.warm_path.type) && (
+                            <Badge variant="outline" className="text-xs">
+                              {formatWarmPathType(message.warm_path.type)}
+                            </Badge>
+                          )}
                         </div>
                       </div>
 
@@ -1332,6 +1373,13 @@ function BatchMessagesView({
                     {item.reason && (
                       <div className="rounded-md bg-muted/40 p-3 text-sm text-muted-foreground">
                         {formatBatchReason(item.reason)}
+                      </div>
+                    )}
+
+                    {message?.warm_path?.reason && (
+                      <div className="rounded-md bg-muted/40 p-3 text-sm text-muted-foreground">
+                        {message.warm_path.reason}
+                        {message.warm_path.caution ? ` ${message.warm_path.caution}` : ''}
                       </div>
                     )}
                   </CardHeader>

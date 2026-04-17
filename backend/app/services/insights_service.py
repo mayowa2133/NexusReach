@@ -15,6 +15,7 @@ from app.models.company import Company
 from app.models.message import Message
 from app.models.job import Job
 from app.models.profile import Profile
+from app.services.linkedin_graph_service import graph_freshness_metadata
 
 # Window used by the API-usage breakdown on the dashboard.
 API_USAGE_WINDOW_DAYS = 30
@@ -469,6 +470,7 @@ async def get_graph_warm_paths(
         select(
             company_expr.label("company"),
             sa_func.count().label("connections"),
+            sa_func.max(LinkedInGraphConnection.last_synced_at).label("last_synced_at"),
         )
         .where(
             LinkedInGraphConnection.user_id == user_id,
@@ -478,10 +480,63 @@ async def get_graph_warm_paths(
         .order_by(sa_func.count().desc())
         .limit(GRAPH_WARM_PATHS_LIMIT)
     )
-    return [
-        {"company_name": row[0], "connection_count": int(row[1])}
-        for row in result.all()
-    ]
+    companies = []
+    for row in result.all():
+        freshness = graph_freshness_metadata(row[2])
+        companies.append({
+            "company_name": row[0],
+            "connection_count": int(row[1]),
+            "freshness": freshness["freshness"],
+            "days_since_sync": freshness["days_since_sync"],
+            "refresh_recommended": freshness["refresh_recommended"],
+        })
+    return companies
+
+
+def _merge_warm_path_companies(
+    outreach_paths: list[dict],
+    graph_paths: list[dict],
+) -> list[dict]:
+    merged: dict[str, dict] = {}
+
+    for item in outreach_paths:
+        merged[item["company_name"]] = {
+            "company_name": item["company_name"],
+            "connected_persons": item["connected_persons"],
+            "outreach_connection_count": len(item["connected_persons"]),
+            "graph_connection_count": 0,
+            "graph_freshness": None,
+            "graph_days_since_sync": None,
+            "graph_refresh_recommended": False,
+        }
+
+    for item in graph_paths:
+        target = merged.setdefault(
+            item["company_name"],
+            {
+                "company_name": item["company_name"],
+                "connected_persons": [],
+                "outreach_connection_count": 0,
+                "graph_connection_count": 0,
+                "graph_freshness": None,
+                "graph_days_since_sync": None,
+                "graph_refresh_recommended": False,
+            },
+        )
+        target["graph_connection_count"] = int(item["connection_count"])
+        target["graph_freshness"] = item.get("freshness")
+        target["graph_days_since_sync"] = item.get("days_since_sync")
+        target["graph_refresh_recommended"] = bool(item.get("refresh_recommended"))
+
+    return sorted(
+        merged.values(),
+        key=lambda item: (
+            -(item["outreach_connection_count"] > 0),
+            -(item["graph_connection_count"] > 0),
+            -(item["outreach_connection_count"] + item["graph_connection_count"]),
+            item["company_name"].lower(),
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -508,6 +563,7 @@ async def get_full_dashboard(
     pipeline = await get_job_pipeline(db, user_id)
     api_usage = await get_api_usage_by_service(db, user_id)
     graph_warm = await get_graph_warm_paths(db, user_id)
+    warm_path_companies = _merge_warm_path_companies(warm, graph_warm)
 
     return {
         "summary": summary,
@@ -518,6 +574,7 @@ async def get_full_dashboard(
         "network_growth": growth,
         "network_gaps": gaps,
         "warm_paths": warm,
+        "warm_path_companies": warm_path_companies,
         "company_openness": openness,
         "job_pipeline": pipeline,
         "api_usage_by_service": api_usage,

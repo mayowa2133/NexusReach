@@ -2630,10 +2630,15 @@ def _bucket_role_fit_rank(bucket: str, person: Person) -> int:
 
 
 def _warm_path_rank(person: Person) -> int:
-    return {
-        "direct_connection": 0,
-        "same_company_bridge": 1,
-    }.get(getattr(person, "warm_path_type", None), 2)
+    warm_path_type = getattr(person, "warm_path_type", None)
+    is_stale = bool(getattr(person, "warm_path_stale", False))
+    refresh_recommended = bool(getattr(person, "warm_path_refresh_recommended", False))
+
+    if warm_path_type == "direct_connection":
+        return 1 if is_stale else 0
+    if warm_path_type == "same_company_bridge":
+        return 2 if (is_stale or refresh_recommended) else 1
+    return 2
 
 
 def _bucketed_linkedin_slugs(bucketed: dict[str, list[Person]]) -> list[str]:

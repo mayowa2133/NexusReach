@@ -41,6 +41,65 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def graph_freshness_metadata(last_synced_at: datetime | None) -> dict[str, Any]:
+    recommended_days = settings.linkedin_graph_refresh_recommended_days
+    stale_after_days = settings.linkedin_graph_stale_after_days
+
+    if last_synced_at is None:
+        return {
+            "freshness": "empty",
+            "days_since_sync": None,
+            "refresh_recommended": False,
+            "stale": False,
+            "caution": None,
+            "status_message": "No LinkedIn graph data synced yet.",
+            "recommended_resync_every_days": recommended_days,
+            "stale_after_days": stale_after_days,
+        }
+
+    days_since_sync = max(
+        0,
+        int((_utcnow() - last_synced_at).total_seconds() // 86400),
+    )
+    refresh_recommended = days_since_sync >= recommended_days
+    stale = days_since_sync >= stale_after_days
+    freshness = "fresh"
+    caution = None
+    status_message = (
+        f"LinkedIn graph is current. Re-sync every {recommended_days} days."
+    )
+
+    if stale:
+        freshness = "stale"
+        caution = (
+            f"LinkedIn graph data is {days_since_sync} days old. Confirm mutual connections"
+            " before relying on them in outreach."
+        )
+        status_message = (
+            f"LinkedIn graph is stale ({days_since_sync} days old). Re-sync before using warm paths heavily."
+        )
+    elif refresh_recommended:
+        freshness = "aging"
+        caution = (
+            f"LinkedIn graph data is {days_since_sync} days old. A re-sync is recommended"
+            " before high-priority outreach."
+        )
+        status_message = (
+            f"LinkedIn graph is aging ({days_since_sync} days since last sync). Re-sync soon."
+        )
+
+    return {
+        "freshness": freshness,
+        "days_since_sync": days_since_sync,
+        "refresh_recommended": refresh_recommended,
+        "stale": stale,
+        "caution": caution,
+        "status_message": status_message,
+        "recommended_resync_every_days": recommended_days,
+        "stale_after_days": stale_after_days,
+    }
+
+
 def _clean_text(value: Any) -> str:
     if value is None:
         return ""
@@ -422,6 +481,8 @@ async def get_status(db: AsyncSession, user_id: uuid.UUID) -> dict[str, Any]:
         if last_run.session_expires_at <= _utcnow():
             sync_status = SYNC_STATUS_IDLE
 
+    freshness = graph_freshness_metadata(user_settings.linkedin_graph_last_synced_at)
+
     return {
         "connected": bool(user_settings.linkedin_graph_connected and count > 0),
         "source": user_settings.linkedin_graph_source,
@@ -429,6 +490,12 @@ async def get_status(db: AsyncSession, user_id: uuid.UUID) -> dict[str, Any]:
         "sync_status": sync_status,
         "last_error": user_settings.linkedin_graph_last_error,
         "connection_count": count,
+        "freshness": freshness["freshness"],
+        "days_since_last_sync": freshness["days_since_sync"],
+        "refresh_recommended": bool(count > 0 and freshness["refresh_recommended"]),
+        "stale_after_days": freshness["stale_after_days"],
+        "recommended_resync_every_days": freshness["recommended_resync_every_days"],
+        "status_message": freshness["status_message"] if count > 0 else "No LinkedIn graph data synced yet.",
         "last_run": _serialize_run(last_run),
     }
 
@@ -669,6 +736,7 @@ async def get_connections_by_linkedin_slugs(
 def serialize_connection(connection: LinkedInGraphConnection | dict[str, Any]) -> dict[str, Any]:
     if isinstance(connection, dict):
         connection_id = connection.get("id")
+        freshness = graph_freshness_metadata(connection.get("last_synced_at"))
         return {
             "id": str(connection_id) if connection_id is not None else "",
             "display_name": connection.get("display_name") or "",
@@ -678,8 +746,14 @@ def serialize_connection(connection: LinkedInGraphConnection | dict[str, Any]) -
             "company_linkedin_url": connection.get("company_linkedin_url"),
             "source": connection.get("source") or "manual_import",
             "last_synced_at": connection.get("last_synced_at"),
+            "freshness": freshness["freshness"],
+            "days_since_sync": freshness["days_since_sync"],
+            "refresh_recommended": freshness["refresh_recommended"],
+            "stale": freshness["stale"],
+            "caution": freshness["caution"],
         }
 
+    freshness = graph_freshness_metadata(connection.last_synced_at)
     return {
         "id": str(connection.id),
         "display_name": connection.display_name,
@@ -689,6 +763,11 @@ def serialize_connection(connection: LinkedInGraphConnection | dict[str, Any]) -
         "company_linkedin_url": connection.company_linkedin_url,
         "source": connection.source,
         "last_synced_at": connection.last_synced_at,
+        "freshness": freshness["freshness"],
+        "days_since_sync": freshness["days_since_sync"],
+        "refresh_recommended": freshness["refresh_recommended"],
+        "stale": freshness["stale"],
+        "caution": freshness["caution"],
     }
 
 
@@ -911,10 +990,16 @@ def apply_warm_path_annotations(
             setattr(person, "warm_path_type", None)
             setattr(person, "warm_path_reason", None)
             setattr(person, "warm_path_connection", None)
+            setattr(person, "warm_path_freshness", None)
+            setattr(person, "warm_path_days_since_sync", None)
+            setattr(person, "warm_path_refresh_recommended", False)
+            setattr(person, "warm_path_stale", False)
+            setattr(person, "warm_path_caution", None)
 
             person_slug = _linkedin_slug_from_url(getattr(person, "linkedin_url", None))
             direct_connection = by_slug.get(person_slug) if person_slug else None
             if direct_connection is not None:
+                freshness = graph_freshness_metadata(direct_connection.last_synced_at)
                 setattr(person, "warm_path_type", "direct_connection")
                 setattr(
                     person,
@@ -922,11 +1007,17 @@ def apply_warm_path_annotations(
                     f"You are already connected to {direct_connection.display_name} on LinkedIn.",
                 )
                 setattr(person, "warm_path_connection", direct_connection)
+                setattr(person, "warm_path_freshness", freshness["freshness"])
+                setattr(person, "warm_path_days_since_sync", freshness["days_since_sync"])
+                setattr(person, "warm_path_refresh_recommended", freshness["refresh_recommended"])
+                setattr(person, "warm_path_stale", freshness["stale"])
+                setattr(person, "warm_path_caution", freshness["caution"])
                 continue
 
             if bridge_connection is None:
                 continue
 
+            freshness = graph_freshness_metadata(bridge_connection.last_synced_at)
             setattr(person, "warm_path_type", "same_company_bridge")
             setattr(
                 person,
@@ -934,6 +1025,11 @@ def apply_warm_path_annotations(
                 f"You already know {bridge_connection.display_name} at {bridge_company_name or company_name}.",
             )
             setattr(person, "warm_path_connection", bridge_connection)
+            setattr(person, "warm_path_freshness", freshness["freshness"])
+            setattr(person, "warm_path_days_since_sync", freshness["days_since_sync"])
+            setattr(person, "warm_path_refresh_recommended", freshness["refresh_recommended"])
+            setattr(person, "warm_path_stale", freshness["stale"])
+            setattr(person, "warm_path_caution", freshness["caution"])
 
 
 async def resolve_warm_path_for_person(
@@ -972,6 +1068,7 @@ async def resolve_warm_path_for_person(
     if person_slug:
         for connection in connections:
             if connection.linkedin_slug == person_slug:
+                freshness = graph_freshness_metadata(connection.last_synced_at)
                 return {
                     "type": "direct_connection",
                     "reason": (
@@ -981,6 +1078,11 @@ async def resolve_warm_path_for_person(
                     "connection_name": connection.display_name,
                     "connection_headline": connection.headline,
                     "connection_linkedin_url": connection.linkedin_url,
+                    "freshness": freshness["freshness"],
+                    "days_since_sync": freshness["days_since_sync"],
+                    "refresh_recommended": freshness["refresh_recommended"],
+                    "stale": freshness["stale"],
+                    "caution": freshness["caution"],
                 }
 
     bridge = _select_best_bridge(
@@ -990,6 +1092,7 @@ async def resolve_warm_path_for_person(
         return None
 
     bridge_company = bridge.current_company_name or company_name
+    freshness = graph_freshness_metadata(bridge.last_synced_at)
     return {
         "type": "same_company_bridge",
         "reason": (
@@ -999,4 +1102,9 @@ async def resolve_warm_path_for_person(
         "connection_name": bridge.display_name,
         "connection_headline": bridge.headline,
         "connection_linkedin_url": bridge.linkedin_url,
+        "freshness": freshness["freshness"],
+        "days_since_sync": freshness["days_since_sync"],
+        "refresh_recommended": freshness["refresh_recommended"],
+        "stale": freshness["stale"],
+        "caution": freshness["caution"],
     }

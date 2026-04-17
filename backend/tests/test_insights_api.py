@@ -47,6 +47,28 @@ MOCK_DASHBOARD = {
             ],
         }
     ],
+    "warm_path_companies": [
+        {
+            "company_name": "TechCorp",
+            "connected_persons": [
+                {"name": "Jane Smith", "title": "Engineering Manager", "status": "connected"},
+            ],
+            "outreach_connection_count": 1,
+            "graph_connection_count": 6,
+            "graph_freshness": "fresh",
+            "graph_days_since_sync": 4,
+            "graph_refresh_recommended": False,
+        },
+        {
+            "company_name": "Acme Inc",
+            "connected_persons": [],
+            "outreach_connection_count": 0,
+            "graph_connection_count": 2,
+            "graph_freshness": "aging",
+            "graph_days_since_sync": 48,
+            "graph_refresh_recommended": True,
+        },
+    ],
     "company_openness": [
         {"company_name": "TechCorp", "total_outreach": 4, "responses": 2, "rate": 50.0},
     ],
@@ -91,6 +113,7 @@ async def test_dashboard_returns_full_data(client, mock_user_id):
     assert "network_growth" in data
     assert "network_gaps" in data
     assert "warm_paths" in data
+    assert "warm_path_companies" in data
     assert "company_openness" in data
     assert "job_pipeline" in data
     assert "api_usage_by_service" in data
@@ -155,6 +178,22 @@ async def test_dashboard_warm_paths(client, mock_user_id):
     assert paths[0]["company_name"] == "TechCorp"
     assert len(paths[0]["connected_persons"]) == 1
     assert paths[0]["connected_persons"][0]["name"] == "Jane Smith"
+
+
+async def test_dashboard_unified_warm_path_companies(client, mock_user_id):
+    """Unified warm paths include both outreach and graph-backed signals."""
+    with patch(
+        "app.routers.insights.get_full_dashboard", new_callable=AsyncMock
+    ) as m:
+        m.return_value = MOCK_DASHBOARD
+        resp = await client.get("/api/insights/dashboard")
+
+    companies = resp.json()["warm_path_companies"]
+    assert len(companies) == 2
+    assert companies[0]["company_name"] == "TechCorp"
+    assert companies[0]["outreach_connection_count"] == 1
+    assert companies[0]["graph_connection_count"] == 6
+    assert companies[1]["graph_refresh_recommended"] is True
 
 
 async def test_dashboard_network_gaps(client, mock_user_id):
@@ -259,10 +298,11 @@ async def test_dashboard_empty_state(client, mock_user_id):
         "response_by_role": [],
         "response_by_company": [],
         "angle_effectiveness": [],
-        "network_growth": [],
-        "network_gaps": [],
-        "warm_paths": [],
-        "company_openness": [],
+    "network_growth": [],
+    "network_gaps": [],
+    "warm_paths": [],
+    "warm_path_companies": [],
+    "company_openness": [],
         "job_pipeline": [],
         "api_usage_by_service": [],
         "graph_warm_paths": [],

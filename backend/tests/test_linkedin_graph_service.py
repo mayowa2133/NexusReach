@@ -1,6 +1,7 @@
 import io
 import uuid
 import zipfile
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -10,6 +11,7 @@ from app.services.linkedin_graph_service import (
     apply_warm_path_annotations,
     connection_matches_company,
     dedupe_connection_candidates,
+    graph_freshness_metadata,
     parse_linkedin_connections_csv,
     parse_linkedin_connections_zip,
     resolve_warm_path_for_person,
@@ -151,6 +153,17 @@ def test_apply_warm_path_annotations_marks_direct_and_bridge_matches():
     assert cold_person.warm_path_type == "same_company_bridge"
     assert cold_person.warm_path_connection is connection_direct
     assert "you already know" in cold_person.warm_path_reason.lower()
+
+
+def test_graph_freshness_metadata_flags_aging_and_stale():
+    aging = graph_freshness_metadata(datetime.now(timezone.utc) - timedelta(days=45))
+    stale = graph_freshness_metadata(datetime.now(timezone.utc) - timedelta(days=120))
+
+    assert aging["freshness"] == "aging"
+    assert aging["refresh_recommended"] is True
+    assert aging["stale"] is False
+    assert stale["freshness"] == "stale"
+    assert stale["stale"] is True
 
 
 @pytest.mark.asyncio

@@ -12,6 +12,11 @@ class LinkedInGraphConnectionResponse(BaseModel):
     company_linkedin_url: str | None = None
     source: str
     last_synced_at: datetime | None = None
+    freshness: str | None = None
+    days_since_sync: int | None = None
+    refresh_recommended: bool = False
+    stale: bool = False
+    caution: str | None = None
 
 
 class LinkedInGraphLastRunResponse(BaseModel):
@@ -34,6 +39,12 @@ class LinkedInGraphStatusResponse(BaseModel):
     sync_status: str = "idle"
     last_error: str | None = None
     connection_count: int = 0
+    freshness: str = "empty"
+    days_since_last_sync: int | None = None
+    refresh_recommended: bool = False
+    stale_after_days: int = 90
+    recommended_resync_every_days: int = 30
+    status_message: str | None = None
     last_run: LinkedInGraphLastRunResponse | None = None
 
 
