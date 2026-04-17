@@ -12,7 +12,7 @@ from app.database import async_session
 from app.models.notification import Notification
 from app.models.search_preference import SearchPreference
 from app.models.company import Company
-from app.services.job_service import search_jobs
+from app.services.job_service import run_startup_refresh_for_query, search_jobs
 from app.services.notification_service import create_notification
 
 logger = logging.getLogger(__name__)
@@ -66,13 +66,21 @@ async def _refresh_user_feeds(user_id: uuid.UUID) -> int:
 
         for pref in preferences:
             try:
-                new_jobs = await search_jobs(
-                    db=db,
-                    user_id=user_id,
-                    query=pref.query,
-                    location=pref.location,
-                    remote_only=pref.remote_only,
-                )
+                pref_mode = getattr(pref, "mode", "default") or "default"
+                if pref_mode == "startup":
+                    new_jobs = await run_startup_refresh_for_query(
+                        db=db,
+                        user_id=user_id,
+                        query=pref.query,
+                    )
+                else:
+                    new_jobs = await search_jobs(
+                        db=db,
+                        user_id=user_id,
+                        query=pref.query,
+                        location=pref.location,
+                        remote_only=pref.remote_only,
+                    )
 
                 # Record refresh metadata
                 pref.last_refreshed_at = datetime.now(timezone.utc)
@@ -199,3 +207,103 @@ def discover_ats_boards() -> dict:
     """Celery task: poll all curated ATS boards for new postings."""
     asyncio.run(_discover_all_boards())
     return {"status": "ok"}
+
+
+# --- Re-scoring ---
+
+
+async def _rescore_user_jobs(user_id: uuid.UUID) -> dict:
+    """Re-score all jobs for a user against their current resume/profile.
+
+    Only re-scores jobs that haven't been scored since the profile was last
+    updated, or that have never been scored.
+    """
+    from app.models.job import Job  # noqa: PLC0415
+    from app.models.profile import Profile  # noqa: PLC0415
+    from app.services.match_scoring import score_job  # noqa: PLC0415
+
+    stats = {"rescored": 0, "skipped": 0, "errors": 0}
+
+    async with async_session() as db:
+        # Load profile
+        result = await db.execute(
+            select(Profile).where(Profile.user_id == user_id)
+        )
+        profile = result.scalar_one_or_none()
+        if not profile or not profile.resume_parsed:
+            return stats
+
+        profile_updated = profile.updated_at
+
+        # Get jobs needing re-scoring: scored_at is null OR scored_at < profile.updated_at
+        result = await db.execute(
+            select(Job).where(
+                Job.user_id == user_id,
+                Job.description.isnot(None),
+            )
+        )
+        jobs = list(result.scalars().all())
+
+        batch_count = 0
+        for job in jobs:
+            # Skip if already scored after profile was last updated
+            if (
+                job.scored_at is not None
+                and profile_updated is not None
+                and job.scored_at >= profile_updated
+            ):
+                stats["skipped"] += 1
+                continue
+
+            try:
+                job_data = {
+                    "title": job.title,
+                    "company_name": job.company_name,
+                    "location": job.location,
+                    "description": job.description,
+                    "remote": job.remote,
+                    "experience_level": job.experience_level,
+                }
+                new_score, new_breakdown = score_job(job_data, profile)
+                job.match_score = new_score
+                job.score_breakdown = new_breakdown
+                job.scored_at = datetime.now(timezone.utc)
+                stats["rescored"] += 1
+                batch_count += 1
+
+                # Flush every 50 to avoid holding too much in memory
+                if batch_count >= 50:
+                    await db.flush()
+                    batch_count = 0
+            except Exception:
+                stats["errors"] += 1
+                logger.debug(
+                    "Re-score failed: job=%s", job.id, exc_info=True,
+                )
+
+        await db.commit()
+
+        if stats["rescored"] > 0:
+            await create_notification(
+                db,
+                user_id,
+                type="rescore_complete",
+                title="Match scores updated",
+                body=f"Re-scored {stats['rescored']} jobs against your updated resume.",
+            )
+
+    return stats
+
+
+@celery_app.task(
+    name="app.tasks.jobs.rescore_user_jobs",
+    autoretry_for=(Exception,),
+    retry_backoff=30,
+    retry_backoff_max=300,
+    max_retries=2,
+    soft_time_limit=180,
+    time_limit=240,
+)
+def rescore_user_jobs(user_id: str) -> dict:
+    """Celery task: re-score all jobs for a user after resume/profile update."""
+    return asyncio.run(_rescore_user_jobs(uuid.UUID(user_id)))

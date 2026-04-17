@@ -46,6 +46,17 @@ class OutreachLog(Base):
     )
     response_received: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # Provider-side tracking for post-send reconciliation.
+    # Populated when a draft is staged to Gmail/Outlook; used by the
+    # reconcile job to detect when the user actually sends from the
+    # provider UI so outreach status can flip from "draft" to "sent".
+    provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    provider_draft_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    provider_message_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

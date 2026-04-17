@@ -365,7 +365,7 @@ VITE_SUPABASE_ANON_KEY=...
 8. `current_company_verified` is separate from `match_quality`. A person can be a `next_best` contact and still be a verified current employee.
 9. Best-guess emails are acceptable only with safe domain evidence. Ambiguous brands like Zip should still withhold unsafe guesses.
 10. Workday exact-job support is honest about upstream outages. Maintenance pages should fail cleanly, not import the wrong landing page.
-11. Legacy `firecrawl_public_web` values still exist in stored data, but new verification writes should use `public_web`.
+11. `firecrawl_public_web` is fully legacy: no code path writes it anymore. Firecrawl is now only an optional page-fetch fallback and never labels its own results. The value survives only in the frontend `Person.current_company_verification_source` union for backwards-compatible reads of old rows.
 12. shadcn/ui in this repo uses `@base-ui/react`, not Radix. No `asChild`, no Radix-specific dialog props.
 13. Run `ruff check app tests conftest.py`, not just `ruff check app`.
 14. Testing Library queries on this codebase often need role-based selectors because duplicated text is common.

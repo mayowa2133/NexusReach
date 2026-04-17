@@ -101,3 +101,23 @@ class CancelSendResponse(BaseModel):
 class EmailConnectionStatus(BaseModel):
     gmail_connected: bool
     outlook_connected: bool
+
+
+class EmailLookupRequest(BaseModel):
+    linkedin_url: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    company_name: str | None = None
+    company_domain: str | None = None
+
+
+class EmailLookupResponse(BaseModel):
+    verified: bool
+    email: str | None
+    domain: str | None
+    first_name: str | None
+    last_name: str | None
+    domain_status: str
+    suggestions: list[EmailSuggestion]
+    known_company: bool
+    source: str

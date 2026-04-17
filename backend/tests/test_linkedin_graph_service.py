@@ -2,6 +2,9 @@ import io
 import uuid
 import zipfile
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from app.services.linkedin_graph_service import (
     apply_warm_path_annotations,
@@ -9,6 +12,7 @@ from app.services.linkedin_graph_service import (
     dedupe_connection_candidates,
     parse_linkedin_connections_csv,
     parse_linkedin_connections_zip,
+    resolve_warm_path_for_person,
 )
 
 
@@ -147,3 +151,106 @@ def test_apply_warm_path_annotations_marks_direct_and_bridge_matches():
     assert cold_person.warm_path_type == "same_company_bridge"
     assert cold_person.warm_path_connection is connection_direct
     assert "you already know" in cold_person.warm_path_reason.lower()
+
+
+@pytest.mark.asyncio
+async def test_resolve_warm_path_for_person_returns_direct_match():
+    connection = SimpleNamespace(
+        id=uuid.uuid4(),
+        linkedin_slug="jane-doe",
+        display_name="Jane Doe",
+        headline="Senior Recruiter",
+        current_company_name="Acme",
+        linkedin_url="https://www.linkedin.com/in/jane-doe",
+        company_linkedin_url=None,
+        source="manual_import",
+        last_synced_at=None,
+    )
+    person = SimpleNamespace(
+        linkedin_url="https://www.linkedin.com/in/jane-doe",
+        department=None,
+        company=SimpleNamespace(name="Acme", public_identity_slugs=["acme"]),
+    )
+
+    with patch(
+        "app.services.linkedin_graph_service.get_connections_for_company",
+        new=AsyncMock(return_value=[connection]),
+    ):
+        result = await resolve_warm_path_for_person(
+            db=None, user_id=uuid.uuid4(), person=person
+        )
+
+    assert result["type"] == "direct_connection"
+    assert result["connection_name"] == "Jane Doe"
+    assert "directly connected" in result["reason"].lower()
+
+
+@pytest.mark.asyncio
+async def test_resolve_warm_path_for_person_picks_recruiter_bridge():
+    recruiter = SimpleNamespace(
+        id=uuid.uuid4(),
+        linkedin_slug="tal-rec",
+        display_name="Tal Recruiter",
+        headline="Senior Recruiter",
+        current_company_name="Acme",
+        linkedin_url="https://www.linkedin.com/in/tal-rec",
+        company_linkedin_url=None,
+        source="manual_import",
+        last_synced_at=None,
+    )
+    engineer = SimpleNamespace(
+        id=uuid.uuid4(),
+        linkedin_slug="eve-eng",
+        display_name="Eve Engineer",
+        headline="Software Engineer",
+        current_company_name="Acme",
+        linkedin_url="https://www.linkedin.com/in/eve-eng",
+        company_linkedin_url=None,
+        source="manual_import",
+        last_synced_at=None,
+    )
+    # Cold recipient (not in connections).
+    person = SimpleNamespace(
+        linkedin_url="https://www.linkedin.com/in/cold-target",
+        department=None,
+        company=SimpleNamespace(name="Acme", public_identity_slugs=["acme"]),
+    )
+
+    with patch(
+        "app.services.linkedin_graph_service.get_connections_for_company",
+        new=AsyncMock(return_value=[engineer, recruiter]),
+    ):
+        result = await resolve_warm_path_for_person(
+            db=None, user_id=uuid.uuid4(), person=person, job_title="Engineer"
+        )
+
+    assert result["type"] == "same_company_bridge"
+    # Recruiter outranks peer engineer.
+    assert result["connection_name"] == "Tal Recruiter"
+
+
+@pytest.mark.asyncio
+async def test_resolve_warm_path_for_person_returns_none_without_company_or_connections():
+    no_company = SimpleNamespace(linkedin_url=None, department=None, company=None)
+    assert (
+        await resolve_warm_path_for_person(
+            db=None, user_id=uuid.uuid4(), person=no_company
+        )
+        is None
+    )
+
+    person = SimpleNamespace(
+        linkedin_url=None,
+        department=None,
+        company=SimpleNamespace(name="Acme", public_identity_slugs=[]),
+    )
+    with patch(
+        "app.services.linkedin_graph_service.get_connections_for_company",
+        new=AsyncMock(return_value=[]),
+    ):
+        assert (
+            await resolve_warm_path_for_person(
+                db=None, user_id=uuid.uuid4(), person=person
+            )
+            is None
+        )

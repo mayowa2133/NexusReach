@@ -6,7 +6,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { useJob, useUpdateJobStage, useToggleJobStar } from '@/hooks/useJobs';
+import { useJob, useUpdateJobStage, useToggleJobStar, useAnalyzeMatch, useTailoredResume, useTailorResume } from '@/hooks/useJobs';
 import { usePeopleSearch, useSavedPeople } from '@/hooks/usePeople';
 import { useFindEmail } from '@/hooks/useEmail';
 import { PeopleSearchDebugPanel } from '@/components/people/PeopleSearchDebugPanel';
@@ -20,7 +20,7 @@ import {
   setStoredPeopleSearchTargetCount,
 } from '@/lib/peopleSearchCount';
 import { toast } from 'sonner';
-import type { Job, JobStage, Person, PeopleSearchResult } from '@/types';
+import type { Job, JobStage, MatchAnalysis, TailoredResume, Person, PeopleSearchResult } from '@/types';
 
 const STAGES: { value: JobStage; label: string }[] = [
   { value: 'discovered', label: 'Discovered' },
@@ -261,6 +261,146 @@ function PeopleSection({
   );
 }
 
+function ResumeTailorSection({ job }: { job: Job }) {
+  const { data: savedTailoring, isLoading: isLoadingSaved } = useTailoredResume(job.id);
+  const tailorResume = useTailorResume();
+  const [tailoring, setTailoring] = useState<TailoredResume | null>(null);
+
+  // Use saved tailoring if available and no fresh one generated
+  const active = tailoring ?? savedTailoring ?? null;
+
+  const handleTailor = async () => {
+    try {
+      const result = await tailorResume.mutateAsync(job.id);
+      setTailoring(result);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to generate tailoring suggestions');
+    }
+  };
+
+  return (
+    <Card>
+      <CardContent className="pt-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="font-medium text-sm">Resume Tailoring</div>
+            <p className="text-xs text-muted-foreground">AI suggestions to optimize your resume for this role</p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleTailor}
+            disabled={tailorResume.isPending}
+          >
+            {tailorResume.isPending ? 'Generating...' : active ? 'Regenerate' : 'Tailor Resume'}
+          </Button>
+        </div>
+
+        {isLoadingSaved && !active && (
+          <div className="text-xs text-muted-foreground">Loading saved suggestions...</div>
+        )}
+
+        {active && (
+          <div className="space-y-4 pt-2 border-t">
+            {/* Strategy summary */}
+            <div>
+              <p className="text-sm text-muted-foreground">{active.summary}</p>
+            </div>
+
+            {/* Skills to emphasize */}
+            {active.skills_to_emphasize.length > 0 && (
+              <div>
+                <div className="text-xs font-medium text-green-700 dark:text-green-400 mb-1.5">Skills to Emphasize</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {active.skills_to_emphasize.map((s) => (
+                    <Badge key={s} variant="secondary" className="text-xs">{s}</Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Skills to add */}
+            {active.skills_to_add.length > 0 && (
+              <div>
+                <div className="text-xs font-medium text-blue-700 dark:text-blue-400 mb-1.5">Skills to Add</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {active.skills_to_add.map((s) => (
+                    <Badge key={s} variant="outline" className="text-xs border-blue-300 dark:border-blue-600">{s}</Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ATS Keywords */}
+            {active.keywords_to_add.length > 0 && (
+              <div>
+                <div className="text-xs font-medium text-purple-700 dark:text-purple-400 mb-1.5">ATS Keywords to Add</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {active.keywords_to_add.map((k) => (
+                    <Badge key={k} variant="outline" className="text-xs border-purple-300 dark:border-purple-600">{k}</Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Bullet rewrites */}
+            {active.bullet_rewrites.length > 0 && (
+              <div>
+                <div className="text-xs font-medium mb-2">Bullet Rewrites</div>
+                <div className="space-y-3">
+                  {active.bullet_rewrites.map((b, i) => (
+                    <div key={i} className="rounded-lg border p-3 space-y-1.5">
+                      <div className="flex items-start gap-2">
+                        <span className="text-xs text-red-500 font-medium shrink-0 mt-0.5">Before:</span>
+                        <span className="text-xs text-muted-foreground line-through">{b.original}</span>
+                      </div>
+                      <div className="flex items-start gap-2">
+                        <span className="text-xs text-green-600 font-medium shrink-0 mt-0.5">After:</span>
+                        <span className="text-xs">{b.rewritten}</span>
+                      </div>
+                      <div className="text-[11px] text-muted-foreground italic">{b.reason}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Section suggestions */}
+            {active.section_suggestions.length > 0 && (
+              <div>
+                <div className="text-xs font-medium mb-2">Section-by-Section Tips</div>
+                <div className="space-y-2">
+                  {active.section_suggestions.map((s, i) => (
+                    <div key={i} className="flex items-start gap-2">
+                      <Badge variant="outline" className="text-[10px] shrink-0 mt-0.5">{s.section}</Badge>
+                      <span className="text-xs text-muted-foreground">{s.suggestion}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Overall strategy */}
+            {active.overall_strategy && (
+              <div className="pt-2 border-t">
+                <div className="text-xs font-medium mb-1">Overall Strategy</div>
+                <p className="text-xs text-muted-foreground">{active.overall_strategy}</p>
+              </div>
+            )}
+
+            {/* Meta */}
+            {active.model && (
+              <div className="text-[10px] text-muted-foreground/50 pt-1">
+                Generated by {active.model}{active.created_at ? ` on ${new Date(active.created_at).toLocaleDateString()}` : ''}
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function JobDetailPage() {
   const { jobId } = useParams<{ jobId: string }>();
   const navigate = useNavigate();
@@ -268,12 +408,14 @@ export function JobDetailPage() {
   const [targetCount, setTargetCount] = useState(() => getStoredPeopleSearchTargetCount());
   const [debugModeEnabled, setDebugModeEnabled] = useState(() => getPeopleSearchDebugEnabled());
   const latestPeopleSearchRequest = useRef(0);
+  const [matchAnalysis, setMatchAnalysis] = useState<MatchAnalysis | null>(null);
 
   const { data: job, isLoading } = useJob(jobId);
 
   const updateStage = useUpdateJobStage();
   const toggleStar = useToggleJobStar();
   const peopleSearch = usePeopleSearch();
+  const analyzeMatch = useAnalyzeMatch();
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -446,6 +588,129 @@ export function JobDetailPage() {
               ? `From ${job.salary_currency || '$'}${Math.round(job.salary_min).toLocaleString()}`
               : `Up to ${job.salary_currency || '$'}${Math.round(job.salary_max!).toLocaleString()}`}
           </span>
+        </div>
+      )}
+
+      {/* Match Score Breakdown + Analyze */}
+      {job.match_score != null && job.score_breakdown && (
+        <Card>
+          <CardContent className="pt-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="font-medium text-sm">Match Breakdown</div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  try {
+                    const result = await analyzeMatch.mutateAsync(job.id);
+                    setMatchAnalysis(result);
+                  } catch (err) {
+                    toast.error(err instanceof Error ? err.message : 'Failed to analyze match');
+                  }
+                }}
+                disabled={analyzeMatch.isPending}
+              >
+                {analyzeMatch.isPending ? 'Analyzing...' : 'AI Analysis'}
+              </Button>
+            </div>
+
+            {/* Progress bars */}
+            <div className="space-y-1.5">
+              {(() => {
+                const maxes = (job.score_breakdown as Record<string, unknown>).category_maxes as Record<string, number> | undefined;
+                const labels: Record<string, string> = {
+                  skills_match: 'Skills',
+                  experience_match: 'Experience',
+                  role_match: 'Role Fit',
+                  location_match: 'Location',
+                  education_match: 'Education',
+                  level_fit: 'Level',
+                  industry_match: 'Industry',
+                };
+                const scoreKeys = ['skills_match', 'experience_match', 'role_match', 'location_match', 'education_match', 'level_fit'];
+                const entries = Object.entries(job.score_breakdown!)
+                  .filter(([key]) => scoreKeys.includes(key) || (!['category_maxes', 'max_possible', 'skills_detail', 'experience_detail', 'resume_not_uploaded'].includes(key) && typeof job.score_breakdown![key] === 'number'));
+                return entries.map(([key, value]) => {
+                  const max = maxes?.[key] ?? 10;
+                  const pct = max > 0 ? ((value as number) / max) * 100 : 0;
+                  return (
+                    <div key={key} className="space-y-0.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-muted-foreground">{labels[key] || key.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}</span>
+                        <span className="font-medium">{Number(value)}/{max}</span>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all ${pct >= 70 ? 'bg-green-500' : pct >= 40 ? 'bg-yellow-500' : 'bg-gray-400'}`}
+                          style={{ width: `${Math.min(pct, 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+
+            {/* Skills detail */}
+            {(() => {
+              const bd = job.score_breakdown as Record<string, unknown>;
+              const detail = bd.skills_detail as Record<string, unknown> | undefined;
+              const matched = detail?.matched as string[] | undefined;
+              if (!matched) return null;
+              return (
+                <div className="text-xs text-muted-foreground">
+                  Matched skills: {matched.length > 0 ? matched.join(', ') : 'none'}
+                </div>
+              );
+            })()}
+
+            {/* AI Analysis results */}
+            {matchAnalysis && (
+              <div className="space-y-2 pt-2 border-t">
+                <div className="text-sm font-medium">AI Match Analysis</div>
+                <p className="text-sm text-muted-foreground">{matchAnalysis.summary}</p>
+
+                {matchAnalysis.strengths.length > 0 && (
+                  <div>
+                    <div className="text-xs font-medium text-green-700 dark:text-green-400 mb-1">Strengths</div>
+                    <ul className="text-xs text-muted-foreground space-y-0.5">
+                      {matchAnalysis.strengths.map((s, i) => <li key={i}>+ {s}</li>)}
+                    </ul>
+                  </div>
+                )}
+
+                {matchAnalysis.gaps.length > 0 && (
+                  <div>
+                    <div className="text-xs font-medium text-red-700 dark:text-red-400 mb-1">Gaps</div>
+                    <ul className="text-xs text-muted-foreground space-y-0.5">
+                      {matchAnalysis.gaps.map((g, i) => <li key={i}>- {g}</li>)}
+                    </ul>
+                  </div>
+                )}
+
+                {matchAnalysis.recommendations.length > 0 && (
+                  <div>
+                    <div className="text-xs font-medium text-blue-700 dark:text-blue-400 mb-1">Recommendations</div>
+                    <ul className="text-xs text-muted-foreground space-y-0.5">
+                      {matchAnalysis.recommendations.map((r, i) => <li key={i}>→ {r}</li>)}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Resume Tailoring */}
+      {job.match_score != null && (
+        <ResumeTailorSection job={job} />
+      )}
+
+      {/* No resume prompt */}
+      {job.match_score == null && (
+        <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground text-center">
+          Upload your resume in your Profile for match scores, AI analysis, and resume tailoring.
         </div>
       )}
 

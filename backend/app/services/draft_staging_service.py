@@ -65,6 +65,8 @@ async def _ensure_outreach_log(
     message_id: uuid.UUID,
     provider: str,
     job_id: uuid.UUID | None,
+    provider_draft_id: str | None = None,
+    provider_message_id: str | None = None,
 ) -> OutreachLog:
     result = await db.execute(
         select(OutreachLog).where(
@@ -74,9 +76,15 @@ async def _ensure_outreach_log(
     )
     existing = result.scalar_one_or_none()
     if existing:
+        # Refresh provider tracking so reconciliation picks up re-staged drafts.
+        existing.provider = provider
+        if provider_draft_id:
+            existing.provider_draft_id = provider_draft_id
+        if provider_message_id:
+            existing.provider_message_id = provider_message_id
         return existing
 
-    return await create_outreach_log(
+    log = await create_outreach_log(
         db=db,
         user_id=user_id,
         person_id=person_id,
@@ -86,6 +94,10 @@ async def _ensure_outreach_log(
         channel="email",
         notes=f"Draft staged in {provider}.",
     )
+    log.provider = provider
+    log.provider_draft_id = provider_draft_id
+    log.provider_message_id = provider_message_id
+    return log
 
 
 async def stage_message_draft(
@@ -131,6 +143,8 @@ async def stage_message_draft(
         message_id=message.id,
         provider=provider,
         job_id=_message_job_id(message),
+        provider_draft_id=draft.get("draft_id"),
+        provider_message_id=draft.get("message_id"),
     )
     await db.commit()
 
@@ -299,7 +313,13 @@ async def send_staged_message(
     )
     outreach_log = outreach_result.scalar_one_or_none()
     if outreach_log:
+        from datetime import datetime, timezone  # noqa: PLC0415
+
         outreach_log.status = "sent"
+        outreach_log.sent_at = datetime.now(timezone.utc)
+        outreach_log.last_contacted_at = outreach_log.sent_at
+        if send_result.get("message_id"):
+            outreach_log.provider_message_id = send_result["message_id"]
 
     await db.commit()
 

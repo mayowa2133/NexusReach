@@ -25,6 +25,18 @@ vi.mock('@/hooks/useJobs', () => ({
   useToggleJobStar: () => ({
     mutateAsync: vi.fn(),
   }),
+  useAnalyzeMatch: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
+  useTailoredResume: () => ({
+    data: null,
+    isLoading: false,
+  }),
+  useTailorResume: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
 }));
 
 vi.mock('@/hooks/usePeople', () => ({

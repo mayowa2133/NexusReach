@@ -29,6 +29,9 @@ describe('supabase auth mode config', () => {
 
   it('still requires Supabase env in supabase mode', async () => {
     vi.stubEnv('VITE_AUTH_MODE', 'supabase');
+    // Clear the test-setup defaults so the missing-env throw fires.
+    vi.stubEnv('VITE_SUPABASE_URL', '');
+    vi.stubEnv('VITE_SUPABASE_ANON_KEY', '');
     vi.doMock('@supabase/supabase-js', () => ({
       createClient: vi.fn(),
     }));

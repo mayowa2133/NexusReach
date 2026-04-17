@@ -73,7 +73,10 @@ async def test_search_jobs_persists_enriched_newgrad_metadata():
     user_id = uuid.uuid4()
     profile = _make_profile()
     db = MagicMock()
-    db.execute = AsyncMock(side_effect=[_ScalarResult(profile), _ScalarResult(None)])
+    # Order: profile load, known-startup company scan (empty), pref upsert check.
+    db.execute = AsyncMock(
+        side_effect=[_ScalarResult(profile), _ScalarResult([]), _ScalarResult(None)]
+    )
     db.add = MagicMock()
     db.commit = AsyncMock()
 

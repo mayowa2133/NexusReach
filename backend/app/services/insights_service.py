@@ -2,17 +2,24 @@
 
 import uuid
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import Integer, cast, select, func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.api_usage import ApiUsage
+from app.models.linkedin_graph import LinkedInGraphConnection
 from app.models.outreach import OutreachLog
 from app.models.person import Person
 from app.models.company import Company
 from app.models.message import Message
 from app.models.job import Job
 from app.models.profile import Profile
+
+# Window used by the API-usage breakdown on the dashboard.
+API_USAGE_WINDOW_DAYS = 30
+# Cap on the imported-graph warm-path companies surfaced on the dashboard.
+GRAPH_WARM_PATHS_LIMIT = 10
 
 
 # ---------------------------------------------------------------------------
@@ -377,6 +384,107 @@ async def get_company_openness(
 
 
 # ---------------------------------------------------------------------------
+# Job pipeline — counts per Job.stage
+# ---------------------------------------------------------------------------
+
+async def get_job_pipeline(
+    db: AsyncSession, user_id: uuid.UUID
+) -> list[dict]:
+    """Counts of tracked jobs grouped by Kanban stage.
+
+    Stage values follow `Job.stage`: discovered | interested | researching |
+    networking | applied | interviewing | offer | accepted | rejected |
+    withdrawn.
+    """
+    result = await db.execute(
+        select(
+            Job.stage,
+            sa_func.count().label("count"),
+        )
+        .where(Job.user_id == user_id)
+        .group_by(Job.stage)
+    )
+    return [
+        {"stage": row[0] or "discovered", "count": int(row[1])}
+        for row in result.all()
+    ]
+
+
+# ---------------------------------------------------------------------------
+# API usage by service — last N days
+# ---------------------------------------------------------------------------
+
+async def get_api_usage_by_service(
+    db: AsyncSession, user_id: uuid.UUID
+) -> list[dict]:
+    """Per-service call counts and cost over the last `API_USAGE_WINDOW_DAYS`.
+
+    Sources: `ApiUsage` rows. Today this captures email-finder calls
+    (`hunter`) and message-drafting LLM calls. Search-provider calls are
+    not currently recorded in `ApiUsage` and will simply not appear until
+    they are.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=API_USAGE_WINDOW_DAYS)
+    result = await db.execute(
+        select(
+            ApiUsage.service,
+            sa_func.count().label("calls"),
+            sa_func.coalesce(sa_func.sum(ApiUsage.cost_cents), 0).label("cost_cents"),
+        )
+        .where(
+            ApiUsage.user_id == user_id,
+            ApiUsage.created_at >= cutoff,
+        )
+        .group_by(ApiUsage.service)
+        .order_by(sa_func.count().desc())
+    )
+    return [
+        {
+            "service": row[0] or "unknown",
+            "calls": int(row[1]),
+            "cost_cents": int(row[2] or 0),
+        }
+        for row in result.all()
+    ]
+
+
+# ---------------------------------------------------------------------------
+# LinkedIn-graph warm paths — top companies in the imported graph
+# ---------------------------------------------------------------------------
+
+async def get_graph_warm_paths(
+    db: AsyncSession, user_id: uuid.UUID
+) -> list[dict]:
+    """Top companies in the user's imported LinkedIn graph by connection count.
+
+    This is intentionally separate from `get_warm_paths`, which is
+    outreach-derived. Per project rules, imported LinkedIn graph data must
+    not be conflated with CRM `Person` rows or with outreach warm paths.
+    """
+    company_expr = sa_func.coalesce(
+        LinkedInGraphConnection.normalized_company_name,
+        LinkedInGraphConnection.current_company_name,
+    )
+    result = await db.execute(
+        select(
+            company_expr.label("company"),
+            sa_func.count().label("connections"),
+        )
+        .where(
+            LinkedInGraphConnection.user_id == user_id,
+            company_expr.is_not(None),
+        )
+        .group_by(company_expr)
+        .order_by(sa_func.count().desc())
+        .limit(GRAPH_WARM_PATHS_LIMIT)
+    )
+    return [
+        {"company_name": row[0], "connection_count": int(row[1])}
+        for row in result.all()
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Composite dashboard
 # ---------------------------------------------------------------------------
 
@@ -397,6 +505,9 @@ async def get_full_dashboard(
     gaps = await get_network_gaps(db, user_id)
     warm = await get_warm_paths(db, user_id)
     openness = await get_company_openness(db, user_id)
+    pipeline = await get_job_pipeline(db, user_id)
+    api_usage = await get_api_usage_by_service(db, user_id)
+    graph_warm = await get_graph_warm_paths(db, user_id)
 
     return {
         "summary": summary,
@@ -408,4 +519,7 @@ async def get_full_dashboard(
         "network_gaps": gaps,
         "warm_paths": warm,
         "company_openness": openness,
+        "job_pipeline": pipeline,
+        "api_usage_by_service": api_usage,
+        "graph_warm_paths": graph_warm,
     }

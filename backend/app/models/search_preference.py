@@ -26,6 +26,13 @@ class SearchPreference(Base):
     # Whether this preference is active for auto-refresh
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    # Discover mode this preference was saved from.
+    # "default" = standard job boards / ATS. "startup" = startup discover flow
+    # (YC, Wellfound, VentureLoop, ecosystem sources).
+    mode: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="default", server_default="default"
+    )
+
     # Auto-refresh metadata
     last_refreshed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     new_jobs_found: Mapped[int] = mapped_column(Integer, default=0, server_default="0")

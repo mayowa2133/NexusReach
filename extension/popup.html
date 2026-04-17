@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 320px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 13px;
+      color: #1a1a2e;
+      background: #fff;
+      padding: 16px;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .header h1 {
+      font-size: 15px;
+      font-weight: 600;
+    }
+    .logo {
+      width: 24px;
+      height: 24px;
+      background: #6366f1;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-weight: 700;
+      font-size: 14px;
+    }
+
+    /* Status card */
+    .status-card {
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+    .status-card.connected {
+      border-color: #86efac;
+      background: #f0fdf4;
+    }
+    .status-card.disconnected {
+      border-color: #fecaca;
+      background: #fef2f2;
+    }
+    .status-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 6px;
+    }
+    .status-dot.on { background: #22c55e; }
+    .status-dot.off { background: #ef4444; }
+    .status-text { font-size: 12px; color: #6b7280; margin-top: 4px; }
+
+    /* Profile info */
+    .profile-info {
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+    .profile-info .name { font-weight: 600; font-size: 14px; }
+    .profile-info .detail { font-size: 11px; color: #6b7280; margin-top: 2px; }
+    .skills-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 8px;
+    }
+    .skill-tag {
+      background: #ede9fe;
+      color: #6d28d9;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 10px;
+      font-weight: 500;
+    }
+
+    /* Forms */
+    .form-group {
+      margin-bottom: 10px;
+    }
+    .form-group label {
+      display: block;
+      font-size: 11px;
+      font-weight: 500;
+      color: #6b7280;
+      margin-bottom: 4px;
+    }
+    .form-group input {
+      width: 100%;
+      padding: 7px 10px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 12px;
+      outline: none;
+    }
+    .form-group input:focus {
+      border-color: #6366f1;
+      box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+    }
+
+    /* Buttons */
+    .btn {
+      width: 100%;
+      padding: 8px;
+      border: none;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn-primary {
+      background: #6366f1;
+      color: #fff;
+    }
+    .btn-primary:hover { background: #4f46e5; }
+    .btn-secondary {
+      background: #f3f4f6;
+      color: #374151;
+      margin-top: 6px;
+    }
+    .btn-secondary:hover { background: #e5e7eb; }
+    .btn-danger {
+      background: #fef2f2;
+      color: #dc2626;
+      margin-top: 6px;
+    }
+    .btn-danger:hover { background: #fee2e2; }
+
+    .hidden { display: none; }
+    .section { margin-bottom: 12px; }
+
+    /* Toggle */
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 0;
+    }
+    .toggle-label { font-size: 12px; }
+    .toggle {
+      position: relative;
+      width: 36px;
+      height: 20px;
+    }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle .slider {
+      position: absolute;
+      inset: 0;
+      background: #d1d5db;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .toggle .slider::after {
+      content: "";
+      position: absolute;
+      width: 16px;
+      height: 16px;
+      left: 2px;
+      bottom: 2px;
+      background: #fff;
+      border-radius: 50%;
+      transition: transform 0.2s;
+    }
+    .toggle input:checked + .slider { background: #6366f1; }
+    .toggle input:checked + .slider::after { transform: translateX(16px); }
+
+    .footer {
+      text-align: center;
+      font-size: 10px;
+      color: #9ca3af;
+      margin-top: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="logo">N</div>
+    <h1>NexusReach Autofill</h1>
+  </div>
+
+  <!-- Login view -->
+  <div id="login-view">
+    <div class="status-card disconnected">
+      <span class="status-dot off"></span> <strong>Not connected</strong>
+      <div class="status-text">Enter your NexusReach API token to connect.</div>
+    </div>
+    <div class="form-group">
+      <label for="api-url">API URL</label>
+      <input id="api-url" type="url" value="http://localhost:8000" placeholder="http://localhost:8000" />
+    </div>
+    <div class="form-group">
+      <label for="auth-token">Auth Token</label>
+      <input id="auth-token" type="password" placeholder="Paste Supabase JWT or dev token" />
+    </div>
+    <button id="connect-btn" class="btn btn-primary">Connect</button>
+    <div class="footer">Find your token in NexusReach Settings</div>
+  </div>
+
+  <!-- Connected view -->
+  <div id="connected-view" class="hidden">
+    <div class="status-card connected">
+      <span class="status-dot on"></span> <strong>Connected</strong>
+      <div class="status-text" id="profile-name-status"></div>
+    </div>
+
+    <div class="profile-info" id="profile-card">
+      <div class="name" id="profile-name">—</div>
+      <div class="detail" id="profile-email">—</div>
+      <div class="detail" id="profile-links"></div>
+      <div class="skills-list" id="profile-skills"></div>
+    </div>
+
+    <div class="toggle-row">
+      <span class="toggle-label">Auto-fill on page load</span>
+      <label class="toggle">
+        <input type="checkbox" id="autofill-toggle" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <button id="refresh-btn" class="btn btn-secondary">Refresh Profile</button>
+    <button id="disconnect-btn" class="btn btn-danger">Disconnect</button>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

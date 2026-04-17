@@ -869,17 +869,42 @@ function JobDetail({
 
         {/* Score breakdown */}
         {job.score_breakdown && Object.keys(job.score_breakdown).length > 0 && (
-          <div className="space-y-1">
+          <div className="space-y-2">
             <div className="text-sm font-medium">Score Breakdown</div>
-            <div className="grid grid-cols-2 gap-1">
-              {Object.entries(job.score_breakdown).map(([key, value]) => (
-                <div key={key} className="flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground">
-                    {key.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
-                  </span>
-                  <span className="font-medium">{value}/{key === 'role_match' || key === 'skills_match' ? 30 : key === 'industry_match' || key === 'location_match' ? 15 : 10}</span>
-                </div>
-              ))}
+            <div className="space-y-1.5">
+              {(() => {
+                const maxes = (job.score_breakdown as Record<string, unknown>).category_maxes as Record<string, number> | undefined;
+                const scoreKeys = ['skills_match', 'experience_match', 'role_match', 'location_match', 'education_match', 'level_fit'];
+                const labels: Record<string, string> = {
+                  skills_match: 'Skills',
+                  experience_match: 'Experience',
+                  role_match: 'Role Fit',
+                  location_match: 'Location',
+                  education_match: 'Education',
+                  level_fit: 'Level',
+                  industry_match: 'Industry',
+                };
+                const entries = Object.entries(job.score_breakdown)
+                  .filter(([key]) => scoreKeys.includes(key) || (!['category_maxes', 'max_possible', 'skills_detail', 'experience_detail', 'resume_not_uploaded'].includes(key) && typeof job.score_breakdown![key] === 'number'));
+                return entries.map(([key, value]) => {
+                  const max = maxes?.[key] ?? (key === 'role_match' || key === 'skills_match' ? 30 : key === 'industry_match' || key === 'location_match' ? 15 : 10);
+                  const pct = max > 0 ? ((value as number) / max) * 100 : 0;
+                  return (
+                    <div key={key} className="space-y-0.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-muted-foreground">{labels[key] || key.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}</span>
+                        <span className="font-medium">{Number(value)}/{max}</span>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all ${pct >= 70 ? 'bg-green-500' : pct >= 40 ? 'bg-yellow-500' : 'bg-gray-400'}`}
+                          style={{ width: `${Math.min(pct, 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
             </div>
           </div>
         )}

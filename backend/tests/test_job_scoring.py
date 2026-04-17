@@ -1,4 +1,4 @@
-"""Tests for job scoring and deduplication — Phase 6.
+"""Tests for job scoring and deduplication.
 
 Tests pure functions from job_service.py: _score_job and _fingerprint.
 No database or external API calls needed.
@@ -17,6 +17,12 @@ def _make_profile(**overrides):
     profile.target_locations = overrides.get("target_locations", ["New York"])
     profile.resume_parsed = overrides.get("resume_parsed", {
         "skills": ["Python", "React", "TypeScript", "FastAPI", "PostgreSQL"],
+        "experience": [
+            {"title": "Software Engineer", "company": "OldCo", "description": "Built APIs"},
+        ],
+        "education": [
+            {"degree": "BS", "field": "Computer Science", "institution": "State U"},
+        ],
     })
     return profile
 
@@ -41,10 +47,10 @@ class TestScoreJob:
     def test_no_profile_returns_zero(self):
         score, breakdown = _score_job(_make_job(), None)
         assert score == 0.0
-        assert breakdown == {}
+        assert breakdown.get("resume_not_uploaded") is True
 
     def test_full_profile_high_score(self):
-        """A job matching role, skills, industry, and location should score high."""
+        """A job matching role, skills, and location should score high."""
         profile = _make_profile()
         job = _make_job(
             title="Software Engineer",
@@ -52,37 +58,43 @@ class TestScoreJob:
             location="New York, NY",
         )
         score, breakdown = _score_job(job, profile)
-        assert score > 50.0
-        assert breakdown["role_match"] == 30.0  # exact title match
+        assert score > 40.0
+        assert breakdown["role_match"] > 0
 
     def test_role_match_in_title(self):
         profile = _make_profile(target_roles=["Backend Developer"])
         job = _make_job(title="Backend Developer")
         _, breakdown = _score_job(job, profile)
-        assert breakdown["role_match"] == 30.0
+        assert breakdown["role_match"] == 20.0  # full role match (20 points max)
 
     def test_role_match_in_description_only(self):
         profile = _make_profile(target_roles=["Backend Developer"])
         job = _make_job(title="Engineer", description="Looking for a backend developer")
         _, breakdown = _score_job(job, profile)
-        assert breakdown["role_match"] == 15.0
+        assert breakdown["role_match"] == 10.0  # description-only = half
 
     def test_no_role_match(self):
         profile = _make_profile(target_roles=["Data Scientist"])
-        job = _make_job(title="Frontend Designer")
+        job = _make_job(title="Frontend Designer", description="Design pixel-perfect UIs")
         _, breakdown = _score_job(job, profile)
         assert breakdown["role_match"] == 0.0
 
     def test_skills_match(self):
         profile = _make_profile(
-            resume_parsed={"skills": ["Python", "React", "Node.js", "Docker"]}
+            resume_parsed={
+                "skills": ["Python", "React", "Node.js", "Docker"],
+                "experience": [],
+                "education": [],
+            }
         )
         job = _make_job(description="We use Python, React, and Docker")
         _, breakdown = _score_job(job, profile)
         assert breakdown["skills_match"] > 0
 
     def test_no_skills_in_profile(self):
-        profile = _make_profile(resume_parsed={"skills": []})
+        profile = _make_profile(
+            resume_parsed={"skills": [], "experience": [], "education": []}
+        )
         _, breakdown = _score_job(_make_job(), profile)
         assert breakdown["skills_match"] == 0.0
 
@@ -91,69 +103,53 @@ class TestScoreJob:
         _, breakdown = _score_job(_make_job(), profile)
         assert breakdown["skills_match"] == 0.0
 
-    def test_industry_match_in_description(self):
-        profile = _make_profile(target_industries=["Fintech"])
-        job = _make_job(description="Join our fintech team")
-        _, breakdown = _score_job(job, profile)
-        assert breakdown["industry_match"] == 15.0
-
-    def test_industry_match_in_company_name(self):
-        profile = _make_profile(target_industries=["AI"])
-        job = _make_job(company_name="AI Startup Inc")
-        _, breakdown = _score_job(job, profile)
-        assert breakdown["industry_match"] == 15.0
-
     def test_location_match(self):
         profile = _make_profile(target_locations=["San Francisco"])
         job = _make_job(location="San Francisco, CA")
         _, breakdown = _score_job(job, profile)
-        assert breakdown["location_match"] == 15.0
+        assert breakdown["location_match"] == 10.0  # full location match (10 points max)
 
     def test_remote_location_bonus(self):
         profile = _make_profile(target_locations=["New York"])
         job = _make_job(location="Austin, TX", remote=True)
         _, breakdown = _score_job(job, profile)
-        assert breakdown["location_match"] == 10.0  # remote bonus
+        assert breakdown["location_match"] == 8.0  # remote bonus = 80% of max
 
     def test_remote_no_target_locations(self):
         profile = _make_profile(target_locations=None)
         job = _make_job(remote=True)
         _, breakdown = _score_job(job, profile)
-        assert breakdown["location_match"] == 10.0
+        assert breakdown["location_match"] == 7.0  # remote, no prefs = 70% of max
 
-    def test_level_fit_junior(self):
-        profile = _make_profile()
-        job = _make_job(title="Junior Software Engineer")
-        _, breakdown = _score_job(job, profile)
-        assert breakdown["level_fit"] == 10.0
-
-    def test_level_fit_senior(self):
-        profile = _make_profile()
-        job = _make_job(title="Senior Staff Engineer")
-        _, breakdown = _score_job(job, profile)
-        assert breakdown["level_fit"] == 2.0
-
-    def test_level_fit_mid(self):
+    def test_level_fit_default(self):
         profile = _make_profile()
         job = _make_job(title="Software Engineer")
         _, breakdown = _score_job(job, profile)
-        assert breakdown["level_fit"] == 5.0
+        assert breakdown["level_fit"] == 2.5  # default = half of 5
 
-    def test_level_fit_newgrad_source_uses_source_aware_inference(self):
+    def test_experience_match(self):
         profile = _make_profile()
-        job = _make_job(
-            title="Software Engineer",
-            source="newgrad_jobs",
-            level_label="Entry Level",
-        )
+        job = _make_job(title="Software Engineer", description="Build APIs with Python")
         _, breakdown = _score_job(job, profile)
-        assert breakdown["level_fit"] == 10.0
+        assert breakdown["experience_match"] > 0
 
-    def test_score_is_sum_of_breakdown(self):
+    def test_education_match(self):
+        profile = _make_profile()
+        job = _make_job(description="Requires Computer Science degree")
+        _, breakdown = _score_job(job, profile)
+        assert breakdown["education_match"] > 0
+
+    def test_score_numeric_keys_sum(self):
+        """Numeric breakdown keys should sum to the total score."""
         profile = _make_profile()
         job = _make_job()
         score, breakdown = _score_job(job, profile)
-        assert score == round(sum(breakdown.values()), 1)
+        numeric_keys = [
+            "skills_match", "experience_match", "role_match",
+            "location_match", "education_match", "level_fit",
+        ]
+        computed_sum = sum(breakdown[k] for k in numeric_keys if k in breakdown)
+        assert score == round(computed_sum, 1)
 
     def test_score_range(self):
         """Score should always be between 0 and 100."""
@@ -161,6 +157,56 @@ class TestScoreJob:
         job = _make_job()
         score, _ = _score_job(job, profile)
         assert 0 <= score <= 100
+
+    def test_breakdown_has_category_maxes(self):
+        """Breakdown should include category_maxes for frontend display."""
+        profile = _make_profile()
+        job = _make_job()
+        _, breakdown = _score_job(job, profile)
+        assert "category_maxes" in breakdown
+        maxes = breakdown["category_maxes"]
+        assert maxes["skills_match"] == 35
+        assert maxes["experience_match"] == 25
+        assert maxes["role_match"] == 20
+        assert maxes["location_match"] == 10
+
+    def test_skills_detail_in_breakdown(self):
+        """Breakdown should include matched skills detail."""
+        profile = _make_profile()
+        job = _make_job(description="We use Python and React daily")
+        _, breakdown = _score_job(job, profile)
+        detail = breakdown.get("skills_detail", {})
+        assert "matched" in detail
+        assert isinstance(detail["matched"], list)
+
+    def test_skill_synonym_matching(self):
+        """Skills with synonyms should match (e.g., 'JS' matches 'javascript')."""
+        profile = _make_profile(
+            resume_parsed={
+                "skills": ["JavaScript"],
+                "experience": [],
+                "education": [],
+            }
+        )
+        job = _make_job(description="Experience with JS and Node.js required")
+        _, breakdown = _score_job(job, profile)
+        assert breakdown["skills_match"] > 0
+
+    def test_word_boundary_skill_matching(self):
+        """Short skills like 'R' should use word boundaries, not substring."""
+        profile = _make_profile(
+            resume_parsed={
+                "skills": ["R"],
+                "experience": [],
+                "education": [],
+            }
+        )
+        # "React" contains "R" but shouldn't match with word boundary
+        job = _make_job(description="We use React and TypeScript")
+        _, breakdown = _score_job(job, profile)
+        detail = breakdown.get("skills_detail", {})
+        matched = detail.get("matched", [])
+        assert "rlang" not in matched
 
 
 # --- _fingerprint ---

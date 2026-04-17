@@ -19,6 +19,8 @@ from app.schemas.jobs import (
     SearchPreferenceToggle,
     DiscoverRequest,
     RefreshResponse,
+    MatchAnalysisResponse,
+    TailoredResumeResponse,
 )
 from app.services.job_service import (
     search_jobs,
@@ -208,6 +210,7 @@ def _pref_to_response(pref) -> SearchPreferenceResponse:
         location=pref.location,
         remote_only=pref.remote_only,
         enabled=pref.enabled,
+        mode=pref.mode or "default",
         last_refreshed_at=pref.last_refreshed_at.isoformat() if pref.last_refreshed_at else None,
         new_jobs_found=pref.new_jobs_found or 0,
         created_at=pref.created_at.isoformat(),
@@ -267,6 +270,173 @@ async def get_single_job(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return _to_response(job)
+
+
+@router.post("/{job_id}/analyze-match", response_model=MatchAnalysisResponse)
+@limiter.limit("5/minute")
+async def analyze_match(
+    request: Request,
+    job_id: str,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get AI-powered match analysis for a job against the user's resume."""
+    from sqlalchemy import select  # noqa: PLC0415
+    from app.models.profile import Profile  # noqa: PLC0415
+    from app.services.match_scoring import score_job, deep_analyze_match  # noqa: PLC0415
+
+    job = await get_job(db, user_id, uuid.UUID(job_id))
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    result = await db.execute(
+        select(Profile).where(Profile.user_id == user_id)
+    )
+    profile = result.scalar_one_or_none()
+    if not profile or not profile.resume_parsed:
+        raise HTTPException(
+            status_code=400,
+            detail="Upload a resume in your profile first to analyze match.",
+        )
+
+    job_data = {
+        "title": job.title,
+        "company_name": job.company_name,
+        "location": job.location,
+        "description": job.description,
+        "remote": job.remote,
+        "experience_level": job.experience_level,
+    }
+    score, breakdown = score_job(job_data, profile)
+
+    try:
+        analysis = await deep_analyze_match(job_data, profile, score, breakdown)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return MatchAnalysisResponse(
+        summary=analysis.get("summary", ""),
+        strengths=analysis.get("strengths", []),
+        gaps=analysis.get("gaps", []),
+        recommendations=analysis.get("recommendations", []),
+        match_score=score,
+        model=analysis.get("model"),
+    )
+
+
+@router.post("/{job_id}/tailor-resume", response_model=TailoredResumeResponse)
+@limiter.limit("5/minute")
+async def tailor_resume_endpoint(
+    request: Request,
+    job_id: str,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Generate AI-powered resume tailoring suggestions for a specific job."""
+    from sqlalchemy import select  # noqa: PLC0415
+    from app.models.profile import Profile  # noqa: PLC0415
+    from app.models.tailored_resume import TailoredResume  # noqa: PLC0415
+    from app.services.match_scoring import score_job  # noqa: PLC0415
+    from app.services.resume_tailor import tailor_resume  # noqa: PLC0415
+
+    job = await get_job(db, user_id, uuid.UUID(job_id))
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    result = await db.execute(
+        select(Profile).where(Profile.user_id == user_id)
+    )
+    profile = result.scalar_one_or_none()
+    if not profile or not profile.resume_parsed:
+        raise HTTPException(
+            status_code=400,
+            detail="Upload a resume in your profile first to tailor.",
+        )
+
+    job_data = {
+        "title": job.title,
+        "company_name": job.company_name,
+        "location": job.location,
+        "description": job.description,
+        "remote": job.remote,
+        "experience_level": job.experience_level,
+    }
+    score, breakdown = score_job(job_data, profile)
+
+    try:
+        suggestions = await tailor_resume(job_data, profile, score, breakdown)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Persist the tailored resume
+    tailored = TailoredResume(
+        user_id=user_id,
+        job_id=uuid.UUID(job_id),
+        summary=suggestions.get("summary"),
+        skills_to_emphasize=suggestions.get("skills_to_emphasize"),
+        skills_to_add=suggestions.get("skills_to_add"),
+        keywords_to_add=suggestions.get("keywords_to_add"),
+        bullet_rewrites=suggestions.get("bullet_rewrites"),
+        section_suggestions=suggestions.get("section_suggestions"),
+        overall_strategy=suggestions.get("overall_strategy"),
+        model=suggestions.get("model"),
+        provider=suggestions.get("provider"),
+    )
+    db.add(tailored)
+    await db.commit()
+    await db.refresh(tailored)
+
+    return TailoredResumeResponse(
+        id=str(tailored.id),
+        job_id=job_id,
+        summary=suggestions.get("summary", ""),
+        skills_to_emphasize=suggestions.get("skills_to_emphasize", []),
+        skills_to_add=suggestions.get("skills_to_add", []),
+        keywords_to_add=suggestions.get("keywords_to_add", []),
+        bullet_rewrites=suggestions.get("bullet_rewrites", []),
+        section_suggestions=suggestions.get("section_suggestions", []),
+        overall_strategy=suggestions.get("overall_strategy", ""),
+        model=suggestions.get("model"),
+        created_at=tailored.created_at.isoformat(),
+    )
+
+
+@router.get("/{job_id}/tailor-resume", response_model=TailoredResumeResponse | None)
+async def get_tailored_resume(
+    job_id: str,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get the most recent tailored resume for a job, if any."""
+    from sqlalchemy import select  # noqa: PLC0415
+    from app.models.tailored_resume import TailoredResume  # noqa: PLC0415
+
+    result = await db.execute(
+        select(TailoredResume)
+        .where(
+            TailoredResume.user_id == user_id,
+            TailoredResume.job_id == uuid.UUID(job_id),
+        )
+        .order_by(TailoredResume.created_at.desc())
+        .limit(1)
+    )
+    tailored = result.scalar_one_or_none()
+    if not tailored:
+        return None
+
+    return TailoredResumeResponse(
+        id=str(tailored.id),
+        job_id=job_id,
+        summary=tailored.summary or "",
+        skills_to_emphasize=tailored.skills_to_emphasize or [],
+        skills_to_add=tailored.skills_to_add or [],
+        keywords_to_add=tailored.keywords_to_add or [],
+        bullet_rewrites=tailored.bullet_rewrites or [],
+        section_suggestions=tailored.section_suggestions or [],
+        overall_strategy=tailored.overall_strategy or "",
+        model=tailored.model,
+        created_at=tailored.created_at.isoformat(),
+    )
 
 
 @router.put("/{job_id}/stage", response_model=JobResponse)

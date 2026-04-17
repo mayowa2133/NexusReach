@@ -395,6 +395,41 @@ export interface Job {
   updated_at: string;
 }
 
+export interface MatchAnalysis {
+  summary: string;
+  strengths: string[];
+  gaps: string[];
+  recommendations: string[];
+  match_score: number | null;
+  model: string | null;
+}
+
+export interface BulletRewrite {
+  original: string;
+  rewritten: string;
+  reason: string;
+  experience_index: number | null;
+}
+
+export interface SectionSuggestion {
+  section: string;
+  suggestion: string;
+}
+
+export interface TailoredResume {
+  id: string | null;
+  job_id: string;
+  summary: string;
+  skills_to_emphasize: string[];
+  skills_to_add: string[];
+  keywords_to_add: string[];
+  bullet_rewrites: BulletRewrite[];
+  section_suggestions: SectionSuggestion[];
+  overall_strategy: string;
+  model: string | null;
+  created_at: string | null;
+}
+
 export interface JobSearchRequest {
   query: string;
   location?: string;
@@ -636,6 +671,22 @@ export interface LinkedInGraphSyncSession {
   max_batch_size: number;
 }
 
+export interface JobPipelineStage {
+  stage: string;
+  count: number;
+}
+
+export interface ApiUsageByService {
+  service: string;
+  calls: number;
+  cost_cents: number;
+}
+
+export interface GraphWarmPathCompany {
+  company_name: string;
+  connection_count: number;
+}
+
 export interface InsightsDashboard {
   summary: DashboardSummary;
   response_by_channel: ResponseRateBreakdown[];
@@ -646,4 +697,7 @@ export interface InsightsDashboard {
   network_gaps: NetworkGap[];
   warm_paths: WarmPath[];
   company_openness: CompanyOpenness[];
+  job_pipeline: JobPipelineStage[];
+  api_usage_by_service: ApiUsageByService[];
+  graph_warm_paths: GraphWarmPathCompany[];
 }

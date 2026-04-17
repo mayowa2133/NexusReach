@@ -934,3 +934,69 @@ def apply_warm_path_annotations(
                 f"You already know {bridge_connection.display_name} at {bridge_company_name or company_name}.",
             )
             setattr(person, "warm_path_connection", bridge_connection)
+
+
+async def resolve_warm_path_for_person(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    person: Any,
+    *,
+    job_title: str | None = None,
+    department: str | None = None,
+) -> dict[str, Any] | None:
+    """Resolve warm-path context for a single person (for drafting).
+
+    Returns a dict with ``type``, ``reason``, and connection summary fields,
+    or ``None`` if the user has no safe warm path to this person. Mirrors
+    the ranking rules in ``apply_warm_path_annotations`` but for one target.
+    """
+    company = getattr(person, "company", None)
+    company_name = getattr(company, "name", None) if company else None
+    if not company_name:
+        return None
+
+    public_identity_slugs = (
+        getattr(company, "public_identity_slugs", None) if company else None
+    ) or []
+
+    connections = await get_connections_for_company(
+        db,
+        user_id,
+        company_name=company_name,
+        public_identity_slugs=public_identity_slugs,
+    )
+    if not connections:
+        return None
+
+    person_slug = _linkedin_slug_from_url(getattr(person, "linkedin_url", None))
+    if person_slug:
+        for connection in connections:
+            if connection.linkedin_slug == person_slug:
+                return {
+                    "type": "direct_connection",
+                    "reason": (
+                        f"You are already directly connected to "
+                        f"{connection.display_name} on LinkedIn."
+                    ),
+                    "connection_name": connection.display_name,
+                    "connection_headline": connection.headline,
+                    "connection_linkedin_url": connection.linkedin_url,
+                }
+
+    bridge = _select_best_bridge(
+        connections, job_title=job_title, department=department
+    )
+    if bridge is None:
+        return None
+
+    bridge_company = bridge.current_company_name or company_name
+    return {
+        "type": "same_company_bridge",
+        "reason": (
+            f"You already know {bridge.display_name} at {bridge_company}, "
+            f"who may be able to introduce you."
+        ),
+        "connection_name": bridge.display_name,
+        "connection_headline": bridge.headline,
+        "connection_linkedin_url": bridge.linkedin_url,
+    }

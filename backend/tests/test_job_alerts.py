@@ -121,16 +121,11 @@ class TestJobMatching:
         google_job = _make_job(company_name="Google")
         meta_job = _make_job(company_name="Meta")
 
-        # Mock db
+        # Mock db — use_starred_companies=False so only the jobs query runs
         db = AsyncMock()
-        # Mock starred companies query (empty)
-        starred_result = MagicMock()
-        starred_result.all.return_value = []
-        # Mock jobs query
         jobs_result = MagicMock()
         jobs_result.scalars.return_value.all.return_value = [google_job, meta_job]
-
-        db.execute = AsyncMock(side_effect=[starred_result, jobs_result])
+        db.execute = AsyncMock(return_value=jobs_result)
 
         matched = await find_new_jobs_for_alert(db, uuid.uuid4(), prefs, since)
         assert len(matched) == 1
@@ -144,11 +139,9 @@ class TestJobMatching:
         job = _make_job(company_name="Google")
 
         db = AsyncMock()
-        starred_result = MagicMock()
-        starred_result.all.return_value = []
         jobs_result = MagicMock()
         jobs_result.scalars.return_value.all.return_value = [job]
-        db.execute = AsyncMock(side_effect=[starred_result, jobs_result])
+        db.execute = AsyncMock(return_value=jobs_result)
 
         matched = await find_new_jobs_for_alert(db, uuid.uuid4(), prefs, since)
         assert len(matched) == 1
@@ -167,11 +160,9 @@ class TestJobMatching:
         frontend_job.description = "Work on UI components at Google"
 
         db = AsyncMock()
-        starred_result = MagicMock()
-        starred_result.all.return_value = []
         jobs_result = MagicMock()
         jobs_result.scalars.return_value.all.return_value = [backend_job, frontend_job]
-        db.execute = AsyncMock(side_effect=[starred_result, jobs_result])
+        db.execute = AsyncMock(return_value=jobs_result)
 
         matched = await find_new_jobs_for_alert(db, uuid.uuid4(), prefs, since)
         assert len(matched) == 1
@@ -223,11 +214,13 @@ class TestJobMatching:
 
 class TestPreferenceModel:
     def test_default_values(self):
-        prefs = JobAlertPreference()
-        assert prefs.enabled is False
-        assert prefs.frequency == "daily"
-        assert prefs.use_starred_companies is True
-        assert prefs.email_provider == "connected"
+        # SQLAlchemy column defaults fire on INSERT, not on bare instantiation,
+        # so verify the configured defaults via the column metadata directly.
+        cols = JobAlertPreference.__table__.c
+        assert cols.enabled.default.arg is False
+        assert cols.frequency.default.arg == "daily"
+        assert cols.use_starred_companies.default.arg is True
+        assert cols.email_provider.default.arg == "connected"
 
     def test_custom_values(self):
         prefs = JobAlertPreference(
