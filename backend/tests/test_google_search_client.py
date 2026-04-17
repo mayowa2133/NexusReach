@@ -5,8 +5,6 @@ from unittest.mock import patch, AsyncMock, MagicMock
 
 from app.clients.google_search_client import search_people, _parse_linkedin_result
 
-pytestmark = pytest.mark.asyncio
-
 
 def _mock_httpx_response(json_data, status_code=200):
     resp = MagicMock()
@@ -81,6 +79,7 @@ class TestParseLinkedInResult:
         assert result is None
 
 
+@pytest.mark.asyncio
 class TestSearchPeople:
     """Tests for search_people() — Google CSE LinkedIn X-ray search."""
 

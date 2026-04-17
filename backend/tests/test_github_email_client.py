@@ -5,8 +5,6 @@ from unittest.mock import patch, AsyncMock, MagicMock
 
 from app.clients import github_email_client
 
-pytestmark = pytest.mark.asyncio
-
 
 class TestExtractUsername:
     def test_standard_url(self):
@@ -45,6 +43,7 @@ class TestIsNoreply:
         assert github_email_client._is_noreply("noreply@github.com") is True
 
 
+@pytest.mark.asyncio
 class TestGetProfileEmail:
     async def test_returns_public_email(self):
         mock_resp = MagicMock()
@@ -114,6 +113,7 @@ class TestGetProfileEmail:
         assert result is None
 
 
+@pytest.mark.asyncio
 class TestGetCommitEmail:
     async def test_extracts_email_from_push_events(self):
         events = [

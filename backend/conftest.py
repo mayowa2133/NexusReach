@@ -12,6 +12,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 from app.dependencies import get_current_user_id
+from app.middleware.rate_limit import limiter
 
 # Deterministic test user
 TEST_USER_ID = uuid.UUID("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
@@ -20,6 +21,14 @@ TEST_USER_ID = uuid.UUID("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
 @pytest.fixture
 def mock_user_id():
     return TEST_USER_ID
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limits():
+    """Keep slowapi state from leaking across tests."""
+    limiter.reset()
+    yield
+    limiter.reset()
 
 
 @pytest.fixture
