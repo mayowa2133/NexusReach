@@ -111,6 +111,12 @@ beforeEach(() => {
       sync_status: 'idle',
       last_error: null,
       connection_count: 0,
+      freshness: 'empty',
+      days_since_last_sync: null,
+      refresh_recommended: false,
+      stale_after_days: 90,
+      recommended_resync_every_days: 30,
+      status_message: null,
       last_run: null,
     },
     isLoading: false,
@@ -156,6 +162,7 @@ describe('SettingsPage — basic', () => {
     expect(screen.getByText('LinkedIn Graph')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /sync now/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /upload export/i })).toBeInTheDocument();
+    expect(screen.getByText(/recommended: hosted import/i)).toBeInTheDocument();
   });
 
   it('shows connector commands after starting a sync session', async () => {
@@ -268,6 +275,12 @@ describe('SettingsPage — email integrations', () => {
         sync_status: 'completed',
         last_error: null,
         connection_count: 12,
+        freshness: 'aging',
+        days_since_last_sync: 14,
+        refresh_recommended: false,
+        stale_after_days: 90,
+        recommended_resync_every_days: 30,
+        status_message: 'LinkedIn graph is current.',
         last_run: null,
       },
       isLoading: false,

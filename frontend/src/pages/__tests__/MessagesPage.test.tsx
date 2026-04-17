@@ -220,13 +220,25 @@ describe('MessagesPage', () => {
         status: 'draft',
         version: 1,
         parent_id: null,
-        recipient_strategy: 'peer',
-        primary_cta: 'warm_intro',
-        fallback_cta: 'redirect',
-        job_id: 'job-1',
-        person_name: 'Alex Lee',
-        person_title: 'Software Engineer II',
-        created_at: '2026-03-19T00:00:00Z',
+      recipient_strategy: 'peer',
+      primary_cta: 'warm_intro',
+      fallback_cta: 'redirect',
+      job_id: 'job-1',
+      warm_path: {
+        type: 'same_company_bridge',
+        reason: 'You already know Jamie Rivera at Affirm.',
+        connection_name: 'Jamie Rivera',
+        connection_headline: 'Senior Engineer',
+        connection_linkedin_url: 'https://www.linkedin.com/in/jamie-rivera',
+        freshness: 'aging',
+        days_since_sync: 41,
+        refresh_recommended: true,
+        stale: false,
+        caution: 'LinkedIn graph data is 41 days old.',
+      },
+      person_name: 'Alex Lee',
+      person_title: 'Software Engineer II',
+      created_at: '2026-03-19T00:00:00Z',
         updated_at: '2026-03-19T00:00:00Z',
       },
       reasoning: 'Use a warm intro angle.',
@@ -235,6 +247,18 @@ describe('MessagesPage', () => {
       primary_cta: 'warm_intro',
       fallback_cta: 'redirect',
       job_id: 'job-1',
+      warm_path: {
+        type: 'same_company_bridge',
+        reason: 'You already know Jamie Rivera at Affirm.',
+        connection_name: 'Jamie Rivera',
+        connection_headline: 'Senior Engineer',
+        connection_linkedin_url: 'https://www.linkedin.com/in/jamie-rivera',
+        freshness: 'aging',
+        days_since_sync: 41,
+        refresh_recommended: true,
+        stale: false,
+        caution: 'LinkedIn graph data is 41 days old.',
+      },
     });
 
     renderMessages();
@@ -249,6 +273,8 @@ describe('MessagesPage', () => {
       goal: 'warm_intro',
       job_id: 'job-1',
     });
+    expect(await screen.findByText(/warm-path context/i)).toBeInTheDocument();
+    expect(screen.getByText(/you already know jamie rivera at affirm/i)).toBeInTheDocument();
   });
 
   it('filters the person dropdown by company name', async () => {
@@ -356,6 +382,18 @@ describe('MessagesPage', () => {
             primary_cta: 'warm_intro',
             fallback_cta: 'redirect',
             job_id: null,
+            warm_path: {
+              type: 'same_company_bridge',
+              reason: 'You already know Jamie Rivera at Affirm.',
+              connection_name: 'Jamie Rivera',
+              connection_headline: 'Senior Engineer',
+              connection_linkedin_url: 'https://www.linkedin.com/in/jamie-rivera',
+              freshness: 'fresh',
+              days_since_sync: 5,
+              refresh_recommended: false,
+              stale: false,
+              caution: null,
+            },
             person_name: 'Alex Lee',
             person_title: 'Software Engineer II',
             created_at: '2026-03-19T00:00:00Z',

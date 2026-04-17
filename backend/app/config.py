@@ -87,6 +87,8 @@ class Settings(BaseSettings):
     # LinkedIn graph sync
     linkedin_graph_sync_session_ttl_seconds: int = 900
     linkedin_graph_max_import_batch_size: int = 250
+    linkedin_graph_refresh_recommended_days: int = 30
+    linkedin_graph_stale_after_days: int = 90
 
     # Stale contact re-verification
     reverify_stale_days: int = 14

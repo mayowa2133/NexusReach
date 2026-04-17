@@ -384,6 +384,14 @@ def _build_warm_path_context(warm_path: dict | None) -> str:
     lines.append(
         "- Keep it subtle. One short sentence is enough; never invent the nature of the relationship."
     )
+    if warm_path.get("stale"):
+        lines.append(
+            "- This graph data is stale. Use the warm path cautiously and avoid implying the relationship is definitely current."
+        )
+    elif warm_path.get("refresh_recommended"):
+        lines.append(
+            "- The LinkedIn graph is aging. Keep any warm-path mention conservative and easy to verify."
+        )
     return "\n".join(lines)
 
 
@@ -769,6 +777,7 @@ async def draft_message(
         "primary_cta": primary_cta,
         "fallback_cta": fallback_cta,
         "job_id": str(job.id) if job else None,
+        "warm_path": warm_path,
     }
 
 

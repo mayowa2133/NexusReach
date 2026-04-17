@@ -183,6 +183,7 @@ describe('DashboardPage — metric cards', () => {
         network_growth: [],
         network_gaps: [],
         warm_paths: [],
+        warm_path_companies: [],
         company_openness: [],
       },
       isLoading: false,
@@ -222,6 +223,49 @@ describe('DashboardPage — chart sections', () => {
   it('renders warm paths section', () => {
     renderDashboard();
     expect(screen.getByText('Warm Paths')).toBeInTheDocument();
+  });
+
+  it('shows unified warm-path counts when graph and outreach data exist', () => {
+    mockInsights = {
+      data: {
+        summary: {
+          total_contacts: 18,
+          total_messages_sent: 12,
+          total_jobs_tracked: 45,
+          overall_response_rate: 33.3,
+          upcoming_follow_ups: 5,
+          active_conversations: 7,
+        },
+        response_by_channel: [],
+        response_by_role: [],
+        response_by_company: [],
+        angle_effectiveness: [],
+        network_growth: [],
+        network_gaps: [],
+        warm_paths: [],
+        warm_path_companies: [
+          {
+            company_name: 'TechCorp',
+            connected_persons: [{ name: 'Jane Smith', title: 'Engineering Manager', status: 'connected' }],
+            outreach_connection_count: 1,
+            graph_connection_count: 4,
+            graph_freshness: 'aging',
+            graph_days_since_sync: 45,
+            graph_refresh_recommended: true,
+          },
+        ],
+        company_openness: [],
+        job_pipeline: [],
+        api_usage_by_service: [],
+        graph_warm_paths: [],
+      },
+      isLoading: false,
+    };
+
+    renderDashboard();
+    expect(screen.getByText('1 outreach contact')).toBeInTheDocument();
+    expect(screen.getByText('4 LinkedIn connections')).toBeInTheDocument();
+    expect(screen.getByText('Re-sync graph')).toBeInTheDocument();
   });
 
   it('renders network gaps section', () => {

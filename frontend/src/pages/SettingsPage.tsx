@@ -37,6 +37,13 @@ function buildLinkedInProfileCommand(sessionToken: string): string {
   return `cd backend && python scripts/linkedin_graph_connector.py --base-url ${API_URL} --session-token ${sessionToken}`;
 }
 
+function formatGraphFreshnessLabel(freshness: string | null | undefined): string {
+  if (freshness === 'stale') return 'Stale';
+  if (freshness === 'aging') return 'Refresh recommended';
+  if (freshness === 'fresh') return 'Fresh';
+  return 'No data';
+}
+
 export function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: emailStatus, isLoading } = useEmailConnectionStatus();
@@ -251,7 +258,7 @@ export function SettingsPage() {
           <CardTitle>LinkedIn Graph</CardTitle>
           <CardDescription>
             Import your first-degree LinkedIn connections so NexusReach can surface warm paths
-            during people search. The server stores only minimal graph match data.
+            in people search, message drafting, and the dashboard. The server stores only minimal graph match data.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -271,6 +278,11 @@ export function SettingsPage() {
               {linkedInSyncLabel}
             </Badge>
             {linkedinGraphStatus && (
+              <Badge variant={linkedinGraphStatus.freshness === 'stale' ? 'destructive' : 'outline'}>
+                {formatGraphFreshnessLabel(linkedinGraphStatus.freshness)}
+              </Badge>
+            )}
+            {linkedinGraphStatus && (
               <Badge variant="outline">
                 {linkedinGraphStatus.connection_count} connection
                 {linkedinGraphStatus.connection_count === 1 ? '' : 's'}
@@ -284,6 +296,9 @@ export function SettingsPage() {
                 ? `Last synced ${new Date(linkedinGraphStatus.last_synced_at).toLocaleString()}.`
                 : 'No LinkedIn graph data synced yet.'}
             </p>
+            {linkedinGraphStatus?.status_message && (
+              <p>{linkedinGraphStatus.status_message}</p>
+            )}
             {linkedinGraphStatus?.source && (
               <p>Latest source: {linkedinGraphStatus.source === 'manual_import' ? 'Manual import' : 'Local sync session'}.</p>
             )}
@@ -292,20 +307,42 @@ export function SettingsPage() {
             )}
           </div>
 
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-lg border p-4 space-y-3">
+              <div>
+                <p className="text-sm font-medium">Recommended: hosted import</p>
+                <p className="text-sm text-muted-foreground">
+                  Export your LinkedIn connections from LinkedIn, then upload the CSV or ZIP here.
+                  No Playwright, CDP, or local browser setup required.
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadLinkedInGraphFile.isPending}
+              >
+                {uploadLinkedInGraphFile.isPending ? 'Uploading...' : 'Upload Export'}
+              </Button>
+            </div>
+
+            <div className="rounded-lg border p-4 space-y-3">
+              <div>
+                <p className="text-sm font-medium">Advanced: local live sync</p>
+                <p className="text-sm text-muted-foreground">
+                  Use the Playwright connector only if you want a live scrape from a logged-in browser.
+                  This is faster, but it requires local tooling.
+                </p>
+              </div>
+              <Button
+                onClick={handleStartLinkedInSync}
+                disabled={startLinkedInSync.isPending || linkedinGraphLoading}
+              >
+                {startLinkedInSync.isPending ? 'Starting...' : 'Sync Now'}
+              </Button>
+            </div>
+          </div>
+
           <div className="flex flex-wrap gap-2">
-            <Button
-              onClick={handleStartLinkedInSync}
-              disabled={startLinkedInSync.isPending || linkedinGraphLoading}
-            >
-              {startLinkedInSync.isPending ? 'Starting...' : 'Sync Now'}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploadLinkedInGraphFile.isPending}
-            >
-              {uploadLinkedInGraphFile.isPending ? 'Uploading...' : 'Upload Export'}
-            </Button>
             <Button
               variant="outline"
               onClick={handleClearLinkedInGraph}

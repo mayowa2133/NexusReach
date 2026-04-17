@@ -3,6 +3,19 @@ from pydantic import BaseModel
 from app.schemas.people import PersonResponse
 
 
+class MessageWarmPathResponse(BaseModel):
+    type: str
+    reason: str | None = None
+    connection_name: str | None = None
+    connection_headline: str | None = None
+    connection_linkedin_url: str | None = None
+    freshness: str | None = None
+    days_since_sync: int | None = None
+    refresh_recommended: bool = False
+    stale: bool = False
+    caution: str | None = None
+
+
 class DraftRequest(BaseModel):
     person_id: str
     channel: str  # linkedin_note | linkedin_message | email | follow_up | thank_you
@@ -31,6 +44,7 @@ class MessageResponse(BaseModel):
     primary_cta: str | None = None
     fallback_cta: str | None = None
     job_id: str | None = None
+    warm_path: MessageWarmPathResponse | None = None
     person_name: str | None = None
     person_title: str | None = None
     scheduled_send_at: str | None = None
@@ -48,6 +62,7 @@ class DraftResponse(BaseModel):
     primary_cta: str | None = None
     fallback_cta: str | None = None
     job_id: str | None = None
+    warm_path: MessageWarmPathResponse | None = None
 
 
 class BatchDraftRequest(BaseModel):

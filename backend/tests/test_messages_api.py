@@ -117,6 +117,18 @@ async def test_draft_message(client, mock_user_id):
             "primary_cta": "interview",
             "fallback_cta": "redirect",
             "job_id": str(job_id),
+            "warm_path": {
+                "type": "same_company_bridge",
+                "reason": "You already know Jane Smith at TechCorp.",
+                "connection_name": "Jane Smith",
+                "connection_headline": "Engineering Manager",
+                "connection_linkedin_url": "https://www.linkedin.com/in/jane-smith",
+                "freshness": "aging",
+                "days_since_sync": 46,
+                "refresh_recommended": True,
+                "stale": False,
+                "caution": "LinkedIn graph data is 46 days old.",
+            },
         }
         resp = await client.post(
             "/api/messages/draft",
@@ -136,8 +148,11 @@ async def test_draft_message(client, mock_user_id):
     assert data["message"]["primary_cta"] == "interview"
     assert data["message"]["fallback_cta"] == "redirect"
     assert data["message"]["job_id"] == str(job_id)
+    assert data["message"]["warm_path"]["type"] == "same_company_bridge"
+    assert data["message"]["warm_path"]["connection_name"] == "Jane Smith"
     assert data["recipient_strategy"] == "recruiter"
     assert data["job_id"] == str(job_id)
+    assert data["warm_path"]["refresh_recommended"] is True
     assert mock_draft.await_args.kwargs["job_id"] == job_id
 
 

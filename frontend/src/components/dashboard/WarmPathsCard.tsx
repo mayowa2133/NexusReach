@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import type { WarmPath } from '@/types';
+import type { UnifiedWarmPathCompany } from '@/types';
 
 interface WarmPathsCardProps {
-  paths: WarmPath[];
+  paths: UnifiedWarmPathCompany[];
 }
 
 export function WarmPathsCard({ paths }: WarmPathsCardProps) {
@@ -18,7 +18,7 @@ export function WarmPathsCard({ paths }: WarmPathsCardProps) {
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground">
-            Connect with people to build warm paths into target companies.
+            Add outreach history or import LinkedIn connections to surface warm paths into target companies.
           </p>
         </CardContent>
       </Card>
@@ -41,13 +41,36 @@ export function WarmPathsCard({ paths }: WarmPathsCardProps) {
                 )
               }
             >
-              <span className="font-medium text-sm">{wp.company_name}</span>
-              <Badge variant="secondary" className="text-xs">
-                {wp.connected_persons.length} connection{wp.connected_persons.length !== 1 ? 's' : ''}
-              </Badge>
+              <div className="space-y-1">
+                <div className="font-medium text-sm">{wp.company_name}</div>
+                <div className="flex flex-wrap gap-1">
+                  {wp.outreach_connection_count > 0 && (
+                    <Badge variant="secondary" className="text-xs">
+                      {wp.outreach_connection_count} outreach contact{wp.outreach_connection_count !== 1 ? 's' : ''}
+                    </Badge>
+                  )}
+                  {wp.graph_connection_count > 0 && (
+                    <Badge variant="outline" className="text-xs">
+                      {wp.graph_connection_count} LinkedIn connection{wp.graph_connection_count !== 1 ? 's' : ''}
+                    </Badge>
+                  )}
+                  {wp.graph_refresh_recommended && (
+                    <Badge variant="outline" className="text-xs">
+                      Re-sync graph
+                    </Badge>
+                  )}
+                </div>
+              </div>
             </button>
             {expandedCompany === wp.company_name && (
               <div className="mt-2 space-y-1.5">
+                {wp.graph_connection_count > 0 && (
+                  <div className="text-xs text-muted-foreground">
+                    {wp.graph_days_since_sync != null
+                      ? `LinkedIn graph last synced ${wp.graph_days_since_sync} day${wp.graph_days_since_sync === 1 ? '' : 's'} ago.`
+                      : 'LinkedIn graph imported for this company.'}
+                  </div>
+                )}
                 {wp.connected_persons.map((p, i) => (
                   <div key={i} className="flex items-center justify-between text-sm">
                     <span>
@@ -61,6 +84,11 @@ export function WarmPathsCard({ paths }: WarmPathsCardProps) {
                     </Badge>
                   </div>
                 ))}
+                {wp.connected_persons.length === 0 && wp.graph_connection_count > 0 && (
+                  <div className="text-sm text-muted-foreground">
+                    No outreach relationship recorded yet. This warm path is coming from your imported LinkedIn graph.
+                  </div>
+                )}
               </div>
             )}
           </div>
