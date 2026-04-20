@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { useStories } from '@/hooks/useStories';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
@@ -231,9 +232,12 @@ function SingleMessagesView() {
   const [editBody, setEditBody] = useState('');
   const [editSubject, setEditSubject] = useState('');
   const [isEditing, setIsEditing] = useState(false);
+  const [showStoryPicker, setShowStoryPicker] = useState(false);
+  const [pickedStoryIds, setPickedStoryIds] = useState<string[]>([]);
 
   const draft = useDraftMessage();
   const edit = useEditMessage();
+  const { data: allStories } = useStories();
   const markCopied = useMarkCopied();
   const findEmail = useFindEmail();
   const verifyEmail = useVerifyEmail();
@@ -290,6 +294,28 @@ function SingleMessagesView() {
       setIsEditing(false);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to draft message');
+    }
+  };
+
+  const handleRedraftWithStories = async (storyIds: string[]) => {
+    if (!activeDraft) return;
+    setShowStoryPicker(false);
+    try {
+      const result = await draft.mutateAsync({
+        person_id: activeDraft.person_id,
+        channel: activeDraft.channel,
+        goal: activeDraft.goal,
+        job_id: activeDraft.job_id ?? undefined,
+        pinned_story_ids: storyIds,
+      });
+      setActiveDraft(result.message);
+      setReasoning(result.reasoning);
+      setEditBody(result.message.body);
+      setEditSubject(result.message.subject || '');
+      setIsEditing(false);
+      toast.success('Redrafted with selected stories');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to redraft');
     }
   };
 
@@ -672,6 +698,106 @@ function SingleMessagesView() {
                       {activeDraft.warm_path.caution && (
                         <div className="text-xs text-amber-700">{activeDraft.warm_path.caution}</div>
                       )}
+                    </div>
+                  )}
+
+                  {/* Stories used in this draft */}
+                  {(activeDraft.story_ids?.length ?? 0) > 0 && (
+                    <div className="rounded-md border border-purple-200 bg-purple-50/50 p-3 text-sm space-y-1 dark:border-purple-800 dark:bg-purple-900/10">
+                      <div className="font-medium text-purple-900 dark:text-purple-200">
+                        Stories used ({activeDraft.story_ids!.length})
+                      </div>
+                      <div className="space-y-0.5">
+                        {activeDraft.story_ids!.map((sid) => {
+                          const s = allStories?.find((x) => x.id === sid);
+                          return (
+                            <div key={sid} className="text-xs text-purple-800 dark:text-purple-300">
+                              {s ? `• ${s.title}${s.impact_metric ? ` — ${s.impact_metric}` : ''}` : `• ${sid.slice(0, 8)}…`}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="mt-1 text-xs h-7 border-purple-300 text-purple-800 dark:border-purple-700 dark:text-purple-200"
+                        onClick={() => {
+                          setPickedStoryIds(activeDraft.story_ids ?? []);
+                          setShowStoryPicker(true);
+                        }}
+                        disabled={draft.isPending}
+                      >
+                        Redraft with different story
+                      </Button>
+                    </div>
+                  )}
+
+                  {/* Story picker (shown when no stories used yet, or triggered by button) */}
+                  {(activeDraft.story_ids?.length ?? 0) === 0 && (allStories?.length ?? 0) > 0 && (
+                    <div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-xs h-7"
+                        onClick={() => {
+                          setPickedStoryIds([]);
+                          setShowStoryPicker(true);
+                        }}
+                        disabled={draft.isPending}
+                      >
+                        Redraft with a story
+                      </Button>
+                    </div>
+                  )}
+
+                  {/* Inline story picker panel */}
+                  {showStoryPicker && (
+                    <div className="rounded-md border p-3 space-y-2">
+                      <div className="text-xs font-medium">Select up to 3 stories to weave into the draft</div>
+                      <div className="space-y-1 max-h-48 overflow-y-auto">
+                        {(allStories ?? []).map((s) => {
+                          const checked = pickedStoryIds.includes(s.id);
+                          return (
+                            <label key={s.id} className="flex items-start gap-2 text-xs cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() =>
+                                  setPickedStoryIds((prev) =>
+                                    checked
+                                      ? prev.filter((id) => id !== s.id)
+                                      : prev.length < 3
+                                      ? [...prev, s.id]
+                                      : prev,
+                                  )
+                                }
+                                className="mt-0.5"
+                              />
+                              <span>
+                                <span className="font-medium">{s.title}</span>
+                                {s.impact_metric && (
+                                  <span className="text-muted-foreground"> — {s.impact_metric}</span>
+                                )}
+                                {s.tags.length > 0 && (
+                                  <span className="text-muted-foreground"> [{s.tags.slice(0, 3).join(', ')}]</span>
+                                )}
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                      <div className="flex gap-2 pt-1">
+                        <Button
+                          size="sm"
+                          onClick={() => handleRedraftWithStories(pickedStoryIds)}
+                          disabled={pickedStoryIds.length === 0 || draft.isPending}
+                        >
+                          {draft.isPending ? 'Drafting…' : 'Redraft'}
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => setShowStoryPicker(false)}>
+                          Cancel
+                        </Button>
+                      </div>
                     </div>
                   )}
 

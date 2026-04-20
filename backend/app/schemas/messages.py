@@ -21,6 +21,7 @@ class DraftRequest(BaseModel):
     channel: str  # linkedin_note | linkedin_message | email | follow_up | thank_you
     goal: str  # interview | referral | warm_intro | follow_up | thank_you (+ legacy aliases)
     job_id: str | None = None
+    pinned_story_ids: list[str] | None = None
 
 
 class EditRequest(BaseModel):
@@ -45,6 +46,7 @@ class MessageResponse(BaseModel):
     fallback_cta: str | None = None
     job_id: str | None = None
     warm_path: MessageWarmPathResponse | None = None
+    story_ids: list[str] = []
     person_name: str | None = None
     person_title: str | None = None
     scheduled_send_at: str | None = None

@@ -113,7 +113,7 @@ This roadmap turns those findings into sequenced product work.
 
 ### 2. Story Bank and Proof-Point Memory
 
-- Status: `in_progress`
+- Status: `shipped`
 - Priority: `now`
 - Owner: `active thread`
 - Goal:
@@ -159,8 +159,9 @@ This roadmap turns those findings into sequenced product work.
     - Profile page: new `Stories` step with full CRUD card (STAR fields, impact metric, role focus, tags, edit/delete)
     - tests: `test_stories_api.py` (8 cases — list/create/get/update/delete + 404 paths)
 - Next checkpoint:
-  - second slice: surface "stories used" in message detail UI + allow user to swap a story into a draft on demand
-  - third slice: hook into interview-prep workspace once that workstream starts
+  - third slice: (no longer needed — interview-prep story mapping already shipped with workstream #4 first slice)
+- Progress notes (continued):
+  - 2026-04-20: Second slice shipped. Added pinned_story_ids to DraftRequest so any draft can be regenerated with a specific story selection. MessageResponse now exposes story_ids extracted from context_snapshot. MessagesPage shows a purple "Stories used" section listing story titles + impact metrics on any draft that used stories. Adds "Redraft with different story" button (or "Redraft with a story" when none used) that opens an inline story picker (checkbox, up to 3 stories, Redraft fires draft_message with pinned_story_ids bypassing auto-relevance). Third slice (interview-prep hook) already delivered as part of workstream #4 first slice — workstream #2 is now fully shipped.
 
 ### 3. Next-Action and Follow-Up Cadence Engine
 

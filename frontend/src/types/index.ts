@@ -219,6 +219,7 @@ export interface Message {
   fallback_cta?: 'referral' | 'redirect' | null;
   job_id?: string | null;
   warm_path?: MessageWarmPath | null;
+  story_ids?: string[];
   person_name: string | null;
   person_title: string | null;
   scheduled_send_at: string | null;
@@ -231,6 +232,7 @@ export interface DraftRequest {
   channel: MessageChannel;
   goal: MessageGoal;
   job_id?: string;
+  pinned_story_ids?: string[];
 }
 
 export interface DraftResponse {

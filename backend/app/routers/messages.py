@@ -55,6 +55,7 @@ def _to_response(msg, person=None, warm_path_override=None) -> MessageResponse:
         fallback_cta=snapshot.get("fallback_cta"),
         job_id=snapshot.get("job_id"),
         warm_path=MessageWarmPathResponse.model_validate(warm_path) if warm_path else None,
+        story_ids=[str(s) for s in (snapshot.get("story_ids") or [])],
         person_name=person.full_name if person else None,
         person_title=person.title if person else None,
         created_at=msg.created_at.isoformat(),
@@ -83,6 +84,11 @@ async def create_draft(
 ):
     """Draft a new personalized message using Claude."""
     try:
+        pinned = (
+            [uuid.UUID(s) for s in body.pinned_story_ids if s]
+            if body.pinned_story_ids
+            else None
+        )
         result = await draft_message(
             db=db,
             user_id=user_id,
@@ -90,6 +96,7 @@ async def create_draft(
             channel=body.channel,
             goal=body.goal,
             job_id=uuid.UUID(body.job_id) if body.job_id else None,
+            pinned_story_ids=pinned,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

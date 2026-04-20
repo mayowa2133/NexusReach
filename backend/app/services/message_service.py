@@ -655,6 +655,7 @@ async def draft_message(
     channel: str,
     goal: str,
     job_id: uuid.UUID | None = None,
+    pinned_story_ids: list[uuid.UUID] | None = None,
 ) -> dict:
     """Draft a personalized message for a person."""
     result = await db.execute(select(Profile).where(Profile.user_id == user_id))
@@ -717,22 +718,31 @@ async def draft_message(
     )
     warm_path_context = _build_warm_path_context(warm_path)
 
-    story_tags: list[str] = [recipient_strategy]
-    if job_context_snapshot:
-        for key in ("team_keywords", "domain_keywords"):
-            vals = job_context_snapshot.get(key) or []
-            story_tags.extend(v for v in vals if isinstance(v, str))
-        seniority = job_context_snapshot.get("seniority")
-        if seniority:
-            story_tags.append(seniority)
-    role_focus = job.title if job else None
-    relevant_stories = await find_relevant_stories(
-        db,
-        user_id=user_id,
-        role_focus=role_focus,
-        tags=story_tags,
-        limit=3,
-    )
+    if pinned_story_ids:
+        pinned_result = await db.execute(
+            select(Story).where(
+                Story.user_id == user_id,
+                Story.id.in_(pinned_story_ids),
+            )
+        )
+        relevant_stories = list(pinned_result.scalars().all())
+    else:
+        story_tags: list[str] = [recipient_strategy]
+        if job_context_snapshot:
+            for key in ("team_keywords", "domain_keywords"):
+                vals = job_context_snapshot.get(key) or []
+                story_tags.extend(v for v in vals if isinstance(v, str))
+            seniority = job_context_snapshot.get("seniority")
+            if seniority:
+                story_tags.append(seniority)
+        role_focus = job.title if job else None
+        relevant_stories = await find_relevant_stories(
+            db,
+            user_id=user_id,
+            role_focus=role_focus,
+            tags=story_tags,
+            limit=3,
+        )
     story_context = _build_story_context(relevant_stories)
 
     user_prompt_sections = [
