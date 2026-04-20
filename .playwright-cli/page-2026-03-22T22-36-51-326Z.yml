@@ -1,0 +1,104 @@
+- generic [ref=e2]:
+  - generic [ref=e6]:
+    - banner [ref=e7]:
+      - generic [ref=e8]:
+        - link "NexusReach" [ref=e9] [cursor=pointer]:
+          - /url: /dashboard
+        - navigation [ref=e10]:
+          - link "Dashboard" [ref=e11] [cursor=pointer]:
+            - /url: /dashboard
+          - link "Jobs" [ref=e12] [cursor=pointer]:
+            - /url: /jobs
+          - link "People" [ref=e13] [cursor=pointer]:
+            - /url: /people
+          - link "Messages" [ref=e14] [cursor=pointer]:
+            - /url: /messages
+          - link "Outreach" [ref=e15] [cursor=pointer]:
+            - /url: /outreach
+        - generic [ref=e16]:
+          - button [ref=e17]:
+            - img [ref=e18]
+          - button "DE" [ref=e21]:
+            - generic [ref=e23]: DE
+    - main [ref=e24]:
+      - generic [ref=e7696]:
+        - generic [ref=e7697]:
+          - heading "People" [level=1] [ref=e7698]
+          - paragraph [ref=e7699]: Find the right people at your target companies.
+        - generic [ref=e7731]:
+          - generic [ref=e7732]: Job-Aware Search Context
+          - generic [ref=e7733]:
+            - generic [ref=e7734]: engineering
+            - generic [ref=e7735]: mid level
+            - generic [ref=e7736]: ml
+        - generic [ref=e7703]:
+          - generic [ref=e7704]:
+            - generic [ref=e7705]:
+              - generic [ref=e7706]: Search by Company
+              - generic [ref=e7707]: Find recruiters, managers, and peers.
+            - generic [ref=e7709]:
+              - generic [ref=e7710]:
+                - generic [ref=e7711]: Company Name
+                - textbox "Company Name" [ref=e7712]:
+                  - /placeholder: e.g. Shopify, Stripe, Google
+                  - text: twitch
+              - generic [ref=e7713]:
+                - generic [ref=e7714]: GitHub Organization (optional)
+                - textbox "GitHub Organization (optional)" [ref=e7715]:
+                  - /placeholder: e.g. vercel, stripe
+                - paragraph [ref=e7716]: Find engineers via their public GitHub contributions.
+              - generic [ref=e7717]:
+                - generic [ref=e7718]: Contacts per category
+                - spinbutton "Contacts per category" [ref=e7719]: "3"
+                - paragraph [ref=e7720]: Choose how many recruiters, hiring managers, and peers to try to return per search.
+              - button "Searching..." [disabled]
+          - generic [ref=e7721]:
+            - generic [ref=e7722]:
+              - generic [ref=e7723]: Add by LinkedIn URL
+              - generic [ref=e7724]: Paste a LinkedIn profile to enrich it.
+            - generic [ref=e7726]:
+              - generic [ref=e7727]:
+                - generic [ref=e7728]: LinkedIn Profile URL
+                - textbox "LinkedIn Profile URL" [ref=e7729]:
+                  - /placeholder: https://linkedin.com/in/someone
+              - button "Add Person" [ref=e7730]
+        - generic [ref=e7737]:
+          - separator [ref=e7738]
+          - generic [ref=e7739]:
+            - heading "Twitch" [level=2] [ref=e7740]
+            - generic [ref=e7741]: information technology & services
+            - generic [ref=e7742]: 4500 employees
+          - generic [ref=e7743]:
+            - generic [ref=e7744]:
+              - generic [ref=e7745]:
+                - heading "Recruiters & Talent Acquisition" [level=3] [ref=e7746]
+                - paragraph [ref=e7747]: Direct line into the hiring process
+              - generic [ref=e7748]: No current-company-verified recruiter was found for this company yet.
+            - generic [ref=e7749]:
+              - generic [ref=e7750]:
+                - heading "Hiring Managers & Team Leads" [level=3] [ref=e7751]
+                - paragraph [ref=e7752]: Understand the role deeply, can champion you
+              - generic [ref=e7755]:
+                - generic [ref=e7756]:
+                  - checkbox "Select Fawn Apgar" [ref=e7757]
+                  - text: Select for batch email
+                - generic [ref=e7758]:
+                  - generic [ref=e7759]: Fawn Apgar
+                  - generic [ref=e7760]: Senior Manager, Platform Product Management
+                - generic [ref=e7761]: Hiring Manager
+                - generic [ref=e7762]: Current company verified
+                - generic [ref=e7763]: Manager
+                - generic [ref=e7764]: Direct Match
+                - generic [ref=e7765]: Matched engineering context.
+                - generic [ref=e7766]: "Evidence: Trusted public org/company slug matched the target company identity."
+                - button "Get Email" [ref=e7767]
+                - generic [ref=e7768]:
+                  - link "Profile" [ref=e7769] [cursor=pointer]:
+                    - /url: https://theorg.com/org/twitch/org-chart/fawn-apgar
+                  - generic [ref=e7770]: via theorg_traversal
+            - generic [ref=e7771]:
+              - generic [ref=e7772]:
+                - heading "Peers & Potential Teammates" [level=3] [ref=e7773]
+                - paragraph [ref=e7774]: Most likely to respond, most authentic conversation
+              - generic [ref=e7775]: No current-company-verified teammate surfaced for this role.
+  - region "Notifications alt+T"

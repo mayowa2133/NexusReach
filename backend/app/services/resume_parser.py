@@ -1,13 +1,34 @@
 """Resume parsing service.
 
 Extracts structured data (skills, experience, education, projects) from
-PDF and DOCX files. Uses basic text extraction with heuristic section
-detection. Can be upgraded to use an external parsing API (Affinda, etc.)
-or Claude for better accuracy later.
+PDF and DOCX files using text extraction plus resume-specific heuristics.
 """
 
 import io
 import re
+
+
+MONTH_PATTERN = (
+    r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|"
+    r"Aug(?:ust)?|Sep(?:t)?(?:ember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?"
+)
+DATE_RANGE_RE = re.compile(
+    rf"(?P<start>{MONTH_PATTERN}\s+\d{{4}}|\d{{4}})\s*[–—-]\s*"
+    rf"(?P<end>{MONTH_PATTERN}\s+\d{{4}}|\d{{4}}|Present|Current)",
+    re.IGNORECASE,
+)
+BULLET_PREFIX_RE = re.compile(r"^[•·▪►\-]\s*")
+LOCATION_SUFFIX_RE = re.compile(
+    r"(?P<prefix>.+?)\s+(?P<location>[A-Za-z .&'/()-]+,\s*(?:[A-Z]{2}|[A-Za-z][A-Za-z .'-]+))$"
+)
+EMAIL_RE = re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")
+PHONE_RE = re.compile(r"(?:\+?1[\s\-.(]*)?\d{3}[\s\-.)]*\d{3}[\s\-]*\d{4}")
+URL_RE = re.compile(r"https?://\S+")
+LOCATION_BOUNDARY_STOPWORDS = {
+    "engineer", "developer", "manager", "scientist", "analyst", "designer", "intern",
+    "application/software", "software", "cloud", "honours", "computer", "science",
+    "b.s.", "m.s.", "bachelor", "master", "ph.d.", "associate",
+}
 
 
 def extract_text_from_pdf(file_bytes: bytes) -> str:
@@ -59,11 +80,25 @@ SECTION_PATTERNS = {
         r"(?i)^projects|personal\s+projects|portfolio|side\s+projects",
         re.MULTILINE,
     ),
+    "certificates": re.compile(
+        r"(?i)^certificates?|certifications?|licenses",
+        re.MULTILINE,
+    ),
 }
+
+
+def _normalize_resume_text(text: str) -> str:
+    text = text.replace("\u00a0", " ")
+    text = re.sub(r"(\w)-\n(\w)", r"\1\2", text)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
 
 
 def _split_sections(text: str) -> dict[str, str]:
     """Split resume text into sections based on common headers."""
+    text = _normalize_resume_text(text)
     # Find all section positions
     positions: list[tuple[int, str]] = []
     for section_name, pattern in SECTION_PATTERNS.items():
@@ -91,163 +126,419 @@ def _split_sections(text: str) -> dict[str, str]:
     return sections
 
 
+def _extract_header_text(text: str) -> str:
+    text = _normalize_resume_text(text)
+    positions: list[int] = []
+    for pattern in SECTION_PATTERNS.values():
+        match = pattern.search(text)
+        if match:
+            positions.append(match.start())
+    if not positions:
+        return text
+    return text[: min(positions)].strip()
+
+
+def _parse_contact_header(text: str) -> dict:
+    header = _extract_header_text(text)
+    if not header:
+        return {}
+
+    lines = [line.strip() for line in header.split("\n") if line.strip()]
+    if not lines:
+        return {}
+
+    name = lines[0]
+    details_text = " | ".join(lines[1:])
+    parts = [part.strip() for part in details_text.split("|") if part.strip()]
+
+    phone = None
+    email = None
+    urls: list[str] = []
+    address_parts: list[str] = []
+
+    for part in parts:
+        email_match = EMAIL_RE.search(part)
+        url_match = URL_RE.search(part)
+        phone_match = PHONE_RE.search(part)
+        if email_match and not email:
+            email = email_match.group(0)
+            continue
+        if phone_match and not phone:
+            phone = phone_match.group(0)
+            continue
+        if url_match:
+            urls.append(url_match.group(0))
+            continue
+        address_parts.append(part)
+
+    return {
+        "name": name,
+        "address": " | ".join(address_parts) if address_parts else None,
+        "phone": phone,
+        "email": email,
+        "urls": urls,
+    }
+
+
+_KNOWN_SKILL_CATEGORIES = [
+    "Programming Languages",
+    "Languages",
+    "Technologies",
+    "Frameworks",
+    "Frontend",
+    "Backend",
+    "Databases",
+    "Libraries",
+    "Methodologies",
+    "Tools",
+    "Platforms",
+    "Cloud",
+    "DevOps",
+    "Concepts",
+    "Skills",
+    "Other",
+]
+
+_SKILL_CATEGORY_SPLIT_RE = re.compile(
+    r"(?<!\n)\s+(?=(?:" + "|".join(re.escape(c) for c in _KNOWN_SKILL_CATEGORIES) + r")\s*:)"
+)
+
+
+def _normalize_skills_text(text: str) -> str:
+    """Repair PDF-flattened skills lines.
+
+    PDF extraction often joins multiple `Category: values` blocks onto one
+    line and inserts space before colons. Collapse `word : value` to
+    `word: value`, then break the line whenever a known category label
+    appears mid-stream so each category lives on its own line.
+    """
+    if not text:
+        return text
+    text = re.sub(r"[ \t]+:", ":", text)
+    text = _SKILL_CATEGORY_SPLIT_RE.sub("\n", text)
+    return text
+
+
+def scrub_skill_value(skill: str | None) -> str | None:
+    """Sanitize one previously-parsed skill string.
+
+    Strips bullet/colon noise and drops embedded category-label leaks like
+    ``"Languages : C"``. Returns None if nothing usable remains.
+    """
+    if not skill:
+        return None
+    cleaned = skill.strip().strip("-•·▪►:").strip()
+    if ":" in cleaned:
+        cleaned = cleaned.rsplit(":", 1)[-1].strip()
+    if not cleaned:
+        return None
+    if not (1 < len(cleaned) < 50 or cleaned.lower() in {"c", "r"}):
+        return None
+    return cleaned
+
+
+def scrub_skill_list(values: list[str] | None) -> list[str]:
+    out: list[str] = []
+    for v in values or []:
+        cleaned = scrub_skill_value(v)
+        if cleaned:
+            out.append(cleaned)
+    return out
+
+
+def _split_skill_values(text: str) -> list[str]:
+    values: list[str] = []
+    for part in re.split(r"[,|;/]", text):
+        skill = part.strip().strip("-•·▪►:").strip()
+        if not skill:
+            continue
+        # Defense in depth: if a stray category label snuck through ("Foo: bar"),
+        # keep only the value side.
+        if ":" in skill:
+            skill = skill.rsplit(":", 1)[-1].strip()
+        if skill and (1 < len(skill) < 50 or skill.lower() in {"c", "r"}):
+            values.append(skill)
+    return values
+
+
 def _parse_skills(text: str) -> list[str]:
     """Extract skills from skills section text."""
-    # Split by common delimiters
     skills: list[str] = []
-    for line in text.split("\n"):
+    seen: set[str] = set()
+    for line in _normalize_skills_text(text).split("\n"):
         line = line.strip().strip("-•·▪►")
         if not line:
             continue
-        # Split by commas, pipes, semicolons
-        parts = re.split(r"[,|;/]", line)
-        for part in parts:
-            skill = part.strip().strip("-•·▪►:").strip()
-            if skill and len(skill) < 50 and len(skill) > 1:
-                skills.append(skill)
+        if ":" in line:
+            _, line = line.split(":", 1)
+        for skill in _split_skill_values(line):
+            normalized = skill.lower()
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            skills.append(skill)
     return skills
+
+
+def _parse_skill_categories(text: str) -> dict[str, list[str]]:
+    categories: dict[str, list[str]] = {}
+    for line in _normalize_skills_text(text).split("\n"):
+        clean_line = line.strip().strip("-•·▪►")
+        if not clean_line or ":" not in clean_line:
+            continue
+        label, values = clean_line.split(":", 1)
+        items = _split_skill_values(values)
+        if items:
+            categories[label.strip()] = items
+    return categories
+
+
+def _parse_title_location(line: str) -> tuple[str, str | None]:
+    clean_line = " ".join(line.split()).strip()
+    if "," not in clean_line:
+        return clean_line, None
+
+    before_comma, after_comma = clean_line.rsplit(",", 1)
+    region = after_comma.strip()
+    tokens = before_comma.split()
+    if not tokens or not region:
+        return clean_line, None
+
+    city_tokens = [tokens[-1]]
+    idx = len(tokens) - 2
+    while idx >= 0 and len(city_tokens) < 3:
+        token = tokens[idx].strip()
+        normalized = token.lower().strip(".")
+        if "/" in token or normalized in LOCATION_BOUNDARY_STOPWORDS:
+            break
+        if not token[:1].isupper():
+            break
+        city_tokens.insert(0, token)
+        idx -= 1
+
+    title = " ".join(tokens[: len(tokens) - len(city_tokens)]).strip()
+    if not title:
+        return clean_line, None
+    return title, f"{' '.join(city_tokens)}, {region}"
 
 
 def _parse_experience(text: str) -> list[dict]:
     """Extract experience entries from experience section text."""
     entries: list[dict] = []
-    lines = [line.strip() for line in text.split("\n") if line.strip()]
+    lines = [line.strip() for line in _normalize_resume_text(text).split("\n") if line.strip()]
 
     current: dict | None = None
     for line in lines:
-        # Heuristic: lines with dates are likely job headers
-        date_match = re.search(
-            r"((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|January|February|March|April|May|June|July|August|September|October|November|December)\s*\d{0,4})"
-            r"|(\d{4}\s*[-–—]\s*(?:\d{4}|[Pp]resent|[Cc]urrent))"
-            r"|(\d{1,2}/\d{4})",
-            line,
-        )
+        date_match = DATE_RANGE_RE.search(line)
         if date_match:
             if current:
+                current["description"] = "\n".join(current["bullets"]).strip()
                 entries.append(current)
+            company = line[: date_match.start()].strip().rstrip("|-–—").strip()
             current = {
-                "company": "",
-                "title": line,
-                "start_date": "",
-                "end_date": None,
+                "company": company,
+                "title": "",
+                "location": "",
+                "start_date": date_match.group("start").strip(),
+                "end_date": date_match.group("end").strip(),
                 "description": "",
+                "bullets": [],
             }
-            # Try to extract dates
-            full_date = re.search(
-                r"(\w+\s*\d{4})\s*[-–—]\s*(\w+\s*\d{4}|[Pp]resent|[Cc]urrent)", line
-            )
-            if full_date:
-                current["start_date"] = full_date.group(1).strip()
-                end = full_date.group(2).strip()
-                current["end_date"] = None if end.lower() in ("present", "current") else end
-                # Remove dates from title
-                current["title"] = line[: full_date.start()].strip().rstrip("-–—|").strip()
-        elif current:
-            if not current["company"] and not current["description"]:
-                current["company"] = line
-            else:
-                desc = current["description"]
-                current["description"] = f"{desc}\n{line}".strip() if desc else line
+            if current["end_date"].lower() in {"present", "current"}:
+                current["end_date"] = None
+            continue
+
+        if not current:
+            continue
+
+        if BULLET_PREFIX_RE.match(line):
+            bullet = BULLET_PREFIX_RE.sub("", line).strip()
+            if bullet:
+                current["bullets"].append(bullet)
+            continue
+
+        if not current["title"]:
+            title, location = _parse_title_location(line)
+            current["title"] = title
+            current["location"] = location or ""
+            continue
+
+        if current["bullets"]:
+            current["bullets"][-1] = f"{current['bullets'][-1]} {line}".strip()
+        else:
+            current["title"] = f"{current['title']} {line}".strip()
 
     if current:
+        current["description"] = "\n".join(current["bullets"]).strip()
         entries.append(current)
 
     return entries
+
+
+def _looks_like_education_header(line: str) -> bool:
+    lowered = line.lower()
+    return any(token in lowered for token in ("university", "college", "institute", "school"))
+
+
+def _looks_like_degree_line(line: str) -> bool:
+    return bool(re.search(
+        r"(?i)\b(bachelor|master|b\.?s\.?|m\.?s\.?|b\.?a\.?|m\.?a\.?|ph\.?d|diploma|certificate|associate)\b",
+        line,
+    ))
 
 
 def _parse_education(text: str) -> list[dict]:
     """Extract education entries from education section text."""
+    lines = [line.strip() for line in _normalize_resume_text(text).split("\n") if line.strip()]
+    if not lines:
+        return []
+
     entries: list[dict] = []
-    lines = [line.strip() for line in text.split("\n") if line.strip()]
+    i = 0
+    while i < len(lines):
+        first_line = lines[i]
+        degree_first = _looks_like_degree_line(first_line)
+        if degree_first:
+            degree_line = first_line
+            institution = lines[i + 1] if i + 1 < len(lines) else ""
+            i += 2
+        else:
+            institution = first_line
+            degree_line = lines[i + 1] if i + 1 < len(lines) else ""
+            i += 2
 
-    current: dict | None = None
-    for line in lines:
-        # Heuristic: lines mentioning degree keywords start new entries
-        degree_match = re.search(
-            r"(?i)(bachelor|master|b\.?s\.?|m\.?s\.?|b\.?a\.?|m\.?a\.?|ph\.?d|diploma|certificate|associate)",
-            line,
-        )
-        if degree_match or (not current and line):
-            if current:
-                entries.append(current)
-            current = {
-                "institution": "",
-                "degree": line,
-                "field": "",
-                "graduation_date": "",
-            }
-            # Try to extract year
-            year = re.search(r"(\d{4})", line)
-            if year:
-                current["graduation_date"] = year.group(1)
-        elif current:
-            if not current["institution"]:
-                current["institution"] = line
-            elif not current["field"]:
-                current["field"] = line
+        degree, location = _parse_title_location(degree_line)
+        entry = {
+            "institution": institution,
+            "degree": degree,
+            "field": degree,
+            "graduation_date": "",
+            "location": location or "",
+            "details": [],
+        }
+        year_match = re.search(r"\b(20\d{2}|19\d{2})\b", degree_line)
+        if year_match:
+            entry["graduation_date"] = year_match.group(1)
 
-    if current:
-        entries.append(current)
+        while i < len(lines) and not _looks_like_education_header(lines[i]) and not _looks_like_degree_line(lines[i]):
+            entry["details"].append(lines[i])
+            year_match = re.search(r"\b(20\d{2}|19\d{2})\b", lines[i])
+            if year_match and not entry["graduation_date"]:
+                entry["graduation_date"] = year_match.group(1)
+            i += 1
+
+        entries.append(entry)
 
     return entries
+
+
+def _start_new_project(line: str) -> bool:
+    if BULLET_PREFIX_RE.match(line):
+        return False
+    if len(line) > 130:
+        return False
+    normalized = line.strip()
+    if "GitHub:" in normalized or URL_RE.search(normalized):
+        return True
+    if normalized.endswith((".", "!", "?")):
+        return False
+    if normalized[:1].islower():
+        return False
+    return len(normalized.split()) <= 10
+
+
+def _parse_project_header(line: str) -> tuple[str, str | None, str | None]:
+    clean_line = " ".join(line.split()).strip()
+    url_match = URL_RE.search(clean_line)
+    url = url_match.group(0) if url_match else None
+    header_without_url = clean_line.replace(url, "").strip() if url else clean_line
+    link_label = None
+    label_match = re.search(r"\(([^()]*GitHub[^()]*)\)", header_without_url, flags=re.IGNORECASE)
+    if label_match:
+        link_label = label_match.group(1).strip()
+        header_without_url = re.sub(r"\([^()]*GitHub[^()]*\)", "", header_without_url).strip()
+    return header_without_url, url, link_label
 
 
 def _parse_projects(text: str) -> list[dict]:
     """Extract project entries from projects section text."""
     entries: list[dict] = []
-    lines = [line.strip() for line in text.split("\n") if line.strip()]
+    lines = [line.strip() for line in _normalize_resume_text(text).split("\n") if line.strip()]
 
     current: dict | None = None
     for line in lines:
-        # Heuristic: short lines without common description words are likely project names
-        is_name = len(line) < 80 and not line.startswith(("-", "•", "·", "▪"))
-        if is_name and (not current or (current and current.get("description"))):
+        if _start_new_project(line):
             if current:
+                current["description"] = "\n".join(current["bullets"]).strip()
                 entries.append(current)
+            name, url, link_label = _parse_project_header(line)
             current = {
-                "name": line,
+                "name": name,
                 "description": "",
+                "bullets": [],
                 "technologies": [],
-                "url": None,
+                "url": url,
+                "link_label": link_label,
             }
-            # Check for URL
-            url_match = re.search(r"(https?://\S+)", line)
-            if url_match:
-                current["url"] = url_match.group(1)
-                current["name"] = line[: url_match.start()].strip().rstrip("-–—|:").strip()
-        elif current:
-            # Check for tech stack line
-            tech_keywords = re.search(r"(?i)(?:tech|stack|built with|using|technologies):\s*(.*)", line)
-            if tech_keywords:
-                techs = re.split(r"[,|;]", tech_keywords.group(1))
-                current["technologies"] = [t.strip() for t in techs if t.strip()]
+            continue
+
+        if not current:
+            continue
+
+        if BULLET_PREFIX_RE.match(line):
+            bullet = BULLET_PREFIX_RE.sub("", line).strip()
+            if bullet:
+                current["bullets"].append(bullet)
+            tech_match = re.search(r"(?i)(?:technologies|tech stack|built with|using)\s*:\s*(.*)", bullet)
+            if tech_match:
+                current["technologies"] = _split_skill_values(tech_match.group(1))
             else:
-                desc = current["description"]
-                current["description"] = f"{desc}\n{line}".strip() if desc else line.lstrip("-•·▪ ")
+                for token in re.findall(r"\b(?:[A-Z][A-Za-z0-9.+#/-]*|[A-Za-z]+\.js)\b", bullet):
+                    if token.lower() in {"built", "designed", "engineered", "developed"}:
+                        continue
+                    if token not in current["technologies"] and len(token) > 1:
+                        current["technologies"].append(token)
+            continue
+
+        if current["bullets"]:
+            current["bullets"][-1] = f"{current['bullets'][-1]} {line}".strip()
+        else:
+            current["description"] = f"{current['description']}\n{line}".strip()
 
     if current:
+        current["description"] = "\n".join(current["bullets"]).strip() or current["description"]
         entries.append(current)
 
     return entries
 
 
-def parse_resume(file_bytes: bytes, content_type: str) -> dict:
-    """Parse a resume file and return structured data.
+def _parse_certificates(text: str) -> list[str]:
+    certificates: list[str] = []
+    for line in _normalize_resume_text(text).split("\n"):
+        clean_line = BULLET_PREFIX_RE.sub("", line.strip())
+        if clean_line and not re.fullmatch(r"\d+", clean_line):
+            certificates.append(clean_line)
+    return certificates
 
-    Returns:
-        {
-            "skills": [...],
-            "experience": [...],
-            "education": [...],
-            "projects": [...]
-        }
-    """
-    text = extract_text(file_bytes, content_type)
-    sections = _split_sections(text)
+
+def parse_resume_text(text: str) -> dict:
+    """Parse structured resume content from extracted plain text."""
+    normalized_text = _normalize_resume_text(text)
+    sections = _split_sections(normalized_text)
+    skill_categories = _parse_skill_categories(sections.get("skills", ""))
 
     return {
+        "contact": _parse_contact_header(normalized_text),
         "skills": _parse_skills(sections.get("skills", "")),
+        "skills_by_category": skill_categories,
         "experience": _parse_experience(sections.get("experience", "")),
         "education": _parse_education(sections.get("education", "")),
         "projects": _parse_projects(sections.get("projects", "")),
+        "certificates": _parse_certificates(sections.get("certificates", "")),
     }
+
+
+def parse_resume(file_bytes: bytes, content_type: str) -> dict:
+    """Parse a resume file and return structured data."""
+    text = extract_text(file_bytes, content_type)
+    return parse_resume_text(text)

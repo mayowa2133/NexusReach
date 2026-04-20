@@ -9,6 +9,7 @@ from urllib.parse import urlparse, urlunparse
 
 from sqlalchemy import String, func as sa_func, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.clients import (
     adzuna_client,
@@ -31,12 +32,23 @@ from app.clients import (
     workday_client,
     yc_jobs_client,
 )
+from app.models.company import Company
 from app.models.job import Job
+from app.models.message import Message
+from app.models.outreach import OutreachLog
+from app.models.person import Person
 from app.models.profile import Profile
+from app.models.resume_artifact import ResumeArtifact
 from app.models.search_preference import SearchPreference
+from app.models.tailored_resume import TailoredResume
+from app.services.job_research_snapshot_service import (
+    get_job_research_snapshot,
+    serialize_snapshot,
+)
 from app.utils.experience_level import (
     classify_experience_level_for_job,
 )
+from app.utils.company_identity import normalize_company_name
 from app.utils.startup_jobs import (
     STARTUP_TAG,
     append_startup_tags,
@@ -731,6 +743,291 @@ async def get_job(
         select(Job).where(Job.id == job_id, Job.user_id == user_id)
     )
     return result.scalar_one_or_none()
+
+
+async def get_job_command_center(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    job_id: uuid.UUID,
+) -> dict | None:
+    """Build a compact command-center summary for a single saved job."""
+    job = await get_job(db, user_id, job_id)
+    if not job:
+        return None
+
+    normalized_company = normalize_company_name(job.company_name)
+    now = datetime.now(timezone.utc)
+
+    profile_result = await db.execute(
+        select(Profile).where(Profile.user_id == user_id)
+    )
+    profile = profile_result.scalar_one_or_none()
+
+    contacts_result = await db.execute(
+        select(Person)
+        .join(Company, Person.company_id == Company.id)
+        .where(
+            Person.user_id == user_id,
+            Company.user_id == user_id,
+            Company.normalized_name == normalized_company,
+        )
+        .order_by(
+            Person.current_company_verified.desc().nullslast(),
+            Person.email_verified.desc().nullslast(),
+            Person.relevance_score.desc().nullslast(),
+            Person.created_at.desc(),
+        )
+        .options(selectinload(Person.company))
+    )
+    contacts = list(contacts_result.scalars().all())
+    top_contacts = contacts[:4]
+
+    tailored_result = await db.execute(
+        select(TailoredResume.id)
+        .where(
+            TailoredResume.user_id == user_id,
+            TailoredResume.job_id == job_id,
+        )
+        .limit(1)
+    )
+    has_tailored_resume = tailored_result.scalar_one_or_none() is not None
+
+    artifact_result = await db.execute(
+        select(ResumeArtifact.id)
+        .where(
+            ResumeArtifact.user_id == user_id,
+            ResumeArtifact.job_id == job_id,
+        )
+        .limit(1)
+    )
+    has_resume_artifact = artifact_result.scalar_one_or_none() is not None
+
+    messages_result = await db.execute(
+        select(Message, Person)
+        .join(Person, Message.person_id == Person.id)
+        .where(
+            Message.user_id == user_id,
+            Message.context_snapshot["job_id"].astext == str(job_id),
+        )
+        .order_by(Message.created_at.desc())
+        .limit(5)
+    )
+    recent_messages_rows = messages_result.all()
+
+    outreach_result = await db.execute(
+        select(OutreachLog)
+        .where(
+            OutreachLog.user_id == user_id,
+            OutreachLog.job_id == job_id,
+        )
+        .options(selectinload(OutreachLog.person), selectinload(OutreachLog.job))
+        .order_by(OutreachLog.updated_at.desc())
+    )
+    outreach_logs = list(outreach_result.scalars().all())
+    recent_outreach = outreach_logs[:5]
+
+    verified_contacts_count = sum(1 for person in contacts if person.current_company_verified)
+    reachable_contacts_count = sum(1 for person in contacts if person.work_email or person.linkedin_url)
+    active_outreach_count = sum(
+        1 for log in outreach_logs if log.status in {"sent", "connected", "following_up"}
+    )
+    responded_outreach_count = sum(
+        1 for log in outreach_logs if log.response_received or log.status in {"responded", "met", "closed"}
+    )
+    due_follow_ups_count = sum(
+        1
+        for log in outreach_logs
+        if log.next_follow_up_at is not None
+        and log.next_follow_up_at <= now
+        and log.status != "closed"
+    )
+
+    checklist = {
+        "resume_uploaded": bool(profile and profile.resume_parsed),
+        "match_scored": job.match_score is not None,
+        "resume_tailored": has_tailored_resume,
+        "resume_artifact_generated": has_resume_artifact,
+        "contacts_saved": len(contacts) > 0,
+        "outreach_started": len(outreach_logs) > 0,
+        "applied": job.stage in {"applied", "interviewing", "offer", "accepted", "rejected", "withdrawn"},
+        "interview_rounds_logged": bool(job.interview_rounds),
+    }
+
+    stats = {
+        "saved_contacts_count": len(contacts),
+        "verified_contacts_count": verified_contacts_count,
+        "reachable_contacts_count": reachable_contacts_count,
+        "drafted_messages_count": len(recent_messages_rows),
+        "outreach_count": len(outreach_logs),
+        "active_outreach_count": active_outreach_count,
+        "responded_outreach_count": responded_outreach_count,
+        "due_follow_ups_count": due_follow_ups_count,
+    }
+
+    snapshot = await get_job_research_snapshot(db, user_id=user_id, job_id=job_id)
+    research_snapshot = serialize_snapshot(snapshot)
+
+    next_action = _determine_job_next_action(
+        job=job,
+        checklist=checklist,
+        stats=stats,
+        research_snapshot=research_snapshot,
+    )
+
+    return {
+        "job_id": str(job.id),
+        "research_snapshot": research_snapshot,
+        "stage": job.stage,
+        "checklist": checklist,
+        "stats": stats,
+        "next_action": next_action,
+        "top_contacts": [
+            {
+                "id": str(person.id),
+                "full_name": person.full_name,
+                "title": person.title,
+                "person_type": person.person_type,
+                "work_email": person.work_email,
+                "linkedin_url": person.linkedin_url,
+                "email_verified": bool(person.email_verified),
+                "current_company_verified": person.current_company_verified,
+            }
+            for person in top_contacts
+        ],
+        "recent_messages": [
+            {
+                "id": str(message.id),
+                "person_id": str(person.id),
+                "person_name": person.full_name,
+                "channel": message.channel,
+                "goal": message.goal,
+                "status": message.status,
+                "created_at": message.created_at.isoformat(),
+            }
+            for message, person in recent_messages_rows
+        ],
+        "recent_outreach": [
+            {
+                "id": str(log.id),
+                "person_id": str(log.person_id),
+                "person_name": log.person.full_name if log.person else None,
+                "channel": log.channel,
+                "status": log.status,
+                "response_received": log.response_received,
+                "last_contacted_at": log.last_contacted_at.isoformat() if log.last_contacted_at else None,
+                "next_follow_up_at": log.next_follow_up_at.isoformat() if log.next_follow_up_at else None,
+                "created_at": log.created_at.isoformat(),
+            }
+            for log in recent_outreach
+        ],
+    }
+
+
+def _determine_job_next_action(
+    *,
+    job: Job,
+    checklist: dict,
+    stats: dict,
+    research_snapshot: dict | None = None,
+) -> dict:
+    """Return the single highest-leverage next action for the job command center."""
+    has_live_targets = bool(research_snapshot and research_snapshot.get("total_candidates", 0) > 0)
+    if not checklist["resume_uploaded"]:
+        return {
+            "key": "upload_resume",
+            "title": "Upload your resume first",
+            "detail": "Resume-backed scoring and tailoring are unavailable until your profile has a parsed resume.",
+            "cta_label": "Open Profile",
+            "cta_section": "profile",
+        }
+
+    if not checklist["contacts_saved"] and not has_live_targets:
+        return {
+            "key": "find_people",
+            "title": "Find people at this company",
+            "detail": "You do not have saved or fresh recruiter, hiring manager, or peer matches for this role yet.",
+            "cta_label": "Find People",
+            "cta_section": "people",
+        }
+
+    if (
+        has_live_targets
+        and stats["outreach_count"] == 0
+        and job.stage in {"discovered", "interested", "researching", "networking"}
+    ):
+        total = research_snapshot["total_candidates"] if research_snapshot else 0
+        return {
+            "key": "draft_live_outreach",
+            "title": "Work the saved people-search results",
+            "detail": (
+                f"You have {total} live candidate{'s' if total != 1 else ''} stored from your latest "
+                "people search. Convert that targeting into outreach."
+            ),
+            "cta_label": "Draft Message",
+            "cta_section": "people",
+        }
+
+    if stats["due_follow_ups_count"] > 0:
+        return {
+            "key": "follow_up_due",
+            "title": "Review overdue follow-ups",
+            "detail": "At least one job-linked outreach thread is due for follow-up now.",
+            "cta_label": "Review Outreach",
+            "cta_section": "activity",
+        }
+
+    if not checklist["resume_tailored"] and checklist["match_scored"]:
+        return {
+            "key": "tailor_resume",
+            "title": "Tailor your resume for this role",
+            "detail": "You have a scored job but no saved tailoring suggestions for this application yet.",
+            "cta_label": "Tailor Resume",
+            "cta_section": "resume",
+        }
+
+    if checklist["resume_tailored"] and not checklist["resume_artifact_generated"] and job.stage in {"discovered", "interested", "researching", "networking", "applied"}:
+        return {
+            "key": "generate_resume_artifact",
+            "title": "Generate a submission-ready resume variant",
+            "detail": "Tailoring suggestions exist, but you have not saved a concrete resume artifact for this role yet.",
+            "cta_label": "Generate Resume",
+            "cta_section": "resume",
+        }
+
+    if job.stage in {"interviewing", "offer"} and not checklist["interview_rounds_logged"]:
+        return {
+            "key": "log_interviews",
+            "title": "Log interview rounds",
+            "detail": "Interview stage is active, but no rounds are saved on this job yet.",
+            "cta_label": "Update Tracker",
+            "cta_section": "stage",
+        }
+
+    if job.stage in {"discovered", "interested", "researching", "networking"} and stats["outreach_count"] == 0:
+        return {
+            "key": "draft_first_outreach",
+            "title": "Draft your first message",
+            "detail": "You already have company contacts saved for this role, but no outreach has been logged yet.",
+            "cta_label": "Open Messages",
+            "cta_section": "activity",
+        }
+
+    if job.stage == "applied" and stats["outreach_count"] == 0:
+        return {
+            "key": "post_apply_outreach",
+            "title": "Start post-apply outreach",
+            "detail": "This role is already in the pipeline, but no recruiter, hiring manager, or peer contact has been logged for it yet.",
+            "cta_label": "Open Messages",
+            "cta_section": "activity",
+        }
+
+    return {
+        "key": "review_job",
+        "title": "Keep this job moving",
+        "detail": "The core workflow is in place. Review activity, update stage, or re-run people search if the context has changed.",
+        "cta_label": "Review Activity",
+        "cta_section": "activity",
+    }
 
 
 # --- Default Seed Feeds ---

@@ -24,6 +24,7 @@ const navItems = [
   { path: '/messages', label: 'Messages' },
   { path: '/outreach', label: 'Outreach' },
   { path: '/find-email', label: 'Find Email' },
+  { path: '/resume-library', label: 'Resumes' },
 ];
 
 export function AppLayout() {

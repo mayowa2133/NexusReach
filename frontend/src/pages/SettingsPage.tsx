@@ -20,6 +20,7 @@ import {
   useUploadLinkedInGraphFile,
 } from '@/hooks/useLinkedInGraph';
 import { API_URL } from '@/lib/api';
+import { useProfile, useUpdateProfile } from '@/hooks/useProfile';
 import { AutoProspectPanel } from '@/components/settings/AutoProspectPanel';
 import { GuardrailsPanel } from '@/components/settings/GuardrailsPanel';
 import { JobAlertsPanel } from '@/components/settings/JobAlertsPanel';
@@ -37,11 +38,62 @@ function buildLinkedInProfileCommand(sessionToken: string): string {
   return `cd backend && python scripts/linkedin_graph_connector.py --base-url ${API_URL} --session-token ${sessionToken}`;
 }
 
-function formatGraphFreshnessLabel(freshness: string | null | undefined): string {
-  if (freshness === 'stale') return 'Stale';
-  if (freshness === 'aging') return 'Refresh recommended';
-  if (freshness === 'fresh') return 'Fresh';
-  return 'No data';
+function ResumeAiAssistCard() {
+  const { data: profile } = useProfile();
+  const update = useUpdateProfile();
+  const enabled = !!profile?.resume_auto_accept_inferred;
+
+  const onToggle = async () => {
+    try {
+      await update.mutateAsync({ resume_auto_accept_inferred: !enabled });
+      toast.success(
+        !enabled
+          ? 'Auto-accept enabled — you are liable for inferred claims'
+          : 'Auto-accept disabled',
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update');
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Resume AI Assist</CardTitle>
+        <CardDescription>
+          Control how aggressively the AI may add inferred claims to your
+          tailored resume.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
+          <div className="space-y-1">
+            <div className="font-medium">Auto-accept inferred claims</div>
+            <p className="text-xs text-muted-foreground">
+              When on, the AI will render inferred capabilities (not explicit in
+              your resume) into the tailored PDF without asking. You remain
+              liable for every claim during interviews.
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant={enabled ? 'default' : 'outline'}
+            onClick={onToggle}
+            disabled={update.isPending}
+          >
+            {enabled ? 'On' : 'Off'}
+          </Button>
+        </div>
+        {enabled && (
+          <div className="rounded-md border border-yellow-300 bg-yellow-50 p-2.5 text-xs text-yellow-900 dark:border-yellow-600 dark:bg-yellow-900/20 dark:text-yellow-200">
+            <strong>Warning:</strong> inferred claims will appear in generated
+            PDFs by default. Review every tailored resume before sending or
+            discussing in an interview.
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 export function SettingsPage() {
@@ -173,6 +225,8 @@ export function SettingsPage() {
         <p className="text-muted-foreground">Manage your account and email integrations.</p>
       </div>
 
+      <ResumeAiAssistCard />
+
       {/* Email Integrations */}
       <Card>
         <CardHeader>
@@ -258,7 +312,7 @@ export function SettingsPage() {
           <CardTitle>LinkedIn Graph</CardTitle>
           <CardDescription>
             Import your first-degree LinkedIn connections so NexusReach can surface warm paths
-            in people search, message drafting, and the dashboard. The server stores only minimal graph match data.
+            during people search. The server stores only minimal graph match data.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -278,11 +332,6 @@ export function SettingsPage() {
               {linkedInSyncLabel}
             </Badge>
             {linkedinGraphStatus && (
-              <Badge variant={linkedinGraphStatus.freshness === 'stale' ? 'destructive' : 'outline'}>
-                {formatGraphFreshnessLabel(linkedinGraphStatus.freshness)}
-              </Badge>
-            )}
-            {linkedinGraphStatus && (
               <Badge variant="outline">
                 {linkedinGraphStatus.connection_count} connection
                 {linkedinGraphStatus.connection_count === 1 ? '' : 's'}
@@ -296,9 +345,6 @@ export function SettingsPage() {
                 ? `Last synced ${new Date(linkedinGraphStatus.last_synced_at).toLocaleString()}.`
                 : 'No LinkedIn graph data synced yet.'}
             </p>
-            {linkedinGraphStatus?.status_message && (
-              <p>{linkedinGraphStatus.status_message}</p>
-            )}
             {linkedinGraphStatus?.source && (
               <p>Latest source: {linkedinGraphStatus.source === 'manual_import' ? 'Manual import' : 'Local sync session'}.</p>
             )}
@@ -307,42 +353,20 @@ export function SettingsPage() {
             )}
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-2">
-            <div className="rounded-lg border p-4 space-y-3">
-              <div>
-                <p className="text-sm font-medium">Recommended: hosted import</p>
-                <p className="text-sm text-muted-foreground">
-                  Export your LinkedIn connections from LinkedIn, then upload the CSV or ZIP here.
-                  No Playwright, CDP, or local browser setup required.
-                </p>
-              </div>
-              <Button
-                variant="outline"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploadLinkedInGraphFile.isPending}
-              >
-                {uploadLinkedInGraphFile.isPending ? 'Uploading...' : 'Upload Export'}
-              </Button>
-            </div>
-
-            <div className="rounded-lg border p-4 space-y-3">
-              <div>
-                <p className="text-sm font-medium">Advanced: local live sync</p>
-                <p className="text-sm text-muted-foreground">
-                  Use the Playwright connector only if you want a live scrape from a logged-in browser.
-                  This is faster, but it requires local tooling.
-                </p>
-              </div>
-              <Button
-                onClick={handleStartLinkedInSync}
-                disabled={startLinkedInSync.isPending || linkedinGraphLoading}
-              >
-                {startLinkedInSync.isPending ? 'Starting...' : 'Sync Now'}
-              </Button>
-            </div>
-          </div>
-
           <div className="flex flex-wrap gap-2">
+            <Button
+              onClick={handleStartLinkedInSync}
+              disabled={startLinkedInSync.isPending || linkedinGraphLoading}
+            >
+              {startLinkedInSync.isPending ? 'Starting...' : 'Sync Now'}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploadLinkedInGraphFile.isPending}
+            >
+              {uploadLinkedInGraphFile.isPending ? 'Uploading...' : 'Upload Export'}
+            </Button>
             <Button
               variant="outline"
               onClick={handleClearLinkedInGraph}

@@ -20,6 +20,7 @@ const ProfilePage = lazy(() => import('@/pages/ProfilePage').then((m) => ({ defa
 const SettingsPage = lazy(() => import('@/pages/SettingsPage').then((m) => ({ default: m.SettingsPage })));
 const TrackerPage = lazy(() => import('@/pages/TrackerPage').then((m) => ({ default: m.TrackerPage })));
 const FindEmailPage = lazy(() => import('@/pages/FindEmailPage').then((m) => ({ default: m.FindEmailPage })));
+const ResumeLibraryPage = lazy(() => import('@/pages/ResumeLibraryPage').then((m) => ({ default: m.ResumeLibraryPage })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -73,6 +74,7 @@ function AppRoutes() {
         <Route path="/profile" element={<ErrorBoundary><PageSuspense><ProfilePage /></PageSuspense></ErrorBoundary>} />
         <Route path="/settings" element={<ErrorBoundary><PageSuspense><SettingsPage /></PageSuspense></ErrorBoundary>} />
         <Route path="/find-email" element={<ErrorBoundary><PageSuspense><FindEmailPage /></PageSuspense></ErrorBoundary>} />
+        <Route path="/resume-library" element={<ErrorBoundary><PageSuspense><ResumeLibraryPage /></PageSuspense></ErrorBoundary>} />
       </Route>
 
       <Route path="*" element={<Navigate to="/dashboard" replace />} />

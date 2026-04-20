@@ -14,5 +14,9 @@ from app.models.search_log import SearchLog
 from app.models.linkedin_graph import LinkedInGraphConnection, LinkedInGraphSyncRun
 from app.models.job_alert import JobAlertPreference
 from app.models.known_person import KnownPerson, KnownPersonCompany
+from app.models.job_research_snapshot import JobResearchSnapshot
+from app.models.story import Story
+from app.models.interview_prep_brief import InterviewPrepBrief
+from app.models.resume_artifact import ResumeArtifact
 
-__all__ = ["User", "Profile", "UserSettings", "Company", "Person", "Message", "Job", "OutreachLog", "ApiUsage", "Notification", "SearchPreference", "SmtpDomainResult", "SearchLog", "LinkedInGraphConnection", "LinkedInGraphSyncRun", "JobAlertPreference", "KnownPerson", "KnownPersonCompany"]
+__all__ = ["User", "Profile", "UserSettings", "Company", "Person", "Message", "Job", "OutreachLog", "ApiUsage", "Notification", "SearchPreference", "SmtpDomainResult", "SearchLog", "LinkedInGraphConnection", "LinkedInGraphSyncRun", "JobAlertPreference", "KnownPerson", "KnownPersonCompany", "JobResearchSnapshot", "Story", "InterviewPrepBrief", "ResumeArtifact"]

@@ -10,7 +10,7 @@ from app.dependencies import get_current_user_id
 from app.models.profile import Profile
 from app.models.search_preference import SearchPreference
 from app.schemas.profile import AutofillProfileResponse, ProfileResponse, ProfileUpdate
-from app.services.resume_parser import parse_resume
+from app.services.resume_parser import extract_text, parse_resume
 
 router = APIRouter(prefix="/profile", tags=["profile"])
 
@@ -75,6 +75,7 @@ async def get_profile(
         github_url=profile.github_url,
         portfolio_url=profile.portfolio_url,
         resume_parsed=profile.resume_parsed,
+        resume_auto_accept_inferred=profile.resume_auto_accept_inferred,
     )
 
 
@@ -193,6 +194,7 @@ async def update_profile(
         github_url=profile.github_url,
         portfolio_url=profile.portfolio_url,
         resume_parsed=profile.resume_parsed,
+        resume_auto_accept_inferred=profile.resume_auto_accept_inferred,
     )
 
 
@@ -217,11 +219,29 @@ async def upload_resume(
     file_bytes = await file.read()
 
     try:
+        raw_text = extract_text(file_bytes, file.content_type)
         parsed = parse_resume(file_bytes, file.content_type)
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"Failed to parse resume: {e}")
 
+    profile.resume_raw = raw_text
     profile.resume_parsed = parsed
+
+    contact = parsed.get("contact") or {}
+    contact_urls = contact.get("urls") or []
+    if not profile.full_name and contact.get("name"):
+        profile.full_name = contact["name"]
+    if not profile.linkedin_url:
+        for url in contact_urls:
+            if "linkedin.com/in/" in url.lower():
+                profile.linkedin_url = url
+                break
+    if not profile.github_url:
+        for url in contact_urls:
+            lowered = url.lower()
+            if "github.com/" in lowered and "/in/" not in lowered:
+                profile.github_url = url
+                break
 
     await db.commit()
     await db.refresh(profile)

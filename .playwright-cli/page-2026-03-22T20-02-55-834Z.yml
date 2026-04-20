@@ -1,0 +1,135 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - banner [ref=e4]:
+      - generic [ref=e5]:
+        - link "NexusReach" [ref=e6] [cursor=pointer]:
+          - /url: /dashboard
+        - navigation [ref=e7]:
+          - link "Dashboard" [ref=e8] [cursor=pointer]:
+            - /url: /dashboard
+          - link "Jobs" [ref=e9] [cursor=pointer]:
+            - /url: /jobs
+          - link "People" [ref=e10] [cursor=pointer]:
+            - /url: /people
+          - link "Messages" [ref=e11] [cursor=pointer]:
+            - /url: /messages
+          - link "Outreach" [ref=e12] [cursor=pointer]:
+            - /url: /outreach
+        - generic [ref=e13]:
+          - button [ref=e14]:
+            - img [ref=e15]
+          - button "DE" [ref=e18]:
+            - generic [ref=e20]: DE
+    - main [ref=e21]:
+      - generic [ref=e6880]:
+        - generic [ref=e6881]:
+          - heading "People" [level=1] [ref=e6882]
+          - paragraph [ref=e6883]: Find the right people at your target companies.
+        - generic [ref=e6911]:
+          - generic [ref=e6912]: Job-Aware Search Context
+          - generic [ref=e6913]:
+            - generic [ref=e6914]: engineering
+            - generic [ref=e6915]: junior level
+            - generic [ref=e6916]: backend
+            - generic [ref=e6917]: ml
+        - generic [ref=e6887]:
+          - generic [ref=e6888]:
+            - generic [ref=e6889]:
+              - generic [ref=e6890]: Search by Company
+              - generic [ref=e6891]: Find recruiters, managers, and peers.
+            - generic [ref=e6893]:
+              - generic [ref=e6894]:
+                - generic [ref=e6895]: Company Name
+                - textbox "Company Name" [ref=e6896]:
+                  - /placeholder: e.g. Shopify, Stripe, Google
+                  - text: applovin
+              - generic [ref=e6897]:
+                - generic [ref=e6898]: GitHub Organization (optional)
+                - textbox "GitHub Organization (optional)" [ref=e6899]:
+                  - /placeholder: e.g. vercel, stripe
+                - paragraph [ref=e6900]: Find engineers via their public GitHub contributions.
+              - button "Searching..." [disabled]
+          - generic [ref=e6901]:
+            - generic [ref=e6902]:
+              - generic [ref=e6903]: Add by LinkedIn URL
+              - generic [ref=e6904]: Paste a LinkedIn profile to enrich it.
+            - generic [ref=e6906]:
+              - generic [ref=e6907]:
+                - generic [ref=e6908]: LinkedIn Profile URL
+                - textbox "LinkedIn Profile URL" [ref=e6909]:
+                  - /placeholder: https://linkedin.com/in/someone
+              - button "Add Person" [ref=e6910]
+        - generic [ref=e6918]:
+          - separator [ref=e6919]
+          - generic [ref=e6920]:
+            - heading "Applovin" [level=2] [ref=e6921]
+            - generic [ref=e6922]: information technology & services
+            - generic [ref=e6923]: 1600 employees
+          - generic [ref=e6924]:
+            - generic [ref=e6925]:
+              - generic [ref=e6926]:
+                - heading "Recruiters & Talent Acquisition" [level=3] [ref=e6927]
+                - paragraph [ref=e6928]: Direct line into the hiring process
+              - generic [ref=e6931]:
+                - generic [ref=e6932]:
+                  - checkbox "Select Ting Xu" [ref=e6933]
+                  - text: Select for batch email
+                - generic [ref=e6934]:
+                  - generic [ref=e6935]: Ting Xu
+                  - generic [ref=e6936]: Global Talent Acquisition Partner
+                - generic [ref=e6937]: Recruiter
+                - generic [ref=e6938]: Current company verified
+                - generic [ref=e6939]: IC
+                - generic [ref=e6940]: Adjacent Match
+                - generic [ref=e6941]: Talent-acquisition contact at the target company.
+                - generic [ref=e6942]: "Evidence: Trusted public org/company slug matched the target company identity."
+                - button "Get Email" [ref=e6943]
+                - generic [ref=e6944]:
+                  - link "Profile" [ref=e6945] [cursor=pointer]:
+                    - /url: https://theorg.com/org/applovin/org-chart/ting-xu
+                  - generic [ref=e6946]: via theorg_traversal
+            - generic [ref=e6947]:
+              - generic [ref=e6948]:
+                - heading "Hiring Managers & Team Leads" [level=3] [ref=e6949]
+                - paragraph [ref=e6950]: Understand the role deeply, can champion you
+              - generic [ref=e6953]:
+                - generic [ref=e6954]:
+                  - checkbox "Select Alex Li" [ref=e6955]
+                  - text: Select for batch email
+                - generic [ref=e6956]:
+                  - generic [ref=e6957]: Alex Li
+                  - generic [ref=e6958]: Senior Director, Global Apps
+                - generic [ref=e6959]: Hiring Manager
+                - generic [ref=e6960]: Current company verified
+                - generic [ref=e6961]: Director+
+                - generic [ref=e6962]: Next Best
+                - generic [ref=e6963]: Senior leader fallback at the target company.
+                - generic [ref=e6964]: "Evidence: Trusted public org/company slug matched the target company identity."
+                - button "Get Email" [ref=e6965]
+                - generic [ref=e6966]:
+                  - link "Profile" [ref=e6967] [cursor=pointer]:
+                    - /url: https://theorg.com/org/applovin/org-chart/alex-li
+                  - generic [ref=e6968]: via brave_public_web
+            - generic [ref=e6969]:
+              - generic [ref=e6970]:
+                - heading "Peers & Potential Teammates" [level=3] [ref=e6971]
+                - paragraph [ref=e6972]: Most likely to respond, most authentic conversation
+              - generic [ref=e6975]:
+                - generic [ref=e6976]:
+                  - checkbox "Select Conner D." [ref=e6977]
+                  - text: Select for batch email
+                - generic [ref=e6978]:
+                  - generic [ref=e6979]: Conner D.
+                  - generic [ref=e6980]: Software Engineer @ AppLovin
+                - generic [ref=e6981]: Peer
+                - generic [ref=e6982]: Current company verified
+                - generic [ref=e6983]: IC
+                - generic [ref=e6984]: Adjacent Match
+                - generic [ref=e6985]: Adjacent engineering teammate at the target company.
+                - generic [ref=e6986]: "Evidence: www linkedin com legal cookie policy trk linkedin tc auth button cookie policy applovin https www linkedin com applovin trk public profile topcard current the johns hopkins university https www linkedin com school johns hopkins univer"
+                - button "Get Email" [ref=e6987]
+                - generic [ref=e6988]:
+                  - link "LinkedIn" [ref=e6989] [cursor=pointer]:
+                    - /url: https://www.linkedin.com/in/conner-d-83a192bb
+                  - generic [ref=e6990]: via brave_search
+  - region "Notifications alt+T"

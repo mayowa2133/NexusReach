@@ -61,6 +61,7 @@ vi.mock('@/hooks/useJobs', () => ({
   useRefreshJobs: () => ({ mutate: vi.fn(), isPending: false }),
   useSeedDefaultJobs: () => ({ mutate: vi.fn(), isPending: false }),
   useSavedSearches: () => ({ data: [] }),
+  useResumeLibrary: () => ({ data: [] }),
 }));
 
 // Mock recharts to avoid SVG rendering issues in jsdom

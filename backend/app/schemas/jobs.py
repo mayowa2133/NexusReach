@@ -166,3 +166,142 @@ class TailoredResumeResponse(BaseModel):
     overall_strategy: str
     model: str | None = None
     created_at: str | None = None
+
+
+class JobCommandCenterChecklist(BaseModel):
+    resume_uploaded: bool
+    match_scored: bool
+    resume_tailored: bool
+    resume_artifact_generated: bool
+    contacts_saved: bool
+    outreach_started: bool
+    applied: bool
+    interview_rounds_logged: bool
+
+
+class JobCommandCenterStats(BaseModel):
+    saved_contacts_count: int
+    verified_contacts_count: int
+    reachable_contacts_count: int
+    drafted_messages_count: int
+    outreach_count: int
+    active_outreach_count: int
+    responded_outreach_count: int
+    due_follow_ups_count: int
+
+
+class JobCommandCenterContact(BaseModel):
+    id: str
+    full_name: str | None = None
+    title: str | None = None
+    person_type: str | None = None
+    work_email: str | None = None
+    linkedin_url: str | None = None
+    email_verified: bool = False
+    current_company_verified: bool | None = None
+
+
+class JobCommandCenterMessage(BaseModel):
+    id: str
+    person_id: str
+    person_name: str | None = None
+    channel: str
+    goal: str
+    status: str
+    created_at: str
+
+
+class JobCommandCenterOutreach(BaseModel):
+    id: str
+    person_id: str
+    person_name: str | None = None
+    channel: str | None = None
+    status: str
+    response_received: bool
+    last_contacted_at: str | None = None
+    next_follow_up_at: str | None = None
+    created_at: str
+
+
+class JobCommandCenterNextAction(BaseModel):
+    key: str
+    title: str
+    detail: str
+    cta_label: str
+    cta_section: str
+
+
+class JobResearchSnapshotResponse(BaseModel):
+    id: str
+    job_id: str
+    company_name: str | None = None
+    target_count_per_bucket: int | None = None
+    recruiters: list[dict] = []
+    hiring_managers: list[dict] = []
+    peers: list[dict] = []
+    your_connections: list[dict] = []
+    recruiter_count: int = 0
+    manager_count: int = 0
+    peer_count: int = 0
+    warm_path_count: int = 0
+    verified_count: int = 0
+    total_candidates: int = 0
+    errors: list[dict] | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class ResumeBulletRewritePreview(BaseModel):
+    id: str
+    section: str
+    experience_index: int | None = None
+    project_index: int | None = None
+    original: str
+    rewritten: str
+    reason: str = ""
+    change_type: str = "reframe"
+    inferred_additions: list[str] = []
+    requires_user_confirm: bool = False
+    decision: str = "pending"
+
+
+class ResumeArtifactResponse(BaseModel):
+    id: str
+    job_id: str
+    tailored_resume_id: str | None = None
+    format: str
+    filename: str
+    content: str
+    generated_at: str
+    created_at: str
+    updated_at: str
+    rewrite_decisions: dict[str, str] = {}
+    rewrite_previews: list[ResumeBulletRewritePreview] = []
+    auto_accept_inferred: bool = False
+
+
+class ResumeArtifactDecisionsUpdate(BaseModel):
+    decisions: dict[str, str]
+
+
+class ResumeArtifactLibraryEntry(BaseModel):
+    id: str
+    job_id: str
+    job_title: str | None = None
+    company_name: str | None = None
+    filename: str
+    generated_at: str
+    updated_at: str
+    pending_inferred_count: int = 0
+
+
+class JobCommandCenterResponse(BaseModel):
+    job_id: str
+    stage: str
+    checklist: JobCommandCenterChecklist
+    stats: JobCommandCenterStats
+    next_action: JobCommandCenterNextAction
+    top_contacts: list[JobCommandCenterContact]
+    recent_messages: list[JobCommandCenterMessage]
+    recent_outreach: list[JobCommandCenterOutreach]
+    research_snapshot: JobResearchSnapshotResponse | None = None

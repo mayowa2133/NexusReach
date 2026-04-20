@@ -4,12 +4,14 @@ import type {
   ATSSearchRequest,
   DiscoverJobsRequest,
   MatchAnalysis,
+  JobCommandCenter,
   InterviewRound,
   Job,
   JobSearchRequest,
   JobStage,
   OfferDetails,
   PaginatedResponse,
+  ResumeArtifact,
   SearchPreference,
   TailoredResume,
 } from '@/types';
@@ -71,11 +73,19 @@ export function useJobs(filters: JobFilters = {}) {
   });
 }
 
-export function useJob(jobId?: string) {
+export function useJob(jobId: string | undefined) {
   return useQuery({
     queryKey: ['job', jobId],
     queryFn: () => api.get<Job>(`/api/jobs/${jobId}`),
-    enabled: Boolean(jobId),
+    enabled: !!jobId,
+  });
+}
+
+export function useJobCommandCenter(jobId: string | undefined) {
+  return useQuery({
+    queryKey: ['job-command-center', jobId],
+    queryFn: () => api.get<JobCommandCenter>(`/api/jobs/${jobId}/command-center`),
+    enabled: !!jobId,
   });
 }
 
@@ -85,9 +95,10 @@ export function useToggleJobStar() {
   return useMutation({
     mutationFn: ({ jobId, starred }: { jobId: string; starred: boolean }) =>
       api.put<Job>(`/api/jobs/${jobId}/star`, { starred }),
-    onSuccess: (_, variables) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['jobs'] });
-      queryClient.invalidateQueries({ queryKey: ['job', variables.jobId] });
+      queryClient.invalidateQueries({ queryKey: ['job'] });
+      queryClient.invalidateQueries({ queryKey: ['job-command-center'] });
     },
   });
 }
@@ -98,9 +109,10 @@ export function useUpdateJobStage() {
   return useMutation({
     mutationFn: ({ jobId, stage, notes }: { jobId: string; stage: JobStage; notes?: string }) =>
       api.put<Job>(`/api/jobs/${jobId}/stage`, { stage, notes }),
-    onSuccess: (_, variables) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['jobs'] });
-      queryClient.invalidateQueries({ queryKey: ['job', variables.jobId] });
+      queryClient.invalidateQueries({ queryKey: ['job'] });
+      queryClient.invalidateQueries({ queryKey: ['job-command-center'] });
     },
   });
 }
@@ -113,9 +125,10 @@ export function useUpdateInterviewRounds() {
   return useMutation({
     mutationFn: ({ jobId, interview_rounds }: { jobId: string; interview_rounds: InterviewRound[] }) =>
       api.put<Job>(`/api/jobs/${jobId}/interviews`, { interview_rounds }),
-    onSuccess: (_, variables) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['jobs'] });
-      queryClient.invalidateQueries({ queryKey: ['job', variables.jobId] });
+      queryClient.invalidateQueries({ queryKey: ['job'] });
+      queryClient.invalidateQueries({ queryKey: ['job-command-center'] });
     },
   });
 }
@@ -126,9 +139,8 @@ export function useUpdateOfferDetails() {
   return useMutation({
     mutationFn: ({ jobId, offer_details }: { jobId: string; offer_details: OfferDetails }) =>
       api.put<Job>(`/api/jobs/${jobId}/offer`, { offer_details }),
-    onSuccess: (_, variables) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['jobs'] });
-      queryClient.invalidateQueries({ queryKey: ['job', variables.jobId] });
     },
   });
 }
@@ -228,6 +240,27 @@ export function useTailoredResume(jobId: string | undefined) {
   });
 }
 
+export function useResumeArtifact(jobId: string | undefined) {
+  return useQuery({
+    queryKey: ['resume-artifact', jobId],
+    queryFn: () => api.get<ResumeArtifact | null>(`/api/jobs/${jobId}/resume-artifact`),
+    enabled: !!jobId,
+  });
+}
+
+export function useClearJobResearchSnapshot() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (jobId: string) =>
+      api.delete(`/api/jobs/${jobId}/research-snapshot`),
+    onSuccess: (_data, jobId) => {
+      queryClient.invalidateQueries({ queryKey: ['job-command-center', jobId] });
+      queryClient.invalidateQueries({ queryKey: ['job-research-snapshot', jobId] });
+    },
+  });
+}
+
 export function useTailorResume() {
   const queryClient = useQueryClient();
 
@@ -236,6 +269,77 @@ export function useTailorResume() {
       api.post<TailoredResume>(`/api/jobs/${jobId}/tailor-resume`),
     onSuccess: (_data, jobId) => {
       queryClient.invalidateQueries({ queryKey: ['tailored-resume', jobId] });
+      queryClient.invalidateQueries({ queryKey: ['job-command-center', jobId] });
+    },
+  });
+}
+
+export function useGenerateResumeArtifact() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (jobId: string) =>
+      api.post<ResumeArtifact>(`/api/jobs/${jobId}/resume-artifact`),
+    onSuccess: (_data, jobId) => {
+      queryClient.invalidateQueries({ queryKey: ['resume-artifact', jobId] });
+      queryClient.invalidateQueries({ queryKey: ['job-command-center', jobId] });
+      queryClient.invalidateQueries({ queryKey: ['tailored-resume', jobId] });
+    },
+  });
+}
+
+export function useUpdateResumeArtifactDecisions() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      jobId,
+      decisions,
+    }: {
+      jobId: string;
+      decisions: Record<string, 'accepted' | 'rejected' | 'pending'>;
+    }) =>
+      api.patch<ResumeArtifact>(
+        `/api/jobs/${jobId}/resume-artifact/decisions`,
+        { decisions },
+      ),
+    onSuccess: (_data, { jobId }) => {
+      queryClient.invalidateQueries({ queryKey: ['resume-artifact', jobId] });
+      queryClient.invalidateQueries({ queryKey: ['resume-library'] });
+    },
+  });
+}
+
+export interface ResumeLibraryEntry {
+  id: string;
+  job_id: string;
+  job_title: string | null;
+  company_name: string | null;
+  filename: string;
+  generated_at: string;
+  updated_at: string;
+  pending_inferred_count: number;
+}
+
+export function useResumeLibrary() {
+  return useQuery({
+    queryKey: ['resume-library'],
+    queryFn: () => api.get<ResumeLibraryEntry[]>('/api/jobs/resume-library'),
+  });
+}
+
+export function useDownloadResumeArtifactPdf() {
+  return useMutation({
+    mutationFn: async ({ jobId, filename }: { jobId: string; filename?: string }) => {
+      const blob = await api.getBlob(`/api/jobs/${jobId}/resume-artifact/pdf`);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename ?? `resume-${jobId}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
     },
   });
 }

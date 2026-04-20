@@ -27,6 +27,7 @@ export interface Profile {
   portfolio_url: string;
   resume_raw: string;
   resume_parsed: ResumeParsed | null;
+  resume_auto_accept_inferred?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -448,6 +449,229 @@ export interface TailoredResume {
   overall_strategy: string;
   model: string | null;
   created_at: string | null;
+}
+
+export type ResumeRewriteChangeType = 'keyword' | 'reframe' | 'inferred_claim';
+export type ResumeRewriteDecision = 'accepted' | 'rejected' | 'pending';
+
+export interface ResumeBulletRewritePreview {
+  id: string;
+  section: 'experience' | 'projects' | string;
+  experience_index: number | null;
+  project_index: number | null;
+  original: string;
+  rewritten: string;
+  reason: string;
+  change_type: ResumeRewriteChangeType;
+  inferred_additions: string[];
+  requires_user_confirm: boolean;
+  decision: ResumeRewriteDecision;
+}
+
+export interface ResumeArtifact {
+  id: string;
+  job_id: string;
+  tailored_resume_id: string | null;
+  format: string;
+  filename: string;
+  content: string;
+  generated_at: string;
+  created_at: string;
+  updated_at: string;
+  rewrite_decisions?: Record<string, ResumeRewriteDecision>;
+  rewrite_previews?: ResumeBulletRewritePreview[];
+  auto_accept_inferred?: boolean;
+}
+
+export interface JobCommandCenterChecklist {
+  resume_uploaded: boolean;
+  match_scored: boolean;
+  resume_tailored: boolean;
+  resume_artifact_generated: boolean;
+  contacts_saved: boolean;
+  outreach_started: boolean;
+  applied: boolean;
+  interview_rounds_logged: boolean;
+}
+
+export interface JobCommandCenterStats {
+  saved_contacts_count: number;
+  verified_contacts_count: number;
+  reachable_contacts_count: number;
+  drafted_messages_count: number;
+  outreach_count: number;
+  active_outreach_count: number;
+  responded_outreach_count: number;
+  due_follow_ups_count: number;
+}
+
+export interface JobCommandCenterContact {
+  id: string;
+  full_name: string | null;
+  title: string | null;
+  person_type: string | null;
+  work_email: string | null;
+  linkedin_url: string | null;
+  email_verified: boolean;
+  current_company_verified: boolean | null;
+}
+
+export interface JobCommandCenterMessage {
+  id: string;
+  person_id: string;
+  person_name: string | null;
+  channel: MessageChannel;
+  goal: MessageGoal;
+  status: MessageStatus;
+  created_at: string;
+}
+
+export interface JobCommandCenterOutreach {
+  id: string;
+  person_id: string;
+  person_name: string | null;
+  channel: OutreachChannel | null;
+  status: OutreachStatus;
+  response_received: boolean;
+  last_contacted_at: string | null;
+  next_follow_up_at: string | null;
+  created_at: string;
+}
+
+export interface JobCommandCenterNextAction {
+  key: string;
+  title: string;
+  detail: string;
+  cta_label: string;
+  cta_section: string;
+}
+
+export type NextActionUrgency = 'high' | 'medium' | 'low';
+
+export interface NextAction {
+  kind: string;
+  urgency: NextActionUrgency;
+  reason: string;
+  suggested_channel: string | null;
+  suggested_goal: string | null;
+  job_id: string | null;
+  job_title: string | null;
+  company_name: string | null;
+  person_id: string | null;
+  person_name: string | null;
+  message_id: string | null;
+  outreach_id: string | null;
+  age_days: number | null;
+  deep_link: string | null;
+  meta: Record<string, unknown>;
+}
+
+export interface NextActionList {
+  items: NextAction[];
+  total: number;
+}
+
+export interface Story {
+  id: string;
+  title: string;
+  summary: string | null;
+  situation: string | null;
+  action: string | null;
+  result: string | null;
+  impact_metric: string | null;
+  role_focus: string | null;
+  tags: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StoryInput {
+  title: string;
+  summary?: string | null;
+  situation?: string | null;
+  action?: string | null;
+  result?: string | null;
+  impact_metric?: string | null;
+  role_focus?: string | null;
+  tags?: string[];
+}
+
+export interface InterviewPrepLikelyRound {
+  name: string;
+  type: string;
+  description: string | null;
+  inferred: boolean;
+}
+
+export interface InterviewPrepQuestionCategory {
+  key: string;
+  label: string;
+  examples: string[];
+  inferred: boolean;
+}
+
+export interface InterviewPrepTheme {
+  title: string;
+  reason: string | null;
+  inferred: boolean;
+}
+
+export interface InterviewPrepStoryMapping {
+  category: string;
+  story_ids: string[];
+}
+
+export interface InterviewPrepBrief {
+  id: string;
+  job_id: string;
+  company_overview: string | null;
+  role_summary: string | null;
+  likely_rounds: InterviewPrepLikelyRound[];
+  question_categories: InterviewPrepQuestionCategory[];
+  prep_themes: InterviewPrepTheme[];
+  story_map: InterviewPrepStoryMapping[];
+  sourced_signals: Record<string, unknown> | null;
+  user_notes: string | null;
+  generated_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InterviewPrepUpdate {
+  user_notes?: string | null;
+  story_map?: InterviewPrepStoryMapping[];
+}
+
+export interface JobResearchSnapshot {
+  id: string;
+  job_id: string;
+  company_name: string | null;
+  target_count_per_bucket: number | null;
+  recruiters: Person[];
+  hiring_managers: Person[];
+  peers: Person[];
+  your_connections: LinkedInGraphConnection[];
+  recruiter_count: number;
+  manager_count: number;
+  peer_count: number;
+  warm_path_count: number;
+  verified_count: number;
+  total_candidates: number;
+  errors: SearchErrorDetail[] | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface JobCommandCenter {
+  job_id: string;
+  stage: string;
+  checklist: JobCommandCenterChecklist;
+  stats: JobCommandCenterStats;
+  next_action: JobCommandCenterNextAction;
+  top_contacts: JobCommandCenterContact[];
+  recent_messages: JobCommandCenterMessage[];
+  recent_outreach: JobCommandCenterOutreach[];
+  research_snapshot: JobResearchSnapshot | null;
 }
 
 export interface JobSearchRequest {

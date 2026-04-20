@@ -1,0 +1,81 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - banner [ref=e4]:
+      - generic [ref=e5]:
+        - link "NexusReach" [ref=e6] [cursor=pointer]:
+          - /url: /dashboard
+        - navigation [ref=e7]:
+          - link "Dashboard" [ref=e8] [cursor=pointer]:
+            - /url: /dashboard
+          - link "Jobs" [ref=e9] [cursor=pointer]:
+            - /url: /jobs
+          - link "Tracker" [ref=e10] [cursor=pointer]:
+            - /url: /tracker
+          - link "People" [ref=e11] [cursor=pointer]:
+            - /url: /people
+          - link "Messages" [ref=e12] [cursor=pointer]:
+            - /url: /messages
+          - link "Outreach" [ref=e13] [cursor=pointer]:
+            - /url: /outreach
+        - generic [ref=e14]:
+          - button [ref=e15]:
+            - img [ref=e16]
+          - button "DE" [ref=e19]:
+            - generic [ref=e21]: DE
+    - main [ref=e22]:
+      - generic [ref=e25]:
+        - generic [ref=e26]:
+          - heading "Jobs" [level=1] [ref=e27]
+          - paragraph [ref=e28]: Discover opportunities across multiple sources, scored against your profile.
+        - generic [ref=e29]:
+          - generic [ref=e30]:
+            - generic [ref=e31]:
+              - generic [ref=e32]: Search Jobs
+              - generic [ref=e33]: Search across JSearch, Adzuna, Remotive, Dice, newgrad-jobs.com, and more.
+            - generic [ref=e35]:
+              - generic [ref=e36]:
+                - generic [ref=e37]: Job Title or Keyword
+                - textbox "Job Title or Keyword" [ref=e38]:
+                  - /placeholder: e.g. Software Engineer, Frontend Developer
+              - generic [ref=e39]:
+                - generic [ref=e40]: Location (optional)
+                - textbox "Location (optional)" [ref=e41]:
+                  - /placeholder: e.g. New York, NY or Remote
+              - generic [ref=e42]:
+                - checkbox "Remote only" [ref=e43]
+                - checkbox [ref=e44]
+                - generic [ref=e45]: Remote only
+              - button "Search Jobs" [ref=e46]
+          - generic [ref=e47]:
+            - generic [ref=e48]:
+              - generic [ref=e49]: Search Company Career Page
+              - generic [ref=e50]: Paste a job posting URL from Apple Jobs, Greenhouse, Lever, Ashby, Workable, Workday, or a similar careers page, or enter a supported board ID.
+            - generic [ref=e52]:
+              - generic [ref=e53]:
+                - generic [ref=e54]: Board ID or Job Posting URL
+                - textbox "Board ID or Job Posting URL" [ref=e55]:
+                  - /placeholder: e.g. stripe or https://jobs.apple.com/en-us/details/...
+                  - text: https://jobs.intuit.com/job/-/-/27595/93951873376?cid=pjob_li_click_us_swe-other-fy26_cn_text_job_int-tm&p_sid=sc04uvb&p_uid=XxjJchL9fR&ss=paid&utm_campaign=&utm_content=pj_board&utm_medium=jobad&utm_source=linkedin+slots+(intuit)
+                - paragraph [ref=e56]: Full job links auto-detect the platform and exact posting. Board IDs still use the selected platform.
+              - generic [ref=e57]:
+                - generic [ref=e58]: ATS Platform
+                - combobox "ATS Platform" [ref=e59]:
+                  - option "Greenhouse" [selected]
+                  - option "Lever"
+                  - option "Ashby"
+              - button "Search Career Page" [ref=e60]
+        - generic [ref=e63]:
+          - generic [ref=e64]:
+            - generic [ref=e65]: Discover Jobs
+            - paragraph [ref=e66]: Run the standard discover flow or target startup-first sources like YC, VentureLoop, Conviction, and a16z Speedrun.
+          - generic [ref=e67]:
+            - button "Discover Jobs" [ref=e68]
+            - button "Discover Startup Jobs" [ref=e69]
+        - generic [ref=e70]:
+          - paragraph [ref=e73]: Search for jobs above to get started.
+          - paragraph [ref=e76]: Select a job to view details.
+  - region "Notifications alt+T":
+    - list:
+      - listitem [ref=e77]:
+        - img [ref=e79]
+        - generic [ref=e84]: Failed to fetch

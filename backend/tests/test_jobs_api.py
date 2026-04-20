@@ -228,6 +228,219 @@ async def test_get_single_job(client, mock_user_id):
     assert resp.json()["title"] == "Software Engineer"
 
 
+async def test_get_job_command_center(client, mock_user_id):
+    """GET /api/jobs/{id}/command-center returns the job workflow summary."""
+    job_id = uuid.uuid4()
+    payload = {
+        "job_id": str(job_id),
+        "stage": "researching",
+        "checklist": {
+            "resume_uploaded": True,
+            "match_scored": True,
+            "resume_tailored": False,
+            "resume_artifact_generated": False,
+            "contacts_saved": True,
+            "outreach_started": False,
+            "applied": False,
+            "interview_rounds_logged": False,
+        },
+        "stats": {
+            "saved_contacts_count": 3,
+            "verified_contacts_count": 2,
+            "reachable_contacts_count": 3,
+            "drafted_messages_count": 1,
+            "outreach_count": 0,
+            "active_outreach_count": 0,
+            "responded_outreach_count": 0,
+            "due_follow_ups_count": 0,
+        },
+        "next_action": {
+            "key": "draft_first_outreach",
+            "title": "Draft your first message",
+            "detail": "You already have company contacts saved for this role, but no outreach has been logged yet.",
+            "cta_label": "Open Messages",
+            "cta_section": "activity",
+        },
+        "top_contacts": [
+            {
+                "id": str(uuid.uuid4()),
+                "full_name": "Jane Recruiter",
+                "title": "Senior Recruiter",
+                "person_type": "recruiter",
+                "work_email": "jane@example.com",
+                "linkedin_url": "https://linkedin.com/in/jane",
+                "email_verified": True,
+                "current_company_verified": True,
+            }
+        ],
+        "recent_messages": [],
+        "recent_outreach": [],
+    }
+
+    with patch("app.routers.jobs.get_job_command_center", new_callable=AsyncMock) as mock_summary:
+        mock_summary.return_value = payload
+        resp = await client.get(f"/api/jobs/{job_id}/command-center")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["job_id"] == str(job_id)
+    assert data["stats"]["saved_contacts_count"] == 3
+    assert data["next_action"]["key"] == "draft_first_outreach"
+
+
+async def test_generate_resume_artifact(client, mock_user_id):
+    """POST /api/jobs/{id}/resume-artifact generates a saved resume artifact."""
+    job_id = uuid.uuid4()
+    artifact_id = uuid.uuid4()
+    tailored_id = uuid.uuid4()
+    artifact = MagicMock()
+    artifact.id = artifact_id
+    artifact.job_id = job_id
+    artifact.tailored_resume_id = tailored_id
+    artifact.format = "latex"
+    artifact.filename = "resume-techcorp-2026-04-18.tex"
+    artifact.content = "\\documentclass{article}\n"
+    artifact.generated_at = datetime(2026, 4, 18, tzinfo=timezone.utc)
+    artifact.created_at = datetime(2026, 4, 18, tzinfo=timezone.utc)
+    artifact.updated_at = datetime(2026, 4, 18, tzinfo=timezone.utc)
+    artifact.rewrite_decisions = {}
+
+    from app.schemas.jobs import ResumeArtifactResponse
+
+    async def _fake_build(_db, *, user_id, job_id, artifact):
+        return ResumeArtifactResponse(
+            id=str(artifact.id),
+            job_id=job_id,
+            tailored_resume_id=str(artifact.tailored_resume_id) if artifact.tailored_resume_id else None,
+            format=artifact.format,
+            filename=artifact.filename,
+            content=artifact.content,
+            generated_at=artifact.generated_at.isoformat(),
+            created_at=artifact.created_at.isoformat(),
+            updated_at=artifact.updated_at.isoformat(),
+        )
+
+    with patch("app.routers.jobs.generate_resume_artifact_for_job", new_callable=AsyncMock) as mock_generate, \
+         patch("app.routers.jobs._build_artifact_response", side_effect=_fake_build):
+        mock_generate.return_value = artifact
+        resp = await client.post(f"/api/jobs/{job_id}/resume-artifact")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["job_id"] == str(job_id)
+    assert data["format"] == "latex"
+    assert data["filename"] == "resume-techcorp-2026-04-18.tex"
+
+
+async def test_get_resume_artifact(client, mock_user_id):
+    """GET /api/jobs/{id}/resume-artifact returns the saved artifact."""
+    job_id = uuid.uuid4()
+    artifact = MagicMock()
+    artifact.id = uuid.uuid4()
+    artifact.job_id = job_id
+    artifact.tailored_resume_id = uuid.uuid4()
+    artifact.format = "latex"
+    artifact.filename = "resume-techcorp-2026-04-18.tex"
+    artifact.content = "\\documentclass{article}\n"
+    artifact.generated_at = datetime(2026, 4, 18, tzinfo=timezone.utc)
+    artifact.created_at = datetime(2026, 4, 18, tzinfo=timezone.utc)
+    artifact.updated_at = datetime(2026, 4, 18, tzinfo=timezone.utc)
+    artifact.rewrite_decisions = {}
+
+    from app.schemas.jobs import ResumeArtifactResponse
+
+    async def _fake_build(_db, *, user_id, job_id, artifact):
+        return ResumeArtifactResponse(
+            id=str(artifact.id),
+            job_id=job_id,
+            tailored_resume_id=str(artifact.tailored_resume_id) if artifact.tailored_resume_id else None,
+            format=artifact.format,
+            filename=artifact.filename,
+            content=artifact.content,
+            generated_at=artifact.generated_at.isoformat(),
+            created_at=artifact.created_at.isoformat(),
+            updated_at=artifact.updated_at.isoformat(),
+        )
+
+    with patch("app.routers.jobs.get_resume_artifact_for_job", new_callable=AsyncMock) as mock_get, \
+         patch("app.routers.jobs._build_artifact_response", side_effect=_fake_build):
+        mock_get.return_value = artifact
+        resp = await client.get(f"/api/jobs/{job_id}/resume-artifact")
+
+    assert resp.status_code == 200
+    assert resp.json()["job_id"] == str(job_id)
+
+
+async def test_download_resume_artifact_pdf(client, mock_user_id):
+    """GET /api/jobs/{id}/resume-artifact/pdf returns a PDF download."""
+    job_id = uuid.uuid4()
+    artifact = MagicMock()
+    artifact.filename = "resume-techcorp-2026-04-18.tex"
+    artifact.content = "\\documentclass{article}\n"
+
+    with patch("app.routers.jobs.get_resume_artifact_for_job", new_callable=AsyncMock) as mock_get:
+        with patch("app.routers.jobs.render_resume_artifact_pdf") as mock_render:
+            mock_get.return_value = artifact
+            mock_render.return_value = b"%PDF-test"
+            resp = await client.get(f"/api/jobs/{job_id}/resume-artifact/pdf")
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("application/pdf")
+    assert "resume-techcorp-2026-04-18.pdf" in resp.headers["content-disposition"]
+    assert resp.content == b"%PDF-test"
+
+
+async def test_get_research_snapshot_returns_payload(client, mock_user_id):
+    """GET /api/jobs/{id}/research-snapshot returns the persisted snapshot."""
+    job_id = uuid.uuid4()
+    snapshot_id = uuid.uuid4()
+    fake_snapshot = MagicMock()
+    fake_snapshot.id = snapshot_id
+    fake_snapshot.job_id = job_id
+    fake_snapshot.company_name = "Acme"
+    fake_snapshot.target_count_per_bucket = 4
+    fake_snapshot.recruiters = [{"id": str(uuid.uuid4()), "full_name": "R"}]
+    fake_snapshot.hiring_managers = []
+    fake_snapshot.peers = []
+    fake_snapshot.your_connections = []
+    fake_snapshot.recruiter_count = 1
+    fake_snapshot.manager_count = 0
+    fake_snapshot.peer_count = 0
+    fake_snapshot.warm_path_count = 0
+    fake_snapshot.verified_count = 0
+    fake_snapshot.total_candidates = 1
+    fake_snapshot.errors = None
+    fake_snapshot.created_at = datetime(2026, 4, 18, tzinfo=timezone.utc)
+    fake_snapshot.updated_at = datetime(2026, 4, 18, tzinfo=timezone.utc)
+
+    with patch(
+        "app.services.job_research_snapshot_service.get_job_research_snapshot",
+        new_callable=AsyncMock,
+    ) as mock_get:
+        mock_get.return_value = fake_snapshot
+        resp = await client.get(f"/api/jobs/{job_id}/research-snapshot")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["id"] == str(snapshot_id)
+    assert data["total_candidates"] == 1
+    assert data["recruiters"][0]["full_name"] == "R"
+
+
+async def test_clear_research_snapshot(client, mock_user_id):
+    """DELETE /api/jobs/{id}/research-snapshot reports deletion outcome."""
+    job_id = uuid.uuid4()
+    with patch(
+        "app.services.job_research_snapshot_service.delete_job_research_snapshot",
+        new_callable=AsyncMock,
+    ) as mock_del:
+        mock_del.return_value = True
+        resp = await client.delete(f"/api/jobs/{job_id}/research-snapshot")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True, "deleted": True}
+
+
 async def test_discover_jobs_startup_mode(client):
     """POST /api/jobs/discover forwards startup mode to the service."""
     with patch("app.routers.jobs.discover_jobs", new_callable=AsyncMock) as mock_discover:

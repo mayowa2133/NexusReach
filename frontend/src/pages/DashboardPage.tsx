@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { useProfile, getProfileCompletion } from '@/hooks/useProfile';
 import { useInsightsDashboard } from '@/hooks/useInsights';
 import { useOutreachLogs } from '@/hooks/useOutreach';
-import { useJobs, useRefreshJobs, useSavedSearches, useSeedDefaultJobs } from '@/hooks/useJobs';
+import { useJobs, useRefreshJobs, useResumeLibrary, useSavedSearches, useSeedDefaultJobs } from '@/hooks/useJobs';
 import { useGuardrails } from '@/hooks/useSettings';
 import { formatRelativeDate } from '@/lib/dateUtils';
 import { getStartupSourceLabels, isStartupJob } from '@/lib/jobStartup';
@@ -22,6 +22,8 @@ import { WarmPathsCard } from '@/components/dashboard/WarmPathsCard';
 import { CompanyOpennessTable } from '@/components/dashboard/CompanyOpennessTable';
 import { JobPipelineCard } from '@/components/dashboard/JobPipelineCard';
 import { ApiUsageCard } from '@/components/dashboard/ApiUsageCard';
+import { GraphWarmPathsCard } from '@/components/dashboard/GraphWarmPathsCard';
+import { ActNowCard } from '@/components/dashboard/ActNowCard';
 
 const STATUS_COLORS: Record<string, 'default' | 'secondary' | 'outline' | 'destructive'> = {
   draft: 'outline',
@@ -76,6 +78,8 @@ export function DashboardPage() {
     !guardrails.response_rate_warnings_enabled
   );
   const recentOutreach = recentLogsData?.items?.slice(0, 5) ?? [];
+  const { data: resumeLibrary } = useResumeLibrary();
+  const recentResumes = resumeLibrary?.slice(0, 3) ?? [];
 
   return (
     <div className="space-y-6">
@@ -120,6 +124,9 @@ export function DashboardPage() {
       {/* KPI cards */}
       <MetricCards summary={insights?.summary} isLoading={insightsLoading} />
 
+      {/* Act Now queue (cadence engine) */}
+      <ActNowCard limit={5} />
+
       {/* Row 1: Network Growth + Response Rate */}
       <div className="grid gap-4 md:grid-cols-2">
         <NetworkGrowthChart data={insights?.network_growth ?? []} />
@@ -138,13 +145,14 @@ export function DashboardPage() {
 
       {/* Row 3: Warm Paths + Network Gaps */}
       <div className="grid gap-4 md:grid-cols-2">
-        <WarmPathsCard paths={insights?.warm_path_companies ?? []} />
+        <WarmPathsCard paths={insights?.warm_paths ?? []} />
         <NetworkGapsCard gaps={insights?.network_gaps ?? []} />
       </div>
 
-      {/* Row 4: Job Pipeline */}
-      <div className="grid gap-4 md:grid-cols-1">
+      {/* Row 4: Job Pipeline + Graph Warm Paths */}
+      <div className="grid gap-4 md:grid-cols-2">
         <JobPipelineCard stages={insights?.job_pipeline ?? []} />
+        <GraphWarmPathsCard companies={insights?.graph_warm_paths ?? []} />
       </div>
 
       {/* Row 5: API Usage */}
@@ -383,6 +391,48 @@ export function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Recent Tailored Resumes</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {recentResumes.length > 0 ? (
+            <div className="space-y-2">
+              {recentResumes.map((entry) => (
+                <Link
+                  key={entry.id}
+                  to={`/jobs/${entry.job_id}`}
+                  className="flex items-center justify-between rounded-md border p-2 text-sm hover:border-primary/60"
+                >
+                  <div className="min-w-0">
+                    <div className="truncate font-medium">
+                      {entry.job_title ?? 'Untitled role'}
+                      {entry.company_name ? ` — ${entry.company_name}` : ''}
+                    </div>
+                    <div className="truncate text-xs text-muted-foreground">
+                      {entry.filename} · updated{' '}
+                      {formatRelativeDate(entry.updated_at) ?? new Date(entry.updated_at).toLocaleString()}
+                    </div>
+                  </div>
+                  {entry.pending_inferred_count > 0 && (
+                    <Badge variant="outline" className="border-yellow-400 text-[11px] text-yellow-800 dark:text-yellow-200">
+                      {entry.pending_inferred_count} pending
+                    </Badge>
+                  )}
+                </Link>
+              ))}
+              <Link to="/resume-library" className="inline-block pt-1 text-sm text-primary hover:underline">
+                View resume library
+              </Link>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              No tailored resumes yet. Generate one from a job to review AI rewrites before an interview.
+            </p>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

@@ -33,3 +33,4 @@ Thumbs.db
 
 # Keep example env files
 !.env.example
+backend/.venv312/

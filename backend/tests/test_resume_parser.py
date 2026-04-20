@@ -8,12 +8,14 @@ import pytest
 
 from app.services.resume_parser import (
     _parse_skills,
+    _parse_skill_categories,
     _parse_experience,
     _parse_education,
     _parse_projects,
     _split_sections,
     extract_text,
     parse_resume,
+    parse_resume_text,
 )
 
 
@@ -64,6 +66,38 @@ class TestParseSkills:
         assert long not in skills
 
 
+# --- _parse_skill_categories: PDF flattening repair ---
+
+
+class TestParseSkillCategoriesFlattened:
+    def test_flattened_multi_category_line(self):
+        # PDF extraction can collapse multiple categories onto one line and
+        # insert space before colons.
+        text = "Languages : C++, Java, Python Technologies : AWS, Terraform Methodologies : Agile"
+        cats = _parse_skill_categories(text)
+        assert "Languages" in cats
+        assert "Technologies" in cats
+        assert "Methodologies" in cats
+        assert "C++" in cats["Languages"]
+        assert "AWS" in cats["Technologies"]
+        # Critical regression: category labels must NOT leak as values.
+        for values in cats.values():
+            for v in values:
+                assert "Languages" not in v
+                assert "Technologies" not in v
+                assert ":" not in v
+
+    def test_parse_skills_drops_label_leak(self):
+        text = "Languages : C++, Java Technologies : AWS, Terraform"
+        skills = _parse_skills(text)
+        assert "C++" in skills
+        assert "AWS" in skills
+        assert "Terraform" in skills
+        for s in skills:
+            assert ":" not in s
+            assert s not in {"Languages", "Technologies"}
+
+
 # --- _parse_experience ---
 
 
@@ -89,6 +123,20 @@ class TestParseExperience:
 
     def test_empty_input(self):
         assert _parse_experience("") == []
+
+    def test_resume_style_entry_preserves_location_and_bullets(self):
+        text = (
+            "Amazon Web Services (AWS) May 2025 – Aug. 2025\n"
+            "Cloud Engineer Toronto, ON\n"
+            "•Engineered a serverless metadata extraction system using Python and AWS Lambda.\n"
+            "•Designed and deployed a secure RESTful API with Amazon API Gateway."
+        )
+        entries = _parse_experience(text)
+        assert len(entries) == 1
+        assert entries[0]["company"] == "Amazon Web Services (AWS)"
+        assert entries[0]["title"] == "Cloud Engineer"
+        assert entries[0]["location"] == "Toronto, ON"
+        assert len(entries[0]["bullets"]) == 2
 
 
 # --- _parse_education ---
@@ -136,6 +184,18 @@ class TestParseProjects:
 
     def test_empty_input(self):
         assert _parse_projects("") == []
+
+    def test_project_with_link_label_and_bullets(self):
+        text = (
+            "ClipForge (GitHub: ClipForge)\n"
+            "•Designed and built an AI-powered short-form video editing platform.\n"
+            "•Built full-stack AI services in Node.js + Next.js."
+        )
+        entries = _parse_projects(text)
+        assert len(entries) == 1
+        assert entries[0]["name"] == "ClipForge"
+        assert entries[0]["link_label"] == "GitHub: ClipForge"
+        assert len(entries[0]["bullets"]) == 2
 
 
 # --- _split_sections ---
@@ -191,3 +251,34 @@ class TestParseResume:
         # This tests the internal logic after text extraction
         with pytest.raises(ValueError):
             parse_resume(b"fake data", "text/plain")
+
+    def test_parse_resume_text_extracts_contact_and_certificates(self):
+        text = (
+            "Mayowa Adesanya\n"
+            "359 Kincardine Terrace, Milton, ON | 289 681 5743 | adesanym@mcmaster.ca | "
+            "https://www.linkedin.com/in/mayowa-adesanya/ | https://github.com/mayowa2133\n\n"
+            "Education\n"
+            "McMaster University\n"
+            "Honours Computer Science Hamilton, Ontario\n"
+            "Cumulative GPA: 3.5/4.0\n\n"
+            "Experience\n"
+            "CIBC Sep. 2025 – Dec. 2025\n"
+            "Application/Software Developer Toronto, ON\n"
+            "•Built and tested new iOS features.\n\n"
+            "Projects\n"
+            "ClipForge (GitHub: ClipForge)\n"
+            "•Designed and built an AI-powered short-form video editing platform.\n\n"
+            "Technical Skills\n"
+            "•Languages: Python, JavaScript, TypeScript\n"
+            "•Technologies: React, Node.js, AWS\n\n"
+            "Certificates\n"
+            "•AWS Certified Solutions Architect – Associate (SAA), AWS (July 2025)\n"
+            "1\n"
+        )
+        parsed = parse_resume_text(text)
+        assert parsed["contact"]["address"] == "359 Kincardine Terrace, Milton, ON"
+        assert parsed["contact"]["email"] == "adesanym@mcmaster.ca"
+        assert parsed["experience"][0]["location"] == "Toronto, ON"
+        assert parsed["skills_by_category"]["Languages"] == ["Python", "JavaScript", "TypeScript"]
+        assert parsed["certificates"][0].startswith("AWS Certified Solutions Architect")
+        assert "1" not in parsed["certificates"]

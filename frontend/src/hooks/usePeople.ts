@@ -15,8 +15,12 @@ export function usePeopleSearch() {
       target_count_per_bucket?: number;
       include_debug?: boolean;
     }) => api.post<PeopleSearchResult>('/api/people/search', params),
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['people'] });
+      if (variables.job_id) {
+        queryClient.invalidateQueries({ queryKey: ['job-command-center', variables.job_id] });
+        queryClient.invalidateQueries({ queryKey: ['job-research-snapshot', variables.job_id] });
+      }
     },
   });
 }

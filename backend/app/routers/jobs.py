@@ -2,6 +2,8 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -21,12 +23,19 @@ from app.schemas.jobs import (
     RefreshResponse,
     MatchAnalysisResponse,
     TailoredResumeResponse,
+    ResumeArtifactResponse,
+    ResumeArtifactDecisionsUpdate,
+    ResumeArtifactLibraryEntry,
+    ResumeBulletRewritePreview,
+    JobCommandCenterResponse,
+    JobResearchSnapshotResponse,
 )
 from app.services.job_service import (
     search_jobs,
     search_ats_jobs,
     get_jobs,
     get_job,
+    get_job_command_center,
     update_job_stage,
     update_interview_rounds,
     update_offer_details,
@@ -40,6 +49,73 @@ from app.services.search_preference_service import (
     delete_search_preference,
 )
 from app.tasks.jobs import refresh_user_feeds
+from app.services.resume_artifact_service import (
+    generate_resume_artifact_for_job,
+    get_resume_artifact_for_job,
+    list_resume_artifacts_for_user,
+    render_resume_artifact_pdf,
+)
+from app.models.profile import Profile
+from app.models.resume_artifact import ResumeArtifact
+from app.models.tailored_resume import TailoredResume
+
+
+async def _build_artifact_response(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    job_id: str,
+    artifact: ResumeArtifact,
+) -> ResumeArtifactResponse:
+    decisions = dict(artifact.rewrite_decisions or {})
+    rewrites: list[dict] = []
+    if artifact.tailored_resume_id:
+        tr_result = await db.execute(
+            select(TailoredResume).where(TailoredResume.id == artifact.tailored_resume_id)
+        )
+        tailored = tr_result.scalar_one_or_none()
+        if tailored:
+            rewrites = list(tailored.bullet_rewrites or [])
+
+    previews: list[ResumeBulletRewritePreview] = []
+    for rewrite in rewrites:
+        rewrite_id = rewrite.get("id") or ""
+        if not rewrite_id:
+            continue
+        previews.append(ResumeBulletRewritePreview(
+            id=rewrite_id,
+            section=rewrite.get("section") or "experience",
+            experience_index=rewrite.get("experience_index"),
+            project_index=rewrite.get("project_index"),
+            original=rewrite.get("original") or "",
+            rewritten=rewrite.get("rewritten") or "",
+            reason=rewrite.get("reason") or "",
+            change_type=rewrite.get("change_type") or "reframe",
+            inferred_additions=list(rewrite.get("inferred_additions") or []),
+            requires_user_confirm=bool(rewrite.get("requires_user_confirm")),
+            decision=decisions.get(rewrite_id, "pending"),
+        ))
+
+    profile_result = await db.execute(
+        select(Profile).where(Profile.user_id == user_id)
+    )
+    profile = profile_result.scalar_one_or_none()
+    auto_accept = bool(profile.resume_auto_accept_inferred) if profile else False
+
+    return ResumeArtifactResponse(
+        id=str(artifact.id),
+        job_id=job_id,
+        tailored_resume_id=str(artifact.tailored_resume_id) if artifact.tailored_resume_id else None,
+        format=artifact.format,
+        filename=artifact.filename,
+        content=artifact.content,
+        generated_at=artifact.generated_at.isoformat(),
+        created_at=artifact.created_at.isoformat(),
+        updated_at=artifact.updated_at.isoformat(),
+        rewrite_decisions=decisions,
+        rewrite_previews=previews,
+        auto_accept_inferred=auto_accept,
+    )
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -257,6 +333,48 @@ async def remove_saved_search(
     return {"ok": True}
 
 
+@router.get("/resume-library", response_model=list[ResumeArtifactLibraryEntry])
+async def list_resume_library(
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """List all saved resume artifacts for the user, newest first."""
+    rows = await list_resume_artifacts_for_user(db=db, user_id=user_id)
+
+    tailored_ids = {
+        artifact.tailored_resume_id for artifact, _ in rows if artifact.tailored_resume_id
+    }
+    tailored_by_id: dict = {}
+    if tailored_ids:
+        tr_result = await db.execute(
+            select(TailoredResume).where(TailoredResume.id.in_(tailored_ids))
+        )
+        tailored_by_id = {tr.id: tr for tr in tr_result.scalars().all()}
+
+    entries: list[ResumeArtifactLibraryEntry] = []
+    for artifact, job in rows:
+        decisions = artifact.rewrite_decisions or {}
+        pending = 0
+        tailored = tailored_by_id.get(artifact.tailored_resume_id) if artifact.tailored_resume_id else None
+        if tailored:
+            for rw in tailored.bullet_rewrites or []:
+                if (rw.get("change_type") or "") != "inferred_claim":
+                    continue
+                if decisions.get(rw.get("id")) in (None, "pending"):
+                    pending += 1
+        entries.append(ResumeArtifactLibraryEntry(
+            id=str(artifact.id),
+            job_id=str(artifact.job_id),
+            job_title=job.title,
+            company_name=job.company_name,
+            filename=artifact.filename,
+            generated_at=artifact.generated_at.isoformat(),
+            updated_at=artifact.updated_at.isoformat(),
+            pending_inferred_count=pending,
+        ))
+    return entries
+
+
 # --- Single Job & Mutations (path-param routes last) ---
 
 @router.get("/{job_id}", response_model=JobResponse)
@@ -270,6 +388,55 @@ async def get_single_job(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return _to_response(job)
+
+
+@router.get("/{job_id}/command-center", response_model=JobCommandCenterResponse)
+async def get_single_job_command_center(
+    job_id: str,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Return a compact command-center summary for a single saved job."""
+    summary = await get_job_command_center(db, user_id, uuid.UUID(job_id))
+    if not summary:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return JobCommandCenterResponse.model_validate(summary)
+
+
+@router.get("/{job_id}/research-snapshot", response_model=JobResearchSnapshotResponse | None)
+async def get_research_snapshot(
+    job_id: str,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Return the latest persisted people-search snapshot for a job, if any."""
+    from app.services.job_research_snapshot_service import (  # noqa: PLC0415
+        get_job_research_snapshot,
+        serialize_snapshot,
+    )
+
+    snapshot = await get_job_research_snapshot(db, user_id=user_id, job_id=uuid.UUID(job_id))
+    payload = serialize_snapshot(snapshot)
+    if not payload:
+        return None
+    return JobResearchSnapshotResponse.model_validate(payload)
+
+
+@router.delete("/{job_id}/research-snapshot")
+async def clear_research_snapshot(
+    job_id: str,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Discard the persisted people-search snapshot for a job."""
+    from app.services.job_research_snapshot_service import (  # noqa: PLC0415
+        delete_job_research_snapshot,
+    )
+
+    deleted = await delete_job_research_snapshot(
+        db, user_id=user_id, job_id=uuid.UUID(job_id)
+    )
+    return {"ok": True, "deleted": deleted}
 
 
 @router.post("/{job_id}/analyze-match", response_model=MatchAnalysisResponse)
@@ -436,6 +603,123 @@ async def get_tailored_resume(
         overall_strategy=tailored.overall_strategy or "",
         model=tailored.model,
         created_at=tailored.created_at.isoformat(),
+    )
+
+
+@router.post("/{job_id}/resume-artifact", response_model=ResumeArtifactResponse)
+@limiter.limit("5/minute")
+async def generate_resume_artifact(
+    request: Request,
+    job_id: str,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Generate or refresh a submission-ready tailored resume artifact for a job."""
+    try:
+        artifact = await generate_resume_artifact_for_job(
+            db=db,
+            user_id=user_id,
+            job_id=uuid.UUID(job_id),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return await _build_artifact_response(db, user_id=user_id, job_id=job_id, artifact=artifact)
+
+
+@router.get("/{job_id}/resume-artifact", response_model=ResumeArtifactResponse | None)
+async def get_resume_artifact(
+    job_id: str,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get the latest saved resume artifact for a job, if any."""
+    artifact = await get_resume_artifact_for_job(
+        db=db,
+        user_id=user_id,
+        job_id=uuid.UUID(job_id),
+    )
+    if not artifact:
+        return None
+
+    return await _build_artifact_response(db, user_id=user_id, job_id=job_id, artifact=artifact)
+
+
+@router.patch("/{job_id}/resume-artifact/decisions", response_model=ResumeArtifactResponse)
+@limiter.limit("15/minute")
+async def update_resume_artifact_decisions(
+    request: Request,
+    job_id: str,
+    body: ResumeArtifactDecisionsUpdate,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Accept or reject proposed bullet rewrites and re-render the artifact.
+
+    Decisions map rewrite_id -> "accepted" | "rejected" | "pending".
+    Decisions for "keyword" and "reframe" rewrites are always applied; only
+    "inferred_claim" rewrites require explicit acceptance (or an auto-accept
+    profile flag) before they are rendered into the final PDF.
+    """
+    valid = {"accepted", "rejected", "pending"}
+    decisions = {
+        str(k): v.lower()
+        for k, v in (body.decisions or {}).items()
+        if isinstance(v, str) and v.lower() in valid
+    }
+
+    existing = await get_resume_artifact_for_job(
+        db=db,
+        user_id=user_id,
+        job_id=uuid.UUID(job_id),
+    )
+    if existing is not None:
+        merged = dict(existing.rewrite_decisions or {})
+        merged.update(decisions)
+    else:
+        merged = decisions
+
+    try:
+        artifact = await generate_resume_artifact_for_job(
+            db=db,
+            user_id=user_id,
+            job_id=uuid.UUID(job_id),
+            rewrite_decisions=merged,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return await _build_artifact_response(db, user_id=user_id, job_id=job_id, artifact=artifact)
+
+
+@router.get("/{job_id}/resume-artifact/pdf")
+async def download_resume_artifact_pdf(
+    job_id: str,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Render the saved resume artifact as a downloadable PDF."""
+    artifact = await get_resume_artifact_for_job(
+        db=db,
+        user_id=user_id,
+        job_id=uuid.UUID(job_id),
+    )
+    if not artifact:
+        artifact = await generate_resume_artifact_for_job(
+            db=db,
+            user_id=user_id,
+            job_id=uuid.UUID(job_id),
+        )
+
+    pdf_bytes = render_resume_artifact_pdf(artifact.content)
+    pdf_filename = artifact.filename.rsplit(".", 1)[0] + ".pdf"
+
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{pdf_filename}"',
+        },
     )
 
 

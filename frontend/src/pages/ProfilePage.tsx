@@ -9,12 +9,13 @@ import { Progress } from '@/components/ui/progress';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Separator } from '@/components/ui/separator';
 import { useProfile, useUpdateProfile, useUploadResume, getProfileCompletion } from '@/hooks/useProfile';
+import { useStories, useCreateStory, useUpdateStory, useDeleteStory } from '@/hooks/useStories';
 import { toast } from 'sonner';
-import type { Profile } from '@/types';
+import type { Profile, Story, StoryInput } from '@/types';
 
 const GOALS = ['job', 'mentor', 'network'] as const;
 const TONES = ['formal', 'conversational', 'humble'] as const;
-const STEPS = ['Basics', 'Goals & Targets', 'Resume', 'Links'] as const;
+const STEPS = ['Basics', 'Goals & Targets', 'Resume', 'Links', 'Stories'] as const;
 
 type FormData = {
   full_name: string;
@@ -423,6 +424,9 @@ export function ProfilePage() {
         </Card>
       )}
 
+      {/* Step 4: Stories */}
+      {step === 4 && <StoryBankSection />}
+
       {/* Navigation + Save */}
       <div className="flex items-center justify-between">
         <Button
@@ -501,5 +505,292 @@ function TagField({
         </div>
       )}
     </div>
+  );
+}
+
+const EMPTY_STORY: StoryInput = {
+  title: '',
+  summary: '',
+  situation: '',
+  action: '',
+  result: '',
+  impact_metric: '',
+  role_focus: '',
+  tags: [],
+};
+
+function StoryBankSection() {
+  const { data: stories = [], isLoading } = useStories();
+  const createStory = useCreateStory();
+  const updateStory = useUpdateStory();
+  const deleteStory = useDeleteStory();
+
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<StoryInput>(EMPTY_STORY);
+  const [tagInput, setTagInput] = useState('');
+  const [showForm, setShowForm] = useState(false);
+
+  const startCreate = () => {
+    setEditingId(null);
+    setDraft(EMPTY_STORY);
+    setTagInput('');
+    setShowForm(true);
+  };
+
+  const startEdit = (story: Story) => {
+    setEditingId(story.id);
+    setDraft({
+      title: story.title,
+      summary: story.summary ?? '',
+      situation: story.situation ?? '',
+      action: story.action ?? '',
+      result: story.result ?? '',
+      impact_metric: story.impact_metric ?? '',
+      role_focus: story.role_focus ?? '',
+      tags: story.tags ?? [],
+    });
+    setTagInput('');
+    setShowForm(true);
+  };
+
+  const cancel = () => {
+    setShowForm(false);
+    setEditingId(null);
+    setDraft(EMPTY_STORY);
+    setTagInput('');
+  };
+
+  const addTagToDraft = () => {
+    const v = tagInput.trim().toLowerCase();
+    if (!v) return;
+    if ((draft.tags ?? []).includes(v)) {
+      setTagInput('');
+      return;
+    }
+    setDraft((prev) => ({ ...prev, tags: [...(prev.tags ?? []), v] }));
+    setTagInput('');
+  };
+
+  const removeTagFromDraft = (tag: string) => {
+    setDraft((prev) => ({ ...prev, tags: (prev.tags ?? []).filter((t) => t !== tag) }));
+  };
+
+  const save = async () => {
+    if (!draft.title.trim()) {
+      toast.error('Title required');
+      return;
+    }
+    try {
+      if (editingId) {
+        await updateStory.mutateAsync({ id: editingId, payload: draft });
+        toast.success('Story updated');
+      } else {
+        await createStory.mutateAsync(draft);
+        toast.success('Story added');
+      }
+      cancel();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save');
+    }
+  };
+
+  const remove = async (id: string) => {
+    if (!confirm('Delete this story?')) return;
+    try {
+      await deleteStory.mutateAsync(id);
+      toast.success('Story deleted');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete');
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <CardTitle>Story Bank</CardTitle>
+            <CardDescription>
+              Reusable proof points the AI can weave into outreach drafts. Use STAR (Situation, Action, Result) and add tags for the contexts they fit.
+            </CardDescription>
+          </div>
+          {!showForm && (
+            <Button size="sm" onClick={startCreate}>
+              Add Story
+            </Button>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {showForm && (
+          <div className="rounded-lg border p-4 space-y-3 bg-muted/30">
+            <div className="space-y-2">
+              <Label htmlFor="story-title">Title</Label>
+              <Input
+                id="story-title"
+                placeholder="e.g. Cut deploy time 40% via CI rewrite"
+                value={draft.title}
+                onChange={(e) => setDraft((p) => ({ ...p, title: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="story-summary">Summary</Label>
+              <Textarea
+                id="story-summary"
+                rows={2}
+                placeholder="One-sentence pitch of the story."
+                value={draft.summary ?? ''}
+                onChange={(e) => setDraft((p) => ({ ...p, summary: e.target.value }))}
+              />
+            </div>
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+              <div className="space-y-2">
+                <Label htmlFor="story-situation">Situation</Label>
+                <Textarea
+                  id="story-situation"
+                  rows={3}
+                  value={draft.situation ?? ''}
+                  onChange={(e) => setDraft((p) => ({ ...p, situation: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="story-action">Action</Label>
+                <Textarea
+                  id="story-action"
+                  rows={3}
+                  value={draft.action ?? ''}
+                  onChange={(e) => setDraft((p) => ({ ...p, action: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="story-result">Result</Label>
+                <Textarea
+                  id="story-result"
+                  rows={3}
+                  value={draft.result ?? ''}
+                  onChange={(e) => setDraft((p) => ({ ...p, result: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="story-metric">Impact Metric</Label>
+                <Input
+                  id="story-metric"
+                  placeholder="e.g. 40% faster, $250k saved, 3x throughput"
+                  value={draft.impact_metric ?? ''}
+                  onChange={(e) => setDraft((p) => ({ ...p, impact_metric: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="story-role">Role Focus</Label>
+                <Input
+                  id="story-role"
+                  placeholder="e.g. Backend, Platform, Staff Engineer"
+                  value={draft.role_focus ?? ''}
+                  onChange={(e) => setDraft((p) => ({ ...p, role_focus: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Tags</Label>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="e.g. leadership, migration, startup"
+                  value={tagInput}
+                  onChange={(e) => setTagInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      addTagToDraft();
+                    }
+                  }}
+                />
+                <Button variant="outline" size="sm" onClick={addTagToDraft} type="button">
+                  Add
+                </Button>
+              </div>
+              {(draft.tags ?? []).length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {(draft.tags ?? []).map((tag) => (
+                    <Badge
+                      key={tag}
+                      variant="secondary"
+                      className="cursor-pointer"
+                      onClick={() => removeTagFromDraft(tag)}
+                    >
+                      {tag} &times;
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={cancel}>
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={save}
+                disabled={createStory.isPending || updateStory.isPending}
+              >
+                {editingId ? 'Update Story' : 'Save Story'}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading stories...</p>
+        ) : stories.length === 0 && !showForm ? (
+          <p className="text-sm text-muted-foreground">
+            No stories yet. Add a few proof points and the AI will pull from them when drafting messages.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {stories.map((story) => (
+              <div key={story.id} className="rounded-lg border p-3 space-y-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="font-medium">{story.title}</div>
+                    {story.role_focus && (
+                      <div className="text-xs text-muted-foreground">{story.role_focus}</div>
+                    )}
+                  </div>
+                  <div className="flex gap-2 shrink-0">
+                    <Button variant="outline" size="sm" onClick={() => startEdit(story)}>
+                      Edit
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => remove(story.id)}
+                      disabled={deleteStory.isPending}
+                    >
+                      Delete
+                    </Button>
+                  </div>
+                </div>
+                {story.summary && <p className="text-sm">{story.summary}</p>}
+                {story.impact_metric && (
+                  <div className="text-xs text-muted-foreground">
+                    Impact: {story.impact_metric}
+                  </div>
+                )}
+                {story.tags.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {story.tags.map((tag) => (
+                      <Badge key={tag} variant="outline" className="text-xs">
+                        {tag}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

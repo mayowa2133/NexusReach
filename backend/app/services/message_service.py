@@ -17,8 +17,10 @@ from app.models.outreach import OutreachLog
 from app.models.person import Person
 from app.models.profile import Profile
 from app.models.settings import UserSettings
+from app.models.story import Story
 from app.services import api_usage_service, linkedin_graph_service
 from app.services.email_finder_service import find_email_for_person
+from app.services.story_service import find_relevant_stories
 from app.utils.job_context import extract_job_context
 
 
@@ -395,6 +397,41 @@ def _build_warm_path_context(warm_path: dict | None) -> str:
     return "\n".join(lines)
 
 
+def _build_story_context(stories: list[Story]) -> str:
+    """Format proof-point stories as optional drafting context.
+
+    Stays opt-in for the LLM — instructions tell it to only weave in a story
+    when one fits naturally and never to fabricate beyond what is written.
+    """
+    if not stories:
+        return ""
+
+    lines = [
+        "STORY BANK (the user's own proof points — use AT MOST ONE if it genuinely fits, never invent details beyond what is written):",
+    ]
+    for story in stories:
+        header = f"- {story.title}"
+        if story.role_focus:
+            header += f" [{story.role_focus}]"
+        if story.tags:
+            header += f" tags: {', '.join(story.tags)}"
+        lines.append(header)
+        if story.summary:
+            lines.append(f"  summary: {story.summary}")
+        body_parts = []
+        if story.situation:
+            body_parts.append(f"S: {story.situation}")
+        if story.action:
+            body_parts.append(f"A: {story.action}")
+        if story.result:
+            body_parts.append(f"R: {story.result}")
+        if body_parts:
+            lines.append("  " + " | ".join(body_parts))
+        if story.impact_metric:
+            lines.append(f"  impact: {story.impact_metric}")
+    return "\n".join(lines)
+
+
 async def _load_guardrails(db: AsyncSession, user_id: uuid.UUID) -> tuple[bool, int]:
     result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
     settings = result.scalar_one_or_none()
@@ -680,6 +717,24 @@ async def draft_message(
     )
     warm_path_context = _build_warm_path_context(warm_path)
 
+    story_tags: list[str] = [recipient_strategy]
+    if job_context_snapshot:
+        for key in ("team_keywords", "domain_keywords"):
+            vals = job_context_snapshot.get(key) or []
+            story_tags.extend(v for v in vals if isinstance(v, str))
+        seniority = job_context_snapshot.get("seniority")
+        if seniority:
+            story_tags.append(seniority)
+    role_focus = job.title if job else None
+    relevant_stories = await find_relevant_stories(
+        db,
+        user_id=user_id,
+        role_focus=role_focus,
+        tags=story_tags,
+        limit=3,
+    )
+    story_context = _build_story_context(relevant_stories)
+
     user_prompt_sections = [
         f"Draft a {channel.replace('_', ' ')} message.",
         "",
@@ -707,6 +762,9 @@ async def draft_message(
 
     if warm_path_context:
         user_prompt_sections.extend(["", warm_path_context])
+
+    if story_context:
+        user_prompt_sections.extend(["", story_context])
 
     if history_context:
         user_prompt_sections.extend(["", history_context])
@@ -759,6 +817,7 @@ async def draft_message(
             "job_context": job_context_snapshot,
             "strategy_hint": strategy_hint,
             "warm_path": warm_path,
+            "story_ids": [str(s.id) for s in relevant_stories],
         },
         status="draft",
         version=version,

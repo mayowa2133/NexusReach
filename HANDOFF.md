@@ -236,7 +236,82 @@ The most recent targeted passes also covered:
     - a16z Speedrun returned real startup companies
     - Wellfound returned live `403` and failed soft to zero jobs
 
+## Resume artifact generation (#5) — current strategy
+
+The job-specific resume artifact pipeline lives in
+`backend/app/services/resume_artifact_service.py` and follows three layered
+phases that each solve a distinct problem:
+
+1. **Recover the source resume.** `_extract_resume_data` re-parses
+   `profile.resume_raw` and merges with the cached `profile.resume_parsed`,
+   preserving experience/project bullets, locations, certificates, contact
+   info, project link labels, and skills.
+2. **Tailor for the job.** `tailor_resume` (`resume_tailor.py`) returns
+   skills to emphasize, missing ATS keywords, and bullet rewrites. Rewrites
+   are filtered through `_should_use_rewrite` so any rewrite that loses an
+   original metric or shrinks below 65% of the source length is rejected.
+3. **Plan + render deterministically.** `_build_resume_artifact_plan` asks
+   the LLM for a layout plan but always falls back to the deterministic
+   `_default_artifact_plan` and `_expand_plan_to_fill_page`. For
+   frontend/fullstack roles the shape is pinned at 3/3/3 experience and
+   3/2/2 projects, plus a Relevant skills line. The renderer compiles to
+   LaTeX and `pdflatex` produces the PDF.
+
+### Failure modes the current implementation guards against
+
+- **Project links disappearing.** `_derive_project_url` reconstructs
+  `https://github.com/<user>/<repo>` from any of: an explicit project URL,
+  `profile.github_url`, or the GitHub URL parsed out of the resume contact
+  block. The resume upload route now also auto-populates
+  `profile.github_url` and `profile.linkedin_url` from the parsed contact
+  the first time a user uploads, so the artifact does not depend on the
+  user separately editing the profile.
+- **Bullets silently dropped.** The render-time fallback when the LLM
+  plan is missing or sparse no longer collapses to 2/2/1 — it now uses the
+  same `_preferred_bullet_indices` calculation as the deterministic
+  planner, which gives 3/3/3 + 3/2/2 for fullstack roles. Rewrites that
+  fail the metric/length check fall back to the original bullet rather
+  than dropping it.
+- **Trailing whitespace on the page.** `_layout_profile` grows the font
+  and line spread aggressively for sparse content (down to ~9 bullets) and
+  shrinks for dense content (up to ~24), so the artifact fills US Letter
+  without an empty band at the bottom and without overflowing to a second
+  page.
+- **Generic phrasing for fullstack JDs.** The tailor system prompt now
+  requires at least one experience and one project rewrite per fullstack
+  JD, surfaces personalization / experimentation / accessibility / WCAG
+  keywords when the JD mentions them, and forbids `section_suggestions`
+  that recommend dropping concrete content (links, dates, metrics).
+
+### Verification
+
+- `pytest tests/test_resume_artifact_service.py` covers: project URL
+  recovery from contact URLs, the deterministic 3/3/3 + 3/2/2 shape,
+  sparse-plan bullet expansion, and the density-vs-font monotonicity that
+  prevents trailing whitespace.
+- A reusable end-to-end smoke (LaTeX -> `pdflatex` -> single-page PDF) is
+  documented at `/tmp/nexusreach-resume-smoke/smoke.py` for manual reruns
+  against new sample JDs.
+
+### Known follow-ups
+
+- The plan layer currently picks bullet selection but does not iterate
+  with `pdflatex` to verify single-page fit. If a JD-specific rewrite ever
+  pushes content past one page, we drop bullets only via the upfront
+  budget — there is no compile-and-retry loop yet.
+- The plan does not yet thread imported LinkedIn graph context into the
+  bullet rewrites; warm-path information stays in people search for now.
+
 ## Suggested next product-level improvements
+
+The active product roadmap created from the Career-Ops comparison now lives in:
+- `COMPETITIVE_ROADMAP.md`
+
+Keep that file updated when:
+- a workstream starts
+- scope or priority changes
+- a milestone ships
+- a later agent takes over and needs current roadmap state
 
 1. Decide on the production-grade Wellfound path: stronger browser retrieval, sanctioned feed, or removal from the v1 source list.
 2. Decide whether startup sources should remain manual-only or join saved-search/hourly refresh behavior.

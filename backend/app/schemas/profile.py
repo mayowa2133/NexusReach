@@ -15,6 +15,7 @@ class ProfileResponse(BaseModel):
     github_url: str | None
     portfolio_url: str | None
     resume_parsed: dict | None
+    resume_auto_accept_inferred: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -50,3 +51,4 @@ class ProfileUpdate(BaseModel):
     linkedin_url: str | None = None
     github_url: str | None = None
     portfolio_url: str | None = None
+    resume_auto_accept_inferred: bool | None = None

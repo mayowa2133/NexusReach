@@ -28,6 +28,7 @@ from app.services.people_service import (
     get_search_history,
 )
 from app.services.employment_verification_service import verify_current_company_for_person
+from app.services.job_research_snapshot_service import save_job_research_snapshot
 
 router = APIRouter(prefix="/people", tags=["people"])
 
@@ -148,7 +149,24 @@ async def search_people(
             )
         except ValueError:
             raise HTTPException(status_code=404, detail="Job not found")
-        return _serialize_people_search_result(result)
+        response = _serialize_people_search_result(result)
+        try:
+            await save_job_research_snapshot(
+                db,
+                user_id=user_id,
+                job_id=job_uuid,
+                company_name=body.company_name,
+                target_count_per_bucket=body.target_count_per_bucket,
+                recruiters=[r.model_dump(mode="json") for r in response.recruiters],
+                hiring_managers=[m.model_dump(mode="json") for m in response.hiring_managers],
+                peers=[p.model_dump(mode="json") for p in response.peers],
+                your_connections=[c.model_dump(mode="json") for c in response.your_connections],
+                errors=[e.model_dump(mode="json") for e in (response.errors or [])] or None,
+            )
+        except Exception:
+            # Snapshot persistence is best-effort — never block search on it.
+            pass
+        return response
 
     result = await search_people_at_company(
         db=db,

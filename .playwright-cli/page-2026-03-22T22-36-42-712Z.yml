@@ -1,0 +1,62 @@
+- generic [ref=e2]:
+  - generic [ref=e6]:
+    - banner [ref=e7]:
+      - generic [ref=e8]:
+        - link "NexusReach" [ref=e9] [cursor=pointer]:
+          - /url: /dashboard
+        - navigation [ref=e10]:
+          - link "Dashboard" [ref=e11] [cursor=pointer]:
+            - /url: /dashboard
+          - link "Jobs" [ref=e12] [cursor=pointer]:
+            - /url: /jobs
+          - link "People" [ref=e13] [cursor=pointer]:
+            - /url: /people
+          - link "Messages" [ref=e14] [cursor=pointer]:
+            - /url: /messages
+          - link "Outreach" [ref=e15] [cursor=pointer]:
+            - /url: /outreach
+        - generic [ref=e16]:
+          - button [ref=e17]:
+            - img [ref=e18]
+          - button "DE" [ref=e21]:
+            - generic [ref=e23]: DE
+    - main [ref=e24]:
+      - generic [ref=e7696]:
+        - generic [ref=e7697]:
+          - heading "People" [level=1] [ref=e7698]
+          - paragraph [ref=e7699]: Find the right people at your target companies.
+        - generic [ref=e7700]:
+          - generic [ref=e7701]: "Finding people for: Software Engineer I, Monetization ML at twitch"
+          - paragraph [ref=e7702]: Searching for team-relevant recruiters, managers, and peers…
+        - generic [ref=e7703]:
+          - generic [ref=e7704]:
+            - generic [ref=e7705]:
+              - generic [ref=e7706]: Search by Company
+              - generic [ref=e7707]: Find recruiters, managers, and peers.
+            - generic [ref=e7709]:
+              - generic [ref=e7710]:
+                - generic [ref=e7711]: Company Name
+                - textbox "Company Name" [ref=e7712]:
+                  - /placeholder: e.g. Shopify, Stripe, Google
+                  - text: twitch
+              - generic [ref=e7713]:
+                - generic [ref=e7714]: GitHub Organization (optional)
+                - textbox "GitHub Organization (optional)" [ref=e7715]:
+                  - /placeholder: e.g. vercel, stripe
+                - paragraph [ref=e7716]: Find engineers via their public GitHub contributions.
+              - generic [ref=e7717]:
+                - generic [ref=e7718]: Contacts per category
+                - spinbutton "Contacts per category" [ref=e7719]: "3"
+                - paragraph [ref=e7720]: Choose how many recruiters, hiring managers, and peers to try to return per search.
+              - button "Searching..." [disabled]
+          - generic [ref=e7721]:
+            - generic [ref=e7722]:
+              - generic [ref=e7723]: Add by LinkedIn URL
+              - generic [ref=e7724]: Paste a LinkedIn profile to enrich it.
+            - generic [ref=e7726]:
+              - generic [ref=e7727]:
+                - generic [ref=e7728]: LinkedIn Profile URL
+                - textbox "LinkedIn Profile URL" [ref=e7729]:
+                  - /placeholder: https://linkedin.com/in/someone
+              - button "Add Person" [ref=e7730]
+  - region "Notifications alt+T"

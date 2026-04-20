@@ -89,6 +89,35 @@ class ApiClient {
     return this.request<T>(path);
   }
 
+  async getBlob(path: string): Promise<Blob> {
+    const token = await getAccessToken();
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      method: 'GET',
+      headers,
+    });
+
+    if (response.status === 401) {
+      useAuthStore.getState().signOut().catch(() => {});
+      throw new Error('Session expired. Please sign in again.');
+    }
+
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => null);
+      const message =
+        errorBody?.error?.message ||
+        errorBody?.detail ||
+        `HTTP ${response.status}`;
+      throw new Error(message);
+    }
+
+    return response.blob();
+  }
+
   post<T>(path: string, data?: unknown) {
     return this.request<T>(path, {
       method: 'POST',
@@ -106,6 +135,13 @@ class ApiClient {
   put<T>(path: string, data?: unknown) {
     return this.request<T>(path, {
       method: 'PUT',
+      body: data ? JSON.stringify(data) : undefined,
+    });
+  }
+
+  patch<T>(path: string, data?: unknown) {
+    return this.request<T>(path, {
+      method: 'PATCH',
       body: data ? JSON.stringify(data) : undefined,
     });
   }

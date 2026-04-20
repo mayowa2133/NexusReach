@@ -1,0 +1,67 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - banner [ref=e4]:
+      - generic [ref=e5]:
+        - link "NexusReach" [ref=e6] [cursor=pointer]:
+          - /url: /dashboard
+        - navigation [ref=e7]:
+          - link "Dashboard" [ref=e8] [cursor=pointer]:
+            - /url: /dashboard
+          - link "Jobs" [ref=e9] [cursor=pointer]:
+            - /url: /jobs
+          - link "People" [ref=e10] [cursor=pointer]:
+            - /url: /people
+          - link "Messages" [ref=e11] [cursor=pointer]:
+            - /url: /messages
+          - link "Outreach" [ref=e12] [cursor=pointer]:
+            - /url: /outreach
+        - generic [ref=e13]:
+          - button [ref=e14]:
+            - img [ref=e15]
+          - button "DE" [ref=e18]:
+            - generic [ref=e20]: DE
+    - main [ref=e21]:
+      - generic [ref=e22]:
+        - generic [ref=e23]:
+          - heading "Jobs" [level=1] [ref=e24]
+          - paragraph [ref=e25]: Discover opportunities across multiple sources, scored against your profile.
+        - generic [ref=e26]:
+          - generic [ref=e27]:
+            - generic [ref=e28]:
+              - generic [ref=e29]: Search Jobs
+              - generic [ref=e30]: Search across JSearch, Adzuna, Remotive, and more.
+            - generic [ref=e32]:
+              - generic [ref=e33]:
+                - generic [ref=e34]: Job Title or Keyword
+                - textbox "Job Title or Keyword" [ref=e35]:
+                  - /placeholder: e.g. Software Engineer, Frontend Developer
+              - generic [ref=e36]:
+                - generic [ref=e37]: Location (optional)
+                - textbox "Location (optional)" [ref=e38]:
+                  - /placeholder: e.g. New York, NY or Remote
+              - generic [ref=e39]:
+                - checkbox "Remote only" [ref=e40]
+                - checkbox [ref=e41]
+                - generic [ref=e42]: Remote only
+              - button "Search Jobs" [ref=e43]
+          - generic [ref=e44]:
+            - generic [ref=e45]:
+              - generic [ref=e46]: Search Company Career Page
+              - generic [ref=e47]: Paste a job posting URL from Apple Jobs, Greenhouse, Lever, Ashby, Workable, Workday, or a similar careers page, or enter a supported board ID.
+            - generic [ref=e49]:
+              - generic [ref=e50]:
+                - generic [ref=e51]: Board ID or Job Posting URL
+                - textbox "Board ID or Job Posting URL" [ref=e52]:
+                  - /placeholder: e.g. stripe or https://jobs.apple.com/en-us/details/...
+                - paragraph [ref=e53]: Full job links auto-detect the platform and exact posting. Board IDs still use the selected platform.
+              - generic [ref=e54]:
+                - generic [ref=e55]: ATS Platform
+                - combobox "ATS Platform" [ref=e56]:
+                  - option "Greenhouse" [selected]
+                  - option "Lever"
+                  - option "Ashby"
+              - button "Search Career Page" [ref=e57]
+        - generic [ref=e58]:
+          - paragraph [ref=e61]: Search for jobs above to get started.
+          - paragraph [ref=e64]: Select a job to view details.
+  - region "Notifications alt+T"

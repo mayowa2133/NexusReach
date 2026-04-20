@@ -107,6 +107,10 @@ NexusReach already has a working end-to-end loop:
 ## Current priorities
 
 ### P1
+- [ ] Execute the competitive roadmap in `COMPETITIVE_ROADMAP.md`, starting with:
+  - Job Command Center
+  - Story Bank / proof-point memory
+  - Next-action and follow-up cadence engine
 - [ ] Decide on the production-grade Wellfound path: stronger browser retrieval, sanctioned feed, or removal from the v1 source list
 - [ ] Decide whether startup sources should remain manual-only or join saved-search/hourly refresh behavior
 - [ ] Harden LinkedIn browser sync against more LinkedIn DOM variants and security-challenge flows
