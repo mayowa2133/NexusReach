@@ -91,6 +91,20 @@ export function ResumeArtifactReview({ jobId, artifact }: Props) {
     }
   };
 
+  const acceptAll = async () => {
+    const all: Record<string, ResumeRewriteDecision> = {};
+    for (const p of previews) {
+      all[p.id] = 'accepted';
+    }
+    try {
+      await update.mutateAsync({ jobId, decisions: all });
+      setPending({});
+      toast.success('All rewrites accepted — PDF regenerated');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to accept all');
+    }
+  };
+
   const handleDownloadPdf = async () => {
     try {
       await downloadPdf.mutateAsync({
@@ -130,7 +144,22 @@ export function ResumeArtifactReview({ jobId, artifact }: Props) {
       <CardContent className="pt-4 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <div className="text-sm font-medium">Review AI Rewrites</div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium">Review AI Rewrites</span>
+              {artifact.body_ats_score != null && (
+                <Badge
+                  className={`text-[11px] ${
+                    artifact.body_ats_score >= 75
+                      ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                      : artifact.body_ats_score >= 50
+                      ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300'
+                      : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
+                  }`}
+                >
+                  ATS {artifact.body_ats_score.toFixed(0)}%
+                </Badge>
+              )}
+            </div>
             <p className="text-xs text-muted-foreground">
               The AI proposes wording changes to match the job. Inferred claims
               (highlighted) assert capabilities not explicit in your resume —
@@ -147,6 +176,14 @@ export function ResumeArtifactReview({ jobId, artifact }: Props) {
             <Badge variant="outline" className="text-[11px]">
               {inferredPending} inferred pending
             </Badge>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={acceptAll}
+              disabled={update.isPending}
+            >
+              Accept All
+            </Button>
             <Button size="sm" onClick={applyChanges} disabled={!dirty || update.isPending}>
               {update.isPending ? 'Applying...' : 'Apply & Regenerate PDF'}
             </Button>

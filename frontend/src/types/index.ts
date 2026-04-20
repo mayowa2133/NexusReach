@@ -481,6 +481,7 @@ export interface ResumeArtifact {
   rewrite_decisions?: Record<string, ResumeRewriteDecision>;
   rewrite_previews?: ResumeBulletRewritePreview[];
   auto_accept_inferred?: boolean;
+  body_ats_score?: number | null;
 }
 
 export interface JobCommandCenterChecklist {

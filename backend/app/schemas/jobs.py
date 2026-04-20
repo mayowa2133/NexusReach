@@ -278,6 +278,7 @@ class ResumeArtifactResponse(BaseModel):
     rewrite_decisions: dict[str, str] = {}
     rewrite_previews: list[ResumeBulletRewritePreview] = []
     auto_accept_inferred: bool = False
+    body_ats_score: float | None = None
 
 
 class ResumeArtifactDecisionsUpdate(BaseModel):

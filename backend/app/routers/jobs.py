@@ -49,6 +49,7 @@ from app.services.search_preference_service import (
     delete_search_preference,
 )
 from app.tasks.jobs import refresh_user_feeds
+from app.services.resume_tailor import extract_jd_must_surface
 from app.services.resume_artifact_service import (
     generate_resume_artifact_for_job,
     get_resume_artifact_for_job,
@@ -60,6 +61,22 @@ from app.models.resume_artifact import ResumeArtifact
 from app.models.tailored_resume import TailoredResume
 
 
+import re as _re
+
+
+def _compute_body_ats_score(tex: str, job_description: str) -> float | None:
+    if not tex or not job_description:
+        return None
+    jd = extract_jd_must_surface(job_description)
+    terms = jd.get("must_surface") or []
+    if not terms:
+        return None
+    parts = _re.split(r"\\subsection\*\{Technical Skills\}", tex, maxsplit=1)
+    body = parts[0].lower()
+    hits = sum(1 for t in terms if t.lower() in body)
+    return round(100.0 * hits / len(terms), 1)
+
+
 async def _build_artifact_response(
     db: AsyncSession,
     *,
@@ -67,6 +84,7 @@ async def _build_artifact_response(
     job_id: str,
     artifact: ResumeArtifact,
 ) -> ResumeArtifactResponse:
+    from app.models.job import Job as _Job
     decisions = dict(artifact.rewrite_decisions or {})
     rewrites: list[dict] = []
     if artifact.tailored_resume_id:
@@ -102,6 +120,14 @@ async def _build_artifact_response(
     profile = profile_result.scalar_one_or_none()
     auto_accept = bool(profile.resume_auto_accept_inferred) if profile else False
 
+    job_result = await db.execute(
+        select(_Job).where(_Job.id == artifact.job_id, _Job.user_id == user_id)
+    )
+    job = job_result.scalar_one_or_none()
+    body_ats_score = _compute_body_ats_score(
+        artifact.content or "", job.description or "" if job else ""
+    )
+
     return ResumeArtifactResponse(
         id=str(artifact.id),
         job_id=job_id,
@@ -115,6 +141,7 @@ async def _build_artifact_response(
         rewrite_decisions=decisions,
         rewrite_previews=previews,
         auto_accept_inferred=auto_accept,
+        body_ats_score=body_ats_score,
     )
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
