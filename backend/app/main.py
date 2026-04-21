@@ -32,6 +32,7 @@ from app.routers import (
     stories,
     cadence,
     interview_prep,
+    triage,
 )
 
 logger = logging.getLogger(__name__)
@@ -83,6 +84,7 @@ app.include_router(known_people.router, prefix="/api")
 app.include_router(stories.router, prefix="/api")
 app.include_router(cadence.router, prefix="/api")
 app.include_router(interview_prep.router, prefix="/api")
+app.include_router(triage.router, prefix="/api")
 
 
 @app.get("/api/health")

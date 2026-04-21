@@ -979,3 +979,50 @@ export interface InsightsDashboard {
   api_usage_by_service: ApiUsageByService[];
   graph_warm_paths: GraphWarmPathCompany[];
 }
+
+// ---------------------------------------------------------------------------
+// Triage / Networking ROI
+// ---------------------------------------------------------------------------
+
+export type TriageTier = 'high' | 'medium' | 'low' | 'skip';
+
+export interface TriageDimensions {
+  job_fit: number;
+  contactability: number;
+  warm_path: number;
+  outreach_opportunity: number;
+  stage_momentum: number;
+}
+
+export interface TriageJobSummary {
+  id: string;
+  title: string | null;
+  company_name: string | null;
+  stage: string;
+  match_score: number | null;
+  starred: boolean;
+  tags: string[] | null;
+  applied_at: string | null;
+  url: string | null;
+}
+
+export interface TriageResult {
+  job: TriageJobSummary;
+  roi_score: number;
+  roi_tier: TriageTier;
+  dimensions: TriageDimensions;
+  recommended_action: string;
+  verified_contacts: number;
+  warm_path_contacts: number;
+  outreach_sent: number;
+  has_active_conversation: boolean;
+}
+
+export interface TriageResponse {
+  items: TriageResult[];
+  total: number;
+  high_count: number;
+  medium_count: number;
+  low_count: number;
+  skip_count: number;
+}

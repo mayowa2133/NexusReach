@@ -23,6 +23,7 @@ const navItems = [
   { path: '/people', label: 'People' },
   { path: '/messages', label: 'Messages' },
   { path: '/outreach', label: 'Outreach' },
+  { path: '/triage', label: 'Triage' },
   { path: '/find-email', label: 'Find Email' },
   { path: '/resume-library', label: 'Resumes' },
 ];
