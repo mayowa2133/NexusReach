@@ -17,6 +17,7 @@ from app.clients import (
     apple_client,
     ats_client,
     conviction_jobs_client,
+    curated_startups_client,
     google_client,
     jsearch_client,
     lever_scrape_client,
@@ -1624,6 +1625,20 @@ async def _discover_startup_ecosystems(
         )
     except Exception:
         logger.exception("a16z Speedrun startup discover failed")
+
+    try:
+        curated_entries = curated_startups_client.get_curated_startups()
+        total_new += await _discover_startup_ecosystem_entries(
+            db,
+            user_id,
+            profile,
+            entries=curated_entries,
+            url_key="career_url",
+            startup_source="curated_list",
+            queries=queries,
+        )
+    except Exception:
+        logger.exception("Curated startups list discover failed")
 
     return total_new
 

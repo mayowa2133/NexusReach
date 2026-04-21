@@ -8,6 +8,7 @@ const STARTUP_SOURCE_LABELS: Record<string, string> = {
   ventureloop: 'VentureLoop',
   conviction: 'Conviction',
   a16z_speedrun: 'a16z Speedrun',
+  curated_list: 'Curated Startups',
 };
 
 export function isStartupJob(job: Pick<Job, 'tags'> | null | undefined): boolean {
