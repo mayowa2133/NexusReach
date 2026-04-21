@@ -1,6 +1,6 @@
 # NexusReach — Competitive Roadmap
 
-Last updated: 2026-04-19 (resume artifact fullstack targeting pass)
+Last updated: 2026-04-21 (cadence engine + interview prep slice 2 shipped; CI fixes)
 Reference comparison: `career-ops` (`santifer/career-ops`)
 
 This file is the living roadmap for product improvements identified by comparing NexusReach against strong adjacent products. It is meant to survive agent handoffs and be updated as work progresses.
@@ -165,7 +165,7 @@ This roadmap turns those findings into sequenced product work.
 
 ### 3. Next-Action and Follow-Up Cadence Engine
 
-- Status: `in_progress`
+- Status: `shipped`
 - Priority: `now`
 - Owner: `active thread`
 - Goal:
@@ -216,10 +216,12 @@ This roadmap turns those findings into sequenced product work.
     - frontend: `NextAction`/`NextActionList` types, `useNextActions` hook, new `ActNowCard` on Dashboard (urgency badge, kind label, age, suggested channel/goal, "Open" deep link)
     - backend tests: `test_cadence_service.py` covering each rule's fire + skip cases (16 unit tests)
     - verified live end-to-end: seeded applied-untouched job, `/api/cadence/next-actions` returned action, Dashboard Act Now rendered "LOW Applied, no outreach · 10 days ago · Suggest: email · referral" with deep link
+- Progress notes (continued):
+  - 2026-04-21: Second slice shipped. `OutreachCadencePanel` on Outreach page shows reply_needed / awaiting_reply / draft_unsent / thank_you_due / applied_untouched actions with urgency badges and "Draft follow-up" CTA per action.
+  - 2026-04-21: Third slice shipped. Cadence thresholds now configurable per user via `UserSettings` DB columns (Alembic 036). `GET/PUT /settings/cadence` endpoints. `CadenceSettingsPanel` with per-field inline Save on Settings page. `useCadenceSettings` + `useUpdateCadenceSettings` hooks.
+  - 2026-04-21: Fourth slice shipped. Weekly cadence digest email via Celery beat (Monday 09:00 UTC). `cadence_digest_service` computes next actions per user, renders urgency-grouped HTML + plain text, sends via connected Gmail or Outlook. `cadence_digest_enabled` toggle in Settings. Alembic 037 adds `cadence_digest_enabled` (default true) + `cadence_digest_last_sent_at`. 6-day guard prevents duplicate fires.
 - Next checkpoint:
-  - second slice: surface queue on Outreach page; add inline "Draft follow-up now" action that calls `/api/messages/draft`
-  - third slice: make cadence thresholds configurable via `UserSettings` (follow-up days, applied-untouched days, quiet hours)
-  - fourth slice: weekly "cadence digest" email via existing job-alert infra
+  - none — workstream complete
 
 ### 4. Interview-Prep Workspace
 
@@ -263,9 +265,10 @@ This roadmap turns those findings into sequenced product work.
     - frontend: `InterviewPrepBrief` + related types, `useInterviewPrep` / `useGenerateInterviewPrep` / `useUpdateInterviewPrep` / `useDeleteInterviewPrep` hooks
     - new `InterviewPrepPanel` component on `JobDetailPage` (gated to stages `applied | interviewing | offer`) — Generate / Refresh / Clear, role summary, likely rounds, per-category story map + examples, prep themes, editable user notes, every inferred item tagged with an Inferred/Sourced badge
     - tests: `test_interview_prep_api.py` (8 cases — get/create-generate/patch/delete + 404 paths)
+- Progress notes (continued):
+  - 2026-04-21: Second slice shipped. `InterviewRound` schema gains `completed_at` field. Cadence `_rule_thank_you_due` now prefers `completed_at` over `scheduled_at` when `completed: true` — ties thank-you nudge to actual round completion rather than scheduled time. `InterviewPrepPanel` now accepts `interviewRounds` prop from `JobDetailPage` and renders a "Logged rounds" section showing type label, interviewer name, date, Completed/Scheduled badge, round notes, and an amber thank-you callout when a completed round is within the 48h window.
 - Next checkpoint:
-  - second slice: surface "interviewer" fields from `jobs.interview_rounds` inside the panel and tie thank-you cadence (workstream #3) to any round marked completed
-  - third slice: optional LLM pass to rewrite generic question examples into company-specific probes when a trusted company description exists
+  - third slice (optional / deferred): LLM pass to rewrite generic question examples into company-specific probes when a trusted company description exists
 
 ### 5. Resume Artifact Generation
 
