@@ -369,6 +369,7 @@ export interface InterviewRound {
   interview_type: InterviewType;
   scheduled_at: string | null;
   completed: boolean;
+  completed_at?: string | null;
   interviewer: string | null;
   notes: string | null;
 }

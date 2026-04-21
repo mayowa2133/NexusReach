@@ -15,11 +15,46 @@ import { useStories } from '@/hooks/useStories';
 import { formatRelativeDate } from '@/lib/dateUtils';
 import type {
   InterviewPrepStoryMapping,
+  InterviewRound,
   Story,
 } from '@/types';
 
+const ROUND_TYPE_LABEL: Record<string, string> = {
+  phone_screen: 'Phone screen',
+  technical: 'Technical',
+  behavioral: 'Behavioral',
+  system_design: 'System design',
+  onsite: 'Onsite',
+  hiring_manager: 'Hiring manager',
+  final: 'Final round',
+  take_home: 'Take-home',
+  other: 'Other',
+};
+
+/** ISO string or null → e.g. "Apr 18" */
+function formatDate(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  try {
+    return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  } catch {
+    return null;
+  }
+}
+
+/** True if ISO datetime is within the last `hours` hours */
+function isRecent(iso: string | null | undefined, hours = 48): boolean {
+  if (!iso) return false;
+  try {
+    const ms = Date.now() - new Date(iso).getTime();
+    return ms >= 0 && ms <= hours * 3_600_000;
+  } catch {
+    return false;
+  }
+}
+
 interface Props {
   jobId: string;
+  interviewRounds?: InterviewRound[] | null;
 }
 
 function InferredBadge({ inferred }: { inferred: boolean }) {
@@ -66,7 +101,7 @@ function StoriesForCategory({
   );
 }
 
-export function InterviewPrepPanel({ jobId }: Props) {
+export function InterviewPrepPanel({ jobId, interviewRounds }: Props) {
   const { data: brief, isLoading } = useInterviewPrep(jobId);
   const { data: stories = [] } = useStories();
   const generate = useGenerateInterviewPrep(jobId);
@@ -171,6 +206,56 @@ export function InterviewPrepPanel({ jobId }: Props) {
                 </p>
               </div>
             ) : null}
+
+            {/* Logged interview rounds from job tracker */}
+            {interviewRounds && interviewRounds.length > 0 && (
+              <div>
+                <div className="text-xs font-medium mb-1">Logged rounds</div>
+                <ul className="space-y-1.5">
+                  {interviewRounds.map((r, i) => {
+                    const dateStr = formatDate(r.completed_at ?? r.scheduled_at);
+                    const recentCompleted =
+                      r.completed && isRecent(r.completed_at ?? r.scheduled_at, 48);
+                    return (
+                      <li
+                        key={i}
+                        className="rounded-md border px-3 py-2 text-xs space-y-0.5"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-medium">
+                              {ROUND_TYPE_LABEL[r.interview_type] ?? r.interview_type}
+                            </span>
+                            {r.interviewer && (
+                              <span className="text-muted-foreground">
+                                · {r.interviewer}
+                              </span>
+                            )}
+                            {dateStr && (
+                              <span className="text-muted-foreground">{dateStr}</span>
+                            )}
+                          </div>
+                          <Badge
+                            variant={r.completed ? 'default' : 'outline'}
+                            className="text-[10px]"
+                          >
+                            {r.completed ? 'Completed' : 'Scheduled'}
+                          </Badge>
+                        </div>
+                        {r.notes && (
+                          <p className="text-muted-foreground">{r.notes}</p>
+                        )}
+                        {recentCompleted && (
+                          <p className="text-amber-600 dark:text-amber-400 font-medium">
+                            ✉ Thank-you note recommended — recent completed round.
+                          </p>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
 
             <div>
               <div className="text-xs font-medium mb-1">Likely rounds</div>

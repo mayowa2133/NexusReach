@@ -178,7 +178,12 @@ def _rule_thank_you_due(
         for r in rounds:
             if not isinstance(r, dict):
                 continue
-            scheduled_raw = r.get("scheduled_at") or r.get("completed_at")
+            # Prefer completed_at when round is explicitly marked completed,
+            # then fall back to scheduled_at (round happened ~as scheduled).
+            if r.get("completed"):
+                scheduled_raw = r.get("completed_at") or r.get("scheduled_at")
+            else:
+                scheduled_raw = r.get("scheduled_at")
             if not scheduled_raw:
                 continue
             try:

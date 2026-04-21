@@ -1247,7 +1247,7 @@ export function JobDetailPage() {
       />
 
       {(job.stage === 'applied' || job.stage === 'interviewing' || job.stage === 'offer') && (
-        <InterviewPrepPanel jobId={job.id} />
+        <InterviewPrepPanel jobId={job.id} interviewRounds={job.interview_rounds} />
       )}
 
       {/* Match Score Breakdown + Analyze */}

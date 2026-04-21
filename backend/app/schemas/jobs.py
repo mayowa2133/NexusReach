@@ -40,6 +40,9 @@ class InterviewRound(BaseModel):
     interview_type: str = Field(description="phone_screen | technical | behavioral | system_design | onsite | hiring_manager | final | take_home | other")
     scheduled_at: str | None = None
     completed: bool = False
+    completed_at: str | None = Field(
+        default=None, description="ISO-8601 datetime when round was completed"
+    )
     interviewer: str | None = None
     notes: str | None = None
 
