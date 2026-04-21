@@ -11,6 +11,8 @@ from app.dependencies import get_current_user_id
 from app.schemas.settings import (
     AutoProspectResponse,
     AutoProspectUpdate,
+    CadenceSettingsResponse,
+    CadenceSettingsUpdate,
     GuardrailsResponse,
     GuardrailsUpdate,
     OnboardingCompleteResponse,
@@ -68,3 +70,23 @@ async def update_auto_prospect(
     """Partially update auto-prospect settings."""
     payload = body.model_dump(exclude_none=True)
     return await settings_service.update_auto_prospect(db, user_id, payload)
+
+
+@router.get("/cadence", response_model=CadenceSettingsResponse)
+async def get_cadence_settings(
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Return the current cadence threshold configuration."""
+    return await settings_service.get_cadence_settings(db, user_id)
+
+
+@router.put("/cadence", response_model=CadenceSettingsResponse)
+async def update_cadence_settings(
+    body: CadenceSettingsUpdate,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Partially update cadence threshold settings."""
+    payload = body.model_dump(exclude_none=True)
+    return await settings_service.update_cadence_settings(db, user_id, payload)

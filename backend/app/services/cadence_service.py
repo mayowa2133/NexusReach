@@ -25,15 +25,18 @@ from app.models.job_research_snapshot import JobResearchSnapshot
 from app.models.message import Message
 from app.models.outreach import OutreachLog
 from app.models.person import Person
+from app.models.settings import UserSettings
 
 
-# --- Tuning knobs (v1 hardcoded; later move to UserSettings) -----------------
-
-DRAFT_UNSENT_AGE_HOURS = 24
-AWAITING_REPLY_DAYS = 5
-APPLIED_UNTOUCHED_DAYS = 7
-THANK_YOU_WINDOW_HOURS = 48
 LIVE_TARGETS_MIN_VERIFIED = 1
+
+# Fallback defaults when no UserSettings row exists
+_DEFAULTS = {
+    "draft_unsent_threshold_hours": 24,
+    "awaiting_reply_threshold_days": 5,
+    "applied_untouched_threshold_days": 7,
+    "thank_you_window_hours": 48,
+}
 
 
 URGENCY_RANK = {"high": 0, "medium": 1, "low": 2}
@@ -157,9 +160,11 @@ def _rule_reply_needed(outreach_logs: list[OutreachLog]) -> list[NextAction]:
     return actions
 
 
-def _rule_thank_you_due(jobs: list[Job], messages: list[Message]) -> list[NextAction]:
+def _rule_thank_you_due(
+    jobs: list[Job], messages: list[Message], thank_you_window_hours: int
+) -> list[NextAction]:
     actions: list[NextAction] = []
-    cutoff = _now() - timedelta(hours=THANK_YOU_WINDOW_HOURS)
+    cutoff = _now() - timedelta(hours=thank_you_window_hours)
     for job in jobs:
         if job.stage != "interviewing":
             continue
@@ -202,7 +207,7 @@ def _rule_thank_you_due(jobs: list[Job], messages: list[Message]) -> list[NextAc
             NextAction(
                 kind="thank_you_due",
                 urgency="high",
-                reason="Recent interview — send a thank-you within 48 hours.",
+                reason=f"Recent interview — send a thank-you within {thank_you_window_hours} hours.",
                 suggested_channel="email",
                 suggested_goal="thank_you",
                 job_id=str(job.id),
@@ -216,9 +221,11 @@ def _rule_thank_you_due(jobs: list[Job], messages: list[Message]) -> list[NextAc
 
 
 def _rule_draft_unsent(
-    messages: list[Message], outreach_logs: list[OutreachLog]
+    messages: list[Message],
+    outreach_logs: list[OutreachLog],
+    draft_unsent_threshold_hours: int,
 ) -> list[NextAction]:
-    cutoff = _now() - timedelta(hours=DRAFT_UNSENT_AGE_HOURS)
+    cutoff = _now() - timedelta(hours=draft_unsent_threshold_hours)
     actions: list[NextAction] = []
     outreach_by_message = {
         log.message_id: log for log in outreach_logs if log.message_id is not None
@@ -237,7 +244,7 @@ def _rule_draft_unsent(
             NextAction(
                 kind="draft_unsent",
                 urgency="high",
-                reason="Draft sitting more than 24h — send or edit before it goes stale.",
+                reason=f"Draft sitting more than {draft_unsent_threshold_hours}h — send or edit before it goes stale.",
                 suggested_channel=msg.channel,
                 suggested_goal=msg.goal,
                 job_id=snap.get("job_id"),
@@ -252,8 +259,10 @@ def _rule_draft_unsent(
     return actions
 
 
-def _rule_awaiting_reply(outreach_logs: list[OutreachLog]) -> list[NextAction]:
-    cutoff = _now() - timedelta(days=AWAITING_REPLY_DAYS)
+def _rule_awaiting_reply(
+    outreach_logs: list[OutreachLog], awaiting_reply_threshold_days: int
+) -> list[NextAction]:
+    cutoff = _now() - timedelta(days=awaiting_reply_threshold_days)
     actions: list[NextAction] = []
     for log in outreach_logs:
         if log.status != "sent":
@@ -267,7 +276,7 @@ def _rule_awaiting_reply(outreach_logs: list[OutreachLog]) -> list[NextAction]:
             NextAction(
                 kind="awaiting_reply",
                 urgency="medium",
-                reason=f"Sent {AWAITING_REPLY_DAYS}+ days ago with no reply — consider a follow-up.",
+                reason=f"Sent {awaiting_reply_threshold_days}+ days ago with no reply — consider a follow-up.",
                 suggested_channel=log.channel,
                 suggested_goal="follow_up",
                 job_id=str(log.job_id) if log.job_id else None,
@@ -321,9 +330,11 @@ def _rule_live_targets_unused(
 
 
 def _rule_applied_untouched(
-    jobs: list[Job], outreach_logs: list[OutreachLog]
+    jobs: list[Job],
+    outreach_logs: list[OutreachLog],
+    applied_untouched_threshold_days: int,
 ) -> list[NextAction]:
-    cutoff = _now() - timedelta(days=APPLIED_UNTOUCHED_DAYS)
+    cutoff = _now() - timedelta(days=applied_untouched_threshold_days)
     contacted_jobs = {log.job_id for log in outreach_logs if log.job_id is not None}
     actions: list[NextAction] = []
     for job in jobs:
@@ -338,7 +349,7 @@ def _rule_applied_untouched(
             NextAction(
                 kind="applied_untouched",
                 urgency="low",
-                reason=f"Applied {APPLIED_UNTOUCHED_DAYS}+ days ago — no networking outreach yet.",
+                reason=f"Applied {applied_untouched_threshold_days}+ days ago — no networking outreach yet.",
                 suggested_channel="email",
                 suggested_goal="referral",
                 job_id=str(job.id),
@@ -354,6 +365,16 @@ def _rule_applied_untouched(
 # --- Public API --------------------------------------------------------------
 
 
+async def _load_thresholds(db: AsyncSession, user_id: uuid.UUID) -> dict:
+    result = await db.execute(
+        select(UserSettings).where(UserSettings.user_id == user_id)
+    )
+    settings = result.scalar_one_or_none()
+    if not settings:
+        return dict(_DEFAULTS)
+    return {k: getattr(settings, k, v) for k, v in _DEFAULTS.items()}
+
+
 async def compute_next_actions(
     db: AsyncSession, user_id: uuid.UUID, limit: int | None = None
 ) -> list[NextAction]:
@@ -361,16 +382,17 @@ async def compute_next_actions(
     messages = await _load_messages(db, user_id)
     outreach = await _load_outreach(db, user_id)
     snapshots = await _load_snapshots(db, user_id)
+    thresholds = await _load_thresholds(db, user_id)
 
     jobs_by_id = {job.id: job for job in jobs}
 
     actions: list[NextAction] = []
     actions.extend(_rule_reply_needed(outreach))
-    actions.extend(_rule_thank_you_due(jobs, messages))
-    actions.extend(_rule_draft_unsent(messages, outreach))
-    actions.extend(_rule_awaiting_reply(outreach))
+    actions.extend(_rule_thank_you_due(jobs, messages, thresholds["thank_you_window_hours"]))
+    actions.extend(_rule_draft_unsent(messages, outreach, thresholds["draft_unsent_threshold_hours"]))
+    actions.extend(_rule_awaiting_reply(outreach, thresholds["awaiting_reply_threshold_days"]))
     actions.extend(_rule_live_targets_unused(snapshots, outreach, jobs_by_id))
-    actions.extend(_rule_applied_untouched(jobs, outreach))
+    actions.extend(_rule_applied_untouched(jobs, outreach, thresholds["applied_untouched_threshold_days"]))
 
     actions.sort(
         key=lambda a: (

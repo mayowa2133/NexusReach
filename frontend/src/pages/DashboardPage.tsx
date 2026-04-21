@@ -145,7 +145,7 @@ export function DashboardPage() {
 
       {/* Row 3: Warm Paths + Network Gaps */}
       <div className="grid gap-4 md:grid-cols-2">
-        <WarmPathsCard paths={insights?.warm_paths ?? []} />
+        <WarmPathsCard paths={insights?.warm_path_companies ?? []} />
         <NetworkGapsCard gaps={insights?.network_gaps ?? []} />
       </div>
 

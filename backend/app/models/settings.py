@@ -40,6 +40,10 @@ class UserSettings(Base):
     auto_stage_on_apply: Mapped[bool] = mapped_column(Boolean, default=False)
     auto_send_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     auto_send_delay_minutes: Mapped[int] = mapped_column(Integer, default=30)
+    draft_unsent_threshold_hours: Mapped[int] = mapped_column(Integer, default=24)
+    awaiting_reply_threshold_days: Mapped[int] = mapped_column(Integer, default=5)
+    applied_untouched_threshold_days: Mapped[int] = mapped_column(Integer, default=7)
+    thank_you_window_hours: Mapped[int] = mapped_column(Integer, default=48)
     api_keys: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

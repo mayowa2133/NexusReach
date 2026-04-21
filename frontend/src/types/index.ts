@@ -574,6 +574,15 @@ export interface NextActionList {
   total: number;
 }
 
+export interface CadenceSettings {
+  draft_unsent_threshold_hours: number;
+  awaiting_reply_threshold_days: number;
+  applied_untouched_threshold_days: number;
+  thank_you_window_hours: number;
+}
+
+export type CadenceSettingsUpdate = Partial<CadenceSettings>;
+
 export interface Story {
   id: string;
   title: string;

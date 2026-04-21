@@ -32,6 +32,20 @@ AUTO_PROSPECT_FIELDS = (
     "auto_send_delay_minutes",
 )
 
+CADENCE_FIELDS = (
+    "draft_unsent_threshold_hours",
+    "awaiting_reply_threshold_days",
+    "applied_untouched_threshold_days",
+    "thank_you_window_hours",
+)
+
+CADENCE_DEFAULTS = {
+    "draft_unsent_threshold_hours": 24,
+    "awaiting_reply_threshold_days": 5,
+    "applied_untouched_threshold_days": 7,
+    "thank_you_window_hours": 48,
+}
+
 
 async def get_guardrails(db: AsyncSession, user_id: uuid.UUID) -> dict:
     """Return current guardrails settings for a user."""
@@ -138,6 +152,39 @@ async def complete_onboarding(db: AsyncSession, user_id: uuid.UUID) -> None:
 
     settings.onboarding_completed = True
     await db.commit()
+
+
+async def get_cadence_settings(db: AsyncSession, user_id: uuid.UUID) -> dict:
+    """Return current cadence threshold settings for a user."""
+    result = await db.execute(
+        select(UserSettings).where(UserSettings.user_id == user_id)
+    )
+    settings = result.scalar_one_or_none()
+    if not settings:
+        return dict(CADENCE_DEFAULTS)
+    return {field: getattr(settings, field) for field in CADENCE_FIELDS}
+
+
+async def update_cadence_settings(
+    db: AsyncSession, user_id: uuid.UUID, payload: dict
+) -> dict:
+    """Partially update cadence threshold settings."""
+    result = await db.execute(
+        select(UserSettings).where(UserSettings.user_id == user_id)
+    )
+    settings = result.scalar_one_or_none()
+    if not settings:
+        settings = UserSettings(user_id=user_id)
+        db.add(settings)
+        await db.flush()
+
+    for key, value in payload.items():
+        if key in CADENCE_FIELDS and value is not None:
+            setattr(settings, key, value)
+
+    await db.commit()
+    await db.refresh(settings)
+    return {field: getattr(settings, field) for field in CADENCE_FIELDS}
 
 
 async def update_guardrails(

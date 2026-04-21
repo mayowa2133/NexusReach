@@ -18,6 +18,7 @@ import { useSavedPeople } from '@/hooks/usePeople';
 import { useJobs } from '@/hooks/useJobs';
 import { toast } from 'sonner';
 import type { OutreachLog, OutreachStatus, OutreachChannel } from '@/types';
+import { OutreachCadencePanel } from '@/components/OutreachCadencePanel';
 
 const STATUSES: { value: OutreachStatus; label: string }[] = [
   { value: 'draft', label: 'Draft' },
@@ -126,6 +127,8 @@ export function OutreachPage() {
           Track your networking conversations and follow-ups.
         </p>
       </div>
+
+      <OutreachCadencePanel />
 
       <div className="grid gap-4 lg:grid-cols-5">
         {/* Left panel — Stats + Create + Filter */}

@@ -22,6 +22,7 @@ import {
 import { API_URL } from '@/lib/api';
 import { useProfile, useUpdateProfile } from '@/hooks/useProfile';
 import { AutoProspectPanel } from '@/components/settings/AutoProspectPanel';
+import { CadenceSettingsPanel } from '@/components/settings/CadenceSettingsPanel';
 import { GuardrailsPanel } from '@/components/settings/GuardrailsPanel';
 import { JobAlertsPanel } from '@/components/settings/JobAlertsPanel';
 import { toast } from 'sonner';
@@ -421,6 +422,11 @@ export function SettingsPage() {
 
       {/* Job Alerts */}
       <JobAlertsPanel />
+
+      <Separator />
+
+      {/* Cadence Thresholds */}
+      <CadenceSettingsPanel />
 
       <Separator />
 
