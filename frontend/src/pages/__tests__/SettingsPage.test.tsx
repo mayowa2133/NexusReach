@@ -71,6 +71,32 @@ vi.mock('@/hooks/useLinkedInGraph', () => ({
   useClearLinkedInGraph: () => mockClearLinkedInGraph,
 }));
 
+vi.mock('@/hooks/useCadence', () => ({
+  useCadenceSettings: () => ({
+    data: {
+      draft_unsent_threshold_hours: 24,
+      awaiting_reply_threshold_days: 5,
+      applied_untouched_threshold_days: 7,
+      thank_you_window_hours: 48,
+      cadence_digest_enabled: true,
+    },
+    isLoading: false,
+  }),
+  useUpdateCadenceSettings: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useNextActions: () => ({ data: null, isLoading: false }),
+}));
+
+vi.mock('@/hooks/useProfile', () => ({
+  useProfile: () => ({ data: null, isLoading: false }),
+  useUpdateProfile: () => ({ mutateAsync: vi.fn(), isPending: false }),
+}));
+
+vi.mock('@/hooks/useJobAlerts', () => ({
+  useJobAlerts: () => ({ data: null, isLoading: false }),
+  useUpdateJobAlerts: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useTestJobAlertDigest: () => ({ mutateAsync: vi.fn(), isPending: false }),
+}));
+
 // Mock sonner toast
 vi.mock('sonner', () => ({
   toast: {
@@ -162,7 +188,7 @@ describe('SettingsPage — basic', () => {
     expect(screen.getByText('LinkedIn Graph')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /sync now/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /upload export/i })).toBeInTheDocument();
-    expect(screen.getByText(/recommended: hosted import/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /clear graph data/i })).toBeInTheDocument();
   });
 
   it('shows connector commands after starting a sync session', async () => {

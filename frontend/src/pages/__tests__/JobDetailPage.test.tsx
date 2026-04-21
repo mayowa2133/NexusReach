@@ -37,6 +37,30 @@ vi.mock('@/hooks/useJobs', () => ({
     mutateAsync: vi.fn(),
     isPending: false,
   }),
+  useJobCommandCenter: () => ({
+    data: null,
+    isLoading: false,
+  }),
+  useResumeArtifact: () => ({
+    data: null,
+    isLoading: false,
+  }),
+  useGenerateResumeArtifact: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
+  useUpdateResumeArtifactDecisions: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
+  useClearJobResearchSnapshot: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
+  useDownloadResumeArtifactPdf: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
 }));
 
 vi.mock('@/hooks/usePeople', () => ({

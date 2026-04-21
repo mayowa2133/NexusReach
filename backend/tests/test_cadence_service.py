@@ -103,14 +103,14 @@ def test_reply_needed_skips_if_already_advanced():
 def test_awaiting_reply_after_threshold():
     old = _now() - timedelta(days=10)
     log = _outreach(status="sent", last_contacted_at=old)
-    actions = _rule_awaiting_reply([log])
+    actions = _rule_awaiting_reply([log], awaiting_reply_threshold_days=5)
     assert len(actions) == 1
     assert actions[0].suggested_goal == "follow_up"
 
 
 def test_awaiting_reply_recent_skipped():
     log = _outreach(status="sent", last_contacted_at=_now() - timedelta(days=1))
-    assert _rule_awaiting_reply([log]) == []
+    assert _rule_awaiting_reply([log], awaiting_reply_threshold_days=5) == []
 
 
 def test_awaiting_reply_skips_responded():
@@ -119,7 +119,7 @@ def test_awaiting_reply_skips_responded():
         response_received=True,
         last_contacted_at=_now() - timedelta(days=10),
     )
-    assert _rule_awaiting_reply([log]) == []
+    assert _rule_awaiting_reply([log], awaiting_reply_threshold_days=5) == []
 
 
 # --- draft_unsent ----------------------------------------------------------
@@ -127,19 +127,19 @@ def test_awaiting_reply_skips_responded():
 
 def test_draft_unsent_after_24h():
     msg = _message(status="draft", created_at=_now() - timedelta(hours=48))
-    actions = _rule_draft_unsent([msg], [])
+    actions = _rule_draft_unsent([msg], [], draft_unsent_threshold_hours=24)
     assert len(actions) == 1
     assert actions[0].urgency == "high"
 
 
 def test_draft_unsent_recent_skipped():
     msg = _message(status="draft", created_at=_now() - timedelta(hours=2))
-    assert _rule_draft_unsent([msg], []) == []
+    assert _rule_draft_unsent([msg], [], draft_unsent_threshold_hours=24) == []
 
 
 def test_draft_unsent_sent_status_skipped():
     msg = _message(status="copied", created_at=_now() - timedelta(hours=48))
-    assert _rule_draft_unsent([msg], []) == []
+    assert _rule_draft_unsent([msg], [], draft_unsent_threshold_hours=24) == []
 
 
 # --- thank_you_due ---------------------------------------------------------
@@ -148,7 +148,18 @@ def test_draft_unsent_sent_status_skipped():
 def test_thank_you_due_recent_interview():
     interview_at = (_now() - timedelta(hours=12)).isoformat()
     job = _job(stage="interviewing", interview_rounds=[{"scheduled_at": interview_at}])
-    actions = _rule_thank_you_due([job], [])
+    actions = _rule_thank_you_due([job], [], thank_you_window_hours=48)
+    assert len(actions) == 1
+    assert actions[0].suggested_goal == "thank_you"
+
+
+def test_thank_you_due_completed_round_uses_completed_at():
+    completed_at = (_now() - timedelta(hours=6)).isoformat()
+    job = _job(
+        stage="interviewing",
+        interview_rounds=[{"completed": True, "completed_at": completed_at}],
+    )
+    actions = _rule_thank_you_due([job], [], thank_you_window_hours=48)
     assert len(actions) == 1
     assert actions[0].suggested_goal == "thank_you"
 
@@ -164,12 +175,12 @@ def test_thank_you_due_skipped_if_already_sent():
         created_at=interview_dt + timedelta(hours=1),
         context_snapshot={"job_id": str(job.id)},
     )
-    assert _rule_thank_you_due([job], [msg]) == []
+    assert _rule_thank_you_due([job], [msg], thank_you_window_hours=48) == []
 
 
 def test_thank_you_due_skipped_for_non_interviewing_stage():
     job = _job(stage="applied")
-    assert _rule_thank_you_due([job], []) == []
+    assert _rule_thank_you_due([job], [], thank_you_window_hours=48) == []
 
 
 # --- live_targets_unused ---------------------------------------------------
@@ -195,20 +206,20 @@ def test_live_targets_unused_skipped_when_outreach_exists():
 
 def test_applied_untouched_after_threshold():
     job = _job(stage="applied", applied_at=_now() - timedelta(days=10))
-    actions = _rule_applied_untouched([job], [])
+    actions = _rule_applied_untouched([job], [], applied_untouched_threshold_days=7)
     assert len(actions) == 1
     assert actions[0].urgency == "low"
 
 
 def test_applied_untouched_skipped_if_recent():
     job = _job(stage="applied", applied_at=_now() - timedelta(days=1))
-    assert _rule_applied_untouched([job], []) == []
+    assert _rule_applied_untouched([job], [], applied_untouched_threshold_days=7) == []
 
 
 def test_applied_untouched_skipped_if_outreach_exists():
     job = _job(stage="applied", applied_at=_now() - timedelta(days=10))
     log = _outreach(job_id=job.id)
-    assert _rule_applied_untouched([job], [log]) == []
+    assert _rule_applied_untouched([job], [log], applied_untouched_threshold_days=7) == []
 
 
 # --- ranking ---------------------------------------------------------------
