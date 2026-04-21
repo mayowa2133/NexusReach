@@ -579,6 +579,7 @@ export interface CadenceSettings {
   awaiting_reply_threshold_days: number;
   applied_untouched_threshold_days: number;
   thank_you_window_hours: number;
+  cadence_digest_enabled: boolean;
 }
 
 export type CadenceSettingsUpdate = Partial<CadenceSettings>;

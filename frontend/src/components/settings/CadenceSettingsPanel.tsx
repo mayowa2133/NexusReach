@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { useCadenceSettings, useUpdateCadenceSettings } from '@/hooks/useCadence';
 import { toast } from 'sonner';
 
@@ -145,6 +146,29 @@ export function CadenceSettingsPanel() {
             </div>
           );
         })}
+
+        {/* Weekly digest toggle */}
+        <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
+          <div className="space-y-1">
+            <Label className="font-medium">Weekly digest email</Label>
+            <p className="text-xs text-muted-foreground">
+              Receive a summary of pending outreach actions every Monday morning. Requires Gmail or
+              Outlook connected.
+            </p>
+          </div>
+          <Switch
+            checked={settings.cadence_digest_enabled}
+            onCheckedChange={async (checked) => {
+              try {
+                await update.mutateAsync({ cadence_digest_enabled: checked });
+                toast.success(checked ? 'Weekly digest enabled' : 'Weekly digest disabled');
+              } catch (err) {
+                toast.error(err instanceof Error ? err.message : 'Failed to update');
+              }
+            }}
+            disabled={update.isPending}
+          />
+        </div>
       </CardContent>
     </Card>
   );

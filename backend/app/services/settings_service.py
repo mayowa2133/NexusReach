@@ -37,6 +37,7 @@ CADENCE_FIELDS = (
     "awaiting_reply_threshold_days",
     "applied_untouched_threshold_days",
     "thank_you_window_hours",
+    "cadence_digest_enabled",
 )
 
 CADENCE_DEFAULTS = {
@@ -44,6 +45,7 @@ CADENCE_DEFAULTS = {
     "awaiting_reply_threshold_days": 5,
     "applied_untouched_threshold_days": 7,
     "thank_you_window_hours": 48,
+    "cadence_digest_enabled": True,
 }
 
 

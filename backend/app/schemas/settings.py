@@ -98,6 +98,7 @@ class CadenceSettingsResponse(BaseModel):
     awaiting_reply_threshold_days: int = Field(default=5, description="Follow-up after N days with no reply")
     applied_untouched_threshold_days: int = Field(default=7, description="Nudge after applying with no outreach for N days")
     thank_you_window_hours: int = Field(default=48, description="Thank-you window after interview round (hours)")
+    cadence_digest_enabled: bool = Field(default=True, description="Send weekly cadence digest email")
 
     model_config = {"from_attributes": True}
 
@@ -107,3 +108,4 @@ class CadenceSettingsUpdate(BaseModel):
     awaiting_reply_threshold_days: Optional[int] = Field(default=None, ge=1, le=30)
     applied_untouched_threshold_days: Optional[int] = Field(default=None, ge=1, le=60)
     thank_you_window_hours: Optional[int] = Field(default=None, ge=1, le=168)
+    cadence_digest_enabled: Optional[bool] = None

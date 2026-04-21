@@ -44,6 +44,10 @@ class UserSettings(Base):
     awaiting_reply_threshold_days: Mapped[int] = mapped_column(Integer, default=5)
     applied_untouched_threshold_days: Mapped[int] = mapped_column(Integer, default=7)
     thank_you_window_hours: Mapped[int] = mapped_column(Integer, default=48)
+    cadence_digest_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    cadence_digest_last_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     api_keys: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
