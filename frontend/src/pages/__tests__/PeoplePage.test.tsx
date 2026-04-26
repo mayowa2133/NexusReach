@@ -473,6 +473,52 @@ describe('PeoplePage', () => {
     expect(screen.getByText(/you already know jamie rivera at affirm\./i)).toBeInTheDocument();
   });
 
+  it('renders follow signals separately from warm-path badges', async () => {
+    mockPeopleSearch.mutateAsync.mockResolvedValue({
+      company: {
+        id: 'c1',
+        name: 'Cursor',
+        domain: 'cursor.com',
+        size: null,
+        industry: 'AI developer tools',
+        description: null,
+        careers_url: null,
+      },
+      your_connections: [],
+      recruiters: [
+        {
+          ...mockSavedPeopleItems[0],
+          id: 'search-follow-1',
+          full_name: 'Avery Target',
+          warm_path_type: null,
+          warm_path_reason: null,
+          warm_path_connection: null,
+          followed_person: false,
+          followed_company: true,
+          linkedin_signal_reason: 'You follow Cursor on LinkedIn.',
+          company_match_confidence: 'verified',
+          current_company_verified: true,
+          current_company_verification_status: 'verified',
+          fallback_reason: null,
+        },
+      ],
+      hiring_managers: [],
+      peers: [],
+      job_context: null,
+    });
+
+    renderPeople();
+
+    await userEvent.type(screen.getByLabelText(/company name/i), 'Cursor');
+    await userEvent.click(screen.getByRole('button', { name: /^find people$/i }));
+
+    expect(await screen.findByText('Following company')).toBeInTheDocument();
+    expect(screen.getByText(/you follow cursor on linkedin\./i)).toBeInTheDocument();
+    expect(screen.queryByText('Warm path')).not.toBeInTheDocument();
+    expect(screen.queryByText('Same-company bridge')).not.toBeInTheDocument();
+    expect(screen.queryByText('Direct connection')).not.toBeInTheDocument();
+  });
+
   it('navigates into batch draft mode from a shortlist selection', async () => {
     renderPeople();
 

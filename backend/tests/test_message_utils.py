@@ -10,6 +10,7 @@ from app.services.message_service import (
     _build_person_context,
     _build_history_context,
     _build_job_context,
+    _build_linkedin_signal_context,
     _build_warm_path_context,
     _normalize_goal,
     _resolve_cta_plan,
@@ -51,6 +52,24 @@ def test_build_warm_path_context_bridge_warns_against_implying_intro():
     assert "same company" in out
     assert "Maria Chan (Senior Recruiter)" in out
     assert "Do not ask the recipient to vouch" in out
+
+
+def test_build_linkedin_signal_context_keeps_follows_separate_from_warm_paths():
+    out = _build_linkedin_signal_context(
+        {
+            "type": "followed_company",
+            "display_name": "Cursor",
+            "refresh_recommended": False,
+            "stale": False,
+        }
+    )
+
+    assert "LINKEDIN SIGNALS" in out
+    assert "affinity only" in out
+    assert "not relationship proof" in out
+    assert "I've been following the company's work" in out
+    assert "Never imply a mutual relationship" in out
+    assert "weaker than a warm path" in out
 
 
 def _make_profile(**overrides):

@@ -1,9 +1,10 @@
 (function initNexusReachLinkedInCompanion() {
   const PANEL_ID = "nexusreach-companion-panel";
   const MAX_GRAPH_ITEMS = 2500;
+  const TEST_MODE = Boolean(window.__NEXUSREACH_LINKEDIN_COMPANION_TEST_HOOKS__);
 
   function wait(ms) {
-    return new Promise((resolve) => window.setTimeout(resolve, ms));
+    return new Promise((resolve) => window.setTimeout(resolve, TEST_MODE ? 0 : ms));
   }
 
   function normalizeLinkedInUrl(url) {
@@ -138,17 +139,23 @@
 
   function matchesControlLabel(value, label) {
     if (!value) return false;
+    if (label === "connect") {
+      return (
+        /\bconnect\b/i.test(value)
+        && !/\b(disconnect|connected|connections?)\b/i.test(value)
+      );
+    }
     if (value === label) return true;
     if (label.length <= 3) return value.split(/\s+/).includes(label);
-    if (value.includes(label)) {
-      return label !== "connect" || !value.includes("disconnect");
-    }
+    if (value.includes(label)) return true;
     return false;
   }
 
   function safeClick(node) {
     if (!node) return false;
     node.scrollIntoView({ behavior: "smooth", block: "center" });
+    node.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+    node.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true }));
     node.click();
     return true;
   }
@@ -644,6 +651,21 @@
       follows,
       warnings,
     };
+  }
+
+  if (TEST_MODE) {
+    window.__NEXUSREACH_LINKEDIN_COMPANION__ = {
+      captureProfile,
+      cleanGraphName,
+      matchesControlLabel,
+      normalizeLinkedInUrl,
+      runAssist,
+      scrapeFollows,
+    };
+  }
+
+  if (typeof chrome === "undefined" || !chrome.runtime?.onMessage) {
+    return;
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {

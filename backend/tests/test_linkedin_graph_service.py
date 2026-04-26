@@ -8,12 +8,16 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.services.linkedin_graph_service import (
+    apply_follow_signal_annotations,
     apply_warm_path_annotations,
     connection_matches_company,
+    dedupe_follow_candidates,
     dedupe_connection_candidates,
     graph_freshness_metadata,
+    normalize_follow_payload,
     parse_linkedin_connections_csv,
     parse_linkedin_connections_zip,
+    resolve_linkedin_signal_for_person,
     resolve_warm_path_for_person,
 )
 
@@ -90,6 +94,70 @@ def test_dedupe_connection_candidates_falls_back_to_name_and_company():
     assert rows[0]["headline"] == "Engineer"
 
 
+def test_normalize_follow_payload_accepts_people_companies_and_showcases():
+    person = normalize_follow_payload(
+        {
+            "entity_type": "person",
+            "display_name": "Avery Target",
+            "linkedin_url": "https://www.linkedin.com/in/avery-target/",
+            "headline": "Founder at Cursor",
+            "current_company_name": "Cursor",
+        },
+        source="local_sync",
+    )
+    company = normalize_follow_payload(
+        {
+            "entity_type": "company",
+            "display_name": "OpenAI for Startups",
+            "linkedin_url": "https://www.linkedin.com/showcase/openai-for-startups/",
+            "headline": "42,000 followers",
+        },
+        source="local_sync",
+    )
+
+    assert person is not None
+    assert person["entity_type"] == "person"
+    assert person["linkedin_slug"] == "avery-target"
+    assert person["normalized_company_name"] == "cursor"
+    assert company is not None
+    assert company["entity_type"] == "company"
+    assert company["linkedin_url"] == "https://www.linkedin.com/showcase/openai-for-startups"
+    assert company["linkedin_slug"] == "openai-for-startups"
+    assert company["normalized_company_name"] == "openai for startups"
+    assert company["current_company_name"] == "OpenAI for Startups"
+
+
+def test_dedupe_follow_candidates_keeps_follow_types_separate():
+    rows = dedupe_follow_candidates(
+        [
+            {
+                "entity_type": "company",
+                "display_name": "Cursor",
+                "linkedin_url": "https://www.linkedin.com/company/cursorai/",
+            },
+            {
+                "entity_type": "company",
+                "display_name": "Cursor",
+                "linkedin_url": "https://www.linkedin.com/company/cursorai/",
+                "headline": "Software development",
+            },
+            {
+                "entity_type": "person",
+                "display_name": "Cursor",
+                "linkedin_url": "https://www.linkedin.com/in/cursor/",
+            },
+        ],
+        source="local_sync",
+    )
+
+    assert len(rows) == 2
+    company = next(row for row in rows if row["entity_type"] == "company")
+    person = next(row for row in rows if row["entity_type"] == "person")
+    assert company["headline"] == "Software development"
+    assert company["linkedin_slug"] == "cursorai"
+    assert person["linkedin_slug"] == "cursor"
+
+
 def test_connection_matches_company_requires_trusted_slug_for_ambiguous_brand():
     connection = {
         "display_name": "Andre Nguyen",
@@ -153,6 +221,57 @@ def test_apply_warm_path_annotations_marks_direct_and_bridge_matches():
     assert cold_person.warm_path_type == "same_company_bridge"
     assert cold_person.warm_path_connection is connection_direct
     assert "you already know" in cold_person.warm_path_reason.lower()
+
+
+def test_apply_follow_signal_annotations_never_sets_warm_path_fields():
+    direct_follow = SimpleNamespace(
+        id=uuid.uuid4(),
+        entity_type="person",
+        linkedin_slug="avery-target",
+        display_name="Avery Target",
+        headline="Founder at Cursor",
+        linkedin_url="https://www.linkedin.com/in/avery-target",
+        current_company_name="Cursor",
+        last_synced_at=None,
+    )
+    company_follow = SimpleNamespace(
+        id=uuid.uuid4(),
+        entity_type="company",
+        linkedin_slug="cursorai",
+        display_name="Cursor",
+        headline="Software development",
+        linkedin_url="https://www.linkedin.com/company/cursorai",
+        current_company_name="Cursor",
+        last_synced_at=None,
+    )
+    followed_person = SimpleNamespace(
+        linkedin_url="https://www.linkedin.com/in/avery-target",
+        warm_path_type=None,
+    )
+    company_affinity_person = SimpleNamespace(
+        linkedin_url="https://www.linkedin.com/in/jordan-target",
+        warm_path_type=None,
+    )
+
+    apply_follow_signal_annotations(
+        {
+            "recruiters": [followed_person],
+            "hiring_managers": [],
+            "peers": [company_affinity_person],
+        },
+        company_name="Cursor",
+        direct_follows=[direct_follow],
+        company_follows=[company_follow],
+    )
+
+    assert followed_person.followed_person is True
+    assert followed_person.followed_company is False
+    assert followed_person.linkedin_signal_type == "followed_person"
+    assert followed_person.warm_path_type is None
+    assert company_affinity_person.followed_person is False
+    assert company_affinity_person.followed_company is True
+    assert company_affinity_person.linkedin_signal_type == "followed_company"
+    assert company_affinity_person.warm_path_type is None
 
 
 def test_graph_freshness_metadata_flags_aging_and_stale():
@@ -267,3 +386,76 @@ async def test_resolve_warm_path_for_person_returns_none_without_company_or_conn
             )
             is None
         )
+
+
+@pytest.mark.asyncio
+async def test_resolve_linkedin_signal_prefers_followed_person_over_company():
+    followed_person = SimpleNamespace(
+        id=uuid.uuid4(),
+        entity_type="person",
+        linkedin_slug="avery-target",
+        display_name="Avery Target",
+        headline="Founder at Cursor",
+        linkedin_url="https://www.linkedin.com/in/avery-target",
+        last_synced_at=None,
+    )
+    company = SimpleNamespace(name="Cursor", public_identity_slugs=["cursorai"])
+    person = SimpleNamespace(
+        linkedin_url="https://www.linkedin.com/in/avery-target",
+        company=company,
+    )
+
+    with (
+        patch(
+            "app.services.linkedin_graph_service.get_followed_people_by_linkedin_slugs",
+            new=AsyncMock(return_value=[followed_person]),
+        ) as people_mock,
+        patch(
+            "app.services.linkedin_graph_service.get_followed_companies_for_company",
+            new=AsyncMock(return_value=[]),
+        ) as company_mock,
+    ):
+        result = await resolve_linkedin_signal_for_person(
+            db=None, user_id=uuid.uuid4(), person=person
+        )
+
+    assert result["type"] == "followed_person"
+    assert result["display_name"] == "Avery Target"
+    people_mock.assert_awaited_once()
+    company_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resolve_linkedin_signal_returns_company_affinity_not_warm_path():
+    company_follow = SimpleNamespace(
+        id=uuid.uuid4(),
+        entity_type="company",
+        linkedin_slug="cursorai",
+        display_name="Cursor",
+        headline="Software development",
+        linkedin_url="https://www.linkedin.com/company/cursorai",
+        last_synced_at=None,
+    )
+    company = SimpleNamespace(name="Cursor", public_identity_slugs=["cursorai"])
+    person = SimpleNamespace(
+        linkedin_url="https://www.linkedin.com/in/jordan-target",
+        company=company,
+    )
+
+    with (
+        patch(
+            "app.services.linkedin_graph_service.get_followed_people_by_linkedin_slugs",
+            new=AsyncMock(return_value=[]),
+        ),
+        patch(
+            "app.services.linkedin_graph_service.get_followed_companies_for_company",
+            new=AsyncMock(return_value=[company_follow]),
+        ),
+    ):
+        result = await resolve_linkedin_signal_for_person(
+            db=None, user_id=uuid.uuid4(), person=person
+        )
+
+    assert result["type"] == "followed_company"
+    assert result["display_name"] == "Cursor"
+    assert "warm" not in result

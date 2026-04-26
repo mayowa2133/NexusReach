@@ -12,6 +12,7 @@ import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import PurePosixPath
 from typing import Any
+from urllib.parse import urlparse
 
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -145,6 +146,13 @@ def _normalize_company_linkedin_url(url: str | None) -> str | None:
         return None
     if clean.startswith("linkedin.com") or clean.startswith("www.linkedin.com"):
         clean = f"https://{clean}"
+    try:
+        parsed = PurePosixPath(urlparse(clean).path)
+        parts = [part for part in parsed.parts if part != "/"]
+        if len(parts) >= 2 and parts[0] in {"company", "showcase"}:
+            return f"https://www.linkedin.com/{parts[0]}/{parts[1].strip().lower()}"
+    except Exception:
+        pass
     hints = extract_public_identity_hints(clean)
     if hints.get("page_type") != "linkedin_company":
         return clean
@@ -158,6 +166,12 @@ def _company_slug_from_url(url: str | None) -> str | None:
     normalized = _normalize_company_linkedin_url(url)
     if not normalized:
         return None
+    try:
+        parts = [part for part in PurePosixPath(urlparse(normalized).path).parts if part != "/"]
+        if len(parts) >= 2 and parts[0] in {"company", "showcase"}:
+            return parts[1].strip().lower() or None
+    except Exception:
+        pass
     hints = extract_public_identity_hints(normalized)
     slug = hints.get("company_slug")
     return slug.lower() if isinstance(slug, str) and slug else None
