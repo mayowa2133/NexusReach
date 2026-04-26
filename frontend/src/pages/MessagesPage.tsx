@@ -15,6 +15,8 @@ import {
   useMarkCopied,
   useMessages,
 } from '@/hooks/useMessages';
+import { useCompanionStatus, useLinkedInAssist } from '@/hooks/useCompanion';
+import { useLinkedInGraphStatus } from '@/hooks/useLinkedInGraph';
 import { useSavedPeople } from '@/hooks/usePeople';
 import { useJobs } from '@/hooks/useJobs';
 import {
@@ -251,6 +253,9 @@ function SingleMessagesView() {
   const { data: messagesData } = useMessages();
   const messages = messagesData?.items;
   const { data: emailStatus } = useEmailConnectionStatus();
+  const { data: companionStatus } = useCompanionStatus();
+  const { data: linkedinGraphStatus } = useLinkedInGraphStatus();
+  const linkedinAssist = useLinkedInAssist();
 
   const selectedPerson = savedPeople?.find((person) => person.id === selectedPersonId);
   const normalizedSavedPeopleCompanyFilter = savedPeopleCompanyFilter.trim().toLowerCase();
@@ -351,6 +356,72 @@ function SingleMessagesView() {
       toast.success('Copied to clipboard');
     } catch {
       toast.success('Copied to clipboard');
+    }
+  };
+
+  const handleOpenInLinkedIn = async (mode: 'open_profile' | 'draft') => {
+    const person = selectedPerson;
+    if (!person?.linkedin_url) {
+      toast.error('This contact does not have a LinkedIn URL yet.');
+      return;
+    }
+
+    if (mode === 'draft' && !activeDraft) {
+      toast.error('Generate a LinkedIn draft first.');
+      return;
+    }
+
+    if (mode === 'draft' && activeDraft?.channel !== 'linkedin_message' && activeDraft?.channel !== 'linkedin_note') {
+      toast.error('Use a LinkedIn note or LinkedIn message draft for this action.');
+      return;
+    }
+
+    try {
+      const assistAction =
+        mode === 'draft'
+          ? (activeDraft!.channel === 'linkedin_note' ? 'linkedin_note' : 'linkedin_message')
+          : 'open_profile';
+      const result = await linkedinAssist.mutateAsync({
+        action: assistAction,
+        personId: person.id,
+        linkedinUrl: person.linkedin_url,
+        messageId: mode === 'draft' ? activeDraft?.id ?? null : null,
+        personName: person.full_name,
+        companyName: person.company?.name ?? null,
+        jobTitle: relevantJobs.find((job) => job.id === selectedJobId)?.title ?? null,
+        draftText: mode === 'draft' ? (editBody || activeDraft?.body || '') : null,
+        warmPath: mode === 'draft' ? activeDraft?.warm_path ?? null : null,
+        linkedinSignal: mode === 'draft' ? activeDraft?.linkedin_signal ?? null : null,
+      });
+      toast.success(result.message);
+      if (mode === 'draft' && activeDraft) {
+        setActiveDraft((current) => (current ? { ...current, status: 'copied' } : current));
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'LinkedIn companion action failed');
+    }
+  };
+
+  const handleRegenerateWithFreshLinkedIn = async () => {
+    const person = selectedPerson;
+    if (!person?.linkedin_url) {
+      toast.error('This contact does not have a LinkedIn URL yet.');
+      return;
+    }
+
+    try {
+      const result = await linkedinAssist.mutateAsync({
+        action: 'open_profile',
+        personId: person.id,
+        linkedinUrl: person.linkedin_url,
+        personName: person.full_name,
+        companyName: person.company?.name ?? null,
+        jobTitle: relevantJobs.find((job) => job.id === selectedJobId)?.title ?? null,
+      });
+      toast.success(result.message);
+      await handleDraft();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to refresh LinkedIn context');
     }
   };
 
@@ -461,6 +532,14 @@ function SingleMessagesView() {
         <h1 className="text-3xl font-semibold tracking-tight">Messages</h1>
         <p className="text-muted-foreground">Draft personalized outreach messages powered by AI.</p>
       </div>
+
+      {linkedinGraphStatus?.refresh_recommended && (
+        <Card className="border-amber-300 bg-amber-50/60">
+          <CardContent className="pt-4 text-sm text-amber-900">
+            LinkedIn graph freshness is aging. Refresh it in Settings before leaning on warm-path context.
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-5">
         <div className="lg:col-span-2 space-y-4">
@@ -674,6 +753,11 @@ function SingleMessagesView() {
                         {formatWarmPathType(activeDraft.warm_path.type)}
                       </Badge>
                     )}
+                    {activeDraft.linkedin_signal && (
+                      <Badge variant="outline" className="text-xs">
+                        {activeDraft.linkedin_signal.type === 'followed_person' ? 'Following' : 'Following company'}
+                      </Badge>
+                    )}
                   </div>
 
                   {activeDraft.warm_path && (
@@ -697,6 +781,24 @@ function SingleMessagesView() {
                       )}
                       {activeDraft.warm_path.caution && (
                         <div className="text-xs text-amber-700">{activeDraft.warm_path.caution}</div>
+                      )}
+                    </div>
+                  )}
+
+                  {activeDraft.linkedin_signal && (
+                    <div className="rounded-md border border-sky-200 bg-sky-50/60 p-3 text-sm space-y-1">
+                      <div className="font-medium">
+                        LinkedIn signal
+                        {activeDraft.linkedin_signal.display_name ? `: ${activeDraft.linkedin_signal.display_name}` : ''}
+                      </div>
+                      {activeDraft.linkedin_signal.reason && (
+                        <div className="text-muted-foreground">{activeDraft.linkedin_signal.reason}</div>
+                      )}
+                      <div className="text-xs text-muted-foreground">
+                        Affinity only. Do not treat this as a warm path or prior relationship.
+                      </div>
+                      {activeDraft.linkedin_signal.caution && (
+                        <div className="text-xs text-amber-700">{activeDraft.linkedin_signal.caution}</div>
                       )}
                     </div>
                   )}
@@ -856,6 +958,24 @@ function SingleMessagesView() {
                           Edit
                         </Button>
                         <Button onClick={handleCopy}>Copy to Clipboard</Button>
+                        <Button
+                          variant="outline"
+                          onClick={() => void handleOpenInLinkedIn('draft')}
+                          disabled={
+                            linkedinAssist.isPending
+                            || !companionStatus?.available
+                            || (activeDraft.channel !== 'linkedin_message' && activeDraft.channel !== 'linkedin_note')
+                          }
+                        >
+                          {linkedinAssist.isPending ? 'Opening...' : 'Draft + Open in LinkedIn'}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={() => void handleRegenerateWithFreshLinkedIn()}
+                          disabled={linkedinAssist.isPending || !companionStatus?.available}
+                        >
+                          Regenerate with fresh LinkedIn context
+                        </Button>
                         <Button variant="outline" onClick={handleDraft} disabled={draft.isPending}>
                           {draft.isPending ? 'Regenerating...' : 'Regenerate'}
                         </Button>

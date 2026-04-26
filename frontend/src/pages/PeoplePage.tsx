@@ -8,6 +8,9 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { usePeopleSearch, useEnrichPerson, useSavedPeople, useVerifyCurrentCompany, useSearchHistory } from '@/hooks/usePeople';
 import { useFindEmail, useVerifyEmail } from '@/hooks/useEmail';
+import { useDraftMessage } from '@/hooks/useMessages';
+import { useCompanionStatus, useLinkedInAssist } from '@/hooks/useCompanion';
+import { useLinkedInGraphStatus } from '@/hooks/useLinkedInGraph';
 import {
   formatEmailVerificationLabel,
   formatGuessBasis,
@@ -127,6 +130,7 @@ export function PeoplePage() {
   const { data: savedPeopleData } = useSavedPeople();
   const savedPeople = savedPeopleData?.items;
   const { data: searchHistory } = useSearchHistory();
+  const { data: linkedinGraphStatus } = useLinkedInGraphStatus();
 
   // Auto-trigger job-aware search when arriving from a job card
   const autoSearchTriggered = useRef(false);
@@ -298,6 +302,14 @@ export function PeoplePage() {
         <h1 className="text-3xl font-semibold tracking-tight">People</h1>
         <p className="text-muted-foreground">Find the right people at your target companies.</p>
       </div>
+
+      {linkedinGraphStatus?.refresh_recommended && (
+        <Card className="border-amber-300 bg-amber-50/60">
+          <CardContent className="pt-4 text-sm text-amber-900">
+            Your LinkedIn graph is aging. Refresh it in Settings to keep warm paths and follow signals current.
+          </CardContent>
+        </Card>
+      )}
 
       {/* Job context banner — shown when auto-searching from a job */}
       {jobId && jobTitle && jobCompany && (
@@ -747,6 +759,9 @@ function PersonCard({
   const findEmail = useFindEmail();
   const verifyEmail = useVerifyEmail();
   const verifyCurrentCompany = useVerifyCurrentCompany();
+  const draftMessage = useDraftMessage();
+  const { data: companionStatus } = useCompanionStatus();
+  const linkedinAssist = useLinkedInAssist();
   const [emailStatus, setEmailStatus] = useState<'idle' | 'loading' | 'not_found'>('idle');
   const [emailResult, setEmailResult] = useState<EmailFindResult | null>(null);
   const [companyVerification, setCompanyVerification] = useState({
@@ -858,6 +873,58 @@ function PersonCard({
     companyVerification.current_company_verification_status
   );
 
+  const handleOpenInLinkedIn = async () => {
+    if (!person.linkedin_url) {
+      toast.error('This contact does not have a LinkedIn URL yet.');
+      return;
+    }
+
+    try {
+      const result = await linkedinAssist.mutateAsync({
+        action: 'open_profile',
+        personId: person.id,
+        linkedinUrl: person.linkedin_url,
+        personName: person.full_name,
+        companyName: person.company?.name ?? null,
+      });
+      toast.success(result.message);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to open LinkedIn in the companion');
+    }
+  };
+
+  const handleDraftAndOpenInLinkedIn = async () => {
+    if (!person.linkedin_url) {
+      toast.error('This contact does not have a LinkedIn URL yet.');
+      return;
+    }
+
+    const channel = person.warm_path_type === 'direct_connection' ? 'linkedin_message' : 'linkedin_note';
+    const goal = person.person_type === 'peer' ? 'warm_intro' : 'interview';
+
+    try {
+      const drafted = await draftMessage.mutateAsync({
+        person_id: person.id,
+        channel,
+        goal,
+      });
+      const result = await linkedinAssist.mutateAsync({
+        action: channel,
+        personId: person.id,
+        linkedinUrl: person.linkedin_url,
+        messageId: drafted.message.id,
+        personName: person.full_name,
+        companyName: person.company?.name ?? null,
+        draftText: drafted.message.body,
+        warmPath: drafted.message.warm_path ?? null,
+        linkedinSignal: drafted.message.linkedin_signal ?? null,
+      });
+      toast.success(result.message);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to draft and open in LinkedIn');
+    }
+  };
+
   return (
     <Card>
       <CardContent className="pt-4 space-y-2">
@@ -928,12 +995,24 @@ function PersonCard({
           </Badge>
         )}
 
+        {person.followed_person && (
+          <Badge variant="outline">Following</Badge>
+        )}
+
+        {person.followed_company && !person.followed_person && (
+          <Badge variant="outline">Following company</Badge>
+        )}
+
         {person.match_reason && (
           <div className="text-xs text-muted-foreground">{person.match_reason}</div>
         )}
 
         {person.warm_path_reason && (
           <div className="text-xs text-muted-foreground">{person.warm_path_reason}</div>
+        )}
+
+        {person.linkedin_signal_reason && (
+          <div className="text-xs text-muted-foreground">{person.linkedin_signal_reason}</div>
         )}
 
         {person.usefulness_score != null && person.usefulness_score > 0 && (
@@ -1076,6 +1155,26 @@ function PersonCard({
             >
               LinkedIn
             </a>
+          )}
+          {person.linkedin_url && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleOpenInLinkedIn}
+              disabled={!companionStatus?.available || linkedinAssist.isPending}
+            >
+              Open in LinkedIn
+            </Button>
+          )}
+          {person.linkedin_url && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDraftAndOpenInLinkedIn}
+              disabled={!companionStatus?.available || linkedinAssist.isPending || draftMessage.isPending}
+            >
+              {draftMessage.isPending || linkedinAssist.isPending ? 'Opening...' : 'Draft + Open'}
+            </Button>
           )}
           {publicProfileUrl && (
             <a

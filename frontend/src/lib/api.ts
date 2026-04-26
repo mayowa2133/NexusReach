@@ -7,7 +7,7 @@ export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
  * Get a valid access token, refreshing via Supabase if needed.
  * In dev mode, returns the static dev token.
  */
-async function getAccessToken(): Promise<string | null> {
+export async function getApiAccessToken(): Promise<string | null> {
   if (isDevAuthMode) {
     return useAuthStore.getState().session?.access_token ?? null;
   }
@@ -42,7 +42,7 @@ class ApiClient {
     path: string,
     options: RequestInit = {}
   ): Promise<T> {
-    const token = await getAccessToken();
+    const token = await getApiAccessToken();
     const isFormData = options.body instanceof FormData;
 
     const headers: Record<string, string> = {
@@ -90,7 +90,7 @@ class ApiClient {
   }
 
   async getBlob(path: string): Promise<Blob> {
-    const token = await getAccessToken();
+    const token = await getApiAccessToken();
     const headers: Record<string, string> = {};
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;

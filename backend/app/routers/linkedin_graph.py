@@ -8,6 +8,7 @@ from app.database import get_db
 from app.dependencies import get_current_user_id
 from app.schemas.linkedin_graph import (
     LinkedInGraphImportBatchRequest,
+    LinkedInGraphImportFollowBatchRequest,
     LinkedInGraphStatusResponse,
     LinkedInGraphSyncSessionResponse,
 )
@@ -42,6 +43,22 @@ async def import_batch(
             db,
             body.session_token,
             [connection.model_dump() for connection in body.connections],
+            is_final_batch=body.is_final_batch,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/import-follow-batch", response_model=LinkedInGraphStatusResponse)
+async def import_follow_batch(
+    body: LinkedInGraphImportFollowBatchRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    try:
+        return await linkedin_graph_service.import_follow_batch_with_session(
+            db,
+            body.session_token,
+            [follow.model_dump() for follow in body.follows],
             is_final_batch=body.is_final_batch,
         )
     except ValueError as exc:

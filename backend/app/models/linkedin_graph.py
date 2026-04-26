@@ -43,6 +43,42 @@ class LinkedInGraphConnection(Base):
     )
 
 
+class LinkedInGraphFollow(Base):
+    __tablename__ = "linkedin_graph_follows"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    entity_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    linkedin_url: Mapped[str | None] = mapped_column(String(500))
+    linkedin_slug: Mapped[str | None] = mapped_column(String(255), index=True)
+    display_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    headline: Mapped[str | None] = mapped_column(String(255))
+    current_company_name: Mapped[str | None] = mapped_column(String(255))
+    normalized_company_name: Mapped[str | None] = mapped_column(String(255), index=True)
+    company_linkedin_url: Mapped[str | None] = mapped_column(String(500))
+    company_linkedin_slug: Mapped[str | None] = mapped_column(String(255), index=True)
+    source: Mapped[str] = mapped_column(String(50), nullable=False)
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    last_synced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class LinkedInGraphSyncRun(Base):
     __tablename__ = "linkedin_graph_sync_runs"
 
