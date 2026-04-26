@@ -58,6 +58,9 @@ class PersonResponse(BaseModel):
     warm_path_type: str | None = None
     warm_path_reason: str | None = None
     warm_path_connection: LinkedInGraphConnectionResponse | None = None
+    followed_person: bool = False
+    followed_company: bool = False
+    linkedin_signal_reason: str | None = None
     company: CompanyResponse | None = None
 
     model_config = {"from_attributes": True}
@@ -85,6 +88,18 @@ class PeopleSearchRequest(BaseModel):
 
 class ManualPersonRequest(BaseModel):
     linkedin_url: str
+
+
+class LinkedInPageCaptureRequest(BaseModel):
+    linkedin_url: str | None = None
+    visible_name: str | None = None
+    headline: str | None = None
+    location: str | None = None
+    current_role_title: str | None = None
+    current_company_label: str | None = None
+    about_snippet: str | None = None
+    recent_experience_snippet: str | None = None
+    captured_at: datetime | None = None
 
 
 class JobContextResponse(BaseModel):

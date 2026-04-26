@@ -19,6 +19,11 @@ import {
   useStartLinkedInGraphSyncSession,
   useUploadLinkedInGraphFile,
 } from '@/hooks/useLinkedInGraph';
+import {
+  useCompanionStatus,
+  useConnectCompanion,
+  useRefreshLinkedInGraphInCompanion,
+} from '@/hooks/useCompanion';
 import { API_URL } from '@/lib/api';
 import { useProfile, useUpdateProfile } from '@/hooks/useProfile';
 import { AutoProspectPanel } from '@/components/settings/AutoProspectPanel';
@@ -107,6 +112,9 @@ export function SettingsPage() {
   const { data: gmailAuth } = useGmailAuthUrl(REDIRECT_URI);
   const { data: outlookAuth } = useOutlookAuthUrl(REDIRECT_URI);
   const { data: linkedinGraphStatus, isLoading: linkedinGraphLoading } = useLinkedInGraphStatus();
+  const { data: companionStatus } = useCompanionStatus();
+  const connectCompanion = useConnectCompanion();
+  const refreshLinkedInGraphInCompanion = useRefreshLinkedInGraphInCompanion();
   const startLinkedInSync = useStartLinkedInGraphSyncSession();
   const uploadLinkedInGraphFile = useUploadLinkedInGraphFile();
   const clearLinkedInGraph = useClearLinkedInGraph();
@@ -177,6 +185,29 @@ export function SettingsPage() {
       toast.success('LinkedIn graph sync session created');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to start LinkedIn graph sync');
+    }
+  };
+
+  const handleConnectCompanion = async () => {
+    try {
+      await connectCompanion.mutateAsync();
+      toast.success('NexusReach Companion connected');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to connect the companion');
+    }
+  };
+
+  const handleRefreshInCompanion = async () => {
+    try {
+      const session = await startLinkedInSync.mutateAsync();
+      setSyncSession(session);
+      const result = await refreshLinkedInGraphInCompanion.mutateAsync(session);
+      toast.success(result.message || 'LinkedIn graph refreshed in the companion');
+      if (result.follow_warnings?.length) {
+        toast.info(result.follow_warnings.slice(0, 2).join(' '));
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to refresh LinkedIn graph in the companion');
     }
   };
 
@@ -329,6 +360,12 @@ export function SettingsPage() {
             <Badge variant={linkedinGraphStatus?.connected ? 'default' : 'outline'}>
               {linkedinGraphStatus?.connected ? 'Connected' : 'Not connected'}
             </Badge>
+            <Badge variant={companionStatus?.available ? 'secondary' : 'outline'}>
+              {companionStatus?.available ? 'Companion detected' : 'Companion not detected'}
+            </Badge>
+            <Badge variant={companionStatus?.connected ? 'default' : 'outline'}>
+              {companionStatus?.connected ? 'Companion connected' : 'Companion disconnected'}
+            </Badge>
             <Badge variant={linkedInSyncStatus === 'failed' ? 'destructive' : 'secondary'}>
               {linkedInSyncLabel}
             </Badge>
@@ -336,6 +373,16 @@ export function SettingsPage() {
               <Badge variant="outline">
                 {linkedinGraphStatus.connection_count} connection
                 {linkedinGraphStatus.connection_count === 1 ? '' : 's'}
+              </Badge>
+            )}
+            {linkedinGraphStatus && (
+              <Badge variant="outline">
+                {linkedinGraphStatus.followed_people_count} followed people
+              </Badge>
+            )}
+            {linkedinGraphStatus && (
+              <Badge variant="outline">
+                {linkedinGraphStatus.followed_companies_count} followed companies
               </Badge>
             )}
           </div>
@@ -346,8 +393,16 @@ export function SettingsPage() {
                 ? `Last synced ${new Date(linkedinGraphStatus.last_synced_at).toLocaleString()}.`
                 : 'No LinkedIn graph data synced yet.'}
             </p>
+            {linkedinGraphStatus?.status_message && (
+              <p>{linkedinGraphStatus.status_message}</p>
+            )}
             {linkedinGraphStatus?.source && (
               <p>Latest source: {linkedinGraphStatus.source === 'manual_import' ? 'Manual import' : 'Local sync session'}.</p>
+            )}
+            {linkedinGraphStatus?.refresh_recommended && (
+              <p className="text-amber-700">
+                This graph is aging. Refresh in the companion before relying on warm paths heavily.
+              </p>
             )}
             {linkedinGraphStatus?.last_error && (
               <p className="text-destructive">{linkedinGraphStatus.last_error}</p>
@@ -356,6 +411,25 @@ export function SettingsPage() {
 
           <div className="flex flex-wrap gap-2">
             <Button
+              onClick={handleConnectCompanion}
+              variant={companionStatus?.connected ? 'outline' : 'default'}
+              disabled={connectCompanion.isPending}
+            >
+              {connectCompanion.isPending ? 'Connecting...' : 'Connect Companion'}
+            </Button>
+            <Button
+              onClick={handleRefreshInCompanion}
+              disabled={
+                startLinkedInSync.isPending
+                || refreshLinkedInGraphInCompanion.isPending
+                || linkedinGraphLoading
+                || !companionStatus?.available
+              }
+            >
+              {refreshLinkedInGraphInCompanion.isPending ? 'Refreshing...' : 'Refresh in Companion'}
+            </Button>
+            <Button
+              variant="outline"
               onClick={handleStartLinkedInSync}
               disabled={startLinkedInSync.isPending || linkedinGraphLoading}
             >

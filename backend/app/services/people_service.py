@@ -3550,6 +3550,14 @@ def _warm_path_rank(person: Person) -> int:
     return 2
 
 
+def _linkedin_signal_rank(person: Person) -> int:
+    if bool(getattr(person, "followed_person", False)):
+        return 0
+    if bool(getattr(person, "followed_company", False)):
+        return 1
+    return 2
+
+
 def _person_location_match_rank(person: Person) -> int:
     raw_profile_data = getattr(person, "profile_data", None)
     profile_data = raw_profile_data if isinstance(raw_profile_data, dict) else {}
@@ -3617,6 +3625,7 @@ def _dedupe_bucket_assignments(bucketed: dict[str, list[Person]]) -> dict[str, l
                 _bucket_role_fit_rank(bucket, person),
                 0 if getattr(person, "company_match_confidence", None) == "verified" else 1,
                 _warm_path_rank(person),
+                _linkedin_signal_rank(person),
                 0 if person.linkedin_url else 1,
                 _normalize_identity(person.full_name),
             )
@@ -3670,6 +3679,7 @@ def _finalize_bucketed(
                 _person_location_match_rank(person) if bucket in {"recruiters", "peers"} else 1,
                 _peer_person_title_alignment_rank(person) if bucket == "peers" else 1,
                 _warm_path_rank(person),
+                _linkedin_signal_rank(person),
                 -(getattr(person, "usefulness_score", None) or 0),
                 _match_rank(getattr(person, "match_quality", None)),
                 _org_rank(bucket, getattr(person, "org_level", "ic") or "ic"),
@@ -4174,11 +4184,28 @@ async def search_people_at_company(
         user_id,
         _bucketed_linkedin_slugs(bucketed),
     )
+    direct_follows = await linkedin_graph_service.get_followed_people_by_linkedin_slugs(
+        db,
+        user_id,
+        _bucketed_linkedin_slugs(bucketed),
+    )
+    company_follows = await linkedin_graph_service.get_followed_companies_for_company(
+        db,
+        user_id,
+        company_name=company_name,
+        public_identity_slugs=public_identity_terms,
+    )
     linkedin_graph_service.apply_warm_path_annotations(
         bucketed,
         company_name=company_name,
         your_connections=your_connections,
         direct_connections=direct_connections,
+    )
+    linkedin_graph_service.apply_follow_signal_annotations(
+        bucketed,
+        company_name=company_name,
+        direct_follows=direct_follows,
+        company_follows=company_follows,
     )
     finalized = _finalize_bucketed(bucketed, target_count_per_bucket=target_count_per_bucket)
 
@@ -5372,6 +5399,17 @@ async def search_people_for_job(
         user_id,
         _bucketed_linkedin_slugs(bucketed),
     )
+    direct_follows = await linkedin_graph_service.get_followed_people_by_linkedin_slugs(
+        db,
+        user_id,
+        _bucketed_linkedin_slugs(bucketed),
+    )
+    company_follows = await linkedin_graph_service.get_followed_companies_for_company(
+        db,
+        user_id,
+        company_name=job.company_name,
+        public_identity_slugs=public_identity_terms,
+    )
     linkedin_graph_service.apply_warm_path_annotations(
         bucketed,
         company_name=job.company_name,
@@ -5380,12 +5418,20 @@ async def search_people_for_job(
         job_title=job.title,
         department=context.department,
     )
+    linkedin_graph_service.apply_follow_signal_annotations(
+        bucketed,
+        company_name=job.company_name,
+        direct_follows=direct_follows,
+        company_follows=company_follows,
+    )
     _record_timing(
         debug,
         stage="warm_path_annotations",
         started_at=warm_paths_started_at,
         your_connections=len(your_connections),
         direct_connections=len(direct_connections),
+        direct_follows=len(direct_follows),
+        company_follows=len(company_follows),
     )
     commit_started_at = time.monotonic()
     await db.commit()
@@ -5503,6 +5549,56 @@ async def enrich_person_from_linkedin(
     return person
 
 
+def _normalize_linkedin_page_capture(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized_url = normalize_linkedin_url(payload.get("linkedin_url"))
+    capture: dict[str, Any] = {
+        "source": "local_linkedin_page",
+        "linkedin_url": normalized_url,
+        "linkedin_slug": normalized_url.rstrip("/").rsplit("/", 1)[-1] if normalized_url else None,
+        "visible_name": (payload.get("visible_name") or "").strip() or None,
+        "headline": (payload.get("headline") or "").strip() or None,
+        "location": (payload.get("location") or "").strip() or None,
+        "current_role_title": (payload.get("current_role_title") or "").strip() or None,
+        "current_company_label": (payload.get("current_company_label") or "").strip() or None,
+        "about_snippet": (payload.get("about_snippet") or "").strip() or None,
+        "recent_experience_snippet": (payload.get("recent_experience_snippet") or "").strip() or None,
+        "captured_at": (
+            payload.get("captured_at").astimezone(timezone.utc).isoformat()
+            if isinstance(payload.get("captured_at"), datetime)
+            else datetime.now(timezone.utc).isoformat()
+        ),
+    }
+    return {key: value for key, value in capture.items() if value is not None}
+
+
+async def persist_linkedin_page_capture(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    person_id: uuid.UUID,
+    payload: dict[str, Any],
+) -> Person:
+    result = await db.execute(
+        select(Person)
+        .options(selectinload(Person.company))
+        .where(Person.id == person_id, Person.user_id == user_id)
+    )
+    person = result.scalar_one_or_none()
+    if person is None:
+        raise ValueError("Person not found.")
+
+    profile_data = dict(person.profile_data or {}) if isinstance(person.profile_data, dict) else {}
+    profile_data["linkedin_live"] = _normalize_linkedin_page_capture(payload)
+    person.profile_data = profile_data
+
+    normalized_url = normalize_linkedin_url(payload.get("linkedin_url"))
+    if normalized_url and not person.linkedin_url:
+        person.linkedin_url = normalized_url
+
+    await db.commit()
+    await db.refresh(person)
+    return person
+
+
 async def get_saved_people(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -5537,6 +5633,37 @@ async def get_saved_people(
             person.person_type or _classify_person(person.title or "", source=person.source or ""),
             context=None,
             company_name=company_name,
+        )
+
+    direct_follows = await linkedin_graph_service.get_followed_people_by_linkedin_slugs(
+        db,
+        user_id,
+        _bucketed_linkedin_slugs({"saved": people}),
+    )
+    grouped_people: dict[str, list[Person]] = {}
+    for person in people:
+        company_name = person.company.name if person.company else ""
+        grouped_people.setdefault(company_name, []).append(person)
+
+    for company_name, grouped in grouped_people.items():
+        company_follows = []
+        if company_name:
+            public_identity_slugs = (
+                grouped[0].company.public_identity_slugs
+                if grouped and grouped[0].company and grouped[0].company.public_identity_slugs
+                else []
+            )
+            company_follows = await linkedin_graph_service.get_followed_companies_for_company(
+                db,
+                user_id,
+                company_name=company_name,
+                public_identity_slugs=public_identity_slugs,
+            )
+        linkedin_graph_service.apply_follow_signal_annotations(
+            {"saved": grouped},
+            company_name=company_name or "this company",
+            direct_follows=direct_follows,
+            company_follows=company_follows,
         )
     return people, total
 

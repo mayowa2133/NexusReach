@@ -10,6 +10,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useJob, useJobCommandCenter, useUpdateJobStage, useToggleJobStar, useAnalyzeMatch, useTailoredResume, useTailorResume, useResumeArtifact, useGenerateResumeArtifact, useDownloadResumeArtifactPdf, useClearJobResearchSnapshot } from '@/hooks/useJobs';
 import { usePeopleSearch, useSavedPeople } from '@/hooks/usePeople';
 import { useFindEmail } from '@/hooks/useEmail';
+import { useDraftMessage } from '@/hooks/useMessages';
+import { useCompanionStatus, useLinkedInAssist } from '@/hooks/useCompanion';
+import { useLinkedInGraphStatus } from '@/hooks/useLinkedInGraph';
 import { sanitizeHTML } from '@/lib/sanitize';
 import { formatRelativeDate } from '@/lib/dateUtils';
 import { getStartupSourceLabels, isStartupJob } from '@/lib/jobStartup';
@@ -64,6 +67,9 @@ function PersonCard({
   jobId: string;
 }) {
   const findEmail = useFindEmail();
+  const draftMessage = useDraftMessage();
+  const { data: companionStatus } = useCompanionStatus();
+  const linkedinAssist = useLinkedInAssist();
   const navigate = useNavigate();
 
   const handleFindEmail = async () => {
@@ -81,6 +87,60 @@ function PersonCard({
 
   const email = person.work_email;
   const linkedinUrl = person.linkedin_url;
+
+  const handleOpenInLinkedIn = async () => {
+    if (!linkedinUrl) {
+      toast.error('This contact does not have a LinkedIn URL yet.');
+      return;
+    }
+
+    try {
+      const result = await linkedinAssist.mutateAsync({
+        action: 'open_profile',
+        personId: person.id,
+        linkedinUrl,
+        personName: person.full_name,
+        companyName: person.company?.name ?? null,
+      });
+      toast.success(result.message);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to open LinkedIn in the companion');
+    }
+  };
+
+  const handleDraftAndOpenInLinkedIn = async () => {
+    if (!linkedinUrl) {
+      toast.error('This contact does not have a LinkedIn URL yet.');
+      return;
+    }
+
+    const channel = person.warm_path_type === 'direct_connection' ? 'linkedin_message' : 'linkedin_note';
+    const goal = person.person_type === 'peer' ? 'warm_intro' : 'interview';
+
+    try {
+      const drafted = await draftMessage.mutateAsync({
+        person_id: person.id,
+        channel,
+        goal,
+        job_id: jobId,
+      });
+      const result = await linkedinAssist.mutateAsync({
+        action: channel,
+        personId: person.id,
+        linkedinUrl,
+        messageId: drafted.message.id,
+        personName: person.full_name,
+        companyName: person.company?.name ?? null,
+        draftText: drafted.message.body,
+        jobTitle: undefined,
+        warmPath: drafted.message.warm_path ?? null,
+        linkedinSignal: drafted.message.linkedin_signal ?? null,
+      });
+      toast.success(result.message);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to draft and open in LinkedIn');
+    }
+  };
 
   return (
     <div className="flex items-start justify-between gap-3 rounded-lg border px-4 py-3">
@@ -103,13 +163,48 @@ function PersonCard({
           {email && (
             <span className="text-[11px] text-muted-foreground font-mono">{email}</span>
           )}
+          {person.followed_person && (
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+              Following
+            </Badge>
+          )}
+          {person.followed_company && !person.followed_person && (
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+              Following company
+            </Badge>
+          )}
         </div>
+        {person.linkedin_signal_reason && (
+          <div className="text-[11px] text-muted-foreground mt-1">{person.linkedin_signal_reason}</div>
+        )}
       </div>
       <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
         {linkedinUrl && (
           <a href={linkedinUrl} target="_blank" rel="noopener noreferrer">
             <Button variant="outline" size="sm" className="h-7 text-xs">LinkedIn</Button>
           </a>
+        )}
+        {linkedinUrl && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs"
+            onClick={handleOpenInLinkedIn}
+            disabled={!companionStatus?.available || linkedinAssist.isPending}
+          >
+            Open in LinkedIn
+          </Button>
+        )}
+        {linkedinUrl && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs"
+            onClick={handleDraftAndOpenInLinkedIn}
+            disabled={!companionStatus?.available || linkedinAssist.isPending || draftMessage.isPending}
+          >
+            {draftMessage.isPending || linkedinAssist.isPending ? 'Opening...' : 'Draft + Open'}
+          </Button>
         )}
         {!email && (
           <Button
@@ -1025,6 +1120,7 @@ export function JobDetailPage() {
 
   const { data: job, isLoading: isLoadingJob } = useJob(jobId);
   const { data: commandCenter, isLoading: isLoadingCommandCenter } = useJobCommandCenter(jobId);
+  const { data: linkedinGraphStatus } = useLinkedInGraphStatus();
 
   // Prefer in-session search results; otherwise hydrate from the persisted
   // snapshot so the command center recovers across reloads.
@@ -1193,6 +1289,14 @@ export function JobDetailPage() {
           )}
         </div>
       </div>
+
+      {linkedinGraphStatus?.refresh_recommended && (
+        <Card className="border-amber-300 bg-amber-50/60">
+          <CardContent className="pt-4 text-sm text-amber-900">
+            Your LinkedIn graph is aging. Refresh it in Settings before relying on warm-path recommendations for this job.
+          </CardContent>
+        </Card>
+      )}
 
       {/* Meta badges */}
       <div className="flex flex-wrap gap-2">

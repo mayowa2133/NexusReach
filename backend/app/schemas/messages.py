@@ -16,6 +16,19 @@ class MessageWarmPathResponse(BaseModel):
     caution: str | None = None
 
 
+class LinkedInSignalResponse(BaseModel):
+    type: str
+    reason: str | None = None
+    display_name: str | None = None
+    headline: str | None = None
+    linkedin_url: str | None = None
+    freshness: str | None = None
+    days_since_sync: int | None = None
+    refresh_recommended: bool = False
+    stale: bool = False
+    caution: str | None = None
+
+
 class DraftRequest(BaseModel):
     person_id: str
     channel: str  # linkedin_note | linkedin_message | email | follow_up | thank_you
@@ -46,6 +59,7 @@ class MessageResponse(BaseModel):
     fallback_cta: str | None = None
     job_id: str | None = None
     warm_path: MessageWarmPathResponse | None = None
+    linkedin_signal: LinkedInSignalResponse | None = None
     story_ids: list[str] = []
     person_name: str | None = None
     person_title: str | None = None
@@ -65,6 +79,7 @@ class DraftResponse(BaseModel):
     fallback_cta: str | None = None
     job_id: str | None = None
     warm_path: MessageWarmPathResponse | None = None
+    linkedin_signal: LinkedInSignalResponse | None = None
 
 
 class BatchDraftRequest(BaseModel):

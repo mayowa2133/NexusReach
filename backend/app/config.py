@@ -70,7 +70,9 @@ class Settings(BaseSettings):
     # App
     environment: str = "development"
     frontend_url: str = "http://localhost:5173"
-    cors_origins: list[str] = ["http://localhost:5173"]
+    cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    companion_extension_origins: list[str] = []
+    companion_extension_origin_regex: str = ""
 
     # Usage limits
     daily_llm_token_limit: int = 100_000

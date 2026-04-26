@@ -132,6 +132,9 @@ export interface Person {
   warm_path_type?: 'direct_connection' | 'same_company_bridge' | null;
   warm_path_reason?: string | null;
   warm_path_connection?: LinkedInGraphConnection | null;
+  followed_person?: boolean;
+  followed_company?: boolean;
+  linkedin_signal_reason?: string | null;
   company: Company | null;
 }
 
@@ -219,6 +222,7 @@ export interface Message {
   fallback_cta?: 'referral' | 'redirect' | null;
   job_id?: string | null;
   warm_path?: MessageWarmPath | null;
+  linkedin_signal?: LinkedInSignal | null;
   story_ids?: string[];
   person_name: string | null;
   person_title: string | null;
@@ -244,6 +248,7 @@ export interface DraftResponse {
   fallback_cta?: 'referral' | 'redirect' | null;
   job_id?: string | null;
   warm_path?: MessageWarmPath | null;
+  linkedin_signal?: LinkedInSignal | null;
 }
 
 export interface MessageWarmPath {
@@ -252,6 +257,19 @@ export interface MessageWarmPath {
   connection_name: string | null;
   connection_headline: string | null;
   connection_linkedin_url: string | null;
+  freshness: 'empty' | 'fresh' | 'aging' | 'stale' | string | null;
+  days_since_sync: number | null;
+  refresh_recommended: boolean;
+  stale: boolean;
+  caution: string | null;
+}
+
+export interface LinkedInSignal {
+  type: 'followed_person' | 'followed_company' | string;
+  reason: string | null;
+  display_name: string | null;
+  headline: string | null;
+  linkedin_url: string | null;
   freshness: 'empty' | 'fresh' | 'aging' | 'stale' | string | null;
   days_since_sync: number | null;
   refresh_recommended: boolean;
@@ -918,6 +936,8 @@ export interface LinkedInGraphStatus {
   sync_status: 'idle' | 'awaiting_upload' | 'syncing' | 'completed' | 'failed' | string;
   last_error: string | null;
   connection_count: number;
+  followed_people_count: number;
+  followed_companies_count: number;
   freshness: 'empty' | 'fresh' | 'aging' | 'stale' | string;
   days_since_last_sync: number | null;
   refresh_recommended: boolean;

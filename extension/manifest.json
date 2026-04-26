@@ -1,22 +1,39 @@
 {
   "manifest_version": 3,
-  "name": "NexusReach Autofill",
+  "name": "NexusReach Companion",
   "version": "0.1.0",
-  "description": "Auto-fill job applications with your NexusReach profile data.",
-  "permissions": ["storage", "activeTab"],
+  "description": "ATS autofill plus local-first LinkedIn assist and graph refresh for NexusReach.",
+  "permissions": ["storage", "activeTab", "tabs"],
   "host_permissions": [
+    "http://localhost:8000/*",
+    "http://127.0.0.1:8000/*",
+    "http://localhost:5173/*",
+    "http://127.0.0.1:5173/*",
+    "http://localhost:4173/*",
+    "http://127.0.0.1:4173/*",
     "https://boards.greenhouse.io/*",
     "https://jobs.lever.co/*",
     "https://jobs.ashbyhq.com/*",
     "https://apply.workable.com/*",
     "https://*.myworkdayjobs.com/*",
     "https://jobs.apple.com/*",
-    "https://*.careers-page.com/*"
+    "https://*.careers-page.com/*",
+    "https://www.linkedin.com/*"
   ],
   "background": {
     "service_worker": "background.js"
   },
   "content_scripts": [
+    {
+      "matches": [
+        "http://localhost:5173/*",
+        "http://127.0.0.1:5173/*",
+        "http://localhost:4173/*",
+        "http://127.0.0.1:4173/*"
+      ],
+      "js": ["app-bridge.js"],
+      "run_at": "document_start"
+    },
     {
       "matches": [
         "https://boards.greenhouse.io/*",
@@ -29,6 +46,13 @@
       ],
       "js": ["content.js"],
       "css": ["content.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.linkedin.com/*"
+      ],
+      "js": ["linkedin-content.js"],
       "run_at": "document_idle"
     }
   ],

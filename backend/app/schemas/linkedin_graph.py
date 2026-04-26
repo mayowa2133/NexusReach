@@ -19,6 +19,23 @@ class LinkedInGraphConnectionResponse(BaseModel):
     caution: str | None = None
 
 
+class LinkedInGraphFollowResponse(BaseModel):
+    id: str
+    entity_type: str
+    display_name: str
+    headline: str | None = None
+    current_company_name: str | None = None
+    linkedin_url: str | None = None
+    company_linkedin_url: str | None = None
+    source: str
+    last_synced_at: datetime | None = None
+    freshness: str | None = None
+    days_since_sync: int | None = None
+    refresh_recommended: bool = False
+    stale: bool = False
+    caution: str | None = None
+
+
 class LinkedInGraphLastRunResponse(BaseModel):
     id: str
     source: str
@@ -39,6 +56,8 @@ class LinkedInGraphStatusResponse(BaseModel):
     sync_status: str = "idle"
     last_error: str | None = None
     connection_count: int = 0
+    followed_people_count: int = 0
+    followed_companies_count: int = 0
     freshness: str = "empty"
     days_since_last_sync: int | None = None
     refresh_recommended: bool = False
@@ -70,7 +89,30 @@ class LinkedInGraphBatchConnectionInput(BaseModel):
     company_url: str | None = None
 
 
+class LinkedInGraphBatchFollowInput(BaseModel):
+    entity_type: str
+    display_name: str | None = None
+    full_name: str | None = None
+    name: str | None = None
+    linkedin_url: str | None = None
+    profile_url: str | None = None
+    url: str | None = None
+    headline: str | None = None
+    position: str | None = None
+    current_company_name: str | None = None
+    company_name: str | None = None
+    company: str | None = None
+    company_linkedin_url: str | None = None
+    company_url: str | None = None
+
+
 class LinkedInGraphImportBatchRequest(BaseModel):
     session_token: str
     connections: list[LinkedInGraphBatchConnectionInput]
+    is_final_batch: bool = False
+
+
+class LinkedInGraphImportFollowBatchRequest(BaseModel):
+    session_token: str
+    follows: list[LinkedInGraphBatchFollowInput]
     is_final_batch: bool = False

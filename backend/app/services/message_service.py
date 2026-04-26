@@ -335,6 +335,26 @@ def _build_person_context(person: Person) -> str:
     if person.github_url:
         parts.append(f"GitHub: {person.github_url}")
 
+    profile_data = person.profile_data if isinstance(person.profile_data, dict) else {}
+    linkedin_live = (
+        profile_data.get("linkedin_live")
+        if isinstance(profile_data.get("linkedin_live"), dict)
+        else {}
+    )
+    if linkedin_live:
+        if linkedin_live.get("headline"):
+            parts.append(f"LinkedIn headline (fresh capture): {linkedin_live['headline']}")
+        if linkedin_live.get("location"):
+            parts.append(f"LinkedIn location (fresh capture): {linkedin_live['location']}")
+        if linkedin_live.get("current_role_title"):
+            parts.append(f"Fresh LinkedIn role: {linkedin_live['current_role_title']}")
+        if linkedin_live.get("current_company_label"):
+            parts.append(f"Fresh LinkedIn company label: {linkedin_live['current_company_label']}")
+        if linkedin_live.get("about_snippet"):
+            parts.append(f"About snippet: {linkedin_live['about_snippet']}")
+        if linkedin_live.get("recent_experience_snippet"):
+            parts.append(f"Recent experience snippet: {linkedin_live['recent_experience_snippet']}")
+
     return "\n".join(parts)
 
 
@@ -394,6 +414,39 @@ def _build_warm_path_context(warm_path: dict | None) -> str:
         lines.append(
             "- The LinkedIn graph is aging. Keep any warm-path mention conservative and easy to verify."
         )
+    return "\n".join(lines)
+
+
+def _build_linkedin_signal_context(linkedin_signal: dict | None) -> str:
+    """Build a LINKEDIN SIGNALS section for follow-based context."""
+    if not linkedin_signal:
+        return ""
+
+    signal_type = linkedin_signal.get("type")
+    display_name = linkedin_signal.get("display_name") or "this profile"
+    lines = ["LINKEDIN SIGNALS (affinity only; not relationship proof):"]
+
+    if signal_type == "followed_person":
+        lines.append(f"- You follow {display_name} on LinkedIn.")
+        lines.append(
+            "- If you mention this, use cautious phrasing such as 'I've been following your work'."
+        )
+    elif signal_type == "followed_company":
+        lines.append(f"- You follow {display_name} on LinkedIn.")
+        lines.append(
+            "- If you mention this, use cautious phrasing such as 'I've been following the company's work'."
+        )
+    else:
+        return ""
+
+    lines.append(
+        "- Never imply a mutual relationship, prior interaction, private access, or familiarity."
+    )
+    lines.append("- This signal is weaker than a warm path. Keep it to one short sentence at most.")
+    if linkedin_signal.get("stale"):
+        lines.append("- This follow signal is stale. Mention it only if it still reads as obviously safe.")
+    elif linkedin_signal.get("refresh_recommended"):
+        lines.append("- This follow signal is aging. Keep any mention conservative.")
     return "\n".join(lines)
 
 
@@ -716,7 +769,13 @@ async def draft_message(
         job_title=(job.title if job else None),
         department=person.department,
     )
+    linkedin_signal = await linkedin_graph_service.resolve_linkedin_signal_for_person(
+        db,
+        user_id,
+        person,
+    )
     warm_path_context = _build_warm_path_context(warm_path)
+    linkedin_signal_context = _build_linkedin_signal_context(linkedin_signal)
 
     if pinned_story_ids:
         pinned_result = await db.execute(
@@ -773,6 +832,9 @@ async def draft_message(
     if warm_path_context:
         user_prompt_sections.extend(["", warm_path_context])
 
+    if linkedin_signal_context:
+        user_prompt_sections.extend(["", linkedin_signal_context])
+
     if story_context:
         user_prompt_sections.extend(["", story_context])
 
@@ -827,6 +889,7 @@ async def draft_message(
             "job_context": job_context_snapshot,
             "strategy_hint": strategy_hint,
             "warm_path": warm_path,
+            "linkedin_signal": linkedin_signal,
             "story_ids": [str(s.id) for s in relevant_stories],
         },
         status="draft",
@@ -847,6 +910,7 @@ async def draft_message(
         "fallback_cta": fallback_cta,
         "job_id": str(job.id) if job else None,
         "warm_path": warm_path,
+        "linkedin_signal": linkedin_signal,
     }
 
 

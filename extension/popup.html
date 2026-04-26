@@ -188,14 +188,14 @@
 <body>
   <div class="header">
     <div class="logo">N</div>
-    <h1>NexusReach Autofill</h1>
+    <h1>NexusReach Companion</h1>
   </div>
 
   <!-- Login view -->
   <div id="login-view">
     <div class="status-card disconnected">
       <span class="status-dot off"></span> <strong>Not connected</strong>
-      <div class="status-text">Enter your NexusReach API token to connect.</div>
+      <div class="status-text">Connect from NexusReach Settings, or use manual token entry as a fallback.</div>
     </div>
     <div class="form-group">
       <label for="api-url">API URL</label>
@@ -206,7 +206,7 @@
       <input id="auth-token" type="password" placeholder="Paste Supabase JWT or dev token" />
     </div>
     <button id="connect-btn" class="btn btn-primary">Connect</button>
-    <div class="footer">Find your token in NexusReach Settings</div>
+    <div class="footer">Recommended: connect this companion from NexusReach Settings</div>
   </div>
 
   <!-- Connected view -->

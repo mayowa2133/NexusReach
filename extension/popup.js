@@ -1,7 +1,7 @@
 /**
- * NexusReach Autofill — Popup Script
+ * NexusReach Companion — Popup Script
  *
- * Handles connect/disconnect, profile display, and autofill toggle.
+ * Handles manual connect/disconnect, profile display, and ATS autofill toggle.
  */
 
 const loginView = document.getElementById("login-view");

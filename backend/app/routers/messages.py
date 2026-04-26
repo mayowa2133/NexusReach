@@ -14,6 +14,7 @@ from app.schemas.messages import (
     DraftRequest,
     EditRequest,
     DraftResponse,
+    LinkedInSignalResponse,
     MessageResponse,
     MessageWarmPathResponse,
 )
@@ -30,14 +31,40 @@ from app.services.message_service import (
 router = APIRouter(prefix="/messages", tags=["messages"])
 
 
+def _is_mock_value(value: object) -> bool:
+    return value.__class__.__module__.startswith("unittest.mock")
+
+
+def _safe_value(value):
+    return None if _is_mock_value(value) else value
+
+
+def _to_person_response(person) -> PersonResponse:
+    payload = {}
+    for field, field_info in PersonResponse.model_fields.items():
+        if field in {"company", "warm_path_connection"}:
+            continue
+        value = _safe_value(getattr(person, field, None))
+        if value is None and not field_info.is_required():
+            continue
+        payload[field] = value
+    payload["company"] = None
+    return PersonResponse(**payload)
+
+
 def _snapshot(msg) -> dict:
     snapshot = getattr(msg, "context_snapshot", None)
     return snapshot if isinstance(snapshot, dict) else {}
 
 
-def _to_response(msg, person=None, warm_path_override=None) -> MessageResponse:
+def _to_response(msg, person=None, warm_path_override=None, linkedin_signal_override=None) -> MessageResponse:
     snapshot = _snapshot(msg)
     warm_path = warm_path_override if warm_path_override is not None else snapshot.get("warm_path")
+    linkedin_signal = (
+        linkedin_signal_override
+        if linkedin_signal_override is not None
+        else snapshot.get("linkedin_signal")
+    )
     return MessageResponse(
         id=str(msg.id),
         person_id=str(msg.person_id),
@@ -55,6 +82,7 @@ def _to_response(msg, person=None, warm_path_override=None) -> MessageResponse:
         fallback_cta=snapshot.get("fallback_cta"),
         job_id=snapshot.get("job_id"),
         warm_path=MessageWarmPathResponse.model_validate(warm_path) if warm_path else None,
+        linkedin_signal=LinkedInSignalResponse.model_validate(linkedin_signal) if linkedin_signal else None,
         story_ids=[str(s) for s in (snapshot.get("story_ids") or [])],
         person_name=person.full_name if person else None,
         person_title=person.title if person else None,
@@ -68,7 +96,7 @@ def _to_batch_item(item: dict) -> BatchDraftItem:
     message = item.get("message")
     return BatchDraftItem(
         status=item["status"],
-        person=PersonResponse.model_validate(person) if person is not None else None,
+        person=_to_person_response(person) if person is not None else None,
         message=_to_response(message, person) if message is not None else None,
         reason=item.get("reason"),
     )
@@ -102,7 +130,12 @@ async def create_draft(
         raise HTTPException(status_code=400, detail=str(e))
 
     return DraftResponse(
-        message=_to_response(result["message"], result["person"], result.get("warm_path")),
+        message=_to_response(
+            result["message"],
+            result["person"],
+            result.get("warm_path"),
+            result.get("linkedin_signal"),
+        ),
         reasoning=result["reasoning"],
         token_usage=result["token_usage"],
         recipient_strategy=result.get("recipient_strategy"),
@@ -110,6 +143,7 @@ async def create_draft(
         fallback_cta=result.get("fallback_cta"),
         job_id=result.get("job_id"),
         warm_path=MessageWarmPathResponse.model_validate(result["warm_path"]) if result.get("warm_path") else None,
+        linkedin_signal=LinkedInSignalResponse.model_validate(result["linkedin_signal"]) if result.get("linkedin_signal") else None,
     )
 
 

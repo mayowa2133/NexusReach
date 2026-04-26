@@ -43,17 +43,28 @@ app = FastAPI(
     version="0.2.0",
 )
 
+
+def _cors_origins() -> list[str]:
+    if settings.environment == "production":
+        return [settings.frontend_url, *settings.companion_extension_origins]
+    return [*settings.cors_origins, *settings.companion_extension_origins]
+
+
+def _cors_origin_regex() -> str | None:
+    if settings.companion_extension_origin_regex:
+        return settings.companion_extension_origin_regex
+    if settings.environment != "production":
+        return r"^chrome-extension://[a-z]{32}$"
+    return None
+
 # --- Rate limiter ---
 app.state.limiter = limiter
 
 # --- Middleware ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=(
-        [settings.frontend_url]
-        if settings.environment == "production"
-        else settings.cors_origins
-    ),
+    allow_origins=_cors_origins(),
+    allow_origin_regex=_cors_origin_regex(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

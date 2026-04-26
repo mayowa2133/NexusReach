@@ -12,6 +12,7 @@ from app.middleware.rate_limit import limiter
 from app.utils.discovery_rate_limit import check_discovery_rate_limit
 from app.schemas.people import (
     CompanyResponse,
+    LinkedInPageCaptureRequest,
     PeopleSearchRequest,
     PeopleSearchResponse,
     ManualPersonRequest,
@@ -26,6 +27,7 @@ from app.services.people_service import (
     enrich_person_from_linkedin,
     get_saved_people,
     get_search_history,
+    persist_linkedin_page_capture,
 )
 from app.services.employment_verification_service import verify_current_company_for_person
 from app.services.job_research_snapshot_service import save_job_research_snapshot
@@ -82,11 +84,14 @@ def _serialize_linkedin_graph_connection(connection) -> LinkedInGraphConnectionR
 
 
 def _serialize_person(person) -> PersonResponse:
-    payload = {
-        field: _safe_value(getattr(person, field, None))
-        for field in PersonResponse.model_fields
-        if field not in {"company", "warm_path_connection"}
-    }
+    payload = {}
+    for field, field_info in PersonResponse.model_fields.items():
+        if field in {"company", "warm_path_connection"}:
+            continue
+        value = _safe_value(getattr(person, field, None))
+        if value is None and not field_info.is_required():
+            continue
+        payload[field] = value
     payload["company"] = _serialize_company(_loaded_company(person))
     warm_path_connection = _serialize_linkedin_graph_connection(
         getattr(person, "warm_path_connection", None)
@@ -194,6 +199,34 @@ async def enrich_person(
         user_id=user_id,
         linkedin_url=body.linkedin_url,
     )
+    return _serialize_person(person)
+
+
+@router.post("/{person_id}/linkedin-page-capture", response_model=PersonResponse)
+@limiter.limit("20/minute")
+async def save_linkedin_page_capture(
+    request: Request,
+    person_id: str,
+    body: LinkedInPageCaptureRequest,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _rate_check: Annotated[None, Depends(check_discovery_rate_limit)],
+):
+    try:
+        person_uuid = uuid.UUID(person_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid person_id format") from exc
+
+    try:
+        person = await persist_linkedin_page_capture(
+            db=db,
+            user_id=user_id,
+            person_id=person_uuid,
+            payload=body.model_dump(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
     return _serialize_person(person)
 
 
