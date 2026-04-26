@@ -117,6 +117,7 @@ async def test_discover_jobs_startup_mode_stores_tagged_direct_board_jobs():
         ]),
         patch("app.services.job_service.conviction_jobs_client.fetch_conviction_startups", new_callable=AsyncMock, return_value=[]),
         patch("app.services.job_service.speedrun_jobs_client.fetch_speedrun_companies", new_callable=AsyncMock, return_value=[]),
+        patch("app.services.job_service.curated_startups_client.get_curated_startups", return_value=[]),
         patch("app.services.job_service._find_existing_job", new_callable=AsyncMock, return_value=None),
     ):
         total_new = await discover_jobs(db, user_id, mode="startup")
@@ -154,6 +155,7 @@ async def test_discover_jobs_startup_mode_resolves_speedrun_company_to_ats_board
         patch("app.services.job_service.wellfound_jobs_client.search_wellfound_jobs", new_callable=AsyncMock, return_value=[]),
         patch("app.services.job_service.ventureloop_jobs_client.search_ventureloop_jobs", new_callable=AsyncMock, return_value=[]),
         patch("app.services.job_service.conviction_jobs_client.fetch_conviction_startups", new_callable=AsyncMock, return_value=[]),
+        patch("app.services.job_service.curated_startups_client.get_curated_startups", return_value=[]),
         patch(
             "app.services.job_service.speedrun_jobs_client.fetch_speedrun_companies",
             new_callable=AsyncMock,
@@ -231,6 +233,7 @@ async def test_discover_jobs_startup_mode_persists_search_preference_with_startu
         patch("app.services.job_service.ventureloop_jobs_client.search_ventureloop_jobs", new_callable=AsyncMock, return_value=[]),
         patch("app.services.job_service.conviction_jobs_client.fetch_conviction_startups", new_callable=AsyncMock, return_value=[]),
         patch("app.services.job_service.speedrun_jobs_client.fetch_speedrun_companies", new_callable=AsyncMock, return_value=[]),
+        patch("app.services.job_service.curated_startups_client.get_curated_startups", return_value=[]),
     ):
         await discover_jobs(db, user_id, queries=["founding engineer"], mode="startup")
 
