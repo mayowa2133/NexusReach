@@ -899,17 +899,16 @@ function PersonCard({
       return;
     }
 
-    const channel = person.warm_path_type === 'direct_connection' ? 'linkedin_message' : 'linkedin_note';
     const goal = person.person_type === 'peer' ? 'warm_intro' : 'interview';
 
     try {
       const drafted = await draftMessage.mutateAsync({
         person_id: person.id,
-        channel,
+        channel: 'linkedin_note',
         goal,
       });
       const result = await linkedinAssist.mutateAsync({
-        action: channel,
+        action: 'linkedin_note',
         personId: person.id,
         linkedinUrl: person.linkedin_url,
         messageId: drafted.message.id,

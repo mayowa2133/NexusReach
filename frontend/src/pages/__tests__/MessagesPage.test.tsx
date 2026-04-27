@@ -211,7 +211,7 @@ describe('MessagesPage', () => {
       message: {
         id: 'm1',
         person_id: 'p1',
-        channel: 'linkedin_message',
+        channel: 'linkedin_note',
         goal: 'warm_intro',
         subject: null,
         body: 'Hi Alex',
@@ -269,7 +269,7 @@ describe('MessagesPage', () => {
 
     expect(mockDraft.mutateAsync).toHaveBeenCalledWith({
       person_id: 'p1',
-      channel: 'linkedin_message',
+      channel: 'linkedin_note',
       goal: 'warm_intro',
       job_id: 'job-1',
     });

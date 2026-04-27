@@ -32,12 +32,19 @@ const STATUSES: { value: OutreachStatus; label: string }[] = [
 
 const CHANNELS: { value: OutreachChannel; label: string }[] = [
   { value: 'linkedin_note', label: 'LinkedIn Note' },
-  { value: 'linkedin_message', label: 'LinkedIn Message' },
   { value: 'email', label: 'Email' },
   { value: 'phone', label: 'Phone' },
   { value: 'in_person', label: 'In Person' },
   { value: 'other', label: 'Other' },
 ];
+const CHANNEL_LABELS: Record<string, string> = {
+  linkedin_note: 'LinkedIn Note',
+  linkedin_message: 'LinkedIn Message',
+  email: 'Email',
+  phone: 'Phone',
+  in_person: 'In Person',
+  other: 'Other',
+};
 
 const STATUS_COLORS: Record<OutreachStatus, 'default' | 'secondary' | 'outline' | 'destructive'> = {
   draft: 'outline',
@@ -53,7 +60,7 @@ export function OutreachPage() {
   const [filterStatus, setFilterStatus] = useState<string>('');
   const [selectedPersonId, setSelectedPersonId] = useState('');
   const [savedPeopleCompanyFilter, setSavedPeopleCompanyFilter] = useState('');
-  const [channel, setChannel] = useState<OutreachChannel>('linkedin_message');
+  const [channel, setChannel] = useState<OutreachChannel>('linkedin_note');
   const [notes, setNotes] = useState('');
   const [linkedJobId, setLinkedJobId] = useState('');
   const [followUpDate, setFollowUpDate] = useState('');
@@ -406,7 +413,7 @@ function OutreachCard({
               </Badge>
               {log.channel && (
                 <Badge variant="outline" className="text-xs">
-                  {CHANNELS.find((ch) => ch.value === log.channel)?.label || log.channel}
+                  {CHANNEL_LABELS[log.channel] || log.channel}
                 </Badge>
               )}
               {log.response_received && (

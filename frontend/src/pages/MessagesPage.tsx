@@ -48,7 +48,6 @@ import type {
 
 const CHANNELS: { value: MessageChannel; label: string; description: string }[] = [
   { value: 'linkedin_note', label: 'LinkedIn Note', description: 'Connection request (300 chars max)' },
-  { value: 'linkedin_message', label: 'LinkedIn Message', description: 'Direct message (1000 chars max)' },
   { value: 'email', label: 'Email', description: 'Professional email with subject line' },
   { value: 'follow_up', label: 'Follow-up', description: 'Follow up on previous outreach' },
   { value: 'thank_you', label: 'Thank You', description: 'After a conversation or meeting' },
@@ -227,7 +226,7 @@ function SingleMessagesView() {
   const [selectedPersonId, setSelectedPersonId] = useState<string>('');
   const [selectedJobId, setSelectedJobId] = useState<string>('');
   const [savedPeopleCompanyFilter, setSavedPeopleCompanyFilter] = useState('');
-  const [channel, setChannel] = useState<MessageChannel>('linkedin_message');
+  const [channel, setChannel] = useState<MessageChannel>('linkedin_note');
   const [goal, setGoal] = useState<MessageGoal>('warm_intro');
   const [activeDraft, setActiveDraft] = useState<Message | null>(null);
   const [reasoning, setReasoning] = useState('');
@@ -371,18 +370,14 @@ function SingleMessagesView() {
       return;
     }
 
-    if (mode === 'draft' && activeDraft?.channel !== 'linkedin_message' && activeDraft?.channel !== 'linkedin_note') {
-      toast.error('Use a LinkedIn note or LinkedIn message draft for this action.');
+    if (mode === 'draft' && activeDraft?.channel !== 'linkedin_note') {
+      toast.error('Use a LinkedIn note draft for this action.');
       return;
     }
 
     try {
-      const assistAction =
-        mode === 'draft'
-          ? (activeDraft!.channel === 'linkedin_note' ? 'linkedin_note' : 'linkedin_message')
-          : 'open_profile';
       const result = await linkedinAssist.mutateAsync({
-        action: assistAction,
+        action: mode === 'draft' ? 'linkedin_note' : 'open_profile',
         personId: person.id,
         linkedinUrl: person.linkedin_url,
         messageId: mode === 'draft' ? activeDraft?.id ?? null : null,
@@ -964,7 +959,7 @@ function SingleMessagesView() {
                           disabled={
                             linkedinAssist.isPending
                             || !companionStatus?.available
-                            || (activeDraft.channel !== 'linkedin_message' && activeDraft.channel !== 'linkedin_note')
+                            || activeDraft.channel !== 'linkedin_note'
                           }
                         >
                           {linkedinAssist.isPending ? 'Opening...' : 'Draft + Open in LinkedIn'}
@@ -1066,7 +1061,7 @@ function SingleMessagesView() {
                     <div className="rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 p-3 text-sm">
                       <p className="font-medium text-amber-900 dark:text-amber-200">No email found for this person</p>
                       <p className="text-amber-700 dark:text-amber-300 text-xs mt-1">
-                        Try finding their email with the button above, or switch to LinkedIn message instead.
+                        Try finding their email with the button above, or use a LinkedIn note if this is a new connection.
                       </p>
                     </div>
                   )}

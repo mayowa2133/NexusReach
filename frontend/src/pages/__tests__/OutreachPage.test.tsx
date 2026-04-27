@@ -354,9 +354,9 @@ describe('OutreachPage — outreach cards', () => {
   it('renders channel badges on cards', () => {
     mockLogs = { data: { items: sampleLogs, total: sampleLogs.length, limit: null, offset: 0 }, isLoading: false };
     renderOutreach();
-    // "LinkedIn Message" and "Email" also appear in the channel dropdown,
-    // so use getAllByText and verify at least 2 matches (dropdown + card).
-    expect(screen.getAllByText('LinkedIn Message').length).toBeGreaterThanOrEqual(2);
+    // LinkedIn Message is kept as a historical channel label, but it is no
+    // longer offered as a new active outreach channel.
+    expect(screen.getAllByText('LinkedIn Message').length).toBe(1);
     expect(screen.getAllByText('Email').length).toBeGreaterThanOrEqual(2);
   });
 
@@ -419,9 +419,10 @@ describe('OutreachPage — filter', () => {
 describe('OutreachPage — channels', () => {
   it('renders all channel options in create form', () => {
     renderOutreach();
-    const channels = ['LinkedIn Note', 'LinkedIn Message', 'Email', 'Phone', 'In Person', 'Other'];
+    const channels = ['LinkedIn Note', 'Email', 'Phone', 'In Person', 'Other'];
     for (const ch of channels) {
       expect(screen.getAllByText(ch).length).toBeGreaterThanOrEqual(1);
     }
+    expect(screen.queryByRole('option', { name: 'LinkedIn Message' })).not.toBeInTheDocument();
   });
 });

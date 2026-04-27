@@ -112,9 +112,7 @@ export function OutreachCadencePanel({ onDraftCreated }: Props) {
       const channel: MessageChannel =
         action.suggested_channel === 'email'
           ? 'email'
-          : action.suggested_channel === 'linkedin_note'
-          ? 'linkedin_note'
-          : 'linkedin_message';
+          : 'linkedin_note';
       const goal: MessageGoal =
         action.kind === 'thank_you_due'
           ? 'thank_you'
