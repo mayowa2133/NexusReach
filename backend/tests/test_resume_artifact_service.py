@@ -5,7 +5,9 @@ from app.services.resume_artifact_service import (
     _default_artifact_plan,
     _derive_project_url,
     _expand_plan_to_fill_page,
+    _latex_rich_text,
     _layout_profile,
+    _quantifiable_measure_spans,
     _render_resume_latex,
 )
 
@@ -210,8 +212,37 @@ def test_render_resume_latex_preserves_resume_structure_and_metrics():
     assert "\\textbf{React}" in latex
     assert "\\textbf{HTML}" in latex or "\\textbf{CSS}" in latex
     assert "\\textbf{responsive} web workflows" in latex
+    assert "\\textbf{4 failure scenarios}" in latex
+    assert "\\textbf{100\\% processing traceability}" in latex
+    assert "\\textbf{100+ full-time CIBC staff}" in latex
     assert "Playwright" in latex
     assert "Cypress" in latex
+
+
+def test_latex_rich_text_bolds_quantifiable_measures_without_overmatching_years():
+    text = (
+        "Shipped in 2025, improved activation by 35% for 12,000 users, "
+        "and added 100+ TypeScript tests with a 3.5/4.0 reliability score."
+    )
+
+    rendered = _latex_rich_text(text, ["TypeScript"])
+
+    assert "Shipped in 2025" in rendered
+    assert "\\textbf{2025}" not in rendered
+    assert "\\textbf{35\\%}" in rendered
+    assert "\\textbf{12,000 users}" in rendered
+    assert "\\textbf{100+ TypeScript tests}" in rendered
+    assert "\\textbf{3.5/4.0 reliability score}" in rendered
+
+
+def test_quantifiable_measure_spans_skip_version_style_tokens():
+    text = "Used HTML5, AWS S3, and OAuth 2.0 for 5000+ engineers."
+    spans = [text[start:end] for start, end in _quantifiable_measure_spans(text)]
+
+    assert "HTML5" not in spans
+    assert "S3" not in spans
+    assert "2.0" in spans
+    assert "5000+ engineers" in spans
 
 
 def test_default_artifact_plan_matches_approved_fullstack_shape():
@@ -512,7 +543,7 @@ def test_build_redline_resume_artifact_content_marks_rendered_edits():
         r"\documentclass{article}",
         r"\begin{document}",
         r"\begin{itemize}",
-        r"\item Built RESTful APIs with React dashboards, improving release confidence.",
+        r"\item Built RESTful APIs with React dashboards, improving release confidence by 35%.",
         r"\end{itemize}",
         r"\end{document}",
     ])
@@ -525,7 +556,7 @@ def test_build_redline_resume_artifact_content_marks_rendered_edits():
                 "original": "Built APIs for internal tools.",
                 "rewritten": (
                     "Built RESTful APIs with React dashboards, "
-                    "improving release confidence."
+                    "improving release confidence by 35%."
                 ),
             }
         ],
@@ -534,9 +565,11 @@ def test_build_redline_resume_artifact_content_marks_rendered_edits():
 
     assert r"\usepackage[normalem]{ulem}" in redline
     assert r"\usepackage{soul}" in redline
+    assert r"\soulregister\textbf7" in redline
     assert r"\sout{for internal tools.}" in redline
     assert r"\hl{RESTful " in redline
     assert "with React dashboards" in redline
+    assert r"\textbf{35\%}" in redline
 
 
 def test_build_redline_resume_artifact_content_handles_short_bullets():

@@ -671,6 +671,55 @@ def _metric_tokens(text: str) -> set[str]:
     return set(re.findall(r"\b\d[\d,]*\+?%?\b|\b\d+\+\b", text))
 
 
+_METRIC_VALUE_RE = re.compile(
+    r"(?<![A-Za-z0-9])"
+    r"(?P<value>\$?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?"
+    r"(?:\s*/\s*\$?\d+(?:\.\d+)?)?(?:\+|%|[KkMmBb])?)"
+    r"(?![A-Za-z0-9])"
+)
+
+_METRIC_UNIT_STOPWORDS = {
+    "a", "an", "and", "as", "at", "by", "for", "from", "in", "into", "of",
+    "on", "or", "over", "per", "the", "through", "to", "using", "via", "while",
+    "with", "within",
+}
+
+
+def _quantifiable_measure_spans(text: str) -> list[tuple[int, int]]:
+    """Return spans for numeric impact phrases worth bolding in resume bullets."""
+    spans: list[tuple[int, int]] = []
+    for match in _METRIC_VALUE_RE.finditer(text):
+        start, end = match.span("value")
+        value = match.group("value")
+        cursor = end
+        unit_count = 0
+
+        while unit_count < 3:
+            unit_match = re.match(r"\s+([A-Za-z][A-Za-z0-9+/#.-]*)", text[cursor:])
+            if unit_match is None:
+                break
+            raw_unit = unit_match.group(1)
+            unit = raw_unit.strip(".,;:")
+            if not unit or unit.lower() in _METRIC_UNIT_STOPWORDS:
+                break
+            cursor += unit_match.start(1) + len(unit)
+            unit_count += 1
+            if cursor < len(text) and text[cursor] in ",.;:":
+                break
+
+        digits_only = re.sub(r"\D", "", value)
+        is_bare_year = (
+            len(digits_only) == 4
+            and 1900 <= int(digits_only) <= 2099
+            and not re.search(r"[+%KkMmBb$/]", value)
+        )
+        if is_bare_year and unit_count == 0:
+            continue
+
+        spans.append((start, cursor))
+    return spans
+
+
 def _should_use_rewrite(original: str, rewrite: str, *, change_type: str = "reframe") -> bool:
     original_tokens = _metric_tokens(original)
     rewrite_tokens = _metric_tokens(rewrite)
@@ -1201,8 +1250,15 @@ def _latex_rich_text(text: str | None, emphasis_terms: list[str]) -> str:
     if not raw:
         return ""
 
-    placeholder_map: dict[str, str] = {}
-    processed = raw
+    spans: list[tuple[int, int]] = []
+
+    def _has_overlap(start: int, end: int) -> bool:
+        return any(start < existing_end and end > existing_start for existing_start, existing_end in spans)
+
+    for start, end in _quantifiable_measure_spans(raw):
+        if not _has_overlap(start, end):
+            spans.append((start, end))
+
     ordered_terms = sorted(
         {term for term in emphasis_terms if _clean(term)},
         key=lambda term: len(_clean(term)),
@@ -1214,18 +1270,26 @@ def _latex_rich_text(text: str | None, emphasis_terms: list[str]) -> str:
         if not clean_term:
             continue
         pattern = re.compile(rf"(?<![A-Za-z0-9])({re.escape(clean_term)})(?![A-Za-z0-9])", re.IGNORECASE)
+        for match in pattern.finditer(raw):
+            start, end = match.span(1)
+            if not _has_overlap(start, end):
+                spans.append((start, end))
 
-        def _replace(match: re.Match[str]) -> str:
-            token = f"@@NRB{index}X{len(placeholder_map)}@@"
-            placeholder_map[token] = rf"\textbf{{{_latex_escape(match.group(1))}}}"
-            return token
+    if not spans:
+        return _latex_escape(raw)
 
-        processed = pattern.sub(_replace, processed)
-
-    escaped = _latex_escape(processed)
-    for token, replacement in placeholder_map.items():
-        escaped = escaped.replace(_latex_escape(token), replacement)
-    return escaped
+    rendered: list[str] = []
+    cursor = 0
+    for start, end in sorted(spans):
+        if start < cursor:
+            continue
+        rendered.append(_latex_escape_preserving_spacing(raw[cursor:start]))
+        rendered.append(
+            rf"\textbf{{{_latex_escape_preserving_spacing(raw[start:end])}}}"
+        )
+        cursor = end
+    rendered.append(_latex_escape_preserving_spacing(raw[cursor:]))
+    return "".join(rendered)
 
 
 def _format_skill_items(skills: list[str], emphasis_terms: list[str]) -> str:
@@ -1731,7 +1795,11 @@ def _find_redline_target_line(
 def _latex_redline_text(original: str, rewritten: str) -> str:
     pieces: list[str] = []
     for kind, text in _redline_diff_segments(original, rewritten):
-        escaped = _latex_escape_preserving_spacing(text)
+        escaped = (
+            _latex_escape_preserving_spacing(text)
+            if kind == "removed"
+            else _latex_metrics_preserving_spacing(text)
+        )
         if not escaped:
             continue
         if kind == "added":
@@ -1763,6 +1831,26 @@ def _latex_escape_preserving_spacing(value: str | None) -> str:
     return text
 
 
+def _latex_metrics_preserving_spacing(value: str | None) -> str:
+    text = value or ""
+    spans = _quantifiable_measure_spans(text)
+    if not spans:
+        return _latex_escape_preserving_spacing(text)
+
+    rendered: list[str] = []
+    cursor = 0
+    for start, end in spans:
+        if start < cursor:
+            continue
+        rendered.append(_latex_escape_preserving_spacing(text[cursor:start]))
+        rendered.append(
+            rf"\textbf{{{_latex_escape_preserving_spacing(text[start:end])}}}"
+        )
+        cursor = end
+    rendered.append(_latex_escape_preserving_spacing(text[cursor:]))
+    return "".join(rendered)
+
+
 def _has_latex_package(content: str, package_name: str) -> bool:
     pattern = rf"\\usepackage(?:\[[^\]]+\])?\{{{re.escape(package_name)}\}}"
     return re.search(pattern, content) is not None
@@ -1778,6 +1866,8 @@ def _inject_redline_latex_packages(content: str) -> str:
         additions.append(r"\usepackage{soul}")
     if r"\sethlcolor" not in content:
         additions.append(r"\sethlcolor{green!25}")
+    if r"\soulregister\textbf" not in content:
+        additions.append(r"\soulregister\textbf7")
 
     if not additions:
         return content
