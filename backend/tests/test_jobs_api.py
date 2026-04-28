@@ -390,6 +390,68 @@ async def test_download_resume_artifact_pdf(client, mock_user_id):
     assert resp.content == b"%PDF-test"
 
 
+async def test_preview_resume_artifact_redline_pdf(client, mock_user_id):
+    """GET /api/jobs/{id}/resume-artifact/redline-pdf returns inline review PDF."""
+    job_id = uuid.uuid4()
+    artifact = MagicMock()
+    artifact.id = uuid.uuid4()
+    artifact.job_id = job_id
+    artifact.tailored_resume_id = uuid.uuid4()
+    artifact.format = "latex"
+    artifact.filename = "resume-techcorp-2026-04-18.tex"
+    artifact.content = "\\documentclass{article}\n"
+    artifact.generated_at = datetime(2026, 4, 18, tzinfo=timezone.utc)
+    artifact.created_at = datetime(2026, 4, 18, tzinfo=timezone.utc)
+    artifact.updated_at = datetime(2026, 4, 18, tzinfo=timezone.utc)
+    artifact.rewrite_decisions = {}
+
+    from app.schemas.jobs import ResumeArtifactResponse, ResumeBulletRewritePreview
+
+    async def _fake_build(_db, *, user_id, job_id, artifact):
+        return ResumeArtifactResponse(
+            id=str(artifact.id),
+            job_id=str(job_id),
+            tailored_resume_id=str(artifact.tailored_resume_id),
+            format=artifact.format,
+            filename=artifact.filename,
+            content=artifact.content,
+            generated_at=artifact.generated_at.isoformat(),
+            created_at=artifact.created_at.isoformat(),
+            updated_at=artifact.updated_at.isoformat(),
+            rewrite_decisions={"rw-1": "accepted"},
+            rewrite_previews=[
+                ResumeBulletRewritePreview(
+                    id="rw-1",
+                    section="experience",
+                    experience_index=0,
+                    original="Built APIs.",
+                    rewritten="Built RESTful APIs.",
+                    decision="accepted",
+                )
+            ],
+        )
+
+    with patch(
+        "app.routers.jobs.get_resume_artifact_for_job",
+        new_callable=AsyncMock,
+    ) as mock_get, patch(
+        "app.routers.jobs._build_artifact_response",
+        side_effect=_fake_build,
+    ), patch("app.routers.jobs.render_resume_artifact_redline_pdf") as mock_render:
+        mock_get.return_value = artifact
+        mock_render.return_value = b"%PDF-redline"
+        resp = await client.get(f"/api/jobs/{job_id}/resume-artifact/redline-pdf")
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("application/pdf")
+    assert "inline" in resp.headers["content-disposition"]
+    assert "resume-techcorp-2026-04-18-redline.pdf" in resp.headers[
+        "content-disposition"
+    ]
+    assert resp.content == b"%PDF-redline"
+    mock_render.assert_called_once()
+
+
 async def test_get_research_snapshot_returns_payload(client, mock_user_id):
     """GET /api/jobs/{id}/research-snapshot returns the persisted snapshot."""
     job_id = uuid.uuid4()

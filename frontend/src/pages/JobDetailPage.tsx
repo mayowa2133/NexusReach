@@ -564,13 +564,18 @@ function ResumeTailorSection({ job }: { job: Job }) {
           </div>
         )}
 
+        {activeArtifact && (activeArtifact.rewrite_previews?.length ?? 0) > 0 && (
+          <ResumeArtifactReview jobId={job.id} artifact={activeArtifact} />
+        )}
+
         {activeArtifact && (
-            <div className="space-y-3 pt-3 border-t">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                <div className="text-sm font-medium">Saved Resume Source</div>
+          <div className="space-y-3 pt-3 border-t">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-medium">Generated Resume Source</div>
                 <p className="text-xs text-muted-foreground">
-                  {activeArtifact.filename} • generated {new Date(activeArtifact.generated_at).toLocaleString()}
+                  Used for exact line references in the edit map • {activeArtifact.filename} • generated{' '}
+                  {new Date(activeArtifact.generated_at).toLocaleString()}
                 </p>
               </div>
             </div>
@@ -578,10 +583,6 @@ function ResumeTailorSection({ job }: { job: Job }) {
               <pre className="whitespace-pre-wrap text-xs leading-5">{activeArtifact.content}</pre>
             </div>
           </div>
-        )}
-
-        {activeArtifact && (activeArtifact.rewrite_previews?.length ?? 0) > 0 && (
-          <ResumeArtifactReview jobId={job.id} artifact={activeArtifact} />
         )}
       </CardContent>
     </Card>

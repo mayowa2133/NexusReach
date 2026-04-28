@@ -1,4 +1,10 @@
-import { useMemo, useState, type ReactElement, type ReactNode } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from 'react';
 import { toast } from 'sonner';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -6,6 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import {
   useUpdateResumeArtifactDecisions,
   useDownloadResumeArtifactPdf,
+  useResumeArtifactRedlinePdf,
 } from '@/hooks/useJobs';
 import type {
   ResumeArtifact,
@@ -323,8 +330,14 @@ export function ResumeArtifactReview({ jobId, artifact }: Props) {
 
   const update = useUpdateResumeArtifactDecisions();
   const downloadPdf = useDownloadResumeArtifactPdf();
+  const redlinePdf = useResumeArtifactRedlinePdf(
+    jobId,
+    artifact.updated_at,
+    Boolean(artifact.rewrite_previews?.length),
+  );
 
   const [pending, setPending] = useState<Record<string, ResumeRewriteDecision>>({});
+  const [redlinePdfUrl, setRedlinePdfUrl] = useState<string | null>(null);
 
   const previews = useMemo(
     () => artifact.rewrite_previews ?? [],
@@ -344,6 +357,16 @@ export function ResumeArtifactReview({ jobId, artifact }: Props) {
     () => buildArtifactEditRows(artifact.content ?? '', previews, autoAccept),
     [artifact.content, autoAccept, previews],
   );
+
+  useEffect(() => {
+    if (!redlinePdf.data) {
+      setRedlinePdfUrl(null);
+      return undefined;
+    }
+    const url = URL.createObjectURL(redlinePdf.data);
+    setRedlinePdfUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [redlinePdf.data]);
 
   const currentDecision = (p: ResumeBulletRewritePreview): ResumeRewriteDecision =>
     pending[p.id] ?? p.decision;
@@ -485,6 +508,55 @@ export function ResumeArtifactReview({ jobId, artifact }: Props) {
           </div>
         )}
 
+        <div className="rounded-xl border bg-slate-950 p-3 text-slate-100 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-medium">Visual redline preview</span>
+                <Badge className="bg-emerald-100 text-[11px] text-emerald-900">
+                  Rendered PDF
+                </Badge>
+              </div>
+              <p className="mt-1 text-xs text-slate-300">
+                This review-only PDF shows the edits directly on the resume page:
+                red strikethrough for removed wording and green highlights for
+                additions. Download still uses the clean final PDF.
+              </p>
+            </div>
+            {dirty && (
+              <Badge variant="outline" className="border-yellow-300 text-yellow-200">
+                Apply changes to refresh PDF preview
+              </Badge>
+            )}
+          </div>
+
+          <div className="mt-3 overflow-hidden rounded-lg border border-slate-700 bg-slate-900">
+            {redlinePdf.isLoading && (
+              <div className="flex min-h-[28rem] items-center justify-center p-6 text-xs text-slate-300">
+                Rendering visual redline preview...
+              </div>
+            )}
+            {redlinePdf.isError && (
+              <div className="flex min-h-[18rem] flex-col items-center justify-center gap-2 p-6 text-center text-xs text-slate-300">
+                <div className="font-medium text-slate-100">
+                  Visual PDF preview is unavailable in this environment.
+                </div>
+                <div>
+                  The source-line edit map below still shows the exact affected
+                  bullets and wording changes.
+                </div>
+              </div>
+            )}
+            {!redlinePdf.isLoading && !redlinePdf.isError && redlinePdfUrl && (
+              <iframe
+                title="Resume visual redline PDF preview"
+                src={`${redlinePdfUrl}#toolbar=0&navpanes=0&view=FitH`}
+                className="h-[42rem] w-full bg-white"
+              />
+            )}
+          </div>
+        </div>
+
         <div className="rounded-xl border bg-gradient-to-br from-slate-50 to-amber-50/60 p-3 dark:from-slate-950/40 dark:to-amber-950/20">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -495,9 +567,9 @@ export function ResumeArtifactReview({ jobId, artifact }: Props) {
                 </Badge>
               </div>
               <p className="mt-1 text-xs text-muted-foreground">
-                Line numbers map to the generated resume source preview above.
-                Removed wording is struck through; inserted wording is highlighted
-                before you apply and regenerate the PDF.
+                Line numbers map to the generated resume source preview on this
+                page. Use this when you need an exact source-line audit trail for
+                the visual PDF marks.
               </p>
             </div>
             {dirty && (

@@ -55,6 +55,7 @@ from app.services.resume_artifact_service import (
     get_resume_artifact_for_job,
     list_resume_artifacts_for_user,
     render_resume_artifact_pdf,
+    render_resume_artifact_redline_pdf,
 )
 from app.models.profile import Profile
 from app.models.resume_artifact import ResumeArtifact
@@ -746,6 +747,48 @@ async def download_resume_artifact_pdf(
         media_type="application/pdf",
         headers={
             "Content-Disposition": f'attachment; filename="{pdf_filename}"',
+        },
+    )
+
+
+@router.get("/{job_id}/resume-artifact/redline-pdf")
+async def preview_resume_artifact_redline_pdf(
+    job_id: str,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Render the saved resume artifact as an inline review PDF with redlines."""
+    artifact = await get_resume_artifact_for_job(
+        db=db,
+        user_id=user_id,
+        job_id=uuid.UUID(job_id),
+    )
+    if not artifact:
+        artifact = await generate_resume_artifact_for_job(
+            db=db,
+            user_id=user_id,
+            job_id=uuid.UUID(job_id),
+        )
+
+    response = await _build_artifact_response(
+        db,
+        user_id=user_id,
+        job_id=job_id,
+        artifact=artifact,
+    )
+    pdf_bytes = render_resume_artifact_redline_pdf(
+        response.content,
+        [preview.model_dump() for preview in response.rewrite_previews],
+        response.rewrite_decisions,
+        auto_accept_inferred=response.auto_accept_inferred,
+    )
+    pdf_filename = artifact.filename.rsplit(".", 1)[0] + "-redline.pdf"
+
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{pdf_filename}"',
         },
     )
 

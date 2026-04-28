@@ -13,6 +13,11 @@ vi.mock('@/hooks/useJobs', () => ({
     mutateAsync: vi.fn(),
     isPending: false,
   }),
+  useResumeArtifactRedlinePdf: () => ({
+    data: undefined,
+    isLoading: false,
+    isError: false,
+  }),
 }));
 
 vi.mock('sonner', () => ({
@@ -69,6 +74,8 @@ describe('ResumeArtifactReview', () => {
     );
 
     expect(screen.getByText('Artifact edit map')).toBeInTheDocument();
+    expect(screen.getByText('Visual redline preview')).toBeInTheDocument();
+    expect(screen.getByText('Rendered PDF')).toBeInTheDocument();
     expect(screen.getByText('1 affected source lines')).toBeInTheDocument();
     expect(screen.getByText('Line 5')).toBeInTheDocument();
     expect(screen.getByText('Current artifact line')).toBeInTheDocument();

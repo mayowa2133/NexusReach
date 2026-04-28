@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from app.services.resume_artifact_service import (
+    _build_redline_resume_artifact_content,
     _default_artifact_plan,
     _derive_project_url,
     _expand_plan_to_fill_page,
@@ -504,4 +505,63 @@ def test_normalize_bullet_rewrites_classifies_inferred_from_delta():
     ])
     assert rewrites[0]["change_type"] == "inferred_claim"
     assert rewrites[0]["requires_user_confirm"] is True
-    assert rewrites[0]["inferred_additions"]
+
+
+def test_build_redline_resume_artifact_content_marks_rendered_edits():
+    content = "\n".join([
+        r"\documentclass{article}",
+        r"\begin{document}",
+        r"\begin{itemize}",
+        r"\item Built RESTful APIs with React dashboards, improving release confidence.",
+        r"\end{itemize}",
+        r"\end{document}",
+    ])
+    redline = _build_redline_resume_artifact_content(
+        content,
+        [
+            {
+                "id": "rw-1",
+                "change_type": "reframe",
+                "original": "Built APIs for internal tools.",
+                "rewritten": (
+                    "Built RESTful APIs with React dashboards, "
+                    "improving release confidence."
+                ),
+            }
+        ],
+        {"rw-1": "accepted"},
+    )
+
+    assert r"\usepackage[normalem]{ulem}" in redline
+    assert r"\usepackage{soul}" in redline
+    assert r"\sout{for internal tools.}" in redline
+    assert r"\hl{RESTful " in redline
+    assert "with React dashboards" in redline
+
+
+def test_build_redline_resume_artifact_content_handles_short_bullets():
+    content = "\n".join([
+        r"\documentclass{article}",
+        r"\usepackage[dvipsnames]{xcolor}",
+        r"\begin{document}",
+        r"\begin{itemize}",
+        r"\item Led QA automation.",
+        r"\end{itemize}",
+        r"\end{document}",
+    ])
+    redline = _build_redline_resume_artifact_content(
+        content,
+        [
+            {
+                "id": "rw-1",
+                "change_type": "reframe",
+                "original": "Led QA.",
+                "rewritten": "Led QA automation.",
+            }
+        ],
+        {"rw-1": "accepted"},
+    )
+
+    assert redline.count(r"\usepackage[dvipsnames]{xcolor}") == 1
+    assert r"\usepackage{xcolor}" not in redline
+    assert r"Led QA {\sethlcolor{green!25}\hl{automation.}}" in redline

@@ -248,6 +248,19 @@ export function useResumeArtifact(jobId: string | undefined) {
   });
 }
 
+export function useResumeArtifactRedlinePdf(
+  jobId: string | undefined,
+  artifactUpdatedAt: string | undefined,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ['resume-artifact-redline-pdf', jobId, artifactUpdatedAt],
+    queryFn: () => api.getBlob(`/api/jobs/${jobId}/resume-artifact/redline-pdf`),
+    enabled: !!jobId && enabled,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 export function useClearJobResearchSnapshot() {
   const queryClient = useQueryClient();
 
@@ -282,6 +295,7 @@ export function useGenerateResumeArtifact() {
       api.post<ResumeArtifact>(`/api/jobs/${jobId}/resume-artifact`),
     onSuccess: (_data, jobId) => {
       queryClient.invalidateQueries({ queryKey: ['resume-artifact', jobId] });
+      queryClient.invalidateQueries({ queryKey: ['resume-artifact-redline-pdf', jobId] });
       queryClient.invalidateQueries({ queryKey: ['job-command-center', jobId] });
       queryClient.invalidateQueries({ queryKey: ['tailored-resume', jobId] });
     },
@@ -305,6 +319,7 @@ export function useUpdateResumeArtifactDecisions() {
       ),
     onSuccess: (_data, { jobId }) => {
       queryClient.invalidateQueries({ queryKey: ['resume-artifact', jobId] });
+      queryClient.invalidateQueries({ queryKey: ['resume-artifact-redline-pdf', jobId] });
       queryClient.invalidateQueries({ queryKey: ['resume-library'] });
     },
   });
