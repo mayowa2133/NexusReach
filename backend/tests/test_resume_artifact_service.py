@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from app.services.resume_artifact_service import (
+    _build_resume_reuse_candidate,
     _build_redline_resume_artifact_content,
     _default_artifact_plan,
     _derive_project_url,
@@ -9,6 +10,7 @@ from app.services.resume_artifact_service import (
     _layout_profile,
     _quantifiable_measure_spans,
     _render_resume_latex,
+    score_resume_content_against_job,
 )
 
 
@@ -598,3 +600,61 @@ def test_build_redline_resume_artifact_content_handles_short_bullets():
     assert redline.count(r"\usepackage[dvipsnames]{xcolor}") == 1
     assert r"\usepackage{xcolor}" not in redline
     assert r"Led QA {\sethlcolor{green!25}\hl{automation.}}" in redline
+
+
+def test_resume_reuse_score_ignores_skills_only_matches():
+    job = SimpleNamespace(description="Experience with React and TypeScript.")
+    content = "\n".join([
+        r"\documentclass{article}",
+        r"\begin{document}",
+        r"\section*{Experience}",
+        r"\begin{itemize}",
+        r"\item Built customer dashboards and release workflows.",
+        r"\end{itemize}",
+        r"\subsection*{Technical Skills}",
+        "React, TypeScript",
+        r"\end{document}",
+    ])
+
+    assert score_resume_content_against_job(content, job) == 0.0
+
+
+def test_build_resume_reuse_candidate_requires_high_body_match():
+    artifact = SimpleNamespace(
+        content="\n".join([
+            r"\documentclass{article}",
+            r"\begin{document}",
+            r"\section*{Experience}",
+            r"\begin{itemize}",
+            (
+                r"\item Built full-stack React and TypeScript workflows with "
+                r"Node.js, REST services, and Agile delivery."
+            ),
+            r"\end{itemize}",
+            r"\subsection*{Technical Skills}",
+            "React, TypeScript, Node.js, REST",
+            r"\end{document}",
+        ])
+    )
+    source_job = SimpleNamespace(
+        title="Full-Stack Software Engineer",
+        description="Build full-stack product experiences.",
+    )
+    target_job = SimpleNamespace(
+        title="Full-Stack Software Engineer",
+        description=(
+            "Build full-stack apps with React, TypeScript, Node.js, REST, "
+            "and Agile delivery."
+        ),
+    )
+
+    candidate = _build_resume_reuse_candidate(
+        artifact=artifact,
+        source_job=source_job,
+        target_job=target_job,
+        threshold=80.0,
+    )
+
+    assert candidate is not None
+    assert candidate["score"] >= 80.0
+    assert candidate["job_family"] == "frontend_fullstack"

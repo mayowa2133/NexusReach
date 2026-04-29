@@ -25,7 +25,10 @@ from app.schemas.jobs import (
     TailoredResumeResponse,
     ResumeArtifactResponse,
     ResumeArtifactDecisionsUpdate,
+    ResumeArtifactReuseResponse,
     ResumeArtifactLibraryEntry,
+    ResumeReuseCandidate,
+    ResumeReuseCandidatesResponse,
     ResumeBulletRewritePreview,
     JobCommandCenterResponse,
     JobResearchSnapshotResponse,
@@ -49,33 +52,28 @@ from app.services.search_preference_service import (
     delete_search_preference,
 )
 from app.tasks.jobs import refresh_user_feeds
-from app.services.resume_tailor import extract_jd_must_surface
 from app.services.resume_artifact_service import (
     generate_resume_artifact_for_job,
+    get_resume_auto_reuse_enabled,
     get_resume_artifact_for_job,
+    get_resume_reuse_candidates_for_job,
     list_resume_artifacts_for_user,
     render_resume_artifact_pdf,
     render_resume_artifact_redline_pdf,
+    reuse_resume_artifact_for_job,
+    score_resume_content_against_job,
+    RESUME_REUSE_SCORE_THRESHOLD,
 )
 from app.models.profile import Profile
 from app.models.resume_artifact import ResumeArtifact
 from app.models.tailored_resume import TailoredResume
 
 
-import re as _re
-
-
 def _compute_body_ats_score(tex: str, job_description: str) -> float | None:
     if not tex or not job_description:
         return None
-    jd = extract_jd_must_surface(job_description)
-    terms = jd.get("must_surface") or []
-    if not terms:
-        return None
-    parts = _re.split(r"\\subsection\*\{Technical Skills\}", tex, maxsplit=1)
-    body = parts[0].lower()
-    hits = sum(1 for t in terms if t.lower() in body)
-    return round(100.0 * hits / len(terms), 1)
+    job = type("_ScoreJob", (), {"description": job_description})()
+    return score_resume_content_against_job(tex, job)
 
 
 async def _build_artifact_response(
@@ -128,11 +126,19 @@ async def _build_artifact_response(
     body_ats_score = _compute_body_ats_score(
         artifact.content or "", job.description or "" if job else ""
     )
+    reused_from_artifact_id = getattr(artifact, "reused_from_artifact_id", None)
+    reuse_score = getattr(artifact, "reuse_score", None)
 
     return ResumeArtifactResponse(
         id=str(artifact.id),
         job_id=job_id,
         tailored_resume_id=str(artifact.tailored_resume_id) if artifact.tailored_resume_id else None,
+        reused_from_artifact_id=(
+            str(reused_from_artifact_id)
+            if isinstance(reused_from_artifact_id, uuid.UUID)
+            else None
+        ),
+        reuse_score=reuse_score if isinstance(reuse_score, (int, float)) else None,
         format=artifact.format,
         filename=artifact.filename,
         content=artifact.content,
@@ -641,6 +647,7 @@ async def generate_resume_artifact(
     job_id: str,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    force_new: bool = False,
 ):
     """Generate or refresh a submission-ready tailored resume artifact for a job."""
     try:
@@ -648,11 +655,92 @@ async def generate_resume_artifact(
             db=db,
             user_id=user_id,
             job_id=uuid.UUID(job_id),
+            allow_auto_reuse=not force_new,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     return await _build_artifact_response(db, user_id=user_id, job_id=job_id, artifact=artifact)
+
+
+def _reuse_candidate_to_response(candidate: dict) -> ResumeReuseCandidate:
+    artifact = candidate["artifact"]
+    source_job = candidate["source_job"]
+    return ResumeReuseCandidate(
+        artifact_id=str(artifact.id),
+        source_job_id=str(source_job.id),
+        source_job_title=source_job.title,
+        source_company_name=source_job.company_name,
+        filename=artifact.filename,
+        score=float(candidate["score"]),
+        threshold=float(candidate["threshold"]),
+        job_family=str(candidate["job_family"]),
+        generated_at=artifact.generated_at.isoformat(),
+        updated_at=artifact.updated_at.isoformat(),
+        reason=str(candidate["reason"]),
+    )
+
+
+@router.get(
+    "/{job_id}/resume-artifact/reuse-candidates",
+    response_model=ResumeReuseCandidatesResponse,
+)
+async def get_resume_reuse_candidates(
+    job_id: str,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Return saved resume artifacts that are strong enough to reuse."""
+    try:
+        candidates = await get_resume_reuse_candidates_for_job(
+            db=db,
+            user_id=user_id,
+            job_id=uuid.UUID(job_id),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    auto_reuse_enabled = await get_resume_auto_reuse_enabled(db, user_id=user_id)
+    return ResumeReuseCandidatesResponse(
+        threshold=RESUME_REUSE_SCORE_THRESHOLD,
+        auto_reuse_enabled=auto_reuse_enabled,
+        candidates=[_reuse_candidate_to_response(candidate) for candidate in candidates],
+    )
+
+
+@router.post(
+    "/{job_id}/resume-artifact/reuse/{artifact_id}",
+    response_model=ResumeArtifactReuseResponse,
+)
+async def reuse_resume_artifact(
+    job_id: str,
+    artifact_id: str,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Use a high-scoring saved resume artifact for another job."""
+    try:
+        artifact, source_job = await reuse_resume_artifact_for_job(
+            db=db,
+            user_id=user_id,
+            job_id=uuid.UUID(job_id),
+            source_artifact_id=uuid.UUID(artifact_id),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    response = await _build_artifact_response(
+        db,
+        user_id=user_id,
+        job_id=job_id,
+        artifact=artifact,
+    )
+    return ResumeArtifactReuseResponse(
+        **response.model_dump(),
+        reused=True,
+        source_job_title=source_job.title,
+        source_company_name=source_job.company_name,
+    )
 
 
 @router.get("/{job_id}/resume-artifact", response_model=ResumeArtifactResponse | None)
@@ -713,6 +801,7 @@ async def update_resume_artifact_decisions(
             user_id=user_id,
             job_id=uuid.UUID(job_id),
             rewrite_decisions=merged,
+            allow_auto_reuse=False,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

@@ -16,6 +16,8 @@ from app.schemas.settings import (
     GuardrailsResponse,
     GuardrailsUpdate,
     OnboardingCompleteResponse,
+    ResumeReuseSettingsResponse,
+    ResumeReuseSettingsUpdate,
 )
 from app.services import settings_service
 
@@ -90,3 +92,23 @@ async def update_cadence_settings(
     """Partially update cadence threshold settings."""
     payload = body.model_dump(exclude_none=True)
     return await settings_service.update_cadence_settings(db, user_id, payload)
+
+
+@router.get("/resume-reuse", response_model=ResumeReuseSettingsResponse)
+async def get_resume_reuse_settings(
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Return the current resume reuse configuration."""
+    return await settings_service.get_resume_reuse_settings(db, user_id)
+
+
+@router.put("/resume-reuse", response_model=ResumeReuseSettingsResponse)
+async def update_resume_reuse_settings(
+    body: ResumeReuseSettingsUpdate,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Partially update resume reuse settings."""
+    payload = body.model_dump(exclude_none=True)
+    return await settings_service.update_resume_reuse_settings(db, user_id, payload)

@@ -48,6 +48,12 @@ CADENCE_DEFAULTS = {
     "cadence_digest_enabled": True,
 }
 
+RESUME_REUSE_FIELDS = ("resume_auto_reuse_enabled",)
+
+RESUME_REUSE_DEFAULTS = {
+    "resume_auto_reuse_enabled": False,
+}
+
 
 async def get_guardrails(db: AsyncSession, user_id: uuid.UUID) -> dict:
     """Return current guardrails settings for a user."""
@@ -187,6 +193,39 @@ async def update_cadence_settings(
     await db.commit()
     await db.refresh(settings)
     return {field: getattr(settings, field) for field in CADENCE_FIELDS}
+
+
+async def get_resume_reuse_settings(db: AsyncSession, user_id: uuid.UUID) -> dict:
+    """Return current resume reuse settings for a user."""
+    result = await db.execute(
+        select(UserSettings).where(UserSettings.user_id == user_id)
+    )
+    settings = result.scalar_one_or_none()
+    if not settings:
+        return dict(RESUME_REUSE_DEFAULTS)
+    return {field: getattr(settings, field) for field in RESUME_REUSE_FIELDS}
+
+
+async def update_resume_reuse_settings(
+    db: AsyncSession, user_id: uuid.UUID, payload: dict
+) -> dict:
+    """Partially update resume reuse settings."""
+    result = await db.execute(
+        select(UserSettings).where(UserSettings.user_id == user_id)
+    )
+    settings = result.scalar_one_or_none()
+    if not settings:
+        settings = UserSettings(user_id=user_id)
+        db.add(settings)
+        await db.flush()
+
+    for key, value in payload.items():
+        if key in RESUME_REUSE_FIELDS and value is not None:
+            setattr(settings, key, value)
+
+    await db.commit()
+    await db.refresh(settings)
+    return {field: getattr(settings, field) for field in RESUME_REUSE_FIELDS}
 
 
 async def update_guardrails(

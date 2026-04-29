@@ -195,6 +195,41 @@ async def test_update_guardrails_empty_body(client, mock_user_id):
 
 
 # ===========================================================================
+# Resume reuse settings
+# ===========================================================================
+
+
+async def test_get_resume_reuse_returns_confirmation_first_default(client, mock_user_id):
+    """Resume reuse defaults to asking before reusing a saved artifact."""
+    with patch(
+        "app.routers.settings.settings_service.get_resume_reuse_settings",
+        new_callable=AsyncMock,
+    ) as m:
+        m.return_value = {"resume_auto_reuse_enabled": False}
+        resp = await client.get("/api/settings/resume-reuse")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"resume_auto_reuse_enabled": False}
+
+
+async def test_update_resume_reuse_can_enable_auto_use(client, mock_user_id):
+    """Users can opt into automatic reuse for high-scoring saved resumes."""
+    with patch(
+        "app.routers.settings.settings_service.update_resume_reuse_settings",
+        new_callable=AsyncMock,
+    ) as m:
+        m.return_value = {"resume_auto_reuse_enabled": True}
+        resp = await client.put(
+            "/api/settings/resume-reuse",
+            json={"resume_auto_reuse_enabled": True},
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["resume_auto_reuse_enabled"] is True
+    m.assert_awaited_once()
+
+
+# ===========================================================================
 # Auth
 # ===========================================================================
 

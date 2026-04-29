@@ -26,6 +26,10 @@ import {
 } from '@/hooks/useCompanion';
 import { API_URL } from '@/lib/api';
 import { useProfile, useUpdateProfile } from '@/hooks/useProfile';
+import {
+  useResumeReuseSettings,
+  useUpdateResumeReuseSettings,
+} from '@/hooks/useSettings';
 import { AutoProspectPanel } from '@/components/settings/AutoProspectPanel';
 import { CadenceSettingsPanel } from '@/components/settings/CadenceSettingsPanel';
 import { GuardrailsPanel } from '@/components/settings/GuardrailsPanel';
@@ -47,7 +51,10 @@ function buildLinkedInProfileCommand(sessionToken: string): string {
 function ResumeAiAssistCard() {
   const { data: profile } = useProfile();
   const update = useUpdateProfile();
+  const { data: reuseSettings } = useResumeReuseSettings();
+  const updateReuse = useUpdateResumeReuseSettings();
   const enabled = !!profile?.resume_auto_accept_inferred;
+  const autoReuseEnabled = !!reuseSettings?.resume_auto_reuse_enabled;
 
   const onToggle = async () => {
     try {
@@ -56,6 +63,21 @@ function ResumeAiAssistCard() {
         !enabled
           ? 'Auto-accept enabled — you are liable for inferred claims'
           : 'Auto-accept disabled',
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update');
+    }
+  };
+
+  const onToggleAutoReuse = async () => {
+    try {
+      await updateReuse.mutateAsync({
+        resume_auto_reuse_enabled: !autoReuseEnabled,
+      });
+      toast.success(
+        !autoReuseEnabled
+          ? 'Automatic high-score resume reuse enabled'
+          : 'Automatic resume reuse disabled',
       );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to update');
@@ -90,6 +112,31 @@ function ResumeAiAssistCard() {
             {enabled ? 'On' : 'Off'}
           </Button>
         </div>
+        <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
+          <div className="space-y-1">
+            <div className="font-medium">Auto-use strong existing resumes</div>
+            <p className="text-xs text-muted-foreground">
+              When on, NexusReach will reuse a saved resume instead of spending
+              LLM tokens if it scores at least 80% for a new compatible posting.
+              When off, you will be asked before reuse.
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant={autoReuseEnabled ? 'default' : 'outline'}
+            onClick={onToggleAutoReuse}
+            disabled={updateReuse.isPending}
+          >
+            {autoReuseEnabled ? 'On' : 'Off'}
+          </Button>
+        </div>
+        {autoReuseEnabled && (
+          <div className="rounded-md border border-blue-300 bg-blue-50 p-2.5 text-xs text-blue-900 dark:border-blue-600 dark:bg-blue-900/20 dark:text-blue-200">
+            Automatic reuse only applies to compatible jobs with a deterministic
+            resume score of 80% or higher. You can still regenerate a fresh
+            resume from the job page.
+          </div>
+        )}
         {enabled && (
           <div className="rounded-md border border-yellow-300 bg-yellow-50 p-2.5 text-xs text-yellow-900 dark:border-yellow-600 dark:bg-yellow-900/20 dark:text-yellow-200">
             <strong>Warning:</strong> inferred claims will appear in generated

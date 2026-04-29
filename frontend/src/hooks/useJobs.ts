@@ -12,6 +12,7 @@ import type {
   OfferDetails,
   PaginatedResponse,
   ResumeArtifact,
+  ResumeReuseCandidatesResponse,
   SearchPreference,
   TailoredResume,
 } from '@/types';
@@ -261,6 +262,21 @@ export function useResumeArtifactRedlinePdf(
   });
 }
 
+export function useResumeReuseCandidates(
+  jobId: string | undefined,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ['resume-reuse-candidates', jobId],
+    queryFn: () =>
+      api.get<ResumeReuseCandidatesResponse>(
+        `/api/jobs/${jobId}/resume-artifact/reuse-candidates`,
+      ),
+    enabled: !!jobId && enabled,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 export function useClearJobResearchSnapshot() {
   const queryClient = useQueryClient();
 
@@ -291,13 +307,42 @@ export function useGenerateResumeArtifact() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (jobId: string) =>
-      api.post<ResumeArtifact>(`/api/jobs/${jobId}/resume-artifact`),
-    onSuccess: (_data, jobId) => {
+    mutationFn: (input: string | { jobId: string; forceNew?: boolean }) => {
+      const jobId = typeof input === 'string' ? input : input.jobId;
+      const forceNew = typeof input === 'string' ? false : Boolean(input.forceNew);
+      const suffix = forceNew ? '?force_new=true' : '';
+      return api.post<ResumeArtifact>(`/api/jobs/${jobId}/resume-artifact${suffix}`);
+    },
+    onSuccess: (_data, input) => {
+      const jobId = typeof input === 'string' ? input : input.jobId;
       queryClient.invalidateQueries({ queryKey: ['resume-artifact', jobId] });
       queryClient.invalidateQueries({ queryKey: ['resume-artifact-redline-pdf', jobId] });
+      queryClient.invalidateQueries({ queryKey: ['resume-reuse-candidates', jobId] });
       queryClient.invalidateQueries({ queryKey: ['job-command-center', jobId] });
       queryClient.invalidateQueries({ queryKey: ['tailored-resume', jobId] });
+    },
+  });
+}
+
+export function useReuseResumeArtifact() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      jobId,
+      artifactId,
+    }: {
+      jobId: string;
+      artifactId: string;
+    }) =>
+      api.post<ResumeArtifact>(
+        `/api/jobs/${jobId}/resume-artifact/reuse/${artifactId}`,
+      ),
+    onSuccess: (_data, { jobId }) => {
+      queryClient.invalidateQueries({ queryKey: ['resume-artifact', jobId] });
+      queryClient.invalidateQueries({ queryKey: ['resume-artifact-redline-pdf', jobId] });
+      queryClient.invalidateQueries({ queryKey: ['resume-reuse-candidates', jobId] });
+      queryClient.invalidateQueries({ queryKey: ['job-command-center', jobId] });
     },
   });
 }

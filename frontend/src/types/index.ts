@@ -493,6 +493,8 @@ export interface ResumeArtifact {
   id: string;
   job_id: string;
   tailored_resume_id: string | null;
+  reused_from_artifact_id?: string | null;
+  reuse_score?: number | null;
   format: string;
   filename: string;
   content: string;
@@ -503,6 +505,26 @@ export interface ResumeArtifact {
   rewrite_previews?: ResumeBulletRewritePreview[];
   auto_accept_inferred?: boolean;
   body_ats_score?: number | null;
+}
+
+export interface ResumeReuseCandidate {
+  artifact_id: string;
+  source_job_id: string;
+  source_job_title: string | null;
+  source_company_name: string | null;
+  filename: string;
+  score: number;
+  threshold: number;
+  job_family: string;
+  generated_at: string;
+  updated_at: string;
+  reason: string;
+}
+
+export interface ResumeReuseCandidatesResponse {
+  threshold: number;
+  auto_reuse_enabled: boolean;
+  candidates: ResumeReuseCandidate[];
 }
 
 export interface JobCommandCenterChecklist {
@@ -914,6 +936,10 @@ export interface AutoProspectSettings {
   auto_stage_on_apply: boolean;
   auto_send_enabled: boolean;
   auto_send_delay_minutes: number;
+}
+
+export interface ResumeReuseSettings {
+  resume_auto_reuse_enabled: boolean;
 }
 
 export interface LinkedInGraphSyncRun {

@@ -330,6 +330,142 @@ async def test_generate_resume_artifact(client, mock_user_id):
     assert data["job_id"] == str(job_id)
     assert data["format"] == "latex"
     assert data["filename"] == "resume-techcorp-2026-04-18.tex"
+    assert mock_generate.await_args.kwargs["allow_auto_reuse"] is True
+
+
+async def test_generate_resume_artifact_force_new_bypasses_auto_reuse(client, mock_user_id):
+    """POST /api/jobs/{id}/resume-artifact?force_new=true bypasses auto reuse."""
+    job_id = uuid.uuid4()
+    artifact = MagicMock()
+    artifact.id = uuid.uuid4()
+    artifact.job_id = job_id
+    artifact.tailored_resume_id = uuid.uuid4()
+    artifact.format = "latex"
+    artifact.filename = "resume-techcorp-2026-04-18.tex"
+    artifact.content = "\\documentclass{article}\n"
+    artifact.generated_at = datetime(2026, 4, 18, tzinfo=timezone.utc)
+    artifact.created_at = datetime(2026, 4, 18, tzinfo=timezone.utc)
+    artifact.updated_at = datetime(2026, 4, 18, tzinfo=timezone.utc)
+    artifact.rewrite_decisions = {}
+
+    from app.schemas.jobs import ResumeArtifactResponse
+
+    async def _fake_build(_db, *, user_id, job_id, artifact):
+        return ResumeArtifactResponse(
+            id=str(artifact.id),
+            job_id=job_id,
+            tailored_resume_id=str(artifact.tailored_resume_id),
+            format=artifact.format,
+            filename=artifact.filename,
+            content=artifact.content,
+            generated_at=artifact.generated_at.isoformat(),
+            created_at=artifact.created_at.isoformat(),
+            updated_at=artifact.updated_at.isoformat(),
+        )
+
+    with patch("app.routers.jobs.generate_resume_artifact_for_job", new_callable=AsyncMock) as mock_generate, \
+         patch("app.routers.jobs._build_artifact_response", side_effect=_fake_build):
+        mock_generate.return_value = artifact
+        resp = await client.post(f"/api/jobs/{job_id}/resume-artifact?force_new=true")
+
+    assert resp.status_code == 200
+    assert mock_generate.await_args.kwargs["allow_auto_reuse"] is False
+
+
+async def test_get_resume_reuse_candidates(client, mock_user_id):
+    """GET /api/jobs/{id}/resume-artifact/reuse-candidates returns saved matches."""
+    job_id = uuid.uuid4()
+    artifact = MagicMock()
+    artifact.id = uuid.uuid4()
+    artifact.filename = "resume-acme-2026-04-18.tex"
+    artifact.generated_at = datetime(2026, 4, 18, tzinfo=timezone.utc)
+    artifact.updated_at = datetime(2026, 4, 19, tzinfo=timezone.utc)
+    source_job = MagicMock()
+    source_job.id = uuid.uuid4()
+    source_job.title = "Full-Stack Engineer"
+    source_job.company_name = "Acme"
+    candidate = {
+        "artifact": artifact,
+        "source_job": source_job,
+        "score": 91.2,
+        "threshold": 80.0,
+        "job_family": "frontend_fullstack",
+        "reason": "This saved resume scores 91.2% against the new posting.",
+    }
+
+    with patch(
+        "app.routers.jobs.get_resume_reuse_candidates_for_job",
+        new_callable=AsyncMock,
+    ) as mock_candidates, patch(
+        "app.routers.jobs.get_resume_auto_reuse_enabled",
+        new_callable=AsyncMock,
+    ) as mock_auto:
+        mock_candidates.return_value = [candidate]
+        mock_auto.return_value = False
+        resp = await client.get(f"/api/jobs/{job_id}/resume-artifact/reuse-candidates")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["threshold"] == 80.0
+    assert data["auto_reuse_enabled"] is False
+    assert data["candidates"][0]["artifact_id"] == str(artifact.id)
+    assert data["candidates"][0]["score"] == 91.2
+
+
+async def test_reuse_resume_artifact(client, mock_user_id):
+    """POST /api/jobs/{id}/resume-artifact/reuse/{artifact_id} reuses a saved artifact."""
+    job_id = uuid.uuid4()
+    source_artifact_id = uuid.uuid4()
+    artifact = MagicMock()
+    artifact.id = uuid.uuid4()
+    artifact.job_id = job_id
+    artifact.tailored_resume_id = None
+    artifact.reused_from_artifact_id = source_artifact_id
+    artifact.reuse_score = 88.0
+    artifact.format = "latex"
+    artifact.filename = "resume-intuit-2026-04-18.tex"
+    artifact.content = "\\documentclass{article}\n"
+    artifact.generated_at = datetime(2026, 4, 18, tzinfo=timezone.utc)
+    artifact.created_at = datetime(2026, 4, 18, tzinfo=timezone.utc)
+    artifact.updated_at = datetime(2026, 4, 18, tzinfo=timezone.utc)
+    source_job = MagicMock()
+    source_job.title = "Full-Stack Engineer"
+    source_job.company_name = "Acme"
+
+    from app.schemas.jobs import ResumeArtifactResponse
+
+    async def _fake_build(_db, *, user_id, job_id, artifact):
+        return ResumeArtifactResponse(
+            id=str(artifact.id),
+            job_id=str(job_id),
+            tailored_resume_id=None,
+            reused_from_artifact_id=str(source_artifact_id),
+            reuse_score=artifact.reuse_score,
+            format=artifact.format,
+            filename=artifact.filename,
+            content=artifact.content,
+            generated_at=artifact.generated_at.isoformat(),
+            created_at=artifact.created_at.isoformat(),
+            updated_at=artifact.updated_at.isoformat(),
+        )
+
+    with patch(
+        "app.routers.jobs.reuse_resume_artifact_for_job",
+        new_callable=AsyncMock,
+    ) as mock_reuse, patch(
+        "app.routers.jobs._build_artifact_response",
+        side_effect=_fake_build,
+    ):
+        mock_reuse.return_value = (artifact, source_job)
+        resp = await client.post(
+            f"/api/jobs/{job_id}/resume-artifact/reuse/{source_artifact_id}"
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["reused"] is True
+    assert data["reused_from_artifact_id"] == str(source_artifact_id)
+    assert data["source_company_name"] == "Acme"
 
 
 async def test_get_resume_artifact(client, mock_user_id):

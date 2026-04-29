@@ -7,7 +7,7 @@ import { Separator } from '@/components/ui/separator';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { useJob, useJobCommandCenter, useUpdateJobStage, useToggleJobStar, useAnalyzeMatch, useTailoredResume, useTailorResume, useResumeArtifact, useGenerateResumeArtifact, useDownloadResumeArtifactPdf, useClearJobResearchSnapshot } from '@/hooks/useJobs';
+import { useJob, useJobCommandCenter, useUpdateJobStage, useToggleJobStar, useAnalyzeMatch, useTailoredResume, useTailorResume, useResumeArtifact, useGenerateResumeArtifact, useDownloadResumeArtifactPdf, useClearJobResearchSnapshot, useResumeReuseCandidates, useReuseResumeArtifact } from '@/hooks/useJobs';
 import { usePeopleSearch, useSavedPeople } from '@/hooks/usePeople';
 import { useFindEmail } from '@/hooks/useEmail';
 import { useDraftMessage } from '@/hooks/useMessages';
@@ -354,6 +354,7 @@ function ResumeTailorSection({ job }: { job: Job }) {
   const { data: savedArtifact, isLoading: isLoadingArtifact } = useResumeArtifact(job.id);
   const tailorResume = useTailorResume();
   const generateArtifact = useGenerateResumeArtifact();
+  const reuseArtifact = useReuseResumeArtifact();
   const downloadArtifactPdf = useDownloadResumeArtifactPdf();
   const [tailoring, setTailoring] = useState<TailoredResume | null>(null);
   const [artifact, setArtifact] = useState<ResumeArtifact | null>(null);
@@ -361,6 +362,9 @@ function ResumeTailorSection({ job }: { job: Job }) {
   // Use saved tailoring if available and no fresh one generated
   const active = tailoring ?? savedTailoring ?? null;
   const activeArtifact = artifact ?? savedArtifact ?? null;
+  const { data: reuseData, isLoading: isLoadingReuseCandidates } =
+    useResumeReuseCandidates(job.id, !activeArtifact);
+  const topReuseCandidate = !activeArtifact ? reuseData?.candidates[0] : undefined;
 
   const handleDownloadArtifact = (currentArtifact: ResumeArtifact) => {
     const blob = new Blob([currentArtifact.content], { type: 'text/markdown;charset=utf-8' });
@@ -394,13 +398,30 @@ function ResumeTailorSection({ job }: { job: Job }) {
     }
   };
 
-  const handleGenerateArtifact = async () => {
+  const handleGenerateArtifact = async (forceNew = false) => {
     try {
-      const result = await generateArtifact.mutateAsync(job.id);
+      const result = await generateArtifact.mutateAsync({ jobId: job.id, forceNew });
       setArtifact(result);
-      toast.success('Generated a job-linked resume artifact');
+      toast.success(
+        result.reused_from_artifact_id && !forceNew
+          ? 'Reused a high-scoring saved resume for this job'
+          : 'Generated a job-linked resume artifact',
+      );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to generate resume artifact');
+    }
+  };
+
+  const handleReuseArtifact = async (artifactId: string) => {
+    try {
+      const result = await reuseArtifact.mutateAsync({
+        jobId: job.id,
+        artifactId,
+      });
+      setArtifact(result);
+      toast.success('Reused the saved resume for this job');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to reuse resume artifact');
     }
   };
 
@@ -451,7 +472,7 @@ function ResumeTailorSection({ job }: { job: Job }) {
             )}
             <Button
               size="sm"
-              onClick={handleGenerateArtifact}
+              onClick={() => handleGenerateArtifact(false)}
               disabled={generateArtifact.isPending}
             >
               {generateArtifact.isPending ? 'Generating...' : activeArtifact ? 'Regenerate Artifact' : 'Generate Artifact'}
@@ -459,12 +480,62 @@ function ResumeTailorSection({ job }: { job: Job }) {
           </div>
         </div>
 
+        {topReuseCandidate && (
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-3 dark:border-emerald-700 dark:bg-emerald-950/20">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-medium">Strong existing resume available</span>
+                  <Badge className="bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200">
+                    {topReuseCandidate.score.toFixed(0)}% match
+                  </Badge>
+                  {reuseData?.auto_reuse_enabled && (
+                    <Badge variant="outline" className="text-[11px]">
+                      Auto-reuse enabled
+                    </Badge>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {topReuseCandidate.reason} Source:{' '}
+                  {topReuseCandidate.source_job_title || 'Saved resume'} at{' '}
+                  {topReuseCandidate.source_company_name || 'Unknown company'}.
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  Default behavior is to ask before reuse. Use the saved resume to
+                  avoid extra LLM tokens, or generate a new tailored resume anyway.
+                </p>
+              </div>
+              <div className="flex shrink-0 flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleGenerateArtifact(true)}
+                  disabled={generateArtifact.isPending || reuseArtifact.isPending}
+                >
+                  Generate New Anyway
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => handleReuseArtifact(topReuseCandidate.artifact_id)}
+                  disabled={reuseArtifact.isPending || generateArtifact.isPending}
+                >
+                  {reuseArtifact.isPending ? 'Reusing...' : 'Use Existing Resume'}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {isLoadingSaved && !active && (
           <div className="text-xs text-muted-foreground">Loading saved suggestions...</div>
         )}
 
         {isLoadingArtifact && !activeArtifact && (
           <div className="text-xs text-muted-foreground">Loading saved resume artifact...</div>
+        )}
+
+        {isLoadingReuseCandidates && !activeArtifact && (
+          <div className="text-xs text-muted-foreground">Checking for reusable saved resumes...</div>
         )}
 
         {active && (

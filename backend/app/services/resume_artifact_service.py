@@ -20,16 +20,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.job import Job
 from app.models.profile import Profile
 from app.models.resume_artifact import ResumeArtifact
+from app.models.settings import UserSettings
 from app.models.tailored_resume import TailoredResume
 from app.models.user import User
 from app.clients.llm_client import generate_message
 from app.services.match_scoring import score_job
 from app.services.resume_parser import parse_resume_text, scrub_skill_list
-from app.services.resume_tailor import _normalize_bullet_rewrites, tailor_resume
+from app.services.resume_tailor import (
+    _normalize_bullet_rewrites,
+    extract_jd_must_surface,
+    tailor_resume,
+)
 from app.utils.company_identity import slugify_company_name
 
 
 logger = logging.getLogger(__name__)
+
+RESUME_REUSE_SCORE_THRESHOLD = 80.0
 
 
 def _clean(value: str | None) -> str:
@@ -1737,6 +1744,37 @@ def _latex_plain_text(line: str) -> str:
     return _clean(text)
 
 
+def _resume_body_contains_term(body: str, term: str) -> bool:
+    normalized = _clean(term).lower()
+    if not normalized:
+        return False
+    if re.fullmatch(r"[a-z0-9+#.]+", normalized):
+        return re.search(
+            rf"(?<![a-z0-9+#.]){re.escape(normalized)}(?![a-z0-9+#.])",
+            body,
+        ) is not None
+    return normalized in body
+
+
+def score_resume_content_against_job(content: str, job: Job) -> float | None:
+    """Deterministically score rendered resume content against a job description."""
+    if not content or not (job.description or ""):
+        return None
+    jd = extract_jd_must_surface(job.description or "")
+    terms = jd.get("must_surface") or []
+    if not terms:
+        return None
+
+    body_content = re.split(
+        r"\\subsection\*\{Technical Skills\}",
+        content,
+        maxsplit=1,
+    )[0]
+    body = _latex_plain_text(body_content).lower()
+    hits = sum(1 for term in terms if _resume_body_contains_term(body, str(term)))
+    return round(100.0 * hits / len(terms), 1)
+
+
 def _redline_compare_text(text: str) -> str:
     text = _latex_plain_text(text).lower()
     text = re.sub(r"[^a-z0-9+#.%]+", " ", text)
@@ -1962,6 +2000,156 @@ def render_resume_artifact_redline_pdf(
     return render_resume_artifact_pdf(redline_content)
 
 
+def _build_resume_reuse_candidate(
+    *,
+    artifact: ResumeArtifact,
+    source_job: Job,
+    target_job: Job,
+    threshold: float,
+) -> dict[str, Any] | None:
+    source_family = _job_family(source_job)
+    target_family = _job_family(target_job)
+    if source_family != target_family:
+        return None
+
+    score = score_resume_content_against_job(artifact.content, target_job)
+    if score is None or score < threshold:
+        return None
+
+    return {
+        "artifact": artifact,
+        "source_job": source_job,
+        "score": score,
+        "threshold": threshold,
+        "job_family": target_family,
+        "reason": (
+            f"This saved resume scores {score:.1f}% against the new posting "
+            f"and matches the {target_family.replace('_', '/')} job family."
+        ),
+    }
+
+
+async def get_resume_reuse_candidates_for_job(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    job_id: uuid.UUID,
+    threshold: float = RESUME_REUSE_SCORE_THRESHOLD,
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    """Find existing resume artifacts that are strong enough for a target job."""
+    target_result = await db.execute(
+        select(Job).where(Job.id == job_id, Job.user_id == user_id)
+    )
+    target_job = target_result.scalar_one_or_none()
+    if not target_job:
+        raise ValueError("Job not found.")
+
+    rows = await list_resume_artifacts_for_user(db=db, user_id=user_id)
+    candidates: list[dict[str, Any]] = []
+    for artifact, source_job in rows:
+        if artifact.job_id == job_id:
+            continue
+        candidate = _build_resume_reuse_candidate(
+            artifact=artifact,
+            source_job=source_job,
+            target_job=target_job,
+            threshold=threshold,
+        )
+        if candidate is not None:
+            candidates.append(candidate)
+
+    candidates.sort(
+        key=lambda item: (
+            float(item["score"]),
+            item["artifact"].generated_at,
+        ),
+        reverse=True,
+    )
+    return candidates[:limit]
+
+
+async def get_resume_auto_reuse_enabled(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+) -> bool:
+    result = await db.execute(
+        select(UserSettings).where(UserSettings.user_id == user_id)
+    )
+    settings = result.scalar_one_or_none()
+    return bool(settings and settings.resume_auto_reuse_enabled)
+
+
+async def reuse_resume_artifact_for_job(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    job_id: uuid.UUID,
+    source_artifact_id: uuid.UUID,
+    threshold: float = RESUME_REUSE_SCORE_THRESHOLD,
+) -> tuple[ResumeArtifact, Job]:
+    """Copy a high-scoring saved resume artifact onto another job."""
+    target_result = await db.execute(
+        select(Job).where(Job.id == job_id, Job.user_id == user_id)
+    )
+    target_job = target_result.scalar_one_or_none()
+    if not target_job:
+        raise ValueError("Job not found.")
+
+    source_result = await db.execute(
+        select(ResumeArtifact, Job)
+        .join(Job, Job.id == ResumeArtifact.job_id)
+        .where(
+            ResumeArtifact.id == source_artifact_id,
+            ResumeArtifact.user_id == user_id,
+        )
+    )
+    source_row = source_result.one_or_none()
+    if source_row is None:
+        raise ValueError("Saved resume artifact not found.")
+
+    source_artifact, source_job = source_row
+    if source_artifact.job_id == job_id:
+        raise ValueError("Cannot reuse a resume artifact for the same job.")
+
+    candidate = _build_resume_reuse_candidate(
+        artifact=source_artifact,
+        source_job=source_job,
+        target_job=target_job,
+        threshold=threshold,
+    )
+    if candidate is None:
+        raise ValueError("Saved resume does not meet the reuse threshold for this job.")
+
+    artifact_result = await db.execute(
+        select(ResumeArtifact).where(
+            ResumeArtifact.user_id == user_id,
+            ResumeArtifact.job_id == job_id,
+        )
+    )
+    artifact = artifact_result.scalar_one_or_none()
+    if artifact is None:
+        artifact = ResumeArtifact(user_id=user_id, job_id=job_id)
+        db.add(artifact)
+
+    artifact.tailored_resume_id = None
+    artifact.reused_from_artifact_id = source_artifact.id
+    artifact.reuse_score = float(candidate["score"])
+    artifact.format = source_artifact.format
+    artifact.filename = (
+        f"resume-{_slugify_label(target_job.company_name, 'company')}-"
+        f"{datetime.now(timezone.utc).date().isoformat()}.tex"
+    )
+    artifact.content = source_artifact.content
+    artifact.rewrite_decisions = {}
+    artifact.generated_at = datetime.now(timezone.utc)
+
+    await db.commit()
+    await db.refresh(artifact)
+    return artifact, source_job
+
+
 async def _load_or_generate_tailoring(
     db: AsyncSession,
     *,
@@ -2022,6 +2210,7 @@ async def generate_resume_artifact_for_job(
     job_id: uuid.UUID,
     rewrite_decisions: dict[str, str] | None = None,
     reuse_decisions: bool = True,
+    allow_auto_reuse: bool = True,
 ) -> ResumeArtifact:
     job_result = await db.execute(
         select(Job).where(Job.id == job_id, Job.user_id == user_id)
@@ -2029,6 +2218,35 @@ async def generate_resume_artifact_for_job(
     job = job_result.scalar_one_or_none()
     if not job:
         raise ValueError("Job not found.")
+
+    artifact_result = await db.execute(
+        select(ResumeArtifact).where(
+            ResumeArtifact.user_id == user_id,
+            ResumeArtifact.job_id == job_id,
+        )
+    )
+    artifact = artifact_result.scalar_one_or_none()
+
+    if (
+        allow_auto_reuse
+        and artifact is None
+        and rewrite_decisions is None
+        and await get_resume_auto_reuse_enabled(db, user_id=user_id)
+    ):
+        candidates = await get_resume_reuse_candidates_for_job(
+            db=db,
+            user_id=user_id,
+            job_id=job_id,
+            limit=1,
+        )
+        if candidates:
+            reused_artifact, _ = await reuse_resume_artifact_for_job(
+                db=db,
+                user_id=user_id,
+                job_id=job_id,
+                source_artifact_id=candidates[0]["artifact"].id,
+            )
+            return reused_artifact
 
     profile_result = await db.execute(
         select(Profile).where(Profile.user_id == user_id)
@@ -2061,14 +2279,6 @@ async def generate_resume_artifact_for_job(
 
     filename = f"resume-{_slugify_label(job.company_name, 'company')}-{datetime.now(timezone.utc).date().isoformat()}.tex"
 
-    artifact_result = await db.execute(
-        select(ResumeArtifact).where(
-            ResumeArtifact.user_id == user_id,
-            ResumeArtifact.job_id == job_id,
-        )
-    )
-    artifact = artifact_result.scalar_one_or_none()
-
     if artifact is None:
         artifact = ResumeArtifact(
             user_id=user_id,
@@ -2095,6 +2305,8 @@ async def generate_resume_artifact_for_job(
     )
 
     artifact.tailored_resume_id = tailored.id
+    artifact.reused_from_artifact_id = None
+    artifact.reuse_score = None
     artifact.format = "latex"
     artifact.filename = filename
     artifact.content = content

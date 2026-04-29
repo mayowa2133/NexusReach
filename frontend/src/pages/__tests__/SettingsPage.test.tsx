@@ -2,7 +2,7 @@
  * Tests for SettingsPage — Phase 9 Guardrails.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -41,17 +41,24 @@ vi.mock('@/stores/auth', () => ({
 let mockGuardrails: { data: unknown; isLoading: boolean } = { data: undefined, isLoading: false };
 let mockEmailStatus: { data: unknown; isLoading: boolean } = { data: undefined, isLoading: false };
 let mockLinkedInGraphStatus: { data: unknown; isLoading: boolean } = { data: undefined, isLoading: false };
+let mockResumeReuseSettings: { data: unknown; isLoading: boolean } = {
+  data: { resume_auto_reuse_enabled: false },
+  isLoading: false,
+};
 
 const mockUpdateGuardrails = { mutateAsync: vi.fn(), isPending: false };
 const mockStartLinkedInGraphSync = { mutateAsync: vi.fn(), isPending: false };
 const mockUploadLinkedInGraphFile = { mutateAsync: vi.fn(), isPending: false };
 const mockClearLinkedInGraph = { mutateAsync: vi.fn(), isPending: false };
+const mockUpdateResumeReuseSettings = { mutateAsync: vi.fn(), isPending: false };
 
 vi.mock('@/hooks/useSettings', () => ({
   useGuardrails: () => mockGuardrails,
   useUpdateGuardrails: () => mockUpdateGuardrails,
   useAutoProspect: () => ({ data: undefined, isLoading: false }),
   useUpdateAutoProspect: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useResumeReuseSettings: () => mockResumeReuseSettings,
+  useUpdateResumeReuseSettings: () => mockUpdateResumeReuseSettings,
 }));
 
 vi.mock('@/hooks/useEmail', () => ({
@@ -147,10 +154,15 @@ beforeEach(() => {
     },
     isLoading: false,
   };
+  mockResumeReuseSettings = {
+    data: { resume_auto_reuse_enabled: false },
+    isLoading: false,
+  };
   mockUpdateGuardrails.mutateAsync.mockReset();
   mockStartLinkedInGraphSync.mutateAsync.mockReset();
   mockUploadLinkedInGraphFile.mutateAsync.mockReset();
   mockClearLinkedInGraph.mutateAsync.mockReset();
+  mockUpdateResumeReuseSettings.mutateAsync.mockReset();
 });
 
 // ===========================================================================
@@ -189,6 +201,28 @@ describe('SettingsPage — basic', () => {
     expect(screen.getByRole('button', { name: /sync now/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /upload export/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /clear graph data/i })).toBeInTheDocument();
+  });
+
+  it('defaults resume auto-reuse to confirmation first', () => {
+    renderSettings();
+    expect(screen.getByText('Auto-use strong existing resumes')).toBeInTheDocument();
+    expect(screen.getByText(/when off, you will be asked before reuse/i)).toBeInTheDocument();
+  });
+
+  it('allows users to opt into automatic high-score resume reuse', async () => {
+    renderSettings();
+    const autoReuseRow = screen
+      .getByText('Auto-use strong existing resumes')
+      .closest('[class*="rounded-lg"]');
+
+    expect(autoReuseRow).not.toBeNull();
+    await userEvent.click(
+      within(autoReuseRow as HTMLElement).getByRole('button', { name: 'Off' }),
+    );
+
+    expect(mockUpdateResumeReuseSettings.mutateAsync).toHaveBeenCalledWith({
+      resume_auto_reuse_enabled: true,
+    });
   });
 
   it('shows connector commands after starting a sync session', async () => {

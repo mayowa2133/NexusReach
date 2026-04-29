@@ -109,3 +109,19 @@ class CadenceSettingsUpdate(BaseModel):
     applied_untouched_threshold_days: Optional[int] = Field(default=None, ge=1, le=60)
     thank_you_window_hours: Optional[int] = Field(default=None, ge=1, le=168)
     cadence_digest_enabled: Optional[bool] = None
+
+
+class ResumeReuseSettingsResponse(BaseModel):
+    resume_auto_reuse_enabled: bool = Field(
+        default=False,
+        description=(
+            "Automatically reuse a previous resume artifact when it scores above "
+            "the reuse threshold for a new job"
+        ),
+    )
+
+    model_config = {"from_attributes": True}
+
+
+class ResumeReuseSettingsUpdate(BaseModel):
+    resume_auto_reuse_enabled: Optional[bool] = None

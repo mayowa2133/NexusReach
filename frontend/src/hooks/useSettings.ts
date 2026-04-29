@@ -1,6 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import type { AutoProspectSettings, GuardrailsSettings } from '@/types';
+import type {
+  AutoProspectSettings,
+  GuardrailsSettings,
+  ResumeReuseSettings,
+} from '@/types';
 
 export function useGuardrails() {
   return useQuery({
@@ -38,6 +42,26 @@ export function useUpdateAutoProspect() {
       api.put<AutoProspectSettings>('/api/settings/auto-prospect', payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['settings', 'auto-prospect'] });
+    },
+  });
+}
+
+export function useResumeReuseSettings() {
+  return useQuery({
+    queryKey: ['settings', 'resume-reuse'],
+    queryFn: () => api.get<ResumeReuseSettings>('/api/settings/resume-reuse'),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useUpdateResumeReuseSettings() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: Partial<ResumeReuseSettings>) =>
+      api.put<ResumeReuseSettings>('/api/settings/resume-reuse', payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['settings', 'resume-reuse'] });
     },
   });
 }

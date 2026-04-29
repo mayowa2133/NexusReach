@@ -272,6 +272,8 @@ class ResumeArtifactResponse(BaseModel):
     id: str
     job_id: str
     tailored_resume_id: str | None = None
+    reused_from_artifact_id: str | None = None
+    reuse_score: float | None = None
     format: str
     filename: str
     content: str
@@ -286,6 +288,32 @@ class ResumeArtifactResponse(BaseModel):
 
 class ResumeArtifactDecisionsUpdate(BaseModel):
     decisions: dict[str, str]
+
+
+class ResumeReuseCandidate(BaseModel):
+    artifact_id: str
+    source_job_id: str
+    source_job_title: str | None = None
+    source_company_name: str | None = None
+    filename: str
+    score: float
+    threshold: float
+    job_family: str
+    generated_at: str
+    updated_at: str
+    reason: str
+
+
+class ResumeReuseCandidatesResponse(BaseModel):
+    threshold: float
+    auto_reuse_enabled: bool = False
+    candidates: list[ResumeReuseCandidate] = []
+
+
+class ResumeArtifactReuseResponse(ResumeArtifactResponse):
+    reused: bool = True
+    source_job_title: str | None = None
+    source_company_name: str | None = None
 
 
 class ResumeArtifactLibraryEntry(BaseModel):

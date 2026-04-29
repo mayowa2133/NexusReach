@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, Float, ForeignKey, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -28,6 +28,12 @@ class ResumeArtifact(Base):
     tailored_resume_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tailored_resumes.id", ondelete="SET NULL"), nullable=True
     )
+    reused_from_artifact_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("resume_artifacts.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    reuse_score: Mapped[float | None] = mapped_column(Float)
 
     format: Mapped[str] = mapped_column(String(50), default="markdown", nullable=False)
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
