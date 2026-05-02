@@ -16,8 +16,7 @@ const { mockUseAuthStore } = vi.hoisted(() => ({
     initialized: true,
     devMode: false,
     signIn: vi.fn(),
-    signInWithGoogle: vi.fn(),
-    signInWithGithub: vi.fn(),
+    signInWithProvider: vi.fn(),
   })),
 }));
 
@@ -55,8 +54,7 @@ describe('LoginPage', () => {
       initialized: true,
       devMode: false,
       signIn: vi.fn(),
-      signInWithGoogle: vi.fn(),
-      signInWithGithub: vi.fn(),
+      signInWithProvider: vi.fn(),
     });
   });
 
@@ -78,7 +76,9 @@ describe('LoginPage', () => {
   it('renders OAuth buttons', () => {
     renderLogin();
     expect(screen.getByRole('button', { name: /google/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /outlook \/ microsoft/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /github/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /linkedin/i })).toBeInTheDocument();
   });
 
   it('renders signup link', () => {
@@ -99,8 +99,7 @@ describe('LoginPage', () => {
       initialized: false,
       devMode: true,
       signIn: vi.fn(),
-      signInWithGoogle: vi.fn(),
-      signInWithGithub: vi.fn(),
+      signInWithProvider: vi.fn(),
     });
 
     renderLogin();

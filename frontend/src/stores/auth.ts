@@ -1,9 +1,11 @@
 import { create } from 'zustand';
-import type { Session, User } from '@supabase/supabase-js';
+import type { Provider, Session, User } from '@supabase/supabase-js';
 import { devAuthUserEmail, isDevAuthMode, supabase } from '@/lib/supabase';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 const DEV_USER_ID = '00000000-0000-0000-0000-000000000001';
+
+export type SocialAuthProvider = Extract<Provider, 'google' | 'github' | 'azure' | 'linkedin_oidc'>;
 
 function buildDevUser(): User {
   return {
@@ -31,11 +33,17 @@ function buildDevSession(user: User): Session {
   } as Session;
 }
 
-async function bootstrapDevUser(): Promise<void> {
+async function bootstrapBackendUser(accessToken?: string): Promise<void> {
   try {
+    if (accessToken) {
+      await fetch(`${API_URL}/api/auth/me`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      return;
+    }
     await fetch(`${API_URL}/api/auth/me`);
   } catch (error) {
-    console.warn('Dev auth bootstrap failed.', error);
+    console.warn('Auth bootstrap failed.', error);
   }
 }
 
@@ -48,8 +56,7 @@ interface AuthState {
   initialize: () => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
-  signInWithGoogle: () => Promise<void>;
-  signInWithGithub: () => Promise<void>;
+  signInWithProvider: (provider: SocialAuthProvider) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -66,7 +73,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (isDevAuthMode) {
       const user = buildDevUser();
       const session = buildDevSession(user);
-      await bootstrapDevUser();
+      await bootstrapBackendUser();
       set({
         session,
         user,
@@ -81,6 +88,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
 
     const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      await bootstrapBackendUser(session.access_token);
+    }
     set({
       session,
       user: session?.user ?? null,
@@ -108,9 +118,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
 
     set({ loading: true });
-    const { error } = await supabase.auth.signUp({ email, password });
+    const { data, error } = await supabase.auth.signUp({ email, password });
     set({ loading: false });
     if (error) throw error;
+    if (data.session?.access_token) {
+      await bootstrapBackendUser(data.session.access_token);
+    }
   },
 
   signIn: async (email: string, password: string) => {
@@ -125,12 +138,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
 
     set({ loading: true });
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     set({ loading: false });
     if (error) throw error;
+    if (data.session?.access_token) {
+      await bootstrapBackendUser(data.session.access_token);
+    }
   },
 
-  signInWithGoogle: async () => {
+  signInWithProvider: async (provider) => {
     if (isDevAuthMode) {
       const user = buildDevUser();
       set({ user, session: buildDevSession(user), initialized: true, devMode: true });
@@ -141,29 +157,20 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       throw new Error('Supabase client is unavailable.');
     }
 
+    const options =
+      provider === 'azure'
+        ? { redirectTo: `${window.location.origin}/auth/callback`, scopes: 'email' }
+        : { redirectTo: `${window.location.origin}/auth/callback` };
+
+    set({ loading: true });
     const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo: window.location.origin },
+      provider,
+      options,
     });
-    if (error) throw error;
-  },
-
-  signInWithGithub: async () => {
-    if (isDevAuthMode) {
-      const user = buildDevUser();
-      set({ user, session: buildDevSession(user), initialized: true, devMode: true });
-      return;
+    if (error) {
+      set({ loading: false });
+      throw error;
     }
-
-    if (!supabase) {
-      throw new Error('Supabase client is unavailable.');
-    }
-
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'github',
-      options: { redirectTo: window.location.origin },
-    });
-    if (error) throw error;
   },
 
   signOut: async () => {

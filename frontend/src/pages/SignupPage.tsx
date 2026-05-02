@@ -6,10 +6,11 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { useAuthStore } from '@/stores/auth';
+import { OAuthProviderButtons } from '@/components/OAuthProviderButtons';
 import { toast } from 'sonner';
 
 export function SignupPage() {
-  const { user, initialized, devMode, signUp, signInWithGoogle, signInWithGithub, loading } = useAuthStore();
+  const { user, initialized, devMode, signUp, loading } = useAuthStore();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -104,14 +105,7 @@ export function SignupPage() {
             <Separator className="flex-1" />
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
-            <Button variant="outline" onClick={() => signInWithGoogle()}>
-              Google
-            </Button>
-            <Button variant="outline" onClick={() => signInWithGithub()}>
-              GitHub
-            </Button>
-          </div>
+          <OAuthProviderButtons />
         </CardContent>
         <CardFooter className="justify-center">
           <p className="text-sm text-muted-foreground">
