@@ -31,6 +31,10 @@ class Occupation:
     engineering_flavored: bool = False
     startup_friendly: bool = False
     newgrad_jobs_path: str | None = None
+    # Short prompt fragment injected into outreach drafting so the model frames
+    # the message in the recipient's professional vocabulary. Keep these to
+    # 1–3 sentences; the rest of the system prompt handles tone & structure.
+    outreach_playbook: str | None = None
 
 
 # v1: mirror the 23 categories surfaced on newgrad-jobs.com.
@@ -94,6 +98,12 @@ OCCUPATIONS: tuple[Occupation, ...] = (
         engineering_flavored=True,
         startup_friendly=True,
         newgrad_jobs_path="software-engineer-jobs",
+        outreach_playbook=(
+            "Lead with a concrete technical detail (project, repo, stack, or "
+            "architecture choice) that connects your work to the team's. Ask "
+            "specific, engineer-to-engineer questions about codebase, on-call, "
+            "or the team's roadmap."
+        ),
     ),
     Occupation(
         key="data_analyst",
@@ -126,6 +136,12 @@ OCCUPATIONS: tuple[Occupation, ...] = (
         department_bucket="data",
         startup_friendly=True,
         newgrad_jobs_path="data-analyst",
+        outreach_playbook=(
+            "Reference a specific analysis or dashboard you've shipped and the "
+            "decision it informed. Use measurement vocabulary (cohorts, lift, "
+            "funnel, attribution) and ask how the team currently sources and "
+            "models its core metrics."
+        ),
     ),
     Occupation(
         key="marketing",
@@ -163,6 +179,12 @@ OCCUPATIONS: tuple[Occupation, ...] = (
         ),
         department_bucket="marketing",
         startup_friendly=True,
+        outreach_playbook=(
+            "Open with a real campaign, content piece, or growth experiment "
+            "you ran and the outcome (CAC, conversion, retention, brand lift). "
+            "Speak in marketer vocabulary: channel mix, audience, creative, "
+            "funnel stage."
+        ),
     ),
     Occupation(
         key="machine_learning_ai",
@@ -201,6 +223,11 @@ OCCUPATIONS: tuple[Occupation, ...] = (
         department_bucket="ml_ai",
         engineering_flavored=True,
         startup_friendly=True,
+        outreach_playbook=(
+            "Cite a paper, model, or applied ML project that's relevant to the "
+            "team's work. Be precise about modeling choices (architecture, "
+            "training data, eval metric) rather than vague references to AI."
+        ),
     ),
     Occupation(
         key="data_engineer",
@@ -232,6 +259,11 @@ OCCUPATIONS: tuple[Occupation, ...] = (
         department_bucket="data",
         engineering_flavored=True,
         startup_friendly=True,
+        outreach_playbook=(
+            "Mention the warehouse, orchestration, and modeling tools you've "
+            "shipped with. Ask concrete questions about pipeline reliability, "
+            "schema evolution, or data contracts."
+        ),
     ),
     Occupation(
         key="business_analyst",
@@ -260,6 +292,11 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "Head of Business Operations",
         ),
         department_bucket="business",
+        outreach_playbook=(
+            "Frame your impact in terms of operational improvement (cycle time, "
+            "cost reduction, process change). Reference a specific stakeholder "
+            "you partnered with and the recommendation that shipped."
+        ),
     ),
     Occupation(
         key="product_management",
@@ -293,6 +330,11 @@ OCCUPATIONS: tuple[Occupation, ...] = (
         ),
         department_bucket="product",
         startup_friendly=True,
+        outreach_playbook=(
+            "Show product judgment: name a recent product decision you'd ask "
+            "about (deprecation, pricing, positioning) and tie it to a problem "
+            "you've shipped through. Avoid generic 'I love your product' framing."
+        ),
     ),
     Occupation(
         key="creatives_design",
@@ -332,6 +374,11 @@ OCCUPATIONS: tuple[Occupation, ...] = (
         department_bucket="design",
         startup_friendly=True,
         newgrad_jobs_path="ux-designer",
+        outreach_playbook=(
+            "Reference a specific flow, surface, or visual decision in the "
+            "team's product. Offer a portfolio link if your bio doesn't already "
+            "and ask about the design team's research and critique rhythm."
+        ),
     ),
     Occupation(
         key="accounting_finance",
@@ -369,6 +416,11 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "Chief Financial Officer",
         ),
         department_bucket="finance",
+        outreach_playbook=(
+            "Be precise and credentialed. Reference relevant certifications "
+            "(CPA, CFA, ACCA) if applicable, the financial systems you've used, "
+            "and a close or audit cycle you owned."
+        ),
     ),
     Occupation(
         key="consulting",
@@ -401,6 +453,12 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "Managing Director",
         ),
         department_bucket="consulting",
+        outreach_playbook=(
+            "Open with a hypothesis or framing about the recipient's practice "
+            "area, not just enthusiasm for the firm. Mention a case team or "
+            "engagement type (turnaround, due diligence, growth strategy) you "
+            "want to learn about."
+        ),
     ),
     Occupation(
         key="engineering_development",
@@ -435,6 +493,11 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "Head of Engineering",
         ),
         department_bucket="hardware_engineering",
+        outreach_playbook=(
+            "Speak the language of physical systems (CAD tool, materials, "
+            "tolerances, manufacturing methods). Reference a specific build or "
+            "test you ran and what the failure mode taught you."
+        ),
     ),
     Occupation(
         key="human_resources",
@@ -470,6 +533,11 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "Chief People Officer",
         ),
         department_bucket="people",
+        outreach_playbook=(
+            "Lead with a people problem you've owned (onboarding, calibration, "
+            "comp, performance). Reference the recipient's program work and ask "
+            "about how the team partners with business leaders."
+        ),
     ),
     Occupation(
         key="arts_entertainment",
@@ -505,6 +573,11 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "Head of Production",
         ),
         department_bucket="arts",
+        outreach_playbook=(
+            "Lead with a piece of work you made — credit, release, exhibition, "
+            "or production — and what you learned from it. Speak craft, not "
+            "just enthusiasm."
+        ),
     ),
     Occupation(
         key="management_executive",
@@ -539,6 +612,11 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "President",
         ),
         department_bucket="executive",
+        outreach_playbook=(
+            "Be respectful of time. One sentence on what you've built or run, "
+            "one specific question about the company's direction, and a clear "
+            "low-friction ask. No filler."
+        ),
     ),
     Occupation(
         key="customer_service_support",
@@ -573,6 +651,11 @@ OCCUPATIONS: tuple[Occupation, ...] = (
         ),
         department_bucket="customer_success",
         startup_friendly=True,
+        outreach_playbook=(
+            "Lead with empathy and account-health vocabulary (NPS, churn, "
+            "expansion, escalation). Reference a difficult customer situation "
+            "you turned around and ask how the team measures success."
+        ),
     ),
     Occupation(
         key="legal_compliance",
@@ -606,6 +689,11 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "Chief Legal Officer",
         ),
         department_bucket="legal",
+        outreach_playbook=(
+            "Use a formal register. Reference your bar admission or jurisdiction "
+            "if relevant, the practice area you're focused on, and a specific "
+            "matter type you've worked on. Avoid hyperbolic claims."
+        ),
     ),
     Occupation(
         key="sales",
@@ -643,6 +731,11 @@ OCCUPATIONS: tuple[Occupation, ...] = (
         ),
         department_bucket="sales",
         startup_friendly=True,
+        outreach_playbook=(
+            "Lead with quota attainment, segment, and deal size. Be specific "
+            "about ICP, sales motion (inbound/outbound, PLG, enterprise), and "
+            "a deal you closed or lost and learned from."
+        ),
     ),
     Occupation(
         key="public_sector_government",
@@ -675,6 +768,11 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "Director of Public Affairs",
         ),
         department_bucket="public_policy",
+        outreach_playbook=(
+            "Reference a specific policy area, bill, or regulatory development "
+            "you've followed. Speak in policy vocabulary (stakeholders, "
+            "rulemaking, constituency) and keep the tone professionally neutral."
+        ),
     ),
     Occupation(
         key="education_training",
@@ -709,6 +807,11 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "Dean",
         ),
         department_bucket="education",
+        outreach_playbook=(
+            "Speak in terms of learner outcomes, curriculum design, and "
+            "assessment. Reference a course or program you've built and the "
+            "evidence it worked."
+        ),
     ),
     Occupation(
         key="cybersecurity",
@@ -747,6 +850,12 @@ OCCUPATIONS: tuple[Occupation, ...] = (
         engineering_flavored=True,
         startup_friendly=True,
         newgrad_jobs_path="cyber-security",
+        outreach_playbook=(
+            "Reference specific threat models, frameworks (NIST, MITRE ATT&CK, "
+            "ISO 27001), or controls you've implemented. Mention certifications "
+            "(OSCP, CISSP, CEH) if relevant and ask about the team's detection "
+            "or response posture."
+        ),
     ),
     Occupation(
         key="project_management",
@@ -779,6 +888,11 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "VP of Program Management",
         ),
         department_bucket="program_management",
+        outreach_playbook=(
+            "Frame outcomes around schedule, scope, and risk. Reference a "
+            "specific cross-functional program you ran end-to-end and how you "
+            "handled an unblocking decision."
+        ),
     ),
     Occupation(
         key="healthcare",
@@ -815,6 +929,11 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "Chief Medical Officer",
         ),
         department_bucket="healthcare",
+        outreach_playbook=(
+            "Lead with credentials and patient-care setting. Use clinical "
+            "vocabulary appropriate to the role and avoid embellishing scope of "
+            "practice. Respect the formality of the field."
+        ),
     ),
     Occupation(
         key="supply_chain",
@@ -850,6 +969,11 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "VP of Operations",
         ),
         department_bucket="supply_chain",
+        outreach_playbook=(
+            "Reference SKU count, lead time, or supplier network specifics. "
+            "Lead with a procurement, demand planning, or logistics decision "
+            "you owned and what it changed about throughput or cost."
+        ),
     ),
 )
 
@@ -1063,6 +1187,22 @@ def peer_title_seeds_for(keys: list[str] | None, department: str | None = None) 
             seen.add(key)
             seeds.append(title)
     return seeds
+
+
+def outreach_playbook_for_keys(keys: list[str] | None) -> str | None:
+    """Return the first non-empty outreach playbook for the given occupation keys.
+
+    Resolution preserves caller order: the first key supplied (that resolves to
+    a known occupation with a playbook) wins. For inferred-from-title keys
+    coming out of ``classify_title``, that order is canonical taxonomy order;
+    for user-supplied ``profile.target_occupations`` it's the user's stated
+    preference order. Returns ``None`` if no key resolves or no key carries a
+    playbook.
+    """
+    for occ in occupations_for_keys(keys):
+        if occ.outreach_playbook:
+            return occ.outreach_playbook
+    return None
 
 
 def manager_title_seeds_for(keys: list[str] | None, department: str | None = None) -> list[str]:

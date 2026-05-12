@@ -21,6 +21,10 @@ from app.models.story import Story
 from app.services import api_usage_service, linkedin_graph_service
 from app.services.email_finder_service import find_email_for_person
 from app.services.story_service import find_relevant_stories
+from app.services.occupation_taxonomy import (
+    occupation_by_key as _occupation_by_key,
+    outreach_playbook_for_keys as _outreach_playbook_for_keys,
+)
 from app.utils.job_context import extract_job_context
 
 
@@ -225,7 +229,7 @@ def _build_job_context(job: Job | None) -> tuple[str, dict | None]:
     if not job:
         return "", None
 
-    context = extract_job_context(job.title, job.description)
+    context = extract_job_context(job.title, job.description, tags=job.tags)
     summary = _strip_html(job.description)[:280]
     summary = f"{summary}..." if len(_strip_html(job.description)) > 280 else summary
 
@@ -248,6 +252,14 @@ def _build_job_context(job: Job | None) -> tuple[str, dict | None]:
     if summary:
         details.append(f"Role summary: {summary}")
 
+    occupation_labels = [
+        _occupation_by_key(key).label
+        for key in context.occupation_keys
+        if _occupation_by_key(key)
+    ]
+    if occupation_labels:
+        details.append(f"Occupation: {', '.join(occupation_labels)}")
+
     snapshot = {
         "id": str(job.id),
         "title": job.title,
@@ -258,10 +270,32 @@ def _build_job_context(job: Job | None) -> tuple[str, dict | None]:
         "seniority": context.seniority,
         "team_keywords": context.team_keywords,
         "domain_keywords": context.domain_keywords,
+        "occupation_keys": context.occupation_keys,
         "summary": summary or None,
     }
 
     return "\n".join(details), snapshot
+
+
+def _resolve_outreach_playbook(
+    job: Job | None,
+    job_context_snapshot: dict | None,
+    profile: Profile,
+) -> str | None:
+    """Pick an occupation-specific outreach playbook for this draft.
+
+    Priority:
+    1. occupations on the target Job (most specific signal)
+    2. ``profile.target_occupations`` (user's persistent focus)
+    """
+    if job_context_snapshot:
+        keys = job_context_snapshot.get("occupation_keys") or []
+        playbook = _outreach_playbook_for_keys(keys)
+        if playbook:
+            return playbook
+    if profile and profile.target_occupations:
+        return _outreach_playbook_for_keys(profile.target_occupations)
+    return None
 
 
 def _build_user_context(profile: Profile) -> str:
@@ -827,6 +861,14 @@ async def draft_message(
             "TARGET JOB CONTEXT:",
             job_context_text,
             "Prefer wording like 'this role' or 'this team' over generic references to opportunities at the company.",
+        ])
+
+    occupation_playbook = _resolve_outreach_playbook(job, job_context_snapshot, profile)
+    if occupation_playbook:
+        user_prompt_sections.extend([
+            "",
+            "OCCUPATION PLAYBOOK (use language native to this field):",
+            occupation_playbook,
         ])
 
     if warm_path_context:

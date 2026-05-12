@@ -16,6 +16,7 @@ from app.services.occupation_taxonomy import (
     occupation_keys_from_tags,
     occupation_tag,
     occupation_tags_for_job,
+    outreach_playbook_for_keys,
     peer_title_seeds_for,
     startup_query_strings_for_occupations,
     team_keywords_for_department,
@@ -195,6 +196,39 @@ def test_newgrad_jobs_paths_filters_known_paths_only() -> None:
     assert "data-analyst" in paths
     assert "ux-designer" in paths
     assert "cyber-security" in paths
+
+
+def test_every_v1_occupation_has_an_outreach_playbook() -> None:
+    missing = [occ.key for occ in OCCUPATIONS if not (occ.outreach_playbook or "").strip()]
+    assert missing == [], f"missing playbooks: {missing}"
+
+
+def test_outreach_playbook_for_keys_preserves_caller_order() -> None:
+    # When the caller supplies multiple matches, the first key wins.
+    swe_playbook = outreach_playbook_for_keys(["software_engineering"])
+    ml_playbook = outreach_playbook_for_keys(["machine_learning_ai"])
+    assert swe_playbook is not None and ml_playbook is not None
+    # ML listed first → ML playbook wins.
+    assert outreach_playbook_for_keys(["machine_learning_ai", "software_engineering"]) == ml_playbook
+    # SWE listed first → SWE playbook wins.
+    assert outreach_playbook_for_keys(["software_engineering", "machine_learning_ai"]) == swe_playbook
+
+
+def test_outreach_playbook_for_keys_via_classify_title_uses_canonical_order() -> None:
+    # classify_title iterates OCCUPATIONS in canonical order, so the keys it
+    # produces are already canonical-ordered. SWE precedes ML in canonical
+    # order, so an ML Software Engineer job picks the SWE playbook.
+    keys = classify_title("Senior Machine Learning Software Engineer")
+    assert keys[0] == "software_engineering"
+    playbook = outreach_playbook_for_keys(keys)
+    swe_playbook = outreach_playbook_for_keys(["software_engineering"])
+    assert playbook == swe_playbook
+
+
+def test_outreach_playbook_for_keys_returns_none_for_unknown() -> None:
+    assert outreach_playbook_for_keys(None) is None
+    assert outreach_playbook_for_keys([]) is None
+    assert outreach_playbook_for_keys(["bogus_key"]) is None
 
 
 def test_team_keywords_for_department_falls_back_to_engineering() -> None:
