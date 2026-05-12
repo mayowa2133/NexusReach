@@ -127,6 +127,7 @@ class SearchPreferenceToggle(BaseModel):
 
 class DiscoverRequest(BaseModel):
     queries: list[str] | None = None
+    occupations: list[str] | None = None
     mode: Literal["default", "startup"] = "default"
 
 

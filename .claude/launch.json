@@ -10,7 +10,7 @@
     },
     {
       "name": "backend",
-      "runtimeExecutable": "uvicorn",
+      "runtimeExecutable": "/Users/mayowaadesanya/.pyenv/versions/3.11.6/bin/uvicorn",
       "runtimeArgs": ["app.main:app", "--reload", "--port", "8000"],
       "port": 8000,
       "cwd": "backend"

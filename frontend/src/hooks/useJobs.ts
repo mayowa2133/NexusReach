@@ -51,11 +51,13 @@ export interface JobFilters {
   salaryMin?: number;
   remote?: boolean;
   startup?: boolean;
+  occupations?: string[];
   search?: string;
 }
 
 export function useJobs(filters: JobFilters = {}) {
-  const { stage, sortBy, starred, employmentType, experienceLevel, salaryMin, remote, startup, search } = filters;
+  const { stage, sortBy, starred, employmentType, experienceLevel, salaryMin, remote, startup, occupations, search } = filters;
+  const occupationsKey = occupations && occupations.length > 0 ? [...occupations].sort().join(',') : '';
   const params = new URLSearchParams();
   if (stage) params.set('stage', stage);
   if (sortBy) params.set('sort_by', sortBy);
@@ -65,11 +67,12 @@ export function useJobs(filters: JobFilters = {}) {
   if (salaryMin !== undefined) params.set('salary_min', String(salaryMin));
   if (remote !== undefined) params.set('remote', String(remote));
   if (startup !== undefined) params.set('startup', String(startup));
+  if (occupationsKey) params.set('occupations', occupationsKey);
   if (search) params.set('search', search);
   const qs = params.toString();
 
   return useQuery({
-    queryKey: ['jobs', stage, sortBy, starred, employmentType, experienceLevel, salaryMin, remote, startup, search],
+    queryKey: ['jobs', stage, sortBy, starred, employmentType, experienceLevel, salaryMin, remote, startup, occupationsKey, search],
     queryFn: () => api.get<PaginatedResponse<Job>>(`/api/jobs${qs ? `?${qs}` : ''}`),
   });
 }

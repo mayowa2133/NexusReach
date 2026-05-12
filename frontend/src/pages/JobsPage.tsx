@@ -28,8 +28,12 @@ import { toast } from 'sonner';
 import { sanitizeHTML } from '@/lib/sanitize';
 import { formatRelativeDate } from '@/lib/dateUtils';
 import { getJobCountry, getJobCountryOptions } from '@/lib/jobCountry';
+import { getOccupationLabels } from '@/lib/jobOccupation';
 import { getStartupSourceLabels, isStartupJob } from '@/lib/jobStartup';
-import type { Job, JobStage } from '@/types';
+import { OccupationChipRow } from '@/components/OccupationChipRow';
+import { useOccupations } from '@/hooks/useOccupations';
+import { useProfile } from '@/hooks/useProfile';
+import type { Job, JobStage, Occupation } from '@/types';
 
 const LAST_VISITED_KEY = 'nexusreach-jobs-last-visited';
 
@@ -153,6 +157,18 @@ export function JobsPage() {
   const [salaryMinFilter, setSalaryMinFilter] = useState('');
   const [discoverMode, setDiscoverMode] = useState<'default' | 'startup' | null>(null);
 
+  // Occupation filter — initialize from profile.target_occupations on first load.
+  const { data: profile } = useProfile();
+  const { data: occupations } = useOccupations();
+  const [selectedOccupations, setSelectedOccupations] = useState<string[]>([]);
+  const [hasInitializedFromProfile, setHasInitializedFromProfile] = useState(false);
+  if (profile && !hasInitializedFromProfile) {
+    if (profile.target_occupations && profile.target_occupations.length > 0) {
+      setSelectedOccupations(profile.target_occupations);
+    }
+    setHasInitializedFromProfile(true);
+  }
+
   // "New jobs" tracking
   const [lastVisited] = useState<string | null>(() => getJobsLastVisited());
   useEffect(() => {
@@ -171,6 +187,7 @@ export function JobsPage() {
     salaryMin: salaryMinFilter ? Number(salaryMinFilter) : undefined,
     remote: remoteFilter ? true : undefined,
     startup: startupFilter ? true : undefined,
+    occupations: selectedOccupations.length > 0 ? selectedOccupations : undefined,
     search: searchFilter || undefined,
   });
   const baseSavedJobs = useMemo(() => savedJobsData?.items ?? [], [savedJobsData?.items]);
@@ -368,12 +385,14 @@ export function JobsPage() {
 
       {/* Quick Discover */}
       <Card>
-        <CardContent className="pt-5 pb-5">
+        <CardContent className="pt-5 pb-5 space-y-4">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div>
               <div className="font-medium">Discover Jobs</div>
               <p className="text-sm text-muted-foreground">
-                Run the standard discover flow or target startup-first sources like YC, VentureLoop, Conviction, and a16z Speedrun.
+                {selectedOccupations.length > 0
+                  ? `Targeting ${selectedOccupations.length} occupation${selectedOccupations.length === 1 ? '' : 's'}. Toggle chips below to widen or narrow.`
+                  : 'Pick the occupations you care about, or run the default flow.'}
               </p>
             </div>
             <div className="flex items-center gap-2 shrink-0">
@@ -381,15 +400,21 @@ export function JobsPage() {
                 disabled={discoverJobs.isPending}
                 onClick={() => {
                   setDiscoverMode('default');
-                  discoverJobs.mutate({ mode: 'default' }, {
-                    onSuccess: (data) => {
-                      toast.success(`Discovered ${data.new_jobs_found} new jobs`);
+                  discoverJobs.mutate(
+                    {
+                      mode: 'default',
+                      occupations: selectedOccupations.length > 0 ? selectedOccupations : undefined,
                     },
-                    onError: (err) => {
-                      toast.error(err instanceof Error ? err.message : 'Discovery failed');
+                    {
+                      onSuccess: (data) => {
+                        toast.success(`Discovered ${data.new_jobs_found} new jobs`);
+                      },
+                      onError: (err) => {
+                        toast.error(err instanceof Error ? err.message : 'Discovery failed');
+                      },
+                      onSettled: () => setDiscoverMode(null),
                     },
-                    onSettled: () => setDiscoverMode(null),
-                  });
+                  );
                 }}
               >
                 {discoverMode === 'default' && discoverJobs.isPending ? 'Discovering...' : 'Discover Jobs'}
@@ -399,21 +424,31 @@ export function JobsPage() {
                 disabled={discoverJobs.isPending}
                 onClick={() => {
                   setDiscoverMode('startup');
-                  discoverJobs.mutate({ mode: 'startup' }, {
-                    onSuccess: (data) => {
-                      toast.success(`Discovered ${data.new_jobs_found} startup jobs`);
+                  discoverJobs.mutate(
+                    {
+                      mode: 'startup',
+                      occupations: selectedOccupations.length > 0 ? selectedOccupations : undefined,
                     },
-                    onError: (err) => {
-                      toast.error(err instanceof Error ? err.message : 'Startup discovery failed');
+                    {
+                      onSuccess: (data) => {
+                        toast.success(`Discovered ${data.new_jobs_found} startup jobs`);
+                      },
+                      onError: (err) => {
+                        toast.error(err instanceof Error ? err.message : 'Startup discovery failed');
+                      },
+                      onSettled: () => setDiscoverMode(null),
                     },
-                    onSettled: () => setDiscoverMode(null),
-                  });
+                  );
                 }}
               >
                 {discoverMode === 'startup' && discoverJobs.isPending ? 'Discovering...' : 'Discover Startup Jobs'}
               </Button>
             </div>
           </div>
+          <OccupationChipRow
+            selected={selectedOccupations}
+            onChange={setSelectedOccupations}
+          />
         </CardContent>
       </Card>
 
@@ -648,6 +683,7 @@ export function JobsPage() {
                 job={job}
                 isSelected={selectedJob?.id === job.id}
                 isNew={!!lastVisited && job.created_at > lastVisited}
+                occupations={occupations}
                 onClick={() => navigate(`/jobs/${job.id}`)}
                 onToggleStar={(starred) => handleToggleStar(job.id, starred)}
               />
@@ -707,16 +743,19 @@ const JobListCard = memo(function JobListCard({
   job,
   isSelected,
   isNew,
+  occupations,
   onClick,
   onToggleStar,
 }: {
   job: Job;
   isSelected: boolean;
   isNew: boolean;
+  occupations: Occupation[] | undefined;
   onClick: () => void;
   onToggleStar: (starred: boolean) => void;
 }) {
   const startupSourceLabels = getStartupSourceLabels(job);
+  const occupationLabels = getOccupationLabels(job, occupations);
 
   return (
     <Card
@@ -779,6 +818,9 @@ const JobListCard = memo(function JobListCard({
           )}
           {startupSourceLabels.map((label) => (
             <Badge key={label} variant="outline" className="text-[10px] px-1 py-0">{label}</Badge>
+          ))}
+          {occupationLabels.slice(0, 1).map((label) => (
+            <Badge key={`occ-${label}`} variant="secondary" className="text-[10px] px-1 py-0">{label}</Badge>
           ))}
           <Badge variant={STAGE_COLORS[job.stage] || 'outline'} className="text-[10px] px-1 py-0 ml-auto">
             {STAGES.find((s) => s.value === job.stage)?.label || job.stage}

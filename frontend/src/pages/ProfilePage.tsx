@@ -10,6 +10,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Separator } from '@/components/ui/separator';
 import { useProfile, useUpdateProfile, useUploadResume, getProfileCompletion } from '@/hooks/useProfile';
 import { useStories, useCreateStory, useUpdateStory, useDeleteStory } from '@/hooks/useStories';
+import { OccupationChipRow } from '@/components/OccupationChipRow';
 import { toast } from 'sonner';
 import type { Profile, Story, StoryInput } from '@/types';
 
@@ -25,6 +26,7 @@ type FormData = {
   target_industries: string[];
   target_company_sizes: string[];
   target_roles: string[];
+  target_occupations: string[];
   target_locations: string[];
   linkedin_url: string;
   github_url: string;
@@ -40,6 +42,7 @@ function profileToForm(profile: Profile | undefined): FormData {
     target_industries: profile?.target_industries ?? [],
     target_company_sizes: profile?.target_company_sizes ?? [],
     target_roles: profile?.target_roles ?? [],
+    target_occupations: profile?.target_occupations ?? [],
     target_locations: profile?.target_locations ?? [],
     linkedin_url: profile?.linkedin_url ?? '',
     github_url: profile?.github_url ?? '',
@@ -249,6 +252,17 @@ export function ProfilePage() {
               <CardDescription>Help us find the right opportunities for you.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label>Target Occupations</Label>
+                <p className="text-xs text-muted-foreground">
+                  Pick the occupation categories you're targeting. Discover and ranking will favor these.
+                </p>
+                <OccupationChipRow
+                  selected={form.target_occupations}
+                  onChange={(next) => updateField('target_occupations', next)}
+                  showAllChip={false}
+                />
+              </div>
               <TagField
                 label="Target Industries"
                 placeholder="e.g. Fintech, AI/ML, Healthcare"

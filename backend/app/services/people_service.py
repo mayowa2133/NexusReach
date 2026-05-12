@@ -39,6 +39,11 @@ from app.utils.job_context import (
     extract_job_context,
     normalize_job_locations,
 )
+from app.services.occupation_taxonomy import (
+    is_engineering_flavored as _occupation_is_engineering_flavored,
+    manager_title_seeds_for as _occupation_manager_titles,
+    peer_title_seeds_for as _occupation_peer_titles,
+)
 from app.utils.linkedin import normalize_linkedin_url
 from app.utils.relevance_scorer import score_candidate_relevance
 
@@ -1726,39 +1731,27 @@ def _companywide_manager_titles(context: JobContext | None) -> list[str]:
 
 def _initial_manager_titles(context: JobContext | None) -> list[str]:
     context_manager_titles = _manager_context_search_titles(context)
+    taxonomy_manager_titles = _occupation_manager_titles(
+        context.occupation_keys if context else None,
+        department=context.department if context else None,
+    )
+    fallback_titles = taxonomy_manager_titles or [
+        "Engineering Manager",
+        "Software Engineering Manager",
+        "Software Development Manager",
+        "Team Lead",
+        "Technical Lead",
+        "Director of Engineering",
+        "Head of Engineering",
+    ]
     if context:
         titles = _prioritize_titles_for_search(
-            context_manager_titles
-            + [
-                "Engineering Manager",
-                "Software Engineering Manager",
-                "Software Development Manager",
-                "Team Lead",
-                "Tech Lead",
-                "Technical Lead",
-                "Software Engineering Lead",
-                "Senior Engineering Manager",
-                "Group Engineering Manager",
-                "Director of Engineering",
-                "Head of Engineering",
-            ],
+            context_manager_titles + fallback_titles,
             bucket="hiring_managers",
             context=context,
         )
     else:
-        titles = [
-            "Engineering Manager",
-            "Software Engineering Manager",
-            "Software Development Manager",
-            "Team Lead",
-            "Tech Lead",
-            "Technical Lead",
-            "Software Engineering Lead",
-            "Senior Engineering Manager",
-            "Group Engineering Manager",
-            "Director of Engineering",
-            "Head of Engineering",
-        ]
+        titles = fallback_titles
     return list(dict.fromkeys(title for title in titles if title))
 
 
@@ -1806,20 +1799,27 @@ def _recruiter_targeted_recovery_keywords(context: JobContext | None) -> list[st
 
 
 def _peer_targeted_recovery_titles(context: JobContext | None) -> list[str]:
-    if context and context.department == "engineering":
-        titles = [
-            "Software Engineer",
-            "Software Developer",
-            "Full Stack Software Developer",
-            "Full Stack Engineer",
-        ]
-        if any(keyword in context.team_keywords for keyword in ("qa", "quality assurance", "test")):
-            titles.extend(["QA Engineer", "Quality Assurance Engineer", "Software Development Engineer in Test"])
-        if any(keyword in context.team_keywords for keyword in ("frontend", "ui", "web")):
-            titles.extend(["Frontend Engineer", "UI Engineer"])
-        if any(keyword in context.team_keywords for keyword in ("backend", "platform", "infrastructure")):
-            titles.extend(["Backend Engineer", "Platform Engineer"])
+    if not context:
+        return _companywide_peer_titles(context)
+
+    taxonomy_peers = _occupation_peer_titles(
+        context.occupation_keys, department=context.department
+    )
+    if taxonomy_peers:
+        titles = list(taxonomy_peers)
+        if context.department == "engineering":
+            if any(keyword in context.team_keywords for keyword in ("qa", "quality assurance", "test")):
+                titles.extend([
+                    "QA Engineer",
+                    "Quality Assurance Engineer",
+                    "Software Development Engineer in Test",
+                ])
+            if any(keyword in context.team_keywords for keyword in ("frontend", "ui", "web")):
+                titles.extend(["Frontend Engineer", "UI Engineer"])
+            if any(keyword in context.team_keywords for keyword in ("backend", "platform", "infrastructure")):
+                titles.extend(["Backend Engineer", "Platform Engineer"])
         return list(dict.fromkeys(title for title in titles if title))
+
     return _companywide_peer_titles(context)
 
 
@@ -4127,7 +4127,14 @@ async def search_people_at_company(
     peer_results = bucket_candidate_groups["peers"]
 
     github_members: list[dict] = []
-    if github_org:
+    # Only enrich with GitHub org membership when the job is engineering-flavored
+    # (software, ML/AI, data engineering, cybersecurity, etc.). For non-engineering
+    # roles like Sales, Marketing, or Healthcare the GitHub signal is noise.
+    github_allowed = _occupation_is_engineering_flavored(
+        roles_context.occupation_keys if roles_context else None,
+        department=roles_context.department if roles_context else None,
+    )
+    if github_org and github_allowed:
         github_members = await github_client.search_org_members(
             github_org,
             limit=max(5, target_count_per_bucket),
@@ -4137,6 +4144,12 @@ async def search_people_at_company(
             languages = list({repo["language"] for repo in repos if repo.get("language")})
             member["github_data"] = {"repos": repos, "languages": languages}
             member["github_url"] = member.get("github_url", "")
+    elif github_org and not github_allowed:
+        logger.debug(
+            "Skipping GitHub org enrichment for non-engineering job: org=%s occupations=%s",
+            github_org,
+            roles_context.occupation_keys if roles_context else None,
+        )
 
     bucketed = {"recruiters": [], "hiring_managers": [], "peers": []}
     seen = {"recruiters": set(), "hiring_managers": set(), "peers": set()}
@@ -4260,7 +4273,7 @@ async def search_people_for_job(
     if not job:
         raise ValueError(f"Job not found: {job_id}")
 
-    context = extract_job_context(job.title, job.description)
+    context = extract_job_context(job.title, job.description, tags=job.tags)
 
     # Populate job locations for location-aware ranking
     if job.location:

@@ -8,9 +8,12 @@ import { useProfile, getProfileCompletion } from '@/hooks/useProfile';
 import { useInsightsDashboard } from '@/hooks/useInsights';
 import { useOutreachLogs } from '@/hooks/useOutreach';
 import { useJobs, useRefreshJobs, useResumeLibrary, useSavedSearches, useSeedDefaultJobs } from '@/hooks/useJobs';
+import { useOccupations } from '@/hooks/useOccupations';
 import { useGuardrails } from '@/hooks/useSettings';
 import { formatRelativeDate } from '@/lib/dateUtils';
+import { getOccupationLabels } from '@/lib/jobOccupation';
 import { getStartupSourceLabels, isStartupJob } from '@/lib/jobStartup';
+import { rebalanceTopJobs } from '@/lib/rebalanceTopJobs';
 import { useOnboarding } from '@/hooks/useOnboarding';
 import { OnboardingDialog } from '@/components/onboarding/OnboardingDialog';
 import { MetricCards } from '@/components/dashboard/MetricCards';
@@ -69,7 +72,12 @@ export function DashboardPage() {
   const [lastVisited] = useState<string | null>(
     () => window.localStorage.getItem('nexusreach-jobs-last-visited')
   );
-  const topJobs = allJobsData?.items?.slice(0, 5) ?? [];
+  const { data: occupations } = useOccupations();
+  const topJobs = rebalanceTopJobs(
+    allJobsData?.items ?? [],
+    profile?.target_occupations,
+    5,
+  );
   const latestJobs = latestJobsData?.items?.slice(0, 5) ?? [];
   const enabledSearchCount = savedSearches?.filter(s => s.enabled).length ?? 0;
   const guardrailsModified = guardrails && (
@@ -329,6 +337,11 @@ export function DashboardPage() {
                 {topJobs.map((job) => {
                   const isNew = !!lastVisited && job.created_at > lastVisited;
                   const startupSourceLabels = getStartupSourceLabels(job);
+                  const occupationLabels = getOccupationLabels(job, occupations);
+                  const hasBadgeRow =
+                    isStartupJob(job) ||
+                    startupSourceLabels.length > 0 ||
+                    occupationLabels.length > 0;
                   return (
                     <div
                       key={job.id}
@@ -350,8 +363,13 @@ export function DashboardPage() {
                             <span className="opacity-70"> · {formatRelativeDate(job.posted_at)}</span>
                           )}
                         </div>
-                        {(isStartupJob(job) || startupSourceLabels.length > 0) && (
+                        {hasBadgeRow && (
                           <div className="flex flex-wrap items-center gap-1 mt-1">
+                            {occupationLabels.slice(0, 1).map((label) => (
+                              <Badge key={`occ-${label}`} variant="secondary" className="text-[10px] px-1 py-0">
+                                {label}
+                              </Badge>
+                            ))}
                             {isStartupJob(job) && (
                               <Badge variant="secondary" className="text-[10px] px-1 py-0">
                                 Startup

@@ -8,6 +8,9 @@ from datetime import datetime, timedelta, timezone
 from app.clients import theorg_client
 from app.config import settings
 from app.models.company import Company
+from app.services.occupation_taxonomy import (
+    DEPARTMENT_TEAM_KEYWORDS as _OCCUPATION_DEPARTMENT_KEYWORDS,
+)
 from app.utils.company_identity import effective_public_identity_slugs, matches_public_company_identity
 from app.utils.job_context import JobContext
 
@@ -67,7 +70,10 @@ TEAM_KEYWORDS_BY_BUCKET = {
         "people",
     ),
 }
-TEAM_KEYWORDS_BY_DEPARTMENT = {
+# Backwards-compatible legacy department keys still used by `extract_job_context`
+# (e.g., "data_science", "human_resources", "product_management"). These overlay
+# the taxonomy's canonical departments so existing callers keep working.
+_LEGACY_DEPARTMENT_KEYWORDS = {
     "engineering": (
         "engineering",
         "software development",
@@ -86,6 +92,11 @@ TEAM_KEYWORDS_BY_DEPARTMENT = {
     ),
     "product_management": ("product", "strategy"),
     "human_resources": ("human resources", "talent", "people"),
+}
+
+TEAM_KEYWORDS_BY_DEPARTMENT: dict[str, tuple[str, ...]] = {
+    **_OCCUPATION_DEPARTMENT_KEYWORDS,
+    **_LEGACY_DEPARTMENT_KEYWORDS,
 }
 
 

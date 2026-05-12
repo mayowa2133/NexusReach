@@ -50,6 +50,12 @@ from app.utils.experience_level import (
     classify_experience_level_for_job,
 )
 from app.utils.company_identity import normalize_company_name
+from app.services.occupation_taxonomy import (
+    OCCUPATION_TAG_PREFIX,
+    discover_queries_for_occupations,
+    occupation_tag,
+    occupation_tags_for_job,
+)
 from app.utils.startup_jobs import (
     STARTUP_TAG,
     append_startup_tags,
@@ -200,7 +206,19 @@ def _refresh_existing_job(
         job.salary_max = data.get("salary_max")
     _apply_if_present(job, "salary_currency", data.get("salary_currency"))
     if data.get("tags") is not None:
-        job.tags = merge_startup_tags(job.tags, data.get("tags"))
+        # Carry over startup tags from the incoming payload (existing behavior),
+        # then layer in any new occupation:* tags inferred from the latest data
+        # so jobs created before the taxonomy existed gain occupation tags on
+        # the next refresh.
+        merged = merge_startup_tags(job.tags, data.get("tags"))
+        incoming_occupation_tags = [
+            tag
+            for tag in (data.get("tags") or [])
+            if isinstance(tag, str) and tag.startswith(OCCUPATION_TAG_PREFIX)
+        ]
+        if incoming_occupation_tags:
+            merged = merge_tags(merged, incoming_occupation_tags)
+        job.tags = merged
     job.experience_level = experience_level
 
 
@@ -597,6 +615,7 @@ async def get_jobs(
     salary_min: float | None = None,
     remote: bool | None = None,
     startup: bool | None = None,
+    occupations: list[str] | None = None,
     search: str | None = None,
     limit: int | None = None,
     offset: int = 0,
@@ -625,6 +644,12 @@ async def get_jobs(
             query = query.where(Job.tags.contains([STARTUP_TAG]))
         else:
             query = query.where(or_(Job.tags.is_(None), not_(Job.tags.contains([STARTUP_TAG]))))
+    if occupations:
+        occupation_clauses = [
+            Job.tags.contains([occupation_tag(key)]) for key in occupations if key
+        ]
+        if occupation_clauses:
+            query = query.where(or_(*occupation_clauses))
     if search:
         term = f"%{search}%"
         query = query.where(
@@ -1080,16 +1105,11 @@ async def seed_default_feeds(
     return total_new
 
 
-# Broader discovery queries spanning multiple roles and industries
-DISCOVER_QUERIES = [
-    {"query": "Software Engineer", "location": None, "remote_only": False},
-    {"query": "Frontend Developer", "location": None, "remote_only": False},
-    {"query": "Backend Developer", "location": None, "remote_only": False},
-    {"query": "Full Stack Developer", "location": None, "remote_only": False},
-    {"query": "Data Scientist", "location": None, "remote_only": False},
-    {"query": "Product Manager", "location": None, "remote_only": False},
-    {"query": "New Grad Software", "location": None, "remote_only": False},
-]
+# Discovery queries spanning multiple roles. These are now derived from the
+# occupation taxonomy at runtime via `discover_queries_for_occupations()`.
+# DISCOVER_QUERIES remains as a backwards-compatible default fallback used
+# when neither user occupations nor explicit queries are supplied.
+DISCOVER_QUERIES: list[dict] = discover_queries_for_occupations(None)
 
 # Curated ATS boards to pull from during discovery.
 # These are popular tech companies with public Greenhouse/Ashby boards.
@@ -1333,6 +1353,28 @@ def _infer_startup_tags_for_job(
     data["tags"] = merge_tags(tags, inferred)
 
 
+def _infer_occupation_tags_for_job(data: dict) -> None:
+    """Stamp `occupation:<key>` tags on a raw job dict in-place.
+
+    Honors any explicit occupation tags already present (e.g., from the
+    newgrad-jobs scraper's source-category hint). Otherwise falls back to
+    title/description classification.
+    """
+    existing = data.get("tags") or []
+    explicit_keys: list[str] = []
+    for tag in existing:
+        if isinstance(tag, str) and tag.startswith(OCCUPATION_TAG_PREFIX):
+            explicit_keys.append(tag[len(OCCUPATION_TAG_PREFIX):])
+
+    inferred = occupation_tags_for_job(
+        title=data.get("title"),
+        description=data.get("description"),
+        explicit_keys=explicit_keys or None,
+    )
+    if inferred:
+        data["tags"] = merge_tags(existing, inferred)
+
+
 async def _store_raw_jobs(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -1348,6 +1390,7 @@ async def _store_raw_jobs(
 
     for data in raw_jobs:
         _infer_startup_tags_for_job(data, known_startup_companies)
+        _infer_occupation_tags_for_job(data)
         fp = _fingerprint(data.get("company_name", ""), data.get("title", ""), data.get("location", ""))
         job_key = _job_identity_key(data, fingerprint=fp)
         if job_key in seen_job_keys:
@@ -1720,6 +1763,7 @@ async def discover_jobs(
     user_id: uuid.UUID,
     queries: list[str] | None = None,
     mode: str = "default",
+    occupations: list[str] | None = None,
 ) -> int:
     """Run a batch of job searches across free sources and ATS boards.
 
@@ -1728,16 +1772,30 @@ async def discover_jobs(
     and search_ats_jobs, so repeat runs are safe.
 
     Args:
-        queries: Optional custom list of search terms.  Falls back to
-                 DISCOVER_QUERIES when not supplied.
+        queries: Optional custom list of free-text search terms. Wins over
+                 occupations when both are supplied.
+        occupations: Optional list of occupation taxonomy keys. When set,
+                     each occupation's default queries are flattened in.
+                     Falls back to ``profile.target_occupations`` and finally
+                     to ``DISCOVER_QUERIES``.
     """
     result = await db.execute(select(Profile).where(Profile.user_id == user_id))
     profile = result.scalar_one_or_none()
 
+    resolved_occupations = (
+        list(occupations)
+        if occupations
+        else (profile.target_occupations if profile is not None else None)
+    )
+
     if mode == "startup":
-        startup_queries = queries or startup_discover_queries(
-            profile.target_roles if profile is not None else None
-        )
+        if queries:
+            startup_queries = list(queries)
+        else:
+            target_roles = profile.target_roles if profile is not None else None
+            startup_queries = startup_discover_queries(
+                target_roles, occupation_keys=resolved_occupations
+            )
         total_new = await _discover_startup_direct_sources(db, user_id, profile, startup_queries)
         total_new += await _discover_startup_ecosystems(db, user_id, profile, startup_queries)
         # Persist search preferences with mode="startup" so the hourly Celery
@@ -1747,11 +1805,14 @@ async def discover_jobs(
         await db.commit()
         return total_new
 
-    search_list = (
-        [{"query": q, "location": None, "remote_only": False} for q in queries]
-        if queries
-        else DISCOVER_QUERIES
-    )
+    if queries:
+        search_list = [
+            {"query": q, "location": None, "remote_only": False} for q in queries
+        ]
+    elif resolved_occupations:
+        search_list = discover_queries_for_occupations(resolved_occupations)
+    else:
+        search_list = DISCOVER_QUERIES
 
     total_new = 0
 

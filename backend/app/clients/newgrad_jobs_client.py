@@ -10,6 +10,12 @@ import httpx
 from bs4 import BeautifulSoup
 from bs4.element import Tag
 
+from app.services.occupation_taxonomy import (
+    OCCUPATIONS as _OCCUPATIONS,
+    newgrad_jobs_paths as _newgrad_paths_for_taxonomy,
+    occupation_tag as _occupation_tag,
+)
+
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://www.newgrad-jobs.com"
@@ -17,14 +23,39 @@ REQUEST_HEADERS = {"User-Agent": "NexusReach/1.0"}
 DEFAULT_TIMEOUT = 20
 DETAIL_CONCURRENCY = 8
 
-# Categories that map to the site's URL structure (/list-{category})
-CATEGORIES = [
-    "software-engineer-jobs",
-    "data-analyst",
-    "cyber-security",
-    "remote",
-    "ux-designer",
-]
+# Categories that map to the site's URL structure (/list-{category}).
+# Most paths come from the canonical occupation taxonomy; "remote" remains a
+# legacy non-occupation category used to harvest remote-only jobs.
+LEGACY_CATEGORIES: tuple[str, ...] = ("remote",)
+
+
+def _build_categories() -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for path in _newgrad_paths_for_taxonomy():
+        if path and path not in seen:
+            seen.add(path)
+            out.append(path)
+    for path in LEGACY_CATEGORIES:
+        if path not in seen:
+            seen.add(path)
+            out.append(path)
+    return out
+
+
+CATEGORIES: list[str] = _build_categories()
+
+
+_PATH_TO_OCCUPATION_KEY: dict[str, str] = {
+    occ.newgrad_jobs_path: occ.key
+    for occ in _OCCUPATIONS
+    if occ.newgrad_jobs_path
+}
+
+
+def _occupation_tags_for_category(category: str) -> list[str]:
+    key = _PATH_TO_OCCUPATION_KEY.get(category)
+    return [_occupation_tag(key)] if key else []
 
 _SALARY_RE = re.compile(r"\$(\d+(?:\.\d+)?)K(?:/yr)?(?:\s*-\s*\$(\d+(?:\.\d+)?)K(?:/yr)?)?", re.IGNORECASE)
 _HIDDEN_CLASS_NAMES = {"w-condition-invisible"}
@@ -226,6 +257,7 @@ def parse_job_list_html(
             "description": "",
             "posted_at": posted_at,
             "source": "newgrad_jobs",
+            "tags": _occupation_tags_for_category(category) or None,
         })
 
         if len(jobs) >= limit:

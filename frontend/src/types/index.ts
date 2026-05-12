@@ -21,6 +21,7 @@ export interface Profile {
   target_industries: string[];
   target_company_sizes: string[];
   target_roles: string[];
+  target_occupations?: string[];
   target_locations: string[];
   linkedin_url: string;
   github_url: string;
@@ -737,7 +738,16 @@ export interface JobSearchRequest {
 
 export interface DiscoverJobsRequest {
   queries?: string[];
+  occupations?: string[];
   mode?: 'default' | 'startup';
+}
+
+export interface Occupation {
+  key: string;
+  label: string;
+  department_bucket: string;
+  engineering_flavored: boolean;
+  startup_friendly: boolean;
 }
 
 export interface ATSSearchRequest {
