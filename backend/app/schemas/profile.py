@@ -10,6 +10,7 @@ class ProfileResponse(BaseModel):
     target_industries: list[str] | None
     target_company_sizes: list[str] | None
     target_roles: list[str] | None
+    target_occupations: list[str] | None = None
     target_locations: list[str] | None
     linkedin_url: str | None
     github_url: str | None
@@ -47,6 +48,7 @@ class ProfileUpdate(BaseModel):
     target_industries: list[str] | None = None
     target_company_sizes: list[str] | None = None
     target_roles: list[str] | None = None
+    target_occupations: list[str] | None = None
     target_locations: list[str] | None = None
     linkedin_url: str | None = None
     github_url: str | None = None

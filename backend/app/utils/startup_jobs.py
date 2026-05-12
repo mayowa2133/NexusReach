@@ -8,9 +8,12 @@ from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 
 from app.clients import ats_client
+from app.services.occupation_taxonomy import startup_query_strings_for_occupations
 
 STARTUP_TAG = "startup"
 STARTUP_SOURCE_PREFIX = "startup_source:"
+# Kept for telemetry / migration scripts. Live behavior pulls from the
+# occupation taxonomy via `startup_query_strings_for_occupations(None)`.
 STARTUP_DISCOVER_FALLBACK_QUERIES = [
     "Founding Engineer",
     "Software Engineer",
@@ -99,8 +102,26 @@ def append_startup_tags(data: dict, source_key: str) -> dict:
     }
 
 
-def startup_discover_queries(target_roles: list[str] | None) -> list[str]:
-    candidates = target_roles or STARTUP_DISCOVER_FALLBACK_QUERIES
+def startup_discover_queries(
+    target_roles: list[str] | None,
+    *,
+    occupation_keys: list[str] | None = None,
+) -> list[str]:
+    """Build the startup-flow query list.
+
+    Priority order:
+    1. user-supplied free-text ``target_roles``
+    2. user-supplied ``occupation_keys`` resolved against the taxonomy
+    3. taxonomy default (every startup-friendly occupation's queries)
+    """
+    candidates: list[str]
+    if target_roles:
+        candidates = list(target_roles)
+    elif occupation_keys:
+        candidates = startup_query_strings_for_occupations(occupation_keys)
+    else:
+        candidates = startup_query_strings_for_occupations(None)
+
     normalized: list[str] = []
     seen: set[str] = set()
     for raw in candidates:

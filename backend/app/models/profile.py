@@ -24,6 +24,7 @@ class Profile(Base):
     target_industries: Mapped[list[str] | None] = mapped_column(ARRAY(String))
     target_company_sizes: Mapped[list[str] | None] = mapped_column(ARRAY(String))
     target_roles: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+    target_occupations: Mapped[list[str] | None] = mapped_column(ARRAY(String))
     target_locations: Mapped[list[str] | None] = mapped_column(ARRAY(String))
     linkedin_url: Mapped[str | None] = mapped_column(String(500))
     github_url: Mapped[str | None] = mapped_column(String(500))

@@ -169,6 +169,9 @@ class JobContext:
     apollo_departments: list[str] = field(default_factory=list)
     job_locations: list[str] = field(default_factory=list)
     job_geo_terms: list[str] = field(default_factory=list)
+    # Occupation taxonomy keys associated with this job, derived from the
+    # `occupation:<key>` tags or, as a fallback, from title-based classification.
+    occupation_keys: list[str] = field(default_factory=list)
 
 
 def _strip_html(text: str) -> str:
@@ -933,8 +936,17 @@ def _extract_product_team_names(
     return results[:limit]
 
 
-def extract_job_context(title: str, description: str | None = None) -> JobContext:
-    """Extract structured job context from a title and description."""
+def extract_job_context(
+    title: str,
+    description: str | None = None,
+    tags: list[str] | None = None,
+) -> JobContext:
+    """Extract structured job context from a title and description.
+
+    When ``tags`` is supplied, any ``occupation:<key>`` entries are surfaced on
+    the resulting ``JobContext.occupation_keys`` so people-discovery callers
+    can route through the canonical occupation taxonomy.
+    """
     title_lower, lead_lower, body_lower = _extract_sections(title, description)
     early_career = _detect_early_career(title_lower, f"{lead_lower} {body_lower}")
 
@@ -986,6 +998,15 @@ def extract_job_context(title: str, description: str | None = None) -> JobContex
     )
     product_team_names = _extract_product_team_names(description, title=title)
 
+    from app.services.occupation_taxonomy import (
+        classify_title as _classify_occupation_title,
+        occupation_keys_from_tags as _occupation_keys_from_tags,
+    )
+
+    occupation_keys = _occupation_keys_from_tags(tags)
+    if not occupation_keys:
+        occupation_keys = _classify_occupation_title(title, description)
+
     return JobContext(
         department=department,
         team_keywords=team_keywords,
@@ -997,4 +1018,5 @@ def extract_job_context(title: str, description: str | None = None) -> JobContex
         peer_titles=peer_titles,
         recruiter_titles=recruiter_titles,
         apollo_departments=apollo_departments,
+        occupation_keys=occupation_keys,
     )
