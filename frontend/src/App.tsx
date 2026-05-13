@@ -25,6 +25,8 @@ const FindEmailPage = lazy(() => import('@/pages/FindEmailPage').then((m) => ({ 
 const ResumeLibraryPage = lazy(() => import('@/pages/ResumeLibraryPage').then((m) => ({ default: m.ResumeLibraryPage })));
 const TriagePage = lazy(() => import('@/pages/TriagePage').then((m) => ({ default: m.TriagePage })));
 const UpgradePage = lazy(() => import('@/pages/UpgradePage').then((m) => ({ default: m.UpgradePage })));
+const TermsPage = lazy(() => import('@/pages/TermsPage').then((m) => ({ default: m.TermsPage })));
+const PrivacyPage = lazy(() => import('@/pages/PrivacyPage').then((m) => ({ default: m.PrivacyPage })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -59,6 +61,8 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/" element={<LandingPage />} />
+      <Route path="/terms" element={<PageSuspense><TermsPage /></PageSuspense>} />
+      <Route path="/privacy" element={<PageSuspense><PrivacyPage /></PageSuspense>} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
 

@@ -263,7 +263,12 @@ export function LandingPage() {
 
       {/* Footer */}
       <footer className="border-t py-8 text-center text-sm text-muted-foreground">
-        <p>&copy; {new Date().getFullYear()} NexusReach. All rights reserved.</p>
+        <div className="flex items-center justify-center gap-4">
+          <Link to="/terms" className="hover:underline">Terms of Service</Link>
+          <span>&middot;</span>
+          <Link to="/privacy" className="hover:underline">Privacy Policy</Link>
+        </div>
+        <p className="mt-2">&copy; {new Date().getFullYear()} NexusReach. All rights reserved.</p>
       </footer>
     </div>
   );
