@@ -22,3 +22,5 @@ aiodns>=3.0.0
 crawl4ai>=0.8.0,<0.9
 beautifulsoup4>=4.12.0
 stripe>=8.0.0
+sentry-sdk[fastapi]>=2.0.0
+python-json-logger>=2.0.0

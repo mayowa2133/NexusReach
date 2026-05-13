@@ -6,7 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
+from app import logging_config
 from app.config import settings
+from app.middleware.request_id import RequestIdMiddleware, RequestIdFilter
 from app.middleware.error_handler import (
     http_exception_handler,
     validation_exception_handler,
@@ -37,6 +39,7 @@ from app.routers import (
     subscription,
 )
 
+logging_config.setup()
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
@@ -63,6 +66,7 @@ def _cors_origin_regex() -> str | None:
 app.state.limiter = limiter
 
 # --- Middleware ---
+app.add_middleware(RequestIdMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),
@@ -71,6 +75,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Inject request_id into every log record
+logging.getLogger().addFilter(RequestIdFilter())
 
 # --- Exception handlers ---
 app.add_exception_handler(HTTPException, http_exception_handler)
@@ -127,7 +134,29 @@ async def health():
     except Exception as exc:
         checks["redis"] = f"error: {exc}"
 
-    healthy = all(v == "ok" for v in checks.values())
+    # SearXNG (non-critical — search falls back to paid providers)
+    try:
+        import httpx
+
+        if settings.searxng_base_url:
+            async with httpx.AsyncClient(timeout=3) as client:
+                resp = await client.get(f"{settings.searxng_base_url.rstrip('/')}/search", params={"q": "test", "format": "json"})
+                checks["searxng"] = "ok" if resp.status_code == 200 else f"error: HTTP {resp.status_code}"
+        else:
+            checks["searxng"] = "not configured"
+    except Exception as exc:
+        checks["searxng"] = f"error: {exc}"
+
+    # Search provider circuit breaker status
+    from app.clients import search_circuit_breaker
+
+    circuit_status = search_circuit_breaker.status_summary()
+    open_circuits = [name for name, info in circuit_status.items() if info["state"] == "open"]
+    checks["search_circuits"] = "all closed" if not open_circuits else f"open: {', '.join(open_circuits)}"
+
+    # Core health = postgres + redis. SearXNG and circuits are informational.
+    core_checks = {k: v for k, v in checks.items() if k in ("postgres", "redis")}
+    healthy = all(v == "ok" for v in core_checks.values())
     status_code = 200 if healthy else 503
     from fastapi.responses import JSONResponse
 

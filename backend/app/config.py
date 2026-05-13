@@ -1,7 +1,10 @@
+import logging
 import uuid
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_config_logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -97,6 +100,11 @@ class Settings(BaseSettings):
     stripe_webhook_secret: str = ""
     stripe_price_id: str = ""
 
+    # Monitoring
+    sentry_dsn: str = ""
+    sentry_traces_sample_rate: float = 0.1
+    log_format: str = "text"  # "text" for dev, "json" for production
+
     # Stale contact re-verification
     reverify_stale_days: int = 14
     reverify_batch_size: int = 20
@@ -128,6 +136,14 @@ class Settings(BaseSettings):
         if errors:
             raise ValueError(
                 "Production configuration errors:\n  - " + "\n  - ".join(errors)
+            )
+        # Non-fatal warnings
+        if "localhost" in self.searxng_base_url:
+            _config_logger.warning(
+                "NEXUSREACH_SEARXNG_BASE_URL points to localhost — "
+                "SearXNG will be unreachable in production. "
+                "Search will fall back to paid providers (Serper/Brave). "
+                "Set this to a hosted SearXNG instance URL or clear it to disable."
             )
         return self
 

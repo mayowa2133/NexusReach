@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from app.clients import search_circuit_breaker
 from app.clients.search_router_client import (
     search_employment_sources,
     search_exact_linkedin_profile,
@@ -14,6 +15,13 @@ from app.clients.search_router_client import (
 )
 
 pytestmark = pytest.mark.asyncio
+
+
+@pytest.fixture(autouse=True)
+def _reset_circuits():
+    search_circuit_breaker.reset_all()
+    yield
+    search_circuit_breaker.reset_all()
 
 
 async def test_search_people_falls_through_to_brave_when_serper_is_empty():
@@ -326,3 +334,46 @@ async def test_search_recruiter_recovery_posts_records_provider_debug_trace():
     assert len(results) == 1
     mock_brave.assert_awaited_once()
     assert debug_traces[-1]["provider"] == "brave"
+
+
+async def test_circuit_breaker_skips_open_provider_and_falls_through():
+    """When a provider's circuit is open, the router skips it entirely."""
+    # Open the searxng circuit
+    for _ in range(3):
+        search_circuit_breaker.record_failure("searxng")
+
+    with (
+        patch("app.clients.search_router_client.search_cache_client.get_json", new_callable=AsyncMock, return_value=None),
+        patch("app.clients.search_router_client.search_cache_client.set_json", new_callable=AsyncMock),
+        patch(
+            "app.clients.search_router_client.searxng_search_client.search_people",
+            new_callable=AsyncMock,
+            return_value=[],
+        ) as mock_searxng,
+        patch(
+            "app.clients.search_router_client.brave_search_client.search_people",
+            new_callable=AsyncMock,
+            return_value=[
+                {
+                    "full_name": "Jane Doe",
+                    "title": "Software Engineer",
+                    "linkedin_url": "https://www.linkedin.com/in/janedoe",
+                    "source": "brave_search",
+                    "profile_data": {},
+                }
+            ],
+        ) as mock_brave,
+        patch("app.clients.search_router_client.serper_search_client.search_people", new_callable=AsyncMock, return_value=[]),
+        patch("app.clients.search_router_client.google_search_client.search_people", new_callable=AsyncMock, return_value=[]),
+        patch("app.clients.search_router_client.settings") as s,
+    ):
+        s.search_cache_ttl_seconds = 86400
+        s.search_linkedin_provider_order = "searxng,serper,brave,google_cse"
+        results = await search_people("Google", titles=["software engineer"], min_results=1)
+
+    # SearXNG should have been skipped entirely
+    mock_searxng.assert_not_called()
+    # Brave should have been called as fallback
+    mock_brave.assert_awaited_once()
+    assert len(results) == 1
+    assert results[0]["profile_data"]["search_provider"] == "brave"

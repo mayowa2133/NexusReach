@@ -14,6 +14,7 @@ from app.clients import (
     searxng_search_client,
     google_search_client,
     search_cache_client,
+    search_circuit_breaker,
     serper_search_client,
     tavily_search_client,
 )
@@ -108,14 +109,18 @@ async def _cached_provider_results(
             "search provider timed out",
             extra={"provider": provider, "family": family, "timeout": timeout_seconds},
         )
+        search_circuit_breaker.record_failure(provider)
         return [], False
     except Exception as exc:  # pragma: no cover - defensive logging only
         logger.warning(
             "search provider failed",
             extra={"provider": provider, "family": family, "error": str(exc)},
         )
+        search_circuit_breaker.record_failure(provider)
         return [], False
 
+    if results:
+        search_circuit_breaker.record_success(provider)
     await search_cache_client.set_json(key, results, ttl_seconds=settings.search_cache_ttl_seconds)
     return results, False
 
@@ -210,6 +215,12 @@ async def _run_family(
     for depth, provider in enumerate(effective_order):
         fetcher = providers.get(provider)
         if fetcher is None:
+            continue
+        if not search_circuit_breaker.is_provider_available(provider):
+            logger.info(
+                "search provider skipped (circuit open)",
+                extra={"provider": provider, "family": family, "fallback_depth": depth},
+            )
             continue
         provider_trace: dict[str, Any] | None = None
         if debug_traces is not None:

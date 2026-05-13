@@ -2,9 +2,12 @@
 
 import logging
 
+import sentry_sdk
 from fastapi import HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+
+from app.middleware.request_id import get_request_id
 
 logger = logging.getLogger(__name__)
 
@@ -41,13 +44,21 @@ async def validation_exception_handler(
 
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Catch-all for unhandled server errors. Logs the traceback, returns 500."""
-    logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
+    request_id = get_request_id()
+    logger.exception(
+        "Unhandled exception on %s %s",
+        request.method,
+        request.url.path,
+        extra={"request_id": request_id},
+    )
+    sentry_sdk.capture_exception(exc)
     return JSONResponse(
         status_code=500,
         content={
             "error": {
                 "code": "INTERNAL_ERROR",
                 "message": "An unexpected error occurred",
+                "request_id": request_id,
                 "details": None,
             }
         },
