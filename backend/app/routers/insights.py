@@ -7,11 +7,11 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import get_current_user_id
+from app.dependencies import get_current_user_id, require_paid_plan
 from app.schemas.insights import InsightsDashboard
 from app.services.insights_service import get_full_dashboard
 
-router = APIRouter(prefix="/insights", tags=["insights"])
+router = APIRouter(prefix="/insights", tags=["insights"], dependencies=[Depends(require_paid_plan)])
 
 
 @router.get("/dashboard", response_model=InsightsDashboard)

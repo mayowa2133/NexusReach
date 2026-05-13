@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import get_current_user_id
+from app.dependencies import get_current_user_id, require_paid_plan
 from app.middleware.rate_limit import limiter
 from app.schemas.messages import (
     BatchDraftItem,
@@ -28,7 +28,7 @@ from app.services.message_service import (
     update_message,
 )
 
-router = APIRouter(prefix="/messages", tags=["messages"])
+router = APIRouter(prefix="/messages", tags=["messages"], dependencies=[Depends(require_paid_plan)])
 
 
 def _is_mock_value(value: object) -> bool:

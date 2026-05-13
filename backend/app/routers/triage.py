@@ -7,11 +7,11 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import get_current_user_id
+from app.dependencies import get_current_user_id, require_paid_plan
 from app.schemas.triage import TriageResponse
 from app.services.triage_service import compute_triage
 
-router = APIRouter(prefix="/triage", tags=["triage"])
+router = APIRouter(prefix="/triage", tags=["triage"], dependencies=[Depends(require_paid_plan)])
 
 
 @router.get("", response_model=TriageResponse)

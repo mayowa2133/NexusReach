@@ -24,3 +24,4 @@ class User(Base):
 
     profile: Mapped["Profile"] = relationship(back_populates="user", uselist=False)  # noqa: F821
     settings: Mapped["UserSettings"] = relationship(back_populates="user", uselist=False)  # noqa: F821
+    subscription: Mapped["Subscription"] = relationship(back_populates="user", uselist=False)  # noqa: F821

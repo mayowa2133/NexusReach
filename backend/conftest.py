@@ -11,7 +11,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
-from app.dependencies import get_current_user_id
+from app.dependencies import get_current_user_id, require_paid_plan
 from app.middleware.rate_limit import limiter
 
 # Deterministic test user
@@ -39,6 +39,7 @@ def authed_client(mock_user_id):
         return mock_user_id
 
     app.dependency_overrides[get_current_user_id] = _override_auth
+    app.dependency_overrides[require_paid_plan] = _override_auth
     yield
     app.dependency_overrides.clear()
 

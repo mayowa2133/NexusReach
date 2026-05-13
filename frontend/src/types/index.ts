@@ -1082,3 +1082,22 @@ export interface TriageResponse {
   low_count: number;
   skip_count: number;
 }
+
+// Subscription / billing
+export type SubscriptionPlan = 'free' | 'pro';
+
+export interface SubscriptionStatus {
+  plan: SubscriptionPlan;
+  is_paid: boolean;
+  stripe_status: string | null;
+  current_period_end: string | null;
+  cancel_at_period_end: boolean;
+}
+
+export interface CheckoutSessionResult {
+  checkout_url: string;
+}
+
+export interface PortalSessionResult {
+  portal_url: string;
+}

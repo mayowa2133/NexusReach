@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import get_current_user_id
+from app.dependencies import get_current_user_id, require_paid_plan
 from app.middleware.rate_limit import limiter
 from app.models.settings import UserSettings
 from app.schemas.email import (
@@ -34,7 +34,7 @@ from app.services.draft_staging_service import (
 )
 from app.services.email_finder_service import find_email_for_person, verify_person_email
 
-router = APIRouter(prefix="/email", tags=["email"])
+router = APIRouter(prefix="/email", tags=["email"], dependencies=[Depends(require_paid_plan)])
 
 
 # --- Email Finding ---

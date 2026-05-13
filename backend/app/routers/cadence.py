@@ -7,11 +7,11 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import get_current_user_id
+from app.dependencies import get_current_user_id, require_paid_plan
 from app.schemas.cadence import NextActionListResponse, NextActionResponse
 from app.services.cadence_service import compute_next_actions, serialize_action
 
-router = APIRouter(prefix="/cadence", tags=["cadence"])
+router = APIRouter(prefix="/cadence", tags=["cadence"], dependencies=[Depends(require_paid_plan)])
 
 
 @router.get("/next-actions", response_model=NextActionListResponse)

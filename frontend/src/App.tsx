@@ -4,8 +4,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from '@/components/ui/sonner';
 import { useAuthStore } from '@/stores/auth';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
+import { PaidRoute } from '@/components/PaidRoute';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { AppLayout } from '@/components/AppLayout';
+import { LandingPage } from '@/pages/LandingPage';
 import { LoginPage } from '@/pages/LoginPage';
 import { SignupPage } from '@/pages/SignupPage';
 
@@ -22,6 +24,7 @@ const TrackerPage = lazy(() => import('@/pages/TrackerPage').then((m) => ({ defa
 const FindEmailPage = lazy(() => import('@/pages/FindEmailPage').then((m) => ({ default: m.FindEmailPage })));
 const ResumeLibraryPage = lazy(() => import('@/pages/ResumeLibraryPage').then((m) => ({ default: m.ResumeLibraryPage })));
 const TriagePage = lazy(() => import('@/pages/TriagePage').then((m) => ({ default: m.TriagePage })));
+const UpgradePage = lazy(() => import('@/pages/UpgradePage').then((m) => ({ default: m.UpgradePage })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -55,6 +58,7 @@ function AppRoutes() {
 
   return (
     <Routes>
+      <Route path="/" element={<LandingPage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
 
@@ -68,18 +72,19 @@ function AppRoutes() {
         <Route path="/dashboard" element={<ErrorBoundary><PageSuspense><DashboardPage /></PageSuspense></ErrorBoundary>} />
         <Route path="/jobs" element={<ErrorBoundary><PageSuspense><JobsPage /></PageSuspense></ErrorBoundary>} />
         <Route path="/jobs/:jobId" element={<ErrorBoundary><PageSuspense><JobDetailPage /></PageSuspense></ErrorBoundary>} />
-        <Route path="/people" element={<ErrorBoundary><PageSuspense><PeoplePage /></PageSuspense></ErrorBoundary>} />
-        <Route path="/messages" element={<ErrorBoundary><PageSuspense><MessagesPage /></PageSuspense></ErrorBoundary>} />
-        <Route path="/outreach" element={<ErrorBoundary><PageSuspense><OutreachPage /></PageSuspense></ErrorBoundary>} />
-        <Route path="/tracker" element={<ErrorBoundary><PageSuspense><TrackerPage /></PageSuspense></ErrorBoundary>} />
         <Route path="/profile" element={<ErrorBoundary><PageSuspense><ProfilePage /></PageSuspense></ErrorBoundary>} />
         <Route path="/settings" element={<ErrorBoundary><PageSuspense><SettingsPage /></PageSuspense></ErrorBoundary>} />
-        <Route path="/find-email" element={<ErrorBoundary><PageSuspense><FindEmailPage /></PageSuspense></ErrorBoundary>} />
-        <Route path="/resume-library" element={<ErrorBoundary><PageSuspense><ResumeLibraryPage /></PageSuspense></ErrorBoundary>} />
-        <Route path="/triage" element={<ErrorBoundary><PageSuspense><TriagePage /></PageSuspense></ErrorBoundary>} />
+        <Route path="/upgrade" element={<ErrorBoundary><PageSuspense><UpgradePage /></PageSuspense></ErrorBoundary>} />
+        <Route path="/people" element={<PaidRoute><ErrorBoundary><PageSuspense><PeoplePage /></PageSuspense></ErrorBoundary></PaidRoute>} />
+        <Route path="/messages" element={<PaidRoute><ErrorBoundary><PageSuspense><MessagesPage /></PageSuspense></ErrorBoundary></PaidRoute>} />
+        <Route path="/outreach" element={<PaidRoute><ErrorBoundary><PageSuspense><OutreachPage /></PageSuspense></ErrorBoundary></PaidRoute>} />
+        <Route path="/tracker" element={<PaidRoute><ErrorBoundary><PageSuspense><TrackerPage /></PageSuspense></ErrorBoundary></PaidRoute>} />
+        <Route path="/find-email" element={<PaidRoute><ErrorBoundary><PageSuspense><FindEmailPage /></PageSuspense></ErrorBoundary></PaidRoute>} />
+        <Route path="/resume-library" element={<PaidRoute><ErrorBoundary><PageSuspense><ResumeLibraryPage /></PageSuspense></ErrorBoundary></PaidRoute>} />
+        <Route path="/triage" element={<PaidRoute><ErrorBoundary><PageSuspense><TriagePage /></PageSuspense></ErrorBoundary></PaidRoute>} />
       </Route>
 
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }

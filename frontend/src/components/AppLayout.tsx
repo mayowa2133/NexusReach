@@ -14,7 +14,9 @@ import { useAuthStore } from '@/stores/auth';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { NotificationBell } from '@/components/NotificationBell';
 import { cn } from '@/lib/utils';
-import { Menu } from 'lucide-react';
+import { isPathPaid } from '@/lib/subscriptionGating';
+import { useSubscription } from '@/hooks/useSubscription';
+import { Lock, Menu } from 'lucide-react';
 
 const navItems = [
   { path: '/dashboard', label: 'Dashboard' },
@@ -31,6 +33,8 @@ const navItems = [
 export function AppLayout() {
   const location = useLocation();
   const { user, signOut } = useAuthStore();
+  const { data: subscription } = useSubscription();
+  const isPaid = subscription?.is_paid ?? false;
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const initials = user?.email?.slice(0, 2).toUpperCase() ?? '??';
@@ -52,21 +56,27 @@ export function AppLayout() {
                 NexusReach
               </div>
               <nav className="flex flex-col gap-1">
-                {navItems.map((item) => (
-                  <Link
-                    key={item.path}
-                    to={item.path}
-                    onClick={() => setMobileOpen(false)}
-                    className={cn(
-                      'flex h-10 items-center rounded-lg px-3 text-sm font-medium transition-colors',
-                      location.pathname === item.path
-                        ? 'bg-secondary text-secondary-foreground'
-                        : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                    )}
-                  >
-                    {item.label}
-                  </Link>
-                ))}
+                {navItems.map((item) => {
+                  const locked = isPathPaid(item.path) && !isPaid;
+                  return (
+                    <Link
+                      key={item.path}
+                      to={locked ? '/upgrade' : item.path}
+                      onClick={() => setMobileOpen(false)}
+                      className={cn(
+                        'flex h-10 items-center gap-1.5 rounded-lg px-3 text-sm font-medium transition-colors',
+                        location.pathname === item.path
+                          ? 'bg-secondary text-secondary-foreground'
+                          : locked
+                            ? 'text-muted-foreground/50 hover:bg-muted hover:text-foreground'
+                            : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                      )}
+                    >
+                      {item.label}
+                      {locked && <Lock className="h-3 w-3" />}
+                    </Link>
+                  );
+                })}
                 <div className="my-2 border-t" />
                 <Link
                   to="/profile"
@@ -92,20 +102,26 @@ export function AppLayout() {
 
           {/* Desktop nav — hidden on mobile */}
           <nav className="hidden items-center gap-1 md:flex">
-            {navItems.map((item) => (
-              <Link
-                key={item.path}
-                to={item.path}
-                className={cn(
-                  'inline-flex h-8 items-center justify-center rounded-lg px-3 text-sm font-medium transition-colors',
-                  location.pathname === item.path
-                    ? 'bg-secondary text-secondary-foreground'
-                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                )}
-              >
-                {item.label}
-              </Link>
-            ))}
+            {navItems.map((item) => {
+              const locked = isPathPaid(item.path) && !isPaid;
+              return (
+                <Link
+                  key={item.path}
+                  to={locked ? '/upgrade' : item.path}
+                  className={cn(
+                    'inline-flex h-8 items-center justify-center gap-1 rounded-lg px-3 text-sm font-medium transition-colors',
+                    location.pathname === item.path
+                      ? 'bg-secondary text-secondary-foreground'
+                      : locked
+                        ? 'text-muted-foreground/50 hover:bg-muted hover:text-foreground'
+                        : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                  )}
+                >
+                  {item.label}
+                  {locked && <Lock className="h-3 w-3" />}
+                </Link>
+              );
+            })}
           </nav>
 
           <div className="ml-auto flex items-center gap-2">

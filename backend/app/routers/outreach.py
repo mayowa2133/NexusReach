@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import get_current_user_id
+from app.dependencies import get_current_user_id, require_paid_plan
 from app.schemas.outreach import (
     CreateOutreachRequest,
     UpdateOutreachRequest,
@@ -23,7 +23,7 @@ from app.services.outreach_service import (
     delete_outreach_log,
 )
 
-router = APIRouter(prefix="/outreach", tags=["outreach"])
+router = APIRouter(prefix="/outreach", tags=["outreach"], dependencies=[Depends(require_paid_plan)])
 
 
 def _to_response(log, person=None) -> OutreachResponse:

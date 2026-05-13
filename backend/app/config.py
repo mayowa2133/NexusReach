@@ -92,6 +92,11 @@ class Settings(BaseSettings):
     linkedin_graph_refresh_recommended_days: int = 30
     linkedin_graph_stale_after_days: int = 90
 
+    # Stripe
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_price_id: str = ""
+
     # Stale contact re-verification
     reverify_stale_days: int = 14
     reverify_batch_size: int = 20
@@ -114,6 +119,12 @@ class Settings(BaseSettings):
             errors.append("NEXUSREACH_SUPABASE_JWT_SECRET is empty")
         if self.auth_mode == "dev":
             errors.append("NEXUSREACH_AUTH_MODE=dev must not be used in production")
+        if not self.stripe_secret_key:
+            errors.append("NEXUSREACH_STRIPE_SECRET_KEY is empty")
+        if not self.stripe_webhook_secret:
+            errors.append("NEXUSREACH_STRIPE_WEBHOOK_SECRET is empty")
+        if not self.stripe_price_id:
+            errors.append("NEXUSREACH_STRIPE_PRICE_ID is empty")
         if errors:
             raise ValueError(
                 "Production configuration errors:\n  - " + "\n  - ".join(errors)

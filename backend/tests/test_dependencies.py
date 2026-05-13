@@ -31,7 +31,7 @@ async def test_get_or_create_user_uses_jwt_email_for_new_user():
     user = await get_or_create_user(auth_user, db)
 
     assert user.email == "person@example.com"
-    assert db.add.call_count == 3
+    assert db.add.call_count == 4
 
 
 async def test_get_or_create_user_backfills_blank_email_and_defaults():
@@ -43,6 +43,7 @@ async def test_get_or_create_user_backfills_blank_email_and_defaults():
             _ScalarResult(existing_user),
             _ScalarResult(None),
             _ScalarResult(None),
+            _ScalarResult(None),
         ]
     )
     db.add = MagicMock()
@@ -52,7 +53,7 @@ async def test_get_or_create_user_backfills_blank_email_and_defaults():
     user = await get_or_create_user(auth_user, db)
 
     assert user.email == "person@example.com"
-    assert db.add.call_count == 2
+    assert db.add.call_count == 3
 
 
 async def test_get_current_auth_user_returns_configured_dev_user(monkeypatch):

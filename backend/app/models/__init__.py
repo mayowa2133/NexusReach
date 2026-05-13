@@ -22,5 +22,6 @@ from app.models.job_research_snapshot import JobResearchSnapshot
 from app.models.story import Story
 from app.models.interview_prep_brief import InterviewPrepBrief
 from app.models.resume_artifact import ResumeArtifact
+from app.models.subscription import Subscription
 
-__all__ = ["User", "Profile", "UserSettings", "Company", "Person", "Message", "Job", "OutreachLog", "ApiUsage", "Notification", "SearchPreference", "SmtpDomainResult", "SearchLog", "LinkedInGraphConnection", "LinkedInGraphFollow", "LinkedInGraphSyncRun", "JobAlertPreference", "KnownPerson", "KnownPersonCompany", "JobResearchSnapshot", "Story", "InterviewPrepBrief", "ResumeArtifact"]
+__all__ = ["User", "Profile", "UserSettings", "Company", "Person", "Message", "Job", "OutreachLog", "ApiUsage", "Notification", "SearchPreference", "SmtpDomainResult", "SearchLog", "LinkedInGraphConnection", "LinkedInGraphFollow", "LinkedInGraphSyncRun", "JobAlertPreference", "KnownPerson", "KnownPersonCompany", "JobResearchSnapshot", "Story", "InterviewPrepBrief", "ResumeArtifact", "Subscription"]

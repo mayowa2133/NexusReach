@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import get_current_user_id
+from app.dependencies import get_current_user_id, require_paid_plan
 from app.schemas.stories import StoryCreate, StoryResponse, StoryUpdate
 from app.services.story_service import (
     create_story,
@@ -17,7 +17,7 @@ from app.services.story_service import (
     update_story,
 )
 
-router = APIRouter(prefix="/stories", tags=["stories"])
+router = APIRouter(prefix="/stories", tags=["stories"], dependencies=[Depends(require_paid_plan)])
 
 
 @router.get("", response_model=list[StoryResponse])

@@ -34,7 +34,12 @@ import { AutoProspectPanel } from '@/components/settings/AutoProspectPanel';
 import { CadenceSettingsPanel } from '@/components/settings/CadenceSettingsPanel';
 import { GuardrailsPanel } from '@/components/settings/GuardrailsPanel';
 import { JobAlertsPanel } from '@/components/settings/JobAlertsPanel';
+import { useSubscription, useCreateCheckout, useCreatePortalSession } from '@/hooks/useSubscription';
 import { toast } from 'sonner';
+import { Lock } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { cn } from '@/lib/utils';
+import { useQueryClient } from '@tanstack/react-query';
 import type { LinkedInGraphSyncSession } from '@/types';
 
 const REDIRECT_URI = `${window.location.origin}/settings`;
@@ -149,8 +154,77 @@ function ResumeAiAssistCard() {
   );
 }
 
+function SubscriptionCard() {
+  const { data: subscription, isLoading } = useSubscription();
+  const createPortal = useCreatePortalSession();
+  const createCheckout = useCreateCheckout();
+
+  if (isLoading) return null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Subscription</CardTitle>
+        <CardDescription>Manage your NexusReach plan.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Badge variant={subscription?.is_paid ? 'default' : 'secondary'}>
+              {subscription?.is_paid ? 'Pro' : 'Free'}
+            </Badge>
+            {subscription?.cancel_at_period_end && subscription.current_period_end && (
+              <span className="text-sm text-muted-foreground">
+                Cancels {new Date(subscription.current_period_end).toLocaleDateString()}
+              </span>
+            )}
+          </div>
+          {subscription?.is_paid ? (
+            <Button
+              variant="outline"
+              onClick={() => createPortal.mutate()}
+              disabled={createPortal.isPending}
+            >
+              {createPortal.isPending ? 'Loading...' : 'Manage Subscription'}
+            </Button>
+          ) : (
+            <Button
+              onClick={() => createCheckout.mutate()}
+              disabled={createCheckout.isPending}
+            >
+              {createCheckout.isPending ? 'Redirecting...' : 'Upgrade to Pro'}
+            </Button>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function PaidSection({ isPaid, children }: { isPaid: boolean; children: React.ReactNode }) {
+  if (isPaid) return <>{children}</>;
+
+  return (
+    <div className="relative">
+      <div className={cn('opacity-50 pointer-events-none select-none')}>
+        {children}
+      </div>
+      <div className="absolute inset-0 z-10 flex items-center justify-center">
+        <Link to="/upgrade">
+          <Badge variant="secondary" className="gap-1 cursor-pointer">
+            <Lock className="h-3 w-3" /> Upgrade to Pro
+          </Badge>
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 export function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const queryClient = useQueryClient();
+  const { data: subscription } = useSubscription();
+  const isPaid = subscription?.is_paid ?? false;
   const { data: emailStatus, isLoading } = useEmailConnectionStatus();
   const connectGmail = useConnectGmail();
   const disconnectGmail = useDisconnectGmail();
@@ -167,6 +241,15 @@ export function SettingsPage() {
   const clearLinkedInGraph = useClearLinkedInGraph();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [syncSession, setSyncSession] = useState<LinkedInGraphSyncSession | null>(null);
+
+  // Handle subscription success callback
+  useEffect(() => {
+    if (searchParams.get('subscription') === 'success') {
+      queryClient.invalidateQueries({ queryKey: ['subscription'] });
+      toast.success('Welcome to Pro! All features are now unlocked.');
+      setSearchParams({});
+    }
+  }, [searchParams, setSearchParams, queryClient]);
 
   // Handle OAuth callback
   useEffect(() => {
@@ -304,9 +387,14 @@ export function SettingsPage() {
         <p className="text-muted-foreground">Manage your account and email integrations.</p>
       </div>
 
-      <ResumeAiAssistCard />
+      <SubscriptionCard />
+
+      <PaidSection isPaid={isPaid}>
+        <ResumeAiAssistCard />
+      </PaidSection>
 
       {/* Email Integrations */}
+      <PaidSection isPaid={isPaid}>
       <Card>
         <CardHeader>
           <CardTitle>Email Integrations</CardTitle>
@@ -383,9 +471,11 @@ export function SettingsPage() {
           </div>
         </CardContent>
       </Card>
+      </PaidSection>
 
       <Separator />
 
+      <PaidSection isPaid={isPaid}>
       <Card>
         <CardHeader>
           <CardTitle>LinkedIn Graph</CardTitle>
@@ -533,25 +623,30 @@ export function SettingsPage() {
           )}
         </CardContent>
       </Card>
+      </PaidSection>
 
       <Separator />
 
       {/* Auto-Prospect */}
-      <AutoProspectPanel />
+      <PaidSection isPaid={isPaid}>
+        <AutoProspectPanel />
+      </PaidSection>
 
       <Separator />
 
-      {/* Job Alerts */}
+      {/* Job Alerts — free tier */}
       <JobAlertsPanel />
 
       <Separator />
 
       {/* Cadence Thresholds */}
-      <CadenceSettingsPanel />
+      <PaidSection isPaid={isPaid}>
+        <CadenceSettingsPanel />
+      </PaidSection>
 
       <Separator />
 
-      {/* Outreach Guardrails */}
+      {/* Outreach Guardrails — free tier */}
       <GuardrailsPanel />
     </div>
   );

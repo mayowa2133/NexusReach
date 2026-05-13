@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import get_current_user_id
+from app.dependencies import get_current_user_id, require_paid_plan
 from app.schemas.interview_prep import (
     InterviewPrepBriefResponse,
     InterviewPrepGenerateRequest,
@@ -20,7 +20,7 @@ from app.services.interview_prep_service import (
     update_brief,
 )
 
-router = APIRouter(prefix="/jobs", tags=["interview-prep"])
+router = APIRouter(prefix="/jobs", tags=["interview-prep"], dependencies=[Depends(require_paid_plan)])
 
 
 @router.get(

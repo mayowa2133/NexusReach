@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import NO_VALUE
 
 from app.database import get_db
-from app.dependencies import get_current_user_id
+from app.dependencies import get_current_user_id, require_paid_plan
 from app.middleware.rate_limit import limiter
 from app.utils.discovery_rate_limit import check_discovery_rate_limit
 from app.schemas.people import (
@@ -32,7 +32,7 @@ from app.services.people_service import (
 from app.services.employment_verification_service import verify_current_company_for_person
 from app.services.job_research_snapshot_service import save_job_research_snapshot
 
-router = APIRouter(prefix="/people", tags=["people"])
+router = APIRouter(prefix="/people", tags=["people"], dependencies=[Depends(require_paid_plan)])
 
 
 def _is_mock_value(value: object) -> bool:

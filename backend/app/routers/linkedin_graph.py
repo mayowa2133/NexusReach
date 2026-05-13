@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import get_current_user_id
+from app.dependencies import get_current_user_id, require_paid_plan
 from app.schemas.linkedin_graph import (
     LinkedInGraphImportBatchRequest,
     LinkedInGraphImportFollowBatchRequest,
@@ -16,8 +16,10 @@ from app.services import linkedin_graph_service
 
 router = APIRouter(prefix="/linkedin-graph", tags=["linkedin-graph"])
 
+_paid = [Depends(require_paid_plan)]
 
-@router.get("/status", response_model=LinkedInGraphStatusResponse)
+
+@router.get("/status", response_model=LinkedInGraphStatusResponse, dependencies=_paid)
 async def get_status(
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -25,7 +27,7 @@ async def get_status(
     return await linkedin_graph_service.get_status(db, user_id)
 
 
-@router.post("/sync-session", response_model=LinkedInGraphSyncSessionResponse)
+@router.post("/sync-session", response_model=LinkedInGraphSyncSessionResponse, dependencies=_paid)
 async def create_sync_session(
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -65,7 +67,7 @@ async def import_follow_batch(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/import-file", response_model=LinkedInGraphStatusResponse)
+@router.post("/import-file", response_model=LinkedInGraphStatusResponse, dependencies=_paid)
 async def import_file(
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -82,7 +84,7 @@ async def import_file(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.delete("/connections", response_model=LinkedInGraphStatusResponse)
+@router.delete("/connections", response_model=LinkedInGraphStatusResponse, dependencies=_paid)
 async def clear_connections(
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],

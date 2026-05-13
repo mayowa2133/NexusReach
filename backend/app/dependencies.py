@@ -13,6 +13,7 @@ from app.database import get_db
 from app.models.user import User
 from app.models.profile import Profile
 from app.models.settings import UserSettings
+from app.models.subscription import Subscription
 
 security = HTTPBearer(auto_error=False)
 
@@ -89,9 +90,10 @@ async def get_or_create_user(
         db.add(user)
         changed = True
 
-        # Create default profile and settings
+        # Create default profile, settings, and subscription
         db.add(Profile(user_id=user_id))
         db.add(UserSettings(user_id=user_id))
+        db.add(Subscription(user_id=user_id, plan="free"))
         changed = True
     else:
         placeholder_email = _fallback_email(user_id)
@@ -109,8 +111,30 @@ async def get_or_create_user(
             db.add(UserSettings(user_id=user_id))
             changed = True
 
+        sub_result = await db.execute(select(Subscription).where(Subscription.user_id == user_id))
+        if sub_result.scalar_one_or_none() is None:
+            db.add(Subscription(user_id=user_id, plan="free"))
+            changed = True
+
     if changed:
         await db.commit()
         await db.refresh(user)
 
     return user
+
+
+async def require_paid_plan(
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> uuid.UUID:
+    """Gate routes to paid-plan users. Returns user_id on success, raises 403 otherwise."""
+    result = await db.execute(
+        select(Subscription).where(Subscription.user_id == user_id)
+    )
+    sub = result.scalar_one_or_none()
+    if sub is None or not sub.is_paid:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This feature requires a paid plan. Please upgrade.",
+        )
+    return user_id
