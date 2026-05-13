@@ -17,6 +17,7 @@ from app.schemas.messages import (
     LinkedInSignalResponse,
     MessageResponse,
     MessageWarmPathResponse,
+    WarmIntroSuggestion,
 )
 from app.schemas.people import PersonResponse
 from app.services.message_service import (
@@ -129,6 +130,8 @@ async def create_draft(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    warm_intro_raw = result.get("warm_intro_suggestion")
+
     return DraftResponse(
         message=_to_response(
             result["message"],
@@ -144,6 +147,7 @@ async def create_draft(
         job_id=result.get("job_id"),
         warm_path=MessageWarmPathResponse.model_validate(result["warm_path"]) if result.get("warm_path") else None,
         linkedin_signal=LinkedInSignalResponse.model_validate(result["linkedin_signal"]) if result.get("linkedin_signal") else None,
+        warm_intro_suggestion=WarmIntroSuggestion.model_validate(warm_intro_raw) if warm_intro_raw else None,
     )
 
 

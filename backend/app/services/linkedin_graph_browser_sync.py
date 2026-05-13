@@ -14,9 +14,9 @@ SCRAPE_CONNECTION_CARDS_SCRIPT = r"""
 () => {
   const normalizeText = (value) => (value || "").replace(/\s+/g, " ").trim();
 
-  // LinkedIn uses hashed class names. Each connection card has two profile
-  // links: an avatar link (no text) and a name link (contains <p>Name</p>
-  // and <p>Headline</p>). We target the name links — those with text content.
+  // LinkedIn uses hashed class names that rotate frequently. We use multiple
+  // strategies to extract name and headline from connection cards.
+
   const profileLinks = Array.from(document.querySelectorAll('a[href*="/in/"]'));
   const seen = new Set();
 
@@ -34,11 +34,51 @@ SCRAPE_CONNECTION_CARDS_SCRIPT = r"""
       if (seen.has(canonical)) return null;
       seen.add(canonical);
 
-      // Extract name and headline from <p> tags inside the link.
-      // Structure: <a> > <div> > <p>Name</p> <div><p>Headline</p></div>
+      let fullName = "";
+      let headline = "";
+
+      // Strategy 1: <p> tags inside the link (most common variant).
       const paragraphs = anchor.querySelectorAll("p");
-      const fullName = paragraphs.length > 0 ? normalizeText(paragraphs[0].textContent) : "";
-      const headline = paragraphs.length > 1 ? normalizeText(paragraphs[1].textContent) : "";
+      if (paragraphs.length > 0) {
+        fullName = normalizeText(paragraphs[0].textContent);
+        headline = paragraphs.length > 1 ? normalizeText(paragraphs[1].textContent) : "";
+      }
+
+      // Strategy 2: <span> tags (LinkedIn sometimes uses spans instead of p)
+      if (!fullName) {
+        const spans = anchor.querySelectorAll("span");
+        for (const span of spans) {
+          const text = normalizeText(span.textContent);
+          if (!text) continue;
+          // Skip spans that are only whitespace, icons, or single chars
+          if (text.length < 2) continue;
+          if (!fullName) {
+            fullName = text;
+          } else if (!headline) {
+            headline = text;
+            break;
+          }
+        }
+      }
+
+      // Strategy 3: aria-label on the link itself (fallback)
+      if (!fullName) {
+        const ariaLabel = anchor.getAttribute("aria-label") || "";
+        if (ariaLabel) {
+          fullName = normalizeText(ariaLabel);
+        }
+      }
+
+      // Strategy 4: Look in a parent card container for name/headline
+      if (!fullName) {
+        const card = anchor.closest("[data-view-name], .mn-connection-card, li");
+        if (card) {
+          const nameEl = card.querySelector("[data-view-name] p, .mn-connection-card__name, [aria-label]");
+          if (nameEl) fullName = normalizeText(nameEl.textContent);
+          const headlineEl = card.querySelector(".mn-connection-card__occupation, [data-view-name] p:nth-child(2)");
+          if (headlineEl) headline = normalizeText(headlineEl.textContent);
+        }
+      }
 
       if (!fullName) return null;
 
@@ -56,11 +96,26 @@ SCROLL_CONNECTIONS_SCRIPT = r"""
 () => {
   const count = document.querySelectorAll('a[href*="/in/"]').length;
 
-  // Try to find the scrollable container; fall back to window scroll
-  const main = document.querySelector("main");
-  const container = (main && main.scrollHeight > main.clientHeight)
-    ? main
-    : document.scrollingElement || document.documentElement;
+  // Try multiple scrollable container candidates.
+  // LinkedIn's layout varies: sometimes <main> is the scroll target,
+  // sometimes a nested div, sometimes the window itself.
+  const candidates = [
+    document.querySelector("main"),
+    document.querySelector('[role="main"]'),
+    document.querySelector(".scaffold-layout__main"),
+  ].filter(Boolean);
+
+  let container = null;
+  for (const c of candidates) {
+    if (c && c.scrollHeight > c.clientHeight + 10) {
+      container = c;
+      break;
+    }
+  }
+
+  if (!container) {
+    container = document.scrollingElement || document.documentElement;
+  }
 
   if (container === document.body || container === document.documentElement || container === document.scrollingElement) {
     window.scrollTo(0, document.body.scrollHeight);
@@ -90,9 +145,22 @@ CLICK_SHOW_MORE_SCRIPT = r"""
 """
 
 _COMPANY_PATTERNS = (
+    # "Software Engineer at Google"
     re.compile(r"\bat\s+([^|,•()\[\]]+)", re.IGNORECASE),
+    # "SWE @Google"
     re.compile(r"@\s*([^|,•()\[\]]+)", re.IGNORECASE),
+    # "Google | Software Engineer" — company first then pipe
+    re.compile(r"^([^|•,]+?)\s*[|•]", re.IGNORECASE),
+    # "Software Engineer - Google" — dash separator (less precise, only if short)
+    re.compile(r"\s[-–—]\s+([^|,•()\[\]]{2,40})$", re.IGNORECASE),
 )
+
+# Words that should NOT be extracted as a company name
+_COMPANY_STOPWORDS = frozenset({
+    "seeking", "looking", "open", "available", "hiring",
+    "student", "graduate", "freelance", "retired", "self-employed",
+    "actively", "currently", "formerly",
+})
 
 
 def _clean_text(value: Any) -> str:
@@ -111,8 +179,16 @@ def infer_company_name_from_headline(headline: str | None) -> str | None:
         if match is None:
             continue
         company = re.sub(r"\s+", " ", match.group(1)).strip(" -:|,.;")
-        if company:
-            return company
+        if not company:
+            continue
+        # Reject stopwords that are clearly not company names
+        first_word = company.split()[0].lower() if company else ""
+        if first_word in _COMPANY_STOPWORDS:
+            continue
+        # Reject very short results that are likely noise
+        if len(company) < 2:
+            continue
+        return company
     return None
 
 

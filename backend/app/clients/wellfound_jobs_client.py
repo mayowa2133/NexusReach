@@ -1,4 +1,21 @@
-"""Best-effort client for Wellfound jobs."""
+"""Best-effort client for Wellfound (formerly AngelList Talent) jobs.
+
+**Production status: BEST-EFFORT / DEGRADED**
+
+Wellfound serves a JS-heavy SPA with aggressive anti-bot detection.  In practice
+this client returns zero results most of the time in production because the
+server responds with a 403, a Cloudflare challenge, or a "Please enable JS"
+page.  Other startup sources (YC Jobs, VentureLoop, Conviction, Speedrun) are
+more reliable and provide richer metadata.
+
+This client is retained so that *if* Wellfound becomes accessible (via a
+sanctioned API, RSS feed, or relaxed bot policy) it will start contributing
+again automatically.  It intentionally fails soft to ``[]`` and never blocks
+or slows down the rest of the startup discover flow.
+
+Decision documented: 2026-05-13 — keep as best-effort, do not invest in
+browser-based workarounds (headless Chrome, Playwright) to bypass anti-bot.
+"""
 
 from __future__ import annotations
 
@@ -19,6 +36,16 @@ REQUEST_HEADERS = {
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     )
 }
+
+# Anti-bot indicator strings that signal the response is not real job data.
+_ANTI_BOT_INDICATORS = (
+    "Please enable JS",
+    "disable any ad blocker",
+    "Checking if the site connection is secure",
+    "cf-browser-verification",
+    "Just a moment...",
+    "Attention Required!",
+)
 
 
 def parse_jobs_page_html(html_content: str, *, query: str | None = None, limit: int = 100) -> list[dict]:
@@ -61,19 +88,44 @@ def parse_jobs_page_html(html_content: str, *, query: str | None = None, limit: 
 
 
 async def search_wellfound_jobs(query: str | None = None, limit: int = 100) -> list[dict]:
+    """Fetch Wellfound jobs, returning ``[]`` on any failure.
+
+    This is intentionally best-effort.  Failures are logged at INFO level
+    (not WARNING) because they are the expected outcome in production.
+    """
     try:
         async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
             response = await client.get(BASE_URL, headers=REQUEST_HEADERS)
-    except httpx.HTTPError:
-        logger.warning("Wellfound jobs fetch failed")
+    except httpx.HTTPError as exc:
+        logger.info(
+            "Wellfound jobs fetch failed (best-effort source, expected in production)",
+            extra={"error": str(exc)},
+        )
+        return []
+
+    if response.status_code == 403:
+        logger.info(
+            "Wellfound returned 403 (anti-bot block, expected in production)",
+        )
         return []
 
     if response.status_code != 200:
-        logger.warning("Wellfound jobs unavailable: status=%s", response.status_code)
+        logger.info(
+            "Wellfound jobs unavailable: status=%s (best-effort source)",
+            response.status_code,
+        )
         return []
 
-    if "Please enable JS" in response.text or "disable any ad blocker" in response.text:
-        logger.warning("Wellfound jobs blocked by anti-bot challenge")
+    if any(indicator in response.text for indicator in _ANTI_BOT_INDICATORS):
+        logger.info(
+            "Wellfound response contains anti-bot challenge (best-effort source)",
+        )
         return []
 
-    return parse_jobs_page_html(response.text, query=query, limit=limit)
+    jobs = parse_jobs_page_html(response.text, query=query, limit=limit)
+    if jobs:
+        logger.info(
+            "Wellfound returned %d jobs (rare success — anti-bot was not triggered)",
+            len(jobs),
+        )
+    return jobs

@@ -197,6 +197,8 @@ def _looks_like_login(page: Page) -> bool:
     url = page.url.lower()
     if "linkedin.com/login" in url or "linkedin.com/checkpoint/" in url:
         return True
+    if "linkedin.com/uas/" in url:
+        return True
     try:
         body_text = (page.locator("body").text_content(timeout=1000) or "").lower()
     except PlaywrightError:
@@ -208,11 +210,40 @@ def _looks_like_security_challenge(page: Page) -> bool:
     url = page.url.lower()
     if "checkpoint/challenge" in url:
         return True
+    if "checkpoint/lg/" in url:
+        return True
     try:
         body_text = (page.locator("body").text_content(timeout=1000) or "").lower()
     except PlaywrightError:
         return False
-    return "security verification" in body_text or "quick security check" in body_text
+    challenge_indicators = (
+        "security verification",
+        "quick security check",
+        "verify your identity",
+        "let's do a quick security check",
+        "enter the code",
+        "we need to verify",
+        "confirm your email",
+        "confirm your phone",
+        "unusual activity",
+    )
+    return any(indicator in body_text for indicator in challenge_indicators)
+
+
+def _looks_like_rate_limited(page: Page) -> bool:
+    """Detect LinkedIn rate limiting or temporary block pages."""
+    try:
+        body_text = (page.locator("body").text_content(timeout=1000) or "").lower()
+    except PlaywrightError:
+        return False
+    rate_indicators = (
+        "you've reached the",
+        "too many requests",
+        "slow down",
+        "temporarily restricted",
+        "try again later",
+    )
+    return any(indicator in body_text for indicator in rate_indicators)
 
 
 @contextmanager
@@ -298,6 +329,14 @@ def _wait_for_connections_page(
                 "The connector will continue automatically once the page loads."
             )
             prompted = True
+        elif _looks_like_rate_limited(page):
+            print(
+                "LinkedIn is rate-limiting this session. "
+                "Wait a few minutes, then re-run the connector."
+            )
+            raise SystemExit(
+                "LinkedIn rate limit detected. Wait 5-10 minutes before retrying."
+            )
 
         page.wait_for_timeout(2000)
 

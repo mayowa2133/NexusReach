@@ -205,6 +205,7 @@ def _build_goal_instructions(
         extras.append("Keep the referral ask respectful and easy to decline.")
     if normalized_goal == "warm_intro":
         extras.append("The message can ask for advice or the right internal contact, but it should still be tied to the job search outcome.")
+        extras.append("If warm path context is available, use it to open naturally — a shared connection is the strongest opener for a warm intro.")
     if normalized_goal in {"follow_up", "thank_you"}:
         extras.append("Reuse the established angle from prior outreach rather than changing to a new generic networking ask.")
     extras.append(f"The primary ask for this draft is: {primary_cta}.")
@@ -482,6 +483,54 @@ def _build_linkedin_signal_context(linkedin_signal: dict | None) -> str:
     elif linkedin_signal.get("refresh_recommended"):
         lines.append("- This follow signal is aging. Keep any mention conservative.")
     return "\n".join(lines)
+
+
+def _build_warm_intro_suggestion(
+    warm_path: dict | None,
+    normalized_goal: str,
+) -> dict | None:
+    """Return a warm-intro suggestion when a warm path exists but the user chose a different goal.
+
+    This never overrides the user's goal — it just surfaces the opportunity so
+    the frontend can show a nudge like "You have a connection at this company.
+    Consider switching to a warm intro."
+    """
+    if not warm_path:
+        return None
+
+    wp_type = warm_path.get("type")
+    if not wp_type:
+        return None
+
+    # Don't suggest if the user already chose warm_intro or follow_up/thank_you
+    if normalized_goal in {"warm_intro", "follow_up", "thank_you"}:
+        return None
+
+    # Don't suggest if the data is stale
+    if warm_path.get("stale"):
+        return None
+
+    connection_name = warm_path.get("connection_name") or "a mutual connection"
+
+    if wp_type == "direct_connection":
+        suggestion = (
+            f"You're already connected with {connection_name} on LinkedIn. "
+            "Consider re-drafting with the 'Warm Intro' goal to lead with that shared connection."
+        )
+    elif wp_type == "same_company_bridge":
+        suggestion = (
+            f"You know {connection_name} at the same company. "
+            "Consider re-drafting with the 'Warm Intro' goal to mention this shared context."
+        )
+    else:
+        return None
+
+    return {
+        "available": True,
+        "warm_path_type": wp_type,
+        "connection_name": connection_name,
+        "suggestion": suggestion,
+    }
 
 
 def _build_story_context(stories: list[Story]) -> str:
@@ -942,6 +991,8 @@ async def draft_message(
     await db.commit()
     await db.refresh(message)
 
+    warm_intro_suggestion = _build_warm_intro_suggestion(warm_path, normalized_goal)
+
     return {
         "message": message,
         "person": person,
@@ -953,6 +1004,7 @@ async def draft_message(
         "job_id": str(job.id) if job else None,
         "warm_path": warm_path,
         "linkedin_signal": linkedin_signal,
+        "warm_intro_suggestion": warm_intro_suggestion,
     }
 
 

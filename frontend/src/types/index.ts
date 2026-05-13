@@ -240,6 +240,13 @@ export interface DraftRequest {
   pinned_story_ids?: string[];
 }
 
+export interface WarmIntroSuggestion {
+  available: boolean;
+  warm_path_type: string | null;
+  connection_name: string | null;
+  suggestion: string | null;
+}
+
 export interface DraftResponse {
   message: Message;
   reasoning: string;
@@ -250,6 +257,7 @@ export interface DraftResponse {
   job_id?: string | null;
   warm_path?: MessageWarmPath | null;
   linkedin_signal?: LinkedInSignal | null;
+  warm_intro_suggestion?: WarmIntroSuggestion | null;
 }
 
 export interface MessageWarmPath {

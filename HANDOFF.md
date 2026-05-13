@@ -313,8 +313,8 @@ Keep that file updated when:
 - a milestone ships
 - a later agent takes over and needs current roadmap state
 
-1. Decide on the production-grade Wellfound path: stronger browser retrieval, sanctioned feed, or removal from the v1 source list.
+1. ~~Decide on the production-grade Wellfound path~~ — **Done (2026-05-13).** Kept as best-effort; anti-bot 403s are expected and logged at INFO.
 2. Decide whether startup sources should remain manual-only or join saved-search/hourly refresh behavior.
 3. Add a separate “venture-backed” taxonomy before bringing in broader VC portfolio boards like Sequoia, Accel, and General Catalyst.
-4. Harden the LinkedIn browser sync flow against more live DOM and challenge variations.
-5. Thread warm-path context into drafting suggestions without changing the no-auto-send rule.
+4. ~~Harden the LinkedIn browser sync flow~~ — **Done (2026-05-13).** Multi-strategy DOM scraping, expanded challenge detection, rate-limit handling, improved company extraction.
+5. ~~Thread warm-path context into drafting suggestions~~ — **Done (2026-05-13).** `warm_intro_suggestion` in DraftResponse + frontend nudge banner.

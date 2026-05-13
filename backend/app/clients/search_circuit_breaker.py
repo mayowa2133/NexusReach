@@ -38,6 +38,11 @@ class _ProviderCircuit:
         "failure_threshold",
         "recovery_seconds",
         "last_failure_time",
+        "total_requests",
+        "total_successes",
+        "total_failures",
+        "total_cache_hits",
+        "total_results_returned",
     )
 
     def __init__(
@@ -53,6 +58,12 @@ class _ProviderCircuit:
         self.failure_threshold = failure_threshold
         self.recovery_seconds = recovery_seconds
         self.last_failure_time: float = 0.0
+        # Telemetry counters (in-memory, reset on restart)
+        self.total_requests: int = 0
+        self.total_successes: int = 0
+        self.total_failures: int = 0
+        self.total_cache_hits: int = 0
+        self.total_results_returned: int = 0
 
     # ------------------------------------------------------------------
     # Public API
@@ -74,7 +85,7 @@ class _ProviderCircuit:
         # HALF_OPEN — already probing; allow exactly one request
         return True
 
-    def record_success(self) -> None:
+    def record_success(self, *, result_count: int = 0) -> None:
         if self.state != CircuitState.CLOSED:
             logger.info(
                 "circuit breaker reset after success",
@@ -82,10 +93,13 @@ class _ProviderCircuit:
             )
         self.state = CircuitState.CLOSED
         self.consecutive_failures = 0
+        self.total_successes += 1
+        self.total_results_returned += result_count
 
     def record_failure(self) -> None:
         self.consecutive_failures += 1
         self.last_failure_time = time.monotonic()
+        self.total_failures += 1
         if self.consecutive_failures >= self.failure_threshold:
             self.state = CircuitState.OPEN
             logger.warning(
@@ -133,12 +147,22 @@ def is_provider_available(provider: str) -> bool:
     return get_circuit(provider).should_allow_request()
 
 
-def record_success(provider: str) -> None:
-    get_circuit(provider).record_success()
+def record_success(provider: str, *, result_count: int = 0) -> None:
+    get_circuit(provider).record_success(result_count=result_count)
 
 
 def record_failure(provider: str) -> None:
     get_circuit(provider).record_failure()
+
+
+def record_request(provider: str) -> None:
+    """Increment the total request counter for a provider."""
+    get_circuit(provider).total_requests += 1
+
+
+def record_cache_hit(provider: str) -> None:
+    """Increment the cache hit counter for a provider."""
+    get_circuit(provider).total_cache_hits += 1
 
 
 def reset_all() -> None:
@@ -152,6 +176,31 @@ def status_summary() -> dict[str, dict]:
         name: {
             "state": circuit.state.value,
             "consecutive_failures": circuit.consecutive_failures,
+        }
+        for name, circuit in _circuits.items()
+    }
+
+
+def telemetry_summary() -> dict[str, dict]:
+    """Return telemetry counters for all tracked providers.
+
+    This supplements ``status_summary()`` with request/success/failure/cache
+    counts accumulated since the process started.
+    """
+    return {
+        name: {
+            "state": circuit.state.value,
+            "consecutive_failures": circuit.consecutive_failures,
+            "total_requests": circuit.total_requests,
+            "total_successes": circuit.total_successes,
+            "total_failures": circuit.total_failures,
+            "total_cache_hits": circuit.total_cache_hits,
+            "total_results_returned": circuit.total_results_returned,
+            "success_rate": (
+                round(circuit.total_successes / circuit.total_requests, 3)
+                if circuit.total_requests > 0
+                else None
+            ),
         }
         for name, circuit in _circuits.items()
     }

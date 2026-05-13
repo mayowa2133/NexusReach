@@ -111,11 +111,11 @@ NexusReach already has a working end-to-end loop:
   - Job Command Center
   - Story Bank / proof-point memory
   - Next-action and follow-up cadence engine
-- [ ] Decide on the production-grade Wellfound path: stronger browser retrieval, sanctioned feed, or removal from the v1 source list
+- [x] Decide on the production-grade Wellfound path — **Decision: keep as best-effort.** Anti-bot 403s are expected. Client logs at INFO, fails soft to `[]`, never blocks other startup sources. Revisit only if Wellfound provides a sanctioned API or feed.
 - [ ] Decide whether startup sources should remain manual-only or join saved-search/hourly refresh behavior
-- [ ] Harden LinkedIn browser sync against more LinkedIn DOM variants and security-challenge flows
-- [ ] Add warm-intro-aware drafting suggestions without changing the no-auto-send rule
-- [ ] Add provider usage telemetry and easier cost/credit visibility
+- [x] Harden LinkedIn browser sync against more LinkedIn DOM variants and security-challenge flows — **Done:** multi-strategy DOM scraping (p, span, aria-label, card container fallbacks), expanded security-challenge detection (CAPTCHA, email/phone verify, unusual activity), rate-limit detection, improved company extraction with stopword filtering
+- [x] Add warm-intro-aware drafting suggestions without changing the no-auto-send rule — **Done:** `warm_intro_suggestion` field in DraftResponse, frontend nudge banner with "Switch to Warm Intro" button, enriched warm_intro goal instructions
+- [x] Add provider usage telemetry and easier cost/credit visibility — **Done:** in-memory per-provider counters (requests, successes, failures, cache hits, results), `GET /api/usage/search-providers` endpoint, `telemetry_summary()` in circuit breaker
 
 ### P2
 - [ ] Add separate “startup-first” vs “venture-backed” taxonomy before onboarding broader VC portfolio boards

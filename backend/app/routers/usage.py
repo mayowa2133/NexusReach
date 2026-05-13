@@ -1,4 +1,4 @@
-"""API usage tracking routes — view daily consumption."""
+"""API usage tracking routes — view daily consumption and provider telemetry."""
 
 import uuid
 from datetime import datetime
@@ -7,6 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.clients import search_circuit_breaker
 from app.database import get_db
 from app.dependencies import get_current_user_id
 from app.schemas.api_usage import DailyUsageResponse, UsageRecordResponse
@@ -43,3 +44,17 @@ async def get_usage_records(
         date_to=date_to,
         limit=limit,
     )
+
+
+@router.get("/search-providers")
+async def get_search_provider_telemetry(
+    _user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+):
+    """Return in-memory search provider telemetry (since last restart).
+
+    Includes circuit breaker state, request/success/failure counts,
+    cache hit ratio, and total results returned per provider.
+    """
+    return {
+        "providers": search_circuit_breaker.telemetry_summary(),
+    }

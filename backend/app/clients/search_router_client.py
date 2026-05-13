@@ -89,6 +89,7 @@ async def _cached_provider_results(
     *,
     timeout_seconds: int,
 ) -> tuple[list[dict], bool]:
+    search_circuit_breaker.record_request(provider)
     cacheable_params = {
         key: value
         for key, value in params.items()
@@ -97,6 +98,7 @@ async def _cached_provider_results(
     key = _cache_key(family, provider, cacheable_params)
     cached = await search_cache_client.get_json(key)
     if isinstance(cached, list):
+        search_circuit_breaker.record_cache_hit(provider)
         return cached, True
 
     try:
@@ -120,7 +122,7 @@ async def _cached_provider_results(
         return [], False
 
     if results:
-        search_circuit_breaker.record_success(provider)
+        search_circuit_breaker.record_success(provider, result_count=len(results))
     await search_cache_client.set_json(key, results, ttl_seconds=settings.search_cache_ttl_seconds)
     return results, False
 

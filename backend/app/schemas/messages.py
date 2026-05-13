@@ -70,6 +70,14 @@ class MessageResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class WarmIntroSuggestion(BaseModel):
+    """Surfaced when a warm path exists but the user drafted with a different goal."""
+    available: bool = False
+    warm_path_type: str | None = None
+    connection_name: str | None = None
+    suggestion: str | None = None
+
+
 class DraftResponse(BaseModel):
     message: MessageResponse
     reasoning: str
@@ -80,6 +88,7 @@ class DraftResponse(BaseModel):
     job_id: str | None = None
     warm_path: MessageWarmPathResponse | None = None
     linkedin_signal: LinkedInSignalResponse | None = None
+    warm_intro_suggestion: WarmIntroSuggestion | None = None
 
 
 class BatchDraftRequest(BaseModel):

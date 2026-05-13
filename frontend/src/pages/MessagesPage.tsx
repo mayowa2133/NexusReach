@@ -44,6 +44,7 @@ import type {
   MessageGoal,
   Person,
   RecipientStrategy,
+  WarmIntroSuggestion,
 } from '@/types';
 
 const CHANNELS: { value: MessageChannel; label: string; description: string }[] = [
@@ -229,6 +230,7 @@ function SingleMessagesView() {
   const [channel, setChannel] = useState<MessageChannel>('linkedin_note');
   const [goal, setGoal] = useState<MessageGoal>('warm_intro');
   const [activeDraft, setActiveDraft] = useState<Message | null>(null);
+  const [warmIntroSuggestion, setWarmIntroSuggestion] = useState<WarmIntroSuggestion | null>(null);
   const [reasoning, setReasoning] = useState('');
   const [editBody, setEditBody] = useState('');
   const [editSubject, setEditSubject] = useState('');
@@ -292,6 +294,7 @@ function SingleMessagesView() {
         job_id: selectedJobId || undefined,
       });
       setActiveDraft(result.message);
+      setWarmIntroSuggestion(result.warm_intro_suggestion ?? null);
       setReasoning(result.reasoning);
       setEditBody(result.message.body);
       setEditSubject(result.message.subject || '');
@@ -313,6 +316,7 @@ function SingleMessagesView() {
         pinned_story_ids: storyIds,
       });
       setActiveDraft(result.message);
+      setWarmIntroSuggestion(result.warm_intro_suggestion ?? null);
       setReasoning(result.reasoning);
       setEditBody(result.message.body);
       setEditSubject(result.message.subject || '');
@@ -795,6 +799,27 @@ function SingleMessagesView() {
                       {activeDraft.linkedin_signal.caution && (
                         <div className="text-xs text-amber-700">{activeDraft.linkedin_signal.caution}</div>
                       )}
+                    </div>
+                  )}
+
+                  {warmIntroSuggestion?.available && (
+                    <div className="rounded-md border border-amber-200 bg-amber-50/60 dark:border-amber-800 dark:bg-amber-900/20 p-3 text-sm space-y-2">
+                      <div className="font-medium text-amber-900 dark:text-amber-200">
+                        Warm intro opportunity
+                      </div>
+                      <div className="text-amber-800 dark:text-amber-300">
+                        {warmIntroSuggestion.suggestion}
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="border-amber-300 text-amber-900 hover:bg-amber-100 dark:border-amber-700 dark:text-amber-200 dark:hover:bg-amber-900/40"
+                        onClick={() => {
+                          setGoal('warm_intro');
+                        }}
+                      >
+                        Switch to Warm Intro
+                      </Button>
                     </div>
                   )}
 
