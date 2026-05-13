@@ -25,6 +25,7 @@ const FindEmailPage = lazy(() => import('@/pages/FindEmailPage').then((m) => ({ 
 const ResumeLibraryPage = lazy(() => import('@/pages/ResumeLibraryPage').then((m) => ({ default: m.ResumeLibraryPage })));
 const TriagePage = lazy(() => import('@/pages/TriagePage').then((m) => ({ default: m.TriagePage })));
 const UpgradePage = lazy(() => import('@/pages/UpgradePage').then((m) => ({ default: m.UpgradePage })));
+const OnboardingPage = lazy(() => import('@/pages/OnboardingPage').then((m) => ({ default: m.OnboardingPage })));
 const TermsPage = lazy(() => import('@/pages/TermsPage').then((m) => ({ default: m.TermsPage })));
 const PrivacyPage = lazy(() => import('@/pages/PrivacyPage').then((m) => ({ default: m.PrivacyPage })));
 
@@ -65,6 +66,16 @@ function AppRoutes() {
       <Route path="/privacy" element={<PageSuspense><PrivacyPage /></PageSuspense>} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
+
+      {/* Onboarding: authenticated but no AppLayout shell */}
+      <Route
+        path="/onboarding"
+        element={
+          <ProtectedRoute>
+            <PageSuspense><OnboardingPage /></PageSuspense>
+          </ProtectedRoute>
+        }
+      />
 
       <Route
         element={
