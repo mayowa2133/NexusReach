@@ -3,8 +3,32 @@
 import re
 
 # Patterns checked in order — first match wins.
-_INTERN_RE = re.compile(
+_DIRECT_INTERN_RE = re.compile(
     r"\b(intern|internship|co-?op)\b", re.IGNORECASE
+)
+_STUDENT_ROLE_RE = re.compile(
+    r"\b("
+    r"student\s+(program|trainee|worker|researcher|engineer|developer|analyst|associate|fellow)"
+    r"|"
+    r"(summer|fall|winter|spring)\s+(analyst|associate|engineer|developer|researcher|program)"
+    r"|"
+    r"(software|data|product|business|finance|research|engineering|quant|security|design)"
+    r"[\w\s,/-]{0,50}\b(summer|fall|winter|spring)\s+\d{4}"
+    r"|"
+    r"(software|data|product|business|finance|research|engineering)\s+student"
+    r"|"
+    r"industrial\s+placement|placement\s+student"
+    r")\b",
+    re.IGNORECASE,
+)
+_STUDENT_ROLE_EXCLUSION_RE = re.compile(
+    r"\b("
+    r"student\s+(success|services|affairs)"
+    r"|university\s+recruiting|campus\s+recruiting"
+    r"|program\s+manager|recruiter|coordinator"
+    r"|\b(manager|director)\b"
+    r")\b",
+    re.IGNORECASE,
 )
 _NEW_GRAD_RE = re.compile(
     r"\b(new\s*grad|entry[\s-]?level|junior|jr\.?|associate"
@@ -24,9 +48,17 @@ _NEWGRAD_SOURCE_RE = re.compile(
 )
 
 
+def _is_intern_level(title: str) -> bool:
+    if _DIRECT_INTERN_RE.search(title):
+        return True
+    if _STUDENT_ROLE_EXCLUSION_RE.search(title):
+        return False
+    return bool(_STUDENT_ROLE_RE.search(title))
+
+
 def classify_experience_level(title: str) -> str:
     """Return one of: intern, new_grad, mid, senior."""
-    if _INTERN_RE.search(title):
+    if _is_intern_level(title):
         return "intern"
     if _NEW_GRAD_RE.search(title):
         return "new_grad"
@@ -46,7 +78,7 @@ def classify_experience_level_for_job(
         return classify_experience_level(title)
 
     combined = f"{title} {level_label or ''}"
-    if _INTERN_RE.search(combined):
+    if _is_intern_level(combined):
         return "intern"
     if _SENIOR_RE.search(combined) and not _NEWGRAD_SOURCE_RE.search(combined):
         return "senior"

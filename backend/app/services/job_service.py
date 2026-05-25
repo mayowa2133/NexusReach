@@ -155,6 +155,15 @@ def _experience_level_for_job(job_data: dict) -> str:
     )
 
 
+def _employment_type_for_job(job_data: dict, experience_level: str) -> str | None:
+    employment_type = job_data.get("employment_type")
+    if employment_type:
+        return employment_type
+    if experience_level == "intern":
+        return "internship"
+    return None
+
+
 def _apply_if_present(job: Job, attr: str, value) -> None:
     if isinstance(value, str):
         if value.strip():
@@ -200,7 +209,7 @@ def _refresh_existing_job(
     job.score_breakdown = breakdown
     job.fingerprint = fingerprint
     _apply_if_present(job, "department", data.get("department"))
-    _apply_if_present(job, "employment_type", data.get("employment_type"))
+    _apply_if_present(job, "employment_type", _employment_type_for_job(data, experience_level))
     if data.get("salary_min") is not None:
         job.salary_min = data.get("salary_min")
     if data.get("salary_max") is not None:
@@ -231,6 +240,7 @@ def _build_job(
     breakdown: dict,
     fingerprint: str,
 ) -> Job:
+    experience_level = _experience_level_for_job(data)
     return Job(
         user_id=user_id,
         external_id=data.get("external_id"),
@@ -242,8 +252,8 @@ def _build_job(
         url=data.get("url"),
         apply_url=data.get("apply_url") or data.get("url"),
         description=data.get("description"),
-        employment_type=data.get("employment_type"),
-        experience_level=_experience_level_for_job(data),
+        employment_type=_employment_type_for_job(data, experience_level),
+        experience_level=experience_level,
         salary_min=data.get("salary_min"),
         salary_max=data.get("salary_max"),
         salary_currency=data.get("salary_currency"),
@@ -683,7 +693,15 @@ async def get_jobs(
     if starred is not None:
         query = query.where(Job.starred == starred)
     if employment_type:
-        query = query.where(Job.employment_type == employment_type)
+        if employment_type.strip().lower() == "internship":
+            query = query.where(
+                or_(
+                    sa_func.lower(Job.employment_type) == "internship",
+                    Job.experience_level == "intern",
+                )
+            )
+        else:
+            query = query.where(Job.employment_type == employment_type)
     if experience_level:
         query = query.where(Job.experience_level == experience_level)
     if salary_min is not None:
