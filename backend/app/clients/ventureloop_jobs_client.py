@@ -81,13 +81,15 @@ def parse_jobs_page_html(html_content: str, *, query: str | None = None, limit: 
             continue
         seen_ids.add(external_id)
 
+        job_url = urljoin(BASE_URL, link["href"])
         jobs.append({
             "external_id": external_id,
             "title": title,
             "company_name": company_name,
             "location": location,
             "remote": "remote" in (location or "").lower(),
-            "url": urljoin(BASE_URL, link["href"]),
+            "url": job_url,
+            "apply_url": job_url,
             "description": f"Backed by {vc_name}" if vc_name else None,
             "posted_at": _parse_posted_at(cells[0].get_text(" ", strip=True)),
             "source": "ventureloop",

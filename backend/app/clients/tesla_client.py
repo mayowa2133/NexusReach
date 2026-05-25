@@ -64,6 +64,7 @@ def _parse_jobs_from_html(html: str) -> list[dict]:
             "location": "",
             "remote": "remote" in title.lower(),
             "url": job_url,
+            "apply_url": job_url,
             "description": "",
             "posted_at": None,
             "source": "tesla",

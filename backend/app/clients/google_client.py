@@ -183,6 +183,7 @@ async def search_google_jobs(
                             "location": location,
                             "remote": remote,
                             "url": job_url,
+                            "apply_url": job_url,
                             "description": description_text[:2000] if description_text else "",
                             "posted_at": posted_at,
                             "source": "google_careers",

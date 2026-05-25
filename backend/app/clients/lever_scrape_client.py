@@ -74,6 +74,7 @@ async def search_lever_html(company_slug: str, limit: int = 50) -> list[dict]:
             "location": location,
             "remote": "remote" in location.lower(),
             "url": href,
+            "apply_url": href,
             "description": "",
             "department": department,
             "employment_type": employment_type.lower() if employment_type else "",

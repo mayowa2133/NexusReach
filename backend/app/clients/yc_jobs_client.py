@@ -109,6 +109,7 @@ def parse_jobs_page_html(html_content: str, *, query: str | None = None, limit: 
 
         salary_min, salary_max, salary_currency = _parse_salary_range(str(job.get("salaryRange") or ""))
         job_url = urljoin(BASE_URL, str(job.get("url") or "").strip())
+        apply_url = urljoin(BASE_URL, str(job.get("ctaUrl") or job.get("applyUrl") or job_url).strip())
         jobs.append({
             "external_id": f"yc_{job.get('id')}",
             "title": title,
@@ -117,6 +118,7 @@ def parse_jobs_page_html(html_content: str, *, query: str | None = None, limit: 
             "location": location or None,
             "remote": "remote" in location.lower(),
             "url": job_url or None,
+            "apply_url": apply_url or None,
             "description": _description(job),
             "employment_type": _normalize_employment_type(job.get("type")),
             "salary_min": salary_min,

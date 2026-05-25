@@ -146,6 +146,7 @@ async def search_apple_jobs(
             "location": locations_text,
             "remote": _is_remote(locations_text, title),
             "url": job_url,
+            "apply_url": job_url,
             "description": "",
             "posted_at": posted_at,
             "source": "apple",

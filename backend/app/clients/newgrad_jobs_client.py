@@ -4,7 +4,7 @@ import asyncio
 import logging
 import re
 from datetime import datetime, timezone
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -189,6 +189,29 @@ def _build_description_html(header: Tag | None) -> str:
     return "\n".join(parts).strip()
 
 
+def _extract_apply_url(soup: BeautifulSoup, page_url: str | None = None) -> str | None:
+    selectors = [
+        "a.apply2[href]",
+        "a[class*='apply'][href]",
+    ]
+    for selector in selectors:
+        link = soup.select_one(selector)
+        if not isinstance(link, Tag):
+            continue
+        href = str(link.get("href") or "").strip()
+        if href:
+            return urljoin(page_url or BASE_URL, href)
+
+    for link in soup.select("a[href]"):
+        label = _normalize_whitespace(link.get_text(" ", strip=True)).lower()
+        if "apply" not in label:
+            continue
+        href = str(link.get("href") or "").strip()
+        if href:
+            return urljoin(page_url or BASE_URL, href)
+    return None
+
+
 def parse_job_list_html(
     html: str,
     *,
@@ -254,6 +277,7 @@ def parse_job_list_html(
             "location": "",
             "remote": category == "remote",
             "url": job_url,
+            "apply_url": job_url,
             "description": "",
             "posted_at": posted_at,
             "source": "newgrad_jobs",
@@ -266,13 +290,14 @@ def parse_job_list_html(
     return jobs
 
 
-def parse_job_detail_html(html: str) -> dict:
+def parse_job_detail_html(html: str, page_url: str | None = None) -> dict:
     """Parse a newgrad-jobs detail page into normalized metadata."""
     soup = _make_visible_soup(html)
     header = soup.select_one(".detail-block-header-2")
 
     meta_items = _extract_meta_items(header)
     description_html = _build_description_html(header)
+    apply_url = _extract_apply_url(soup, page_url)
 
     location = ""
     employment_type: str | None = None
@@ -315,6 +340,7 @@ def parse_job_detail_html(html: str) -> dict:
         "salary_min": salary_min,
         "salary_max": salary_max,
         "salary_currency": salary_currency,
+        "apply_url": apply_url,
         "description": description_html,
         "level_label": level_label,
         "closed": is_closed,
@@ -359,10 +385,31 @@ async def fetch_job_detail(
         if resp.status_code != 200:
             logger.warning("newgrad-jobs detail returned %d for %s", resp.status_code, job_url)
             return None
-        return parse_job_detail_html(resp.text)
+        return parse_job_detail_html(resp.text, page_url=str(resp.url))
     finally:
         if owns_client:
             await client.aclose()
+
+
+async def resolve_newgrad_apply_urls(job_urls: list[str]) -> dict[str, str]:
+    """Resolve newgrad-jobs detail URLs to the underlying application URLs."""
+    unique_urls = [url for url in dict.fromkeys(job_urls) if url]
+    if not unique_urls:
+        return {}
+
+    results: dict[str, str] = {}
+    semaphore = asyncio.Semaphore(DETAIL_CONCURRENCY)
+    async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT, follow_redirects=True) as client:
+        async def resolve(job_url: str) -> None:
+            async with semaphore:
+                detail = await fetch_job_detail(job_url, client=client)
+            apply_url = detail.get("apply_url") if detail else None
+            if isinstance(apply_url, str) and apply_url:
+                results[job_url] = apply_url
+
+        await asyncio.gather(*(resolve(url) for url in unique_urls))
+
+    return results
 
 
 async def _enrich_job(job: dict, *, client: httpx.AsyncClient, semaphore: asyncio.Semaphore) -> dict | None:

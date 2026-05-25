@@ -116,6 +116,7 @@ async def search_amazon_jobs(
             "location": location,
             "remote": remote,
             "url": job_url,
+            "apply_url": job_url or None,
             "description": description,
             "posted_at": posted_at,
             "source": "amazon",

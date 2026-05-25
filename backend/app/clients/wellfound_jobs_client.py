@@ -42,13 +42,15 @@ def parse_jobs_page_html(html_content: str, *, query: str | None = None, limit: 
             continue
         if not title or not company_name or not job_url:
             continue
+        normalized_url = urljoin(BASE_URL, job_url)
         jobs.append({
             "external_id": f"wellfound_{job_url.rstrip('/').rsplit('/', 1)[-1]}",
             "title": title,
             "company_name": company_name,
             "location": location or None,
             "remote": "remote" in location.lower(),
-            "url": urljoin(BASE_URL, job_url),
+            "url": normalized_url,
+            "apply_url": normalized_url,
             "description": description or None,
             "posted_at": time_node.get("datetime") if time_node else None,
             "source": "wellfound",

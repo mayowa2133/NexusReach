@@ -55,6 +55,7 @@ async def search_jobs(
             "location": j.get("location", {}).get("display_name", ""),
             "remote": "remote" in j.get("title", "").lower() or "remote" in j.get("description", "").lower(),
             "url": j.get("redirect_url", ""),
+            "apply_url": j.get("redirect_url", "") or None,
             "description": j.get("description", ""),
             "employment_type": j.get("contract_time", ""),
             "posted_at": j.get("created") or None,

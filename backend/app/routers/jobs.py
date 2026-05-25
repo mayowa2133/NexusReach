@@ -163,6 +163,7 @@ def _to_response(job) -> JobResponse:
         location=job.location,
         remote=job.remote,
         url=job.url,
+        apply_url=job.apply_url or job.url,
         description=job.description,
         employment_type=job.employment_type,
         salary_min=job.salary_min,

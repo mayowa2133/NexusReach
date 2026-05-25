@@ -186,6 +186,7 @@ async def search_microsoft_jobs(
             "location": location,
             "remote": _is_remote(p, location),
             "url": job_url,
+            "apply_url": job_url or None,
             "description": description,
             "posted_at": posted_at,
             "source": "microsoft",

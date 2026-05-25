@@ -123,6 +123,7 @@ async def search_workday(
             "location": p.get("locationsText", ""),
             "remote": "remote" in (p.get("locationsText", "") + title).lower(),
             "url": job_url,
+            "apply_url": job_url or None,
             "description": "",
             "posted_at": posted_at,
             "source": "workday",

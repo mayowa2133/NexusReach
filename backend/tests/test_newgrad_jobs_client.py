@@ -19,6 +19,7 @@ def test_parse_job_detail_html_software_fixture():
     assert detail["salary_min"] == 93000.0
     assert detail["salary_max"] == 109000.0
     assert detail["level_label"] == "Entry Level"
+    assert detail["apply_url"] == "https://example.com/apply"
     assert "Responsibilities" in detail["description"]
     assert "IAM automation team" in detail["description"]
 

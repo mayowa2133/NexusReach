@@ -167,13 +167,15 @@ def _parse_response(data: dict, limit: int) -> list[dict]:
 
         remote = "remote" in (location + " " + title).lower()
 
+        job_url = f"{_BASE_URL}/jobs/{job_id}"
         jobs.append({
             "external_id": f"meta_{job_id}",
             "title": title,
             "company_name": "Meta",
             "location": location,
             "remote": remote,
-            "url": f"{_BASE_URL}/jobs/{job_id}",
+            "url": job_url,
+            "apply_url": job_url,
             "description": "",
             "posted_at": None,
             "source": "meta",

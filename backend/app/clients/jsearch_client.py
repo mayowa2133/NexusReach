@@ -7,6 +7,30 @@ from app.config import settings
 JSEARCH_BASE_URL = "https://jsearch.p.rapidapi.com"
 
 
+def _first_text(*values: object) -> str | None:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _apply_url(job: dict) -> str | None:
+    direct = _first_text(job.get("job_apply_link"))
+    if direct:
+        return direct
+
+    options = job.get("job_apply_options")
+    if isinstance(options, list):
+        for option in options:
+            if not isinstance(option, dict):
+                continue
+            option_url = _first_text(option.get("apply_link"))
+            if option_url:
+                return option_url
+
+    return _first_text(job.get("job_google_link"))
+
+
 def _headers() -> dict[str, str]:
     return {
         "X-RapidAPI-Key": settings.jsearch_api_key,
@@ -68,6 +92,7 @@ async def search_jobs(
             "location": j.get("job_city", "") or j.get("job_state", "") or j.get("job_country", ""),
             "remote": j.get("job_is_remote", False),
             "url": j.get("job_apply_link", "") or j.get("job_google_link", ""),
+            "apply_url": _apply_url(j),
             "description": j.get("job_description", ""),
             "employment_type": j.get("job_employment_type", ""),
             "posted_at": j.get("job_posted_at_datetime_utc") or None,

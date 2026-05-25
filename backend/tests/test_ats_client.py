@@ -153,6 +153,7 @@ class TestSearchWorkable:
         assert results[0]["external_id"] == "wk_11DC4EA360"
         assert results[0]["company_name"] == "Trexquant Investment"
         assert results[0]["url"] == "https://apply.workable.com/trexquant/j/11DC4EA360"
+        assert results[0]["apply_url"] == "https://apply.workable.com/trexquant/j/11DC4EA360"
         assert results[0]["location"] == "Stamford, Connecticut, United States"
         assert results[0]["department"] == "Technology"
 
@@ -292,6 +293,7 @@ class TestFetchExactJob:
         assert jobs[0]["company_name"] == "Apple"
         assert jobs[0]["location"] == "Cupertino, California, United States"
         assert jobs[0]["department"] == "Core OS"
+        assert jobs[0]["apply_url"] == parsed.canonical_url
         assert "Minimum Qualifications" in (jobs[0]["description"] or "")
 
     async def test_fetches_generic_exact_job_from_json_ld(self):
@@ -340,6 +342,7 @@ class TestFetchExactJob:
         assert jobs[0]["company_name"] == "Example"
         assert jobs[0]["location"] == "Toronto, ON, CA"
         assert jobs[0]["source"] == "example_jobs"
+        assert jobs[0]["apply_url"] == parsed.canonical_url
 
     async def test_fetches_workday_job_from_json_ld(self):
         parsed = parse_ats_job_url(
@@ -397,6 +400,10 @@ class TestFetchExactJob:
         assert jobs[0]["company_name"] == "NVIDIA"
         assert jobs[0]["location"] == "Hillsboro, OR, United States"
         assert jobs[0]["url"] == (
+            "https://nvidia.wd5.myworkdayjobs.com/en-US/NVIDIAExternalCareerSite/job/"
+            "Senior-Systems-Software-Engineer---New-College-Grad-2026_JR2015144-1"
+        )
+        assert jobs[0]["apply_url"] == (
             "https://nvidia.wd5.myworkdayjobs.com/en-US/NVIDIAExternalCareerSite/job/"
             "Senior-Systems-Software-Engineer---New-College-Grad-2026_JR2015144-1"
         )

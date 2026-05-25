@@ -18,6 +18,7 @@ def _mock_job(user_id, **overrides):
     j.location = overrides.get("location", "New York, NY")
     j.remote = overrides.get("remote", False)
     j.url = overrides.get("url", "https://example.com/job/1")
+    j.apply_url = overrides.get("apply_url", None)
     j.description = overrides.get("description", "Build things")
     j.employment_type = overrides.get("employment_type", "full_time")
     j.salary_min = overrides.get("salary_min", 100000.0)
@@ -43,7 +44,7 @@ def _mock_job(user_id, **overrides):
 
 async def test_search_jobs(client, mock_user_id):
     """POST /api/jobs/search returns scored job results."""
-    job = _mock_job(mock_user_id)
+    job = _mock_job(mock_user_id, apply_url="https://example.com/job/1/apply")
 
     with patch("app.routers.jobs.search_jobs", new_callable=AsyncMock) as mock_search:
         mock_search.return_value = [job]
@@ -56,6 +57,7 @@ async def test_search_jobs(client, mock_user_id):
     data = resp.json()
     assert len(data) == 1
     assert data[0]["title"] == "Software Engineer"
+    assert data[0]["apply_url"] == "https://example.com/job/1/apply"
     assert data[0]["match_score"] == 75.0
 
 

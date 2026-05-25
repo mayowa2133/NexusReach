@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.models.job import Job
-from app.services.job_service import _find_existing_job, discover_jobs, search_jobs
+from app.services.job_service import _find_existing_job, _store_raw_jobs, discover_jobs, search_jobs
 from app.services.newgrad_jobs_backfill_service import backfill_newgrad_jobs
 
 pytestmark = pytest.mark.asyncio
@@ -56,6 +56,7 @@ def _newgrad_job(**overrides) -> dict:
         "location": "Minneapolis, MN",
         "remote": False,
         "url": "https://www.newgrad-jobs.com/list-software-engineer-jobs/associate_software_engineer_iam_automation_at_u_s_bank_21643587",
+        "apply_url": "https://careers.usbank.com/associate-software-engineer",
         "description": "<div class='rich-text-block-20 w-richtext'><p>Build backend services with Python and Docker.</p></div>",
         "employment_type": "full-time",
         "salary_min": 93000.0,
@@ -105,6 +106,7 @@ async def test_search_jobs_persists_enriched_newgrad_metadata():
     assert job.employment_type == "full-time"
     assert job.experience_level == "new_grad"
     assert job.source == "newgrad_jobs"
+    assert job.apply_url == "https://careers.usbank.com/associate-software-engineer"
 
 
 async def test_find_existing_job_prefers_source_and_external_id():
@@ -184,6 +186,27 @@ async def test_discover_jobs_stores_same_enriched_newgrad_fields():
     assert job.salary_min == 93000.0
     assert job.description is not None and "Python and Docker" in job.description
     assert job.experience_level == "new_grad"
+    assert job.apply_url == "https://careers.usbank.com/associate-software-engineer"
+
+
+async def test_store_raw_jobs_commits_existing_apply_url_update():
+    user_id = uuid.uuid4()
+    existing_job = MagicMock()
+    existing_job.tags = None
+    db = MagicMock()
+    db.commit = AsyncMock()
+
+    with (
+        patch("app.services.job_service._load_known_startup_company_names", new_callable=AsyncMock, return_value=set()),
+        patch("app.services.job_service._find_existing_job", new_callable=AsyncMock, return_value=existing_job),
+        patch("app.services.job_service._maybe_auto_prospect", new_callable=AsyncMock) as mock_auto_prospect,
+    ):
+        stored = await _store_raw_jobs(db, user_id, [_newgrad_job()], _make_profile())
+
+    assert stored == []
+    assert existing_job.apply_url == "https://careers.usbank.com/associate-software-engineer"
+    db.commit.assert_awaited_once()
+    mock_auto_prospect.assert_not_awaited()
 
 
 async def test_backfill_newgrad_jobs_updates_existing_row_in_place():
@@ -199,6 +222,7 @@ async def test_backfill_newgrad_jobs_updates_existing_row_in_place():
     job.location = ""
     job.remote = False
     job.url = "https://www.newgrad-jobs.com/list-software-engineer-jobs/software_engineer_at_pnc_21643566"
+    job.apply_url = None
     job.description = ""
     job.employment_type = None
     job.salary_min = None
@@ -229,6 +253,7 @@ async def test_backfill_newgrad_jobs_updates_existing_row_in_place():
             "salary_min": 90000.0,
             "salary_max": 110000.0,
             "salary_currency": "USD",
+            "apply_url": "https://careers.pnc.com/software-engineer",
             "description": "<div><p>Build software systems with Python.</p></div>",
             "level_label": "Entry Level",
             "closed": False,
@@ -238,6 +263,7 @@ async def test_backfill_newgrad_jobs_updates_existing_row_in_place():
 
     assert result == {"checked": 1, "updated": 1, "skipped": 0}
     assert job.external_id == "newgrad_software_engineer_at_pnc_21643566"
+    assert job.apply_url == "https://careers.pnc.com/software-engineer"
     assert job.location == "Pittsburgh, PA"
     assert job.salary_min == 90000.0
     assert job.salary_max == 110000.0

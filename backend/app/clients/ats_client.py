@@ -288,6 +288,7 @@ def _normalize_json_ld_job(parsed: ParsedATSJobURL, job_posting: dict) -> dict |
         "location": _json_ld_location(job_posting),
         "remote": remote or "remote" in f"{title} {description}".lower(),
         "url": parsed.canonical_url,
+        "apply_url": parsed.canonical_url,
         "description": description or None,
         "employment_type": employment_type_value,
         "posted_at": _coerce_posted_at(job_posting.get("datePosted")),
@@ -424,6 +425,7 @@ def _normalize_generic_exact_job(page: dict, parsed: ParsedATSJobURL) -> dict | 
         "location": location,
         "remote": "remote" in f"{title} {description}".lower(),
         "url": parsed.canonical_url,
+        "apply_url": parsed.canonical_url,
         "description": description or None,
         "employment_type": None,
         "posted_at": None,
@@ -495,6 +497,7 @@ def _normalize_apple_job(parsed: ParsedATSJobURL, page: dict) -> dict | None:
         "location": _apple_location(jobs_data.get("locations")),
         "remote": bool(jobs_data.get("homeOffice")) or "remote" in f"{title} {jobs_data.get('description', '')}".lower(),
         "url": parsed.canonical_url,
+        "apply_url": parsed.canonical_url,
         "description": _apple_description(jobs_data),
         "employment_type": _normalize_text(jobs_data.get("employmentType")) or _normalize_text(jobs_data.get("jobType")) or None,
         "posted_at": _coerce_posted_at(jobs_data.get("postDateInGMT") or jobs_data.get("postingDate")),
@@ -626,6 +629,7 @@ def _normalize_workday_job(parsed: ParsedATSJobURL, page: dict) -> dict | None:
                 "remote": str(json_ld.get("jobLocationType") or "").upper() == "TELECOMMUTE"
                 or "remote" in f"{title} {description}".lower(),
                 "url": canonical_url,
+                "apply_url": canonical_url,
                 "description": description or None,
                 "employment_type": employment_type_value,
                 "posted_at": _coerce_posted_at(json_ld.get("datePosted")),
@@ -653,6 +657,7 @@ def _normalize_workday_job(parsed: ParsedATSJobURL, page: dict) -> dict | None:
         "location": None,
         "remote": "remote" in f"{title} {description}".lower(),
         "url": canonical_url,
+        "apply_url": canonical_url,
         "description": description or None,
         "employment_type": None,
         "posted_at": None,
@@ -1084,6 +1089,7 @@ def _normalize_icims_job(parsed: ParsedATSJobURL, page: dict) -> dict | None:
         "location": location,
         "remote": "remote" in f"{title} {description}".lower(),
         "url": parsed.canonical_url,
+        "apply_url": parsed.canonical_url,
         "description": description or None,
         "employment_type": None,
         "posted_at": None,
@@ -1248,6 +1254,7 @@ async def search_workable(
     else:
         department_value = str(department or "")
 
+    posting_url = f"https://apply.workable.com/{company_slug}/j/{shortcode}"
     return [
         {
             "external_id": f"wk_{shortcode}",
@@ -1255,7 +1262,8 @@ async def search_workable(
             "company_name": account_name,
             "location": _workable_location(raw_job),
             "remote": remote,
-            "url": f"https://apply.workable.com/{company_slug}/j/{shortcode}",
+            "url": posting_url,
+            "apply_url": posting_url,
             "description": raw_job.get("description", ""),
             "department": department_value,
             "employment_type": raw_job.get("type"),

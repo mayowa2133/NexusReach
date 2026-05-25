@@ -76,6 +76,7 @@ logger = logging.getLogger(__name__)
 STARTUP_BOARD_SOURCES = ["yc_jobs", "wellfound", "ventureloop"]
 STARTUP_LINK_RESOLVE_CONCURRENCY = 6
 STARTUP_MAX_RESOLVED_LINKS_PER_COMPANY = 3
+APPLY_URL_REPAIR_MAX_JOBS = 20
 
 
 # --- Deduplication ---
@@ -189,7 +190,7 @@ def _refresh_existing_job(
     if data.get("remote") is not None:
         job.remote = bool(data.get("remote"))
     _apply_if_present(job, "url", data.get("url"))
-    _apply_if_present(job, "apply_url", data.get("apply_url"))
+    _apply_if_present(job, "apply_url", data.get("apply_url") or data.get("url"))
     _apply_if_present(job, "description", data.get("description"))
     _apply_if_present(job, "source", data.get("source"))
     _apply_if_present(job, "ats", data.get("ats"))
@@ -239,7 +240,7 @@ def _build_job(
         location=data.get("location"),
         remote=data.get("remote", False),
         url=data.get("url"),
-        apply_url=data.get("apply_url"),
+        apply_url=data.get("apply_url") or data.get("url"),
         description=data.get("description"),
         employment_type=data.get("employment_type"),
         experience_level=_experience_level_for_job(data),
@@ -583,6 +584,56 @@ async def search_ats_jobs(
     return ordered_jobs
 
 
+async def _repair_missing_apply_urls(db: AsyncSession, jobs: list[Job]) -> None:
+    did_update = False
+    for job in jobs:
+        if job.source == "simplify_github" and not job.apply_url and job.url:
+            job.apply_url = job.url
+            did_update = True
+
+    dice_jobs = [
+        job
+        for job in jobs
+        if job.source == "dice" and not job.apply_url and job.url
+    ][:APPLY_URL_REPAIR_MAX_JOBS]
+
+    if dice_jobs:
+        resolved_urls = await remote_jobs_client.resolve_dice_apply_urls(
+            [job.url for job in dice_jobs if job.url]
+        )
+        for job in dice_jobs:
+            apply_url = resolved_urls.get(job.url or "")
+            if not apply_url:
+                continue
+            job.apply_url = apply_url
+            did_update = True
+
+    newgrad_jobs = [
+        job
+        for job in jobs
+        if job.source == "newgrad_jobs" and not job.apply_url and job.url
+    ][:APPLY_URL_REPAIR_MAX_JOBS]
+
+    if newgrad_jobs:
+        resolved_urls = await newgrad_jobs_client.resolve_newgrad_apply_urls(
+            [job.url for job in newgrad_jobs if job.url]
+        )
+        for job in newgrad_jobs:
+            apply_url = resolved_urls.get(job.url or "")
+            if not apply_url:
+                continue
+            job.apply_url = apply_url
+            did_update = True
+
+    for job in jobs:
+        if not job.apply_url and job.url:
+            job.apply_url = job.url
+            did_update = True
+
+    if did_update:
+        await db.commit()
+
+
 async def toggle_job_starred(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -668,7 +719,9 @@ async def get_jobs(
             sa_func.coalesce(Job.posted_at, Job.created_at.cast(String)).desc()
         )
 
-    return await paginate(db, query, limit=limit, offset=offset)
+    jobs, total = await paginate(db, query, limit=limit, offset=offset)
+    await _repair_missing_apply_urls(db, jobs)
+    return jobs, total
 
 
 async def update_job_stage(
@@ -768,7 +821,10 @@ async def get_job(
     result = await db.execute(
         select(Job).where(Job.id == job_id, Job.user_id == user_id)
     )
-    return result.scalar_one_or_none()
+    job = result.scalar_one_or_none()
+    if job:
+        await _repair_missing_apply_urls(db, [job])
+    return job
 
 
 async def get_job_command_center(
@@ -1384,6 +1440,7 @@ async def _store_raw_jobs(
     """Deduplicate and store raw job dicts from any source."""
     stored: list[Job] = []
     seen_job_keys: set[str] = set()
+    refreshed_existing = False
     known_startup_companies = (
         await _load_known_startup_company_names(db, user_id) if raw_jobs else set()
     )
@@ -1417,6 +1474,7 @@ async def _store_raw_jobs(
                 breakdown=breakdown,
                 experience_level=experience_level,
             )
+            refreshed_existing = True
             continue
 
         job = _build_job(
@@ -1429,9 +1487,10 @@ async def _store_raw_jobs(
         db.add(job)
         stored.append(job)
 
-    if stored:
+    if stored or refreshed_existing:
         await db.commit()
 
+    if stored:
         # Trigger auto-prospect for newly stored jobs (if enabled)
         try:
             await _maybe_auto_prospect(db, user_id, stored)
