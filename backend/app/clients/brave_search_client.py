@@ -233,12 +233,17 @@ def _recruiter_recovery_profile_queries(
 ) -> list[str]:
     geo_part = _geo_query_clause(geo_terms)
     team_part = f' "{team_keywords[0]}"' if team_keywords else ""
+    # Derive the job's region rather than hardcoding Canada (audit H1).
+    geo_label = next((term for term in (geo_terms or []) if term and "," not in term), "")
     queries = [
         f'site:linkedin.com/in "{company_name}" recruiter{geo_part}',
         f'site:linkedin.com/in "{company_name}" "talent acquisition"{geo_part}',
         f'site:linkedin.com/in "{company_name}" ("lead talent acquisition" OR "head of talent acquisition" OR "talent acquisition leader"){geo_part}',
-        f'site:linkedin.com/in "{company_name}" ("hiring in Canada" OR "responsible for hiring in Canada" OR "hiring in Canada and the US"){geo_part}',
     ]
+    if geo_label:
+        queries.append(
+            f'site:linkedin.com/in "{company_name}" ("hiring in {geo_label}" OR "responsible for hiring in {geo_label}"){geo_part}'
+        )
     if team_part:
         queries.append(f'site:linkedin.com/in "{company_name}" recruiter{team_part}{geo_part}')
         queries.append(f'site:linkedin.com/in "{company_name}" "talent acquisition"{team_part}{geo_part}')
@@ -251,11 +256,19 @@ def _recruiter_recovery_post_queries(
     geo_terms: list[str] | None = None,
 ) -> list[str]:
     geo_part = _geo_query_clause(geo_terms)
+    geo_label = next((term for term in (geo_terms or []) if term and "," not in term), "")
     queries = [
-        f'site:linkedin.com/posts "{company_name}" ("hiring in Canada" OR "responsible for hiring in Canada" OR "hiring in Canada and the US"){geo_part}',
         f'site:linkedin.com/posts "{company_name}" ("talent acquisition" OR recruiter){geo_part}',
-        f'site:linkedin.com/posts "{company_name}" ("Toronto" OR "Canada") ("talent acquisition" OR recruiter)',
     ]
+    if geo_label:
+        # Region-aware hiring-signal queries instead of hardcoded Canada/Toronto (audit H1).
+        queries.insert(
+            0,
+            f'site:linkedin.com/posts "{company_name}" ("hiring in {geo_label}" OR "responsible for hiring in {geo_label}"){geo_part}',
+        )
+        queries.append(
+            f'site:linkedin.com/posts "{company_name}" "{geo_label}" ("talent acquisition" OR recruiter)'
+        )
     return list(dict.fromkeys(query for query in queries if query))
 
 

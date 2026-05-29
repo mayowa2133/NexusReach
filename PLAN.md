@@ -1,6 +1,6 @@
 # NexusReach — Current Plan and Roadmap
 
-Last updated: 2026-04-04
+Last updated: 2026-05-24
 
 This file tracks what is already shipped, what is actively being hardened, and what still matters next.
 
@@ -114,7 +114,7 @@ NexusReach already has a working end-to-end loop:
 - [ ] Decide on the production-grade Wellfound path: stronger browser retrieval, sanctioned feed, or removal from the v1 source list
 - [ ] Decide whether startup sources should remain manual-only or join saved-search/hourly refresh behavior
 - [ ] Harden LinkedIn browser sync against more LinkedIn DOM variants and security-challenge flows
-- [ ] Add warm-intro-aware drafting suggestions without changing the no-auto-send rule
+- [ ] Add warm-intro-aware drafting suggestions without changing the draft-first, opt-in delayed auto-send rule
 - [ ] Add provider usage telemetry and easier cost/credit visibility
 
 ### P2
@@ -145,7 +145,7 @@ NexusReach already has a working end-to-end loop:
 
 ## Guiding principles
 
-1. Keep humans in the loop. Draft and stage; never auto-send.
+1. Keep users in control. Draft and stage by default; any auto-send must be explicitly enabled, delayed, and cancellable.
 2. Prefer explicit same-company hierarchy over empty buckets.
 3. Keep public identity trust separate from email-domain trust.
 4. Keep imported LinkedIn graph data separate from CRM contacts and outreach-derived insights.

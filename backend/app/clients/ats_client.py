@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, urlparse
 import httpx
 
 from app.clients import crawl4ai_client, firecrawl_client
+from app.utils.job_metadata import parse_json_ld_base_salary
 
 JSON_LD_RE = re.compile(
     r"<script[^>]+type=[\"']application/ld\+json[\"'][^>]*>(?P<payload>.*?)</script>",
@@ -74,6 +75,18 @@ def _clean_url(url: str) -> str:
     parsed = urlparse(url)
     path = parsed.path.rstrip("/")
     return parsed._replace(path=path, query="", fragment="").geturl()
+
+
+def _humanize_company_slug(slug: str) -> str:
+    """Turn an ATS board slug into a readable company name (audit M2).
+
+    e.g. "match-group" -> "Match Group", "spotify" -> "Spotify". Concatenated
+    single-token slugs are simply capitalized (best effort without a lookup).
+    """
+    cleaned = (slug or "").replace("-", " ").replace("_", " ").strip()
+    if not cleaned:
+        return slug or ""
+    return " ".join(word[:1].upper() + word[1:] for word in cleaned.split())
 
 
 def _strip_tags(value: str | None) -> str:
@@ -275,6 +288,7 @@ def _normalize_json_ld_job(parsed: ParsedATSJobURL, job_posting: dict) -> dict |
 
     ats_label = parsed.ats_type if parsed.ats_type != "generic_exact" else _host_ats_label(parsed.host)
     remote = str(job_posting.get("jobLocationType") or "").upper() == "TELECOMMUTE"
+    salary = parse_json_ld_base_salary(job_posting.get("baseSalary"))
 
     return {
         "external_id": parsed.external_id
@@ -287,11 +301,16 @@ def _normalize_json_ld_job(parsed: ParsedATSJobURL, job_posting: dict) -> dict |
         "company_name": company_name,
         "location": _json_ld_location(job_posting),
         "remote": remote or "remote" in f"{title} {description}".lower(),
+        "work_mode": "remote" if remote else None,
         "url": parsed.canonical_url,
         "apply_url": parsed.canonical_url,
         "description": description or None,
         "employment_type": employment_type_value,
         "posted_at": _coerce_posted_at(job_posting.get("datePosted")),
+        "salary_min": salary.minimum if salary else None,
+        "salary_max": salary.maximum if salary else None,
+        "salary_currency": salary.currency if salary else None,
+        "salary_period": salary.period if salary else None,
         "source": ats_label,
         "ats": ats_label,
         "ats_slug": parsed.company_slug or _domain_root(parsed.host),
@@ -619,6 +638,8 @@ def _normalize_workday_job(parsed: ParsedATSJobURL, page: dict) -> dict | None:
         identifier = json_ld.get("identifier")
         identifier_value = identifier.get("value") if isinstance(identifier, dict) else None
         external_id = parsed.external_id or (f"wd_{identifier_value}" if identifier_value else None)
+        remote = str(json_ld.get("jobLocationType") or "").upper() == "TELECOMMUTE"
+        salary = parse_json_ld_base_salary(json_ld.get("baseSalary"))
 
         if title and company_name and canonical_url:
             return {
@@ -626,13 +647,17 @@ def _normalize_workday_job(parsed: ParsedATSJobURL, page: dict) -> dict | None:
                 "title": title,
                 "company_name": company_name,
                 "location": _workday_location_from_json_ld(json_ld),
-                "remote": str(json_ld.get("jobLocationType") or "").upper() == "TELECOMMUTE"
-                or "remote" in f"{title} {description}".lower(),
+                "remote": remote or "remote" in f"{title} {description}".lower(),
+                "work_mode": "remote" if remote else None,
                 "url": canonical_url,
                 "apply_url": canonical_url,
                 "description": description or None,
                 "employment_type": employment_type_value,
                 "posted_at": _coerce_posted_at(json_ld.get("datePosted")),
+                "salary_min": salary.minimum if salary else None,
+                "salary_max": salary.maximum if salary else None,
+                "salary_currency": salary.currency if salary else None,
+                "salary_period": salary.period if salary else None,
                 "source": "workday",
                 "ats": "workday",
                 "ats_slug": parsed.company_slug or _workday_company_slug(parsed.host),
@@ -1167,7 +1192,7 @@ async def search_lever(company_slug: str, limit: int | None = None) -> list[dict
         {
             "external_id": f"lv_{p.get('id', '')}",
             "title": p.get("text", ""),
-            "company_name": company_slug,
+            "company_name": _humanize_company_slug(company_slug),
             "location": p.get("categories", {}).get("location", ""),
             "remote": "remote" in (p.get("text", "") + p.get("categories", {}).get("location", "")).lower(),
             "url": p.get("hostedUrl", "") or p.get("applyUrl", ""),
@@ -1248,6 +1273,7 @@ async def search_workable(
     shortcode = raw_job.get("shortcode") or job_shortcode
     workplace = raw_job.get("workplace", "")
     remote = bool(raw_job.get("remote")) or workplace == "remote"
+    work_mode = workplace if workplace in {"remote", "hybrid"} else ("remote" if remote else None)
     department = raw_job.get("department") or []
     if isinstance(department, list):
         department_value = ", ".join(item for item in department if item)
@@ -1262,6 +1288,7 @@ async def search_workable(
             "company_name": account_name,
             "location": _workable_location(raw_job),
             "remote": remote,
+            "work_mode": work_mode,
             "url": posting_url,
             "apply_url": posting_url,
             "description": raw_job.get("description", ""),

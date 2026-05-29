@@ -5,7 +5,6 @@ whose verification has gone stale (older than ``reverify_stale_days``)
 or was never performed.
 """
 
-import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -19,7 +18,7 @@ from app.services.employment_verification_service import (
     _apply_verification_result,
     _verify_person,
 )
-from app.tasks import celery_app
+from app.tasks import celery_app, run_async
 from app.utils.company_identity import effective_public_identity_slugs
 
 logger = logging.getLogger(__name__)
@@ -102,4 +101,4 @@ async def _reverify_stale_contacts() -> dict:
 )
 def reverify_stale_contacts() -> dict:
     """Celery entry point for stale contact re-verification."""
-    return asyncio.run(_reverify_stale_contacts())
+    return run_async(_reverify_stale_contacts())

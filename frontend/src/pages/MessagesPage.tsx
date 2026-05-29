@@ -163,6 +163,10 @@ function getRecommendedBatchGoal(people: Person[]): MessageGoal {
     : 'warm_intro';
 }
 
+function isMessageGoal(value: string | null): value is MessageGoal {
+  return GOAL_OPTIONS.some((option) => option.value === value);
+}
+
 function isReadyBatchItem(item: BatchDraftItem): item is BatchDraftItem & { person: Person; message: Message } {
   return item.status === 'ready' && item.person != null && item.message != null;
 }
@@ -223,11 +227,17 @@ export function MessagesPage() {
 }
 
 function SingleMessagesView() {
-  const [selectedPersonId, setSelectedPersonId] = useState<string>('');
-  const [selectedJobId, setSelectedJobId] = useState<string>('');
+  const [searchParams] = useSearchParams();
+  const initialPersonId = searchParams.get('person_id') ?? '';
+  const initialJobId = searchParams.get('job_id') ?? '';
+  const [selectedPersonId, setSelectedPersonId] = useState<string>(initialPersonId);
+  const [selectedJobId, setSelectedJobId] = useState<string>(initialJobId);
   const [savedPeopleCompanyFilter, setSavedPeopleCompanyFilter] = useState('');
   const [channel, setChannel] = useState<MessageChannel>('linkedin_note');
-  const [goal, setGoal] = useState<MessageGoal>('warm_intro');
+  const [goal, setGoal] = useState<MessageGoal>(() => {
+    const initialGoal = searchParams.get('goal');
+    return isMessageGoal(initialGoal) ? initialGoal : 'warm_intro';
+  });
   const [activeDraft, setActiveDraft] = useState<Message | null>(null);
   const [reasoning, setReasoning] = useState('');
   const [editBody, setEditBody] = useState('');

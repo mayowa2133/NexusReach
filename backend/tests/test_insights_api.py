@@ -14,6 +14,13 @@ MOCK_DASHBOARD = {
         "overall_response_rate": 33.3,
         "upcoming_follow_ups": 5,
         "active_conversations": 7,
+        "contacts_found": 24,
+        "verified_emails": 9,
+        "warm_paths": 8,
+        "drafts_created": 14,
+        "staged_drafts": 3,
+        "replies": 4,
+        "interviews": 2,
     },
     "response_by_channel": [
         {"label": "linkedin_message", "sent": 8, "responded": 3, "rate": 37.5},
@@ -135,6 +142,13 @@ async def test_dashboard_summary_fields(client, mock_user_id):
     assert summary["overall_response_rate"] == 33.3
     assert summary["upcoming_follow_ups"] == 5
     assert summary["active_conversations"] == 7
+    assert summary["contacts_found"] == 24
+    assert summary["verified_emails"] == 9
+    assert summary["warm_paths"] == 8
+    assert summary["drafts_created"] == 14
+    assert summary["staged_drafts"] == 3
+    assert summary["replies"] == 4
+    assert summary["interviews"] == 2
 
 
 async def test_dashboard_response_by_channel(client, mock_user_id):
@@ -293,16 +307,23 @@ async def test_dashboard_empty_state(client, mock_user_id):
             "overall_response_rate": 0.0,
             "upcoming_follow_ups": 0,
             "active_conversations": 0,
+            "contacts_found": 0,
+            "verified_emails": 0,
+            "warm_paths": 0,
+            "drafts_created": 0,
+            "staged_drafts": 0,
+            "replies": 0,
+            "interviews": 0,
         },
         "response_by_channel": [],
         "response_by_role": [],
         "response_by_company": [],
         "angle_effectiveness": [],
-    "network_growth": [],
-    "network_gaps": [],
-    "warm_paths": [],
-    "warm_path_companies": [],
-    "company_openness": [],
+        "network_growth": [],
+        "network_gaps": [],
+        "warm_paths": [],
+        "warm_path_companies": [],
+        "company_openness": [],
         "job_pipeline": [],
         "api_usage_by_service": [],
         "graph_warm_paths": [],

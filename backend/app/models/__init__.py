@@ -5,6 +5,7 @@ from app.models.company import Company
 from app.models.person import Person
 from app.models.message import Message
 from app.models.job import Job
+from app.models.job_refresh_run import JobRefreshRun, JobSourceRun
 from app.models.outreach import OutreachLog
 from app.models.api_usage import ApiUsage
 from app.models.notification import Notification
@@ -23,4 +24,4 @@ from app.models.story import Story
 from app.models.interview_prep_brief import InterviewPrepBrief
 from app.models.resume_artifact import ResumeArtifact
 
-__all__ = ["User", "Profile", "UserSettings", "Company", "Person", "Message", "Job", "OutreachLog", "ApiUsage", "Notification", "SearchPreference", "SmtpDomainResult", "SearchLog", "LinkedInGraphConnection", "LinkedInGraphFollow", "LinkedInGraphSyncRun", "JobAlertPreference", "KnownPerson", "KnownPersonCompany", "JobResearchSnapshot", "Story", "InterviewPrepBrief", "ResumeArtifact"]
+__all__ = ["User", "Profile", "UserSettings", "Company", "Person", "Message", "Job", "JobRefreshRun", "JobSourceRun", "OutreachLog", "ApiUsage", "Notification", "SearchPreference", "SmtpDomainResult", "SearchLog", "LinkedInGraphConnection", "LinkedInGraphFollow", "LinkedInGraphSyncRun", "JobAlertPreference", "KnownPerson", "KnownPersonCompany", "JobResearchSnapshot", "Story", "InterviewPrepBrief", "ResumeArtifact"]

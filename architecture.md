@@ -1,6 +1,6 @@
 # NexusReach — Architecture
 
-Last updated: 2026-04-04
+Last updated: 2026-05-24
 
 This document describes the current implemented architecture, not the original greenfield plan.
 
@@ -447,19 +447,56 @@ stored email
   - person context
   - outreach history
 
-Draft creation and draft staging remain separate. NexusReach never auto-sends.
+Draft creation and draft staging remain separate. Email auto-send is optional, user-enabled, delayed, and cancellable before send.
+
+Gmail and Outlook refresh tokens are encrypted before storage using a versioned
+application keyring. Stored token values must use the encrypted token format;
+legacy plaintext token values are cleared by migration and treated as
+reconnect-required at runtime.
+
+## Observability and account controls
+
+- Frontend error capture uses Sentry when `VITE_SENTRY_DSN` is configured.
+- Backend API, worker, and beat error capture use Sentry when
+  `NEXUSREACH_SENTRY_DSN` is configured.
+- Frontend product analytics use PostHog when `VITE_POSTHOG_KEY` is configured.
+  Autocapture and session recording are disabled by default; route pageviews and
+  named product events are explicit.
+- Public `/privacy` and `/terms` routes are part of the frontend.
+- Account export returns user-scoped NexusReach data as JSON and redacts OAuth
+  refresh tokens plus stored API keys.
+- Account deletion deletes the Supabase auth identity using the backend-only
+  service role key, then deletes app-owned user data from Postgres.
 
 ## Deployment and runtime assumptions
 
-- Frontend is designed for Vercel or equivalent static hosting.
-- Backend is designed for Railway or similar app hosting.
-- Redis is used by both Celery and the search cache.
-- Local development commonly runs with:
-  - Postgres on `localhost:5432`
-  - Redis on `localhost:6379`
-  - frontend on `localhost:5173`
-  - backend on `localhost:8000`
-- LinkedIn graph browser sync is a local operator flow and currently assumes Playwright is available on the machine running the connector.
+The launch stack is explicitly Vercel + Railway + Supabase + Redis:
+
+- Frontend runs on Vercel from the `frontend` project root.
+- FastAPI runs as a Railway web service from `backend/railway.web.toml`.
+- Celery worker runs as a separate Railway service from `backend/railway.worker.toml`.
+- Celery beat runs as a separate Railway service from `backend/railway.beat.toml`.
+- Supabase provides hosted Postgres and auth.
+- Railway Redis is shared by Celery, search cache, and rate-limit storage.
+- SearXNG runs on Railway or another private reachable host.
+
+The production backend is built from `backend/Dockerfile`, which installs TeX
+Live so `pdflatex` is available for resume PDF generation. Migrations are run
+once per release by the Railway API service pre-deploy command before worker and
+beat are restarted. The production health check is `GET /api/health`, which
+validates Postgres and Redis.
+
+Local development commonly runs with:
+
+- Postgres on `localhost:5432`
+- Redis on `localhost:6379`
+- frontend on `localhost:5173`
+- backend on `localhost:8000`
+
+LinkedIn graph browser sync is a local operator flow. Playwright is installed on
+the machine running `backend/scripts/linkedin_graph_connector.py`, not in the
+Railway backend service, so the server never stores LinkedIn cookies, session
+tokens, or credentials.
 
 ## Architecture truths worth preserving
 

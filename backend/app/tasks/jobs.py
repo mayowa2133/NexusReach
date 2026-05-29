@@ -7,12 +7,20 @@ from datetime import datetime, timezone
 
 from sqlalchemy import select
 
-from app.tasks import celery_app
+from app.tasks import celery_app, run_async
 from app.database import async_session
 from app.models.notification import Notification
 from app.models.search_preference import SearchPreference
 from app.models.company import Company
-from app.services.job_service import run_startup_refresh_for_query, search_jobs
+from app.models.job_refresh_run import JobRefreshRun
+from app.services.job_service import (
+    fetch_curated_ats_source_payloads,
+    mark_stale_jobs_for_user,
+    run_startup_refresh_for_query,
+    search_jobs,
+    store_curated_ats_payloads_for_user,
+    summarize_source_stats,
+)
 from app.services.notification_service import create_notification
 
 logger = logging.getLogger(__name__)
@@ -65,25 +73,74 @@ async def _refresh_user_feeds(user_id: uuid.UUID) -> int:
         }
 
         for pref in preferences:
+            started_at = datetime.now(timezone.utc)
+            refresh_run = JobRefreshRun(
+                id=uuid.uuid4(),
+                user_id=user_id,
+                search_preference_id=pref.id,
+                mode=getattr(pref, "mode", "default") or "default",
+                query=pref.query,
+                location=pref.location,
+                remote_only=bool(pref.remote_only),
+                status="running",
+                started_at=started_at,
+            )
+            db.add(refresh_run)
+            pref.last_attempted_at = started_at
+            await db.flush()
+            source_stats: list[dict] = []
             try:
                 pref_mode = getattr(pref, "mode", "default") or "default"
                 if pref_mode == "startup":
-                    new_jobs = await run_startup_refresh_for_query(
+                    matched_jobs = await run_startup_refresh_for_query(
                         db=db,
                         user_id=user_id,
                         query=pref.query,
                     )
                 else:
-                    new_jobs = await search_jobs(
+                    matched_jobs = await search_jobs(
                         db=db,
                         user_id=user_id,
                         query=pref.query,
                         location=pref.location,
                         remote_only=pref.remote_only,
+                        limit=50,
+                        refresh_run_id=refresh_run.id,
+                        source_stats=source_stats,
                     )
 
+                # search_jobs now also returns refreshed existing rows (audit C3);
+                # keep counts and notifications scoped to genuinely-new jobs. The
+                # startup path returns only new rows, so absence of the flag = new.
+                new_jobs = [
+                    job
+                    for job in matched_jobs
+                    if getattr(job, "_is_new_job", True)
+                ]
+
                 # Record refresh metadata
-                pref.last_refreshed_at = datetime.now(timezone.utc)
+                finished_at = datetime.now(timezone.utc)
+                summary = summarize_source_stats(source_stats)
+                refresh_run.finished_at = finished_at
+                refresh_run.duration_seconds = round(
+                    (finished_at - started_at).total_seconds(), 3
+                )
+                refresh_run.total_new = len(new_jobs)
+                refresh_run.total_seen = summary["total_seen"]
+                refresh_run.total_existing = summary["total_existing"]
+                refresh_run.total_duplicates = summary["total_duplicates"]
+                refresh_run.total_errors = summary["total_errors"]
+                refresh_run.status = (
+                    "partial_success" if summary["total_errors"] else "success"
+                )
+                pref.last_refreshed_at = finished_at
+                pref.last_success_at = finished_at
+                pref.last_duration_seconds = refresh_run.duration_seconds
+                pref.last_error = (
+                    f"{summary['total_errors']} source(s) failed"
+                    if summary["total_errors"]
+                    else None
+                )
                 pref.new_jobs_found = len(new_jobs)
                 total_new += len(new_jobs)
                 await db.commit()
@@ -118,11 +175,23 @@ async def _refresh_user_feeds(user_id: uuid.UUID) -> int:
                             )
 
             except Exception:
+                finished_at = datetime.now(timezone.utc)
+                refresh_run.finished_at = finished_at
+                refresh_run.duration_seconds = round(
+                    (finished_at - started_at).total_seconds(), 3
+                )
+                refresh_run.status = "failed"
+                refresh_run.error = "Refresh failed; see worker logs for traceback."
+                pref.last_duration_seconds = refresh_run.duration_seconds
+                pref.last_error = refresh_run.error
+                await db.commit()
                 logger.exception(
                     "Failed to refresh feed for user %s, query '%s'",
                     user_id,
                     pref.query,
                 )
+
+        await mark_stale_jobs_for_user(db, user_id)
 
     return total_new
 
@@ -146,11 +215,16 @@ async def _refresh_all() -> None:
 
     logger.info("Refreshing job feeds for %d users", len(user_ids))
 
-    for uid in user_ids:
-        try:
-            await _refresh_user_feeds(uid)
-        except Exception:
-            logger.exception("Failed to refresh feeds for user %s", uid)
+    semaphore = asyncio.Semaphore(5)
+
+    async def refresh_one(uid: uuid.UUID) -> None:
+        async with semaphore:
+            try:
+                await _refresh_user_feeds(uid)
+            except Exception:
+                logger.exception("Failed to refresh feeds for user %s", uid)
+
+    await asyncio.gather(*(refresh_one(uid) for uid in user_ids))
 
 
 @celery_app.task(
@@ -162,7 +236,7 @@ async def _refresh_all() -> None:
 )
 def refresh_all_job_feeds() -> dict:
     """Celery task: refresh job feeds for all users with saved searches."""
-    asyncio.run(_refresh_all())
+    run_async(_refresh_all())
     return {"status": "ok"}
 
 
@@ -172,23 +246,56 @@ def refresh_all_job_feeds() -> dict:
 
 async def _discover_all_boards() -> None:
     """Run ATS board discovery for every user with at least one saved search."""
-    from app.services.job_service import _discover_ats_boards  # noqa: PLC0415
-
     async with async_session() as db:
-        stmt = (
-            select(SearchPreference.user_id)
+        prefs_stmt = (
+            select(SearchPreference)
             .where(SearchPreference.enabled == True)  # noqa: E712
-            .distinct()
         )
-        result = await db.execute(stmt)
-        user_ids = [row[0] for row in result.all()]
+        result = await db.execute(prefs_stmt)
+        preferences = list(result.scalars().all())
+
+    prefs_by_user: dict[uuid.UUID, list[SearchPreference]] = {}
+    for pref in preferences:
+        prefs_by_user.setdefault(pref.user_id, []).append(pref)
+    user_ids = list(prefs_by_user)
 
     logger.info("Running ATS board auto-discovery for %d users", len(user_ids))
+    source_payloads, source_stats = await fetch_curated_ats_source_payloads()
 
     for uid in user_ids:
         try:
             async with async_session() as db:
-                new_count = await _discover_ats_boards(db, uid)
+                started_at = datetime.now(timezone.utc)
+                refresh_run = JobRefreshRun(
+                    id=uuid.uuid4(),
+                    user_id=uid,
+                    search_preference_id=None,
+                    mode="ats_discovery",
+                    query="curated_ats_boards",
+                    location=None,
+                    remote_only=False,
+                    status="running",
+                    started_at=started_at,
+                )
+                db.add(refresh_run)
+                await db.flush()
+                new_count = await store_curated_ats_payloads_for_user(
+                    db,
+                    uid,
+                    source_payloads=source_payloads,
+                    source_stats=source_stats,
+                    preferences=prefs_by_user.get(uid, []),
+                    refresh_run_id=refresh_run.id,
+                )
+                finished_at = datetime.now(timezone.utc)
+                refresh_run.finished_at = finished_at
+                refresh_run.duration_seconds = round(
+                    (finished_at - started_at).total_seconds(), 3
+                )
+                refresh_run.total_new = new_count
+                refresh_run.status = "success"
+                await mark_stale_jobs_for_user(db, uid)
+                await db.commit()
                 logger.info(
                     "ATS auto-discover: %d new jobs for user %s", new_count, uid,
                 )
@@ -205,7 +312,7 @@ async def _discover_all_boards() -> None:
 )
 def discover_ats_boards() -> dict:
     """Celery task: poll all curated ATS boards for new postings."""
-    asyncio.run(_discover_all_boards())
+    run_async(_discover_all_boards())
     return {"status": "ok"}
 
 
@@ -306,4 +413,4 @@ async def _rescore_user_jobs(user_id: uuid.UUID) -> dict:
 )
 def rescore_user_jobs(user_id: str) -> dict:
     """Celery task: re-score all jobs for a user after resume/profile update."""
-    return asyncio.run(_rescore_user_jobs(uuid.UUID(user_id)))
+    return run_async(_rescore_user_jobs(uuid.UUID(user_id)))

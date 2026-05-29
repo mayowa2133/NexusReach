@@ -73,6 +73,7 @@ vi.mock('@/hooks/useJobs', () => ({
   useSavedSearches: () => ({
     data: mockSavedSearches,
   }),
+  useJobRefreshRuns: () => ({ data: [] }),
   useToggleSavedSearch: () => mockToggleSavedSearch,
   useDeleteSavedSearch: () => mockDeleteSavedSearch,
   useRefreshJobs: () => ({ mutate: vi.fn(), isPending: false }),
@@ -137,6 +138,7 @@ const startupJob = {
 };
 
 beforeEach(() => {
+  vi.unstubAllGlobals();
   window.localStorage.clear();
   mockNavigate.mockReset();
   mockSavedJobs = undefined;
@@ -305,13 +307,15 @@ describe('JobsPage', () => {
     expect(screen.getByPlaceholderText(/search saved jobs/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/employment type filter/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/country filter/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/nearby location filter/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/nearby radius in kilometers/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/minimum salary filter/i)).toBeInTheDocument();
     // Remote filter button (separate from search remote-only)
     expect(screen.getByRole('button', { name: /^remote$/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^startup$/i })).toBeInTheDocument();
   });
 
-  it('filters saved jobs by derived country', async () => {
+  it('passes selected country to useJobs for server-side filtering', async () => {
     mockSavedJobs = { items: [sampleJob, canadaJob], total: 2, limit: null, offset: 0 };
 
     renderJobs();
@@ -321,9 +325,59 @@ describe('JobsPage', () => {
 
     await userEvent.selectOptions(screen.getByLabelText(/country filter/i), 'Canada');
 
-    expect(screen.queryByText('Backend Engineer')).not.toBeInTheDocument();
-    expect(screen.getByText('Platform Engineer')).toBeInTheDocument();
-    expect(screen.getByText(/1 jobs/i)).toBeInTheDocument();
+    expect(mockUseJobs).toHaveBeenCalledWith(expect.objectContaining({ country: 'Canada' }));
+  });
+
+  it('passes manual nearby filters to useJobs', async () => {
+    mockSavedJobs = { items: [sampleJob, canadaJob], total: 2, limit: null, offset: 0 };
+
+    renderJobs();
+
+    await userEvent.type(screen.getByLabelText(/nearby location filter/i), 'GTA');
+    await userEvent.clear(screen.getByLabelText(/nearby radius in kilometers/i));
+    await userEvent.type(screen.getByLabelText(/nearby radius in kilometers/i), '50');
+    await userEvent.click(screen.getByRole('button', { name: /include remote/i }));
+
+    expect(mockUseJobs).toHaveBeenCalledWith(expect.objectContaining({
+      near: 'GTA',
+      radiusKm: 50,
+      includeRemoteInRadius: true,
+    }));
+  });
+
+  it('uses browser geolocation for nearby jobs when allowed', async () => {
+    mockSavedJobs = { items: [sampleJob], total: 1, limit: null, offset: 0 };
+    const getCurrentPosition = vi.fn((success: PositionCallback) => {
+      success({
+        coords: {
+          latitude: 43.6532,
+          longitude: -79.3832,
+          accuracy: 20,
+          altitude: null,
+          altitudeAccuracy: null,
+          heading: null,
+          speed: null,
+          toJSON: () => ({}),
+        },
+        timestamp: Date.now(),
+        toJSON: () => ({}),
+      });
+    });
+    vi.stubGlobal('navigator', {
+      ...navigator,
+      geolocation: { getCurrentPosition },
+    });
+
+    renderJobs();
+    await userEvent.click(screen.getByRole('button', { name: /near me/i }));
+
+    expect(getCurrentPosition).toHaveBeenCalled();
+    expect(await screen.findByText(/using your current location/i)).toBeInTheDocument();
+    expect(mockUseJobs).toHaveBeenCalledWith(expect.objectContaining({
+      nearLat: 43.6532,
+      nearLng: -79.3832,
+      radiusKm: 50,
+    }));
   });
 
   it('passes startup=true to useJobs when the startup filter is enabled', async () => {

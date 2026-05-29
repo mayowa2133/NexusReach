@@ -14,6 +14,18 @@ def _first_text(*values: object) -> str | None:
     return None
 
 
+def _compose_location(*parts: object) -> str:
+    """Join city/state/country into one string, preserving specificity (audit M3).
+
+    e.g. ("Austin", "TX", "US") -> "Austin, TX, US" instead of just "Austin".
+    """
+    seen: list[str] = []
+    for part in parts:
+        if isinstance(part, str) and part.strip() and part.strip() not in seen:
+            seen.append(part.strip())
+    return ", ".join(seen)
+
+
 def _apply_url(job: dict) -> str | None:
     direct = _first_text(job.get("job_apply_link"))
     if direct:
@@ -64,9 +76,10 @@ async def search_jobs(
     if location:
         q = f"{query} in {location}"
 
+    num_pages = max(1, min((limit + 9) // 10, 5))
     params: dict = {
         "query": q,
-        "num_pages": "1",
+        "num_pages": str(num_pages),
         "date_posted": date_posted,
     }
     if remote_only:
@@ -89,7 +102,9 @@ async def search_jobs(
             "title": j.get("job_title", ""),
             "company_name": j.get("employer_name", ""),
             "company_logo": j.get("employer_logo", ""),
-            "location": j.get("job_city", "") or j.get("job_state", "") or j.get("job_country", ""),
+            "location": _compose_location(
+                j.get("job_city"), j.get("job_state"), j.get("job_country")
+            ),
             "remote": j.get("job_is_remote", False),
             "url": j.get("job_apply_link", "") or j.get("job_google_link", ""),
             "apply_url": _apply_url(j),

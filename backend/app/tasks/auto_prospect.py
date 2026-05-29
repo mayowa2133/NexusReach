@@ -1,11 +1,10 @@
 """Celery tasks for auto-prospect: background people search + email finding + auto-send."""
 
-import asyncio
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from app.tasks import celery_app
+from app.tasks import celery_app, run_async
 from app.database import async_session
 
 logger = logging.getLogger(__name__)
@@ -104,7 +103,7 @@ async def _auto_prospect_job(user_id: uuid.UUID, job_id: uuid.UUID) -> dict:
 )
 def auto_prospect_job(user_id: str, job_id: str) -> dict:
     """Celery task: auto-prospect a single job (people search + email finding)."""
-    return asyncio.run(
+    return run_async(
         _auto_prospect_job(uuid.UUID(user_id), uuid.UUID(job_id))
     )
 
@@ -264,7 +263,7 @@ async def _auto_draft_for_job(user_id: uuid.UUID, job_id: uuid.UUID) -> dict:
 )
 def auto_draft_for_job(user_id: str, job_id: str) -> dict:
     """Celery task: auto-draft outreach emails for a job's contacts."""
-    return asyncio.run(
+    return run_async(
         _auto_draft_for_job(uuid.UUID(user_id), uuid.UUID(job_id))
     )
 
@@ -383,4 +382,4 @@ async def _process_pending_sends() -> dict:
 )
 def process_pending_sends() -> dict:
     """Celery beat task: process scheduled auto-sends every 5 minutes."""
-    return asyncio.run(_process_pending_sends())
+    return run_async(_process_pending_sends())

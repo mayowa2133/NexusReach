@@ -7,6 +7,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from app.config import settings
+from app.observability import init_sentry
 from app.middleware.error_handler import (
     http_exception_handler,
     validation_exception_handler,
@@ -34,9 +35,11 @@ from app.routers import (
     interview_prep,
     triage,
     occupations,
+    account,
 )
 
 logger = logging.getLogger(__name__)
+init_sentry("api")
 
 app = FastAPI(
     title="NexusReach API",
@@ -98,6 +101,7 @@ app.include_router(cadence.router, prefix="/api")
 app.include_router(interview_prep.router, prefix="/api")
 app.include_router(triage.router, prefix="/api")
 app.include_router(occupations.router, prefix="/api")
+app.include_router(account.router, prefix="/api")
 
 
 @app.get("/api/health")
@@ -138,7 +142,14 @@ async def health():
 @app.on_event("startup")
 async def log_auth_mode() -> None:
     if settings.auth_mode == "dev":
-        logger.warning(
-            "NEXUSREACH_AUTH_MODE=dev is enabled. Supabase auth is bypassed and all requests run as %s.",
-            settings.dev_user_email,
-        )
+        if settings.dev_auth_bypass_enabled:
+            logger.warning(
+                "NEXUSREACH_AUTH_MODE=dev and NEXUSREACH_DEV_AUTH_BYPASS_ENABLED=true are enabled. "
+                "Supabase auth is bypassed and all requests run as %s.",
+                settings.dev_user_email,
+            )
+        else:
+            logger.error(
+                "NEXUSREACH_AUTH_MODE=dev is set without NEXUSREACH_DEV_AUTH_BYPASS_ENABLED=true. "
+                "Authenticated requests will fail closed."
+            )

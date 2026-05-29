@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 import re
 from html import unescape
-from xml.etree.ElementTree import iterparse
+from xml.etree.ElementTree import XMLPullParser
 
 import httpx
 
@@ -98,46 +98,38 @@ async def search_google_jobs(
     """
     keywords = [kw.lower() for kw in search_text.split() if kw] if search_text else []
 
-    try:
+    async def _iter_feed_events():
+        """Yield (event, elem) incrementally so the full ~22MB feed is never
+        buffered in memory (audit H10). Chunks are fed to a streaming pull
+        parser; the caller clears each element as it is handled."""
         async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
             async with client.stream("GET", _FEED_URL, headers=_HEADERS) as resp:
                 if resp.status_code != 200:
                     logger.debug("Google Careers feed returned %d", resp.status_code)
-                    return []
-
-                # Stream to a temp buffer for iterparse
-                chunks: list[bytes] = []
+                    return
+                parser = XMLPullParser(events=("end",))
                 async for chunk in resp.aiter_bytes(chunk_size=65536):
-                    chunks.append(chunk)
-
-    except Exception:
-        logger.exception("Google Careers feed fetch failed")
-        return []
-
-    # Parse the XML feed
-    import io
-
-    xml_bytes = b"".join(chunks)
-    if not xml_bytes:
-        logger.debug("Google Careers: empty feed response")
-        return []
+                    parser.feed(chunk)
+                    for event, elem in parser.read_events():
+                        yield event, elem
+                parser.close()
+                for event, elem in parser.read_events():
+                    yield event, elem
 
     jobs: list[dict] = []
 
+    # Track current entry fields
+    current_entry: dict | None = None
+    current_locations: list[str] = []
+    current_categories: list[str] = []
+    current_location_parts: list[str] = []
+
     try:
-        source = io.BytesIO(xml_bytes)
-        context = iterparse(source, events=("end",))
-
-        # Track current entry fields
-        current_entry: dict | None = None
-        current_locations: list[str] = []
-        current_categories: list[str] = []
-
-        for event, elem in context:
+        async for event, elem in _iter_feed_events():
             # Strip namespace prefix if present
             tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
 
-            if tag == "entry":
+            if tag in {"entry", "job"}:
                 # Finished an entry — process it
                 if current_entry is not None:
                     current_entry["_locations"] = current_locations
@@ -149,13 +141,20 @@ async def search_google_jobs(
                     raw_url = current_entry.get("url", "")
                     remote_field = current_entry.get("remote", "").lower()
                     is_remote_field = current_entry.get("isRemote", "").lower()
+                    is_hybrid_field = current_entry.get("isHybrid", "").lower()
                     published = current_entry.get("published", "")
                     description_html = current_entry.get("description", "")
                     location = _parse_locations(current_entry)
                     remote = (
                         remote_field in ("remote", "hybrid")
                         or is_remote_field in ("yes",)
+                        or is_hybrid_field in ("yes", "true")
                         or "remote" in (location + " " + title).lower()
+                    )
+                    work_mode = (
+                        "hybrid" if remote_field == "hybrid" or is_hybrid_field in ("yes", "true")
+                        else "remote" if remote_field == "remote" or is_remote_field == "yes"
+                        else None
                     )
                     description_text = _strip_tags(description_html) if description_html else ""
 
@@ -182,6 +181,7 @@ async def search_google_jobs(
                             "company_name": company_name,
                             "location": location,
                             "remote": remote,
+                            "work_mode": work_mode,
                             "url": job_url,
                             "apply_url": job_url,
                             "description": description_text[:2000] if description_text else "",
@@ -197,6 +197,7 @@ async def search_google_jobs(
                 current_entry = None
                 current_locations = []
                 current_categories = []
+                current_location_parts = []
                 elem.clear()
                 continue
 
@@ -204,7 +205,7 @@ async def search_google_jobs(
             # In Atom feeds, entries contain these child elements
             if tag in (
                 "title", "jobid", "url", "employer", "remote",
-                "isRemote", "published", "description", "jobtype",
+                "isRemote", "isHybrid", "published", "description", "jobtype",
             ):
                 if current_entry is None:
                     current_entry = {}
@@ -218,23 +219,31 @@ async def search_google_jobs(
                     current_entry = {}
                     current_locations = []
                     current_categories = []
-                if elem.text:
+                    current_location_parts = []
+                if elem.text and elem.text.strip():
                     current_locations.append(elem.text.strip())
+                elif current_location_parts:
+                    current_locations.append(", ".join(current_location_parts))
+                current_location_parts = []
+
+            elif tag in {"city", "state", "country"}:
+                if current_entry is not None and elem.text and elem.text.strip():
+                    current_location_parts.append(elem.text.strip())
 
             elif tag == "category":
                 if current_entry is None:
                     current_entry = {}
                     current_locations = []
                     current_categories = []
+                    current_location_parts = []
                 if elem.text:
                     current_categories.append(elem.text.strip())
 
             elem.clear()
 
     except Exception:
-        logger.exception("Google Careers feed parse failed")
-        # Return whatever we've collected so far
-        pass
+        logger.exception("Google Careers feed fetch/parse failed")
+        # Return whatever we've collected so far.
 
     logger.info("Google Careers: %d jobs (query=%r)", len(jobs), search_text)
     return jobs

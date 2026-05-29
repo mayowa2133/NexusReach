@@ -412,22 +412,37 @@ export interface Job {
   company_name: string;
   company_logo: string | null;
   location: string | null;
+  locations?: Array<Record<string, unknown>> | null;
+  country_codes?: string[] | null;
+  countries?: string[] | null;
+  location_lat?: number | null;
+  location_lng?: number | null;
+  location_radius_km?: number | null;
+  location_geocode_label?: string | null;
   remote: boolean;
+  work_mode?: string | null;
   url: string | null;
   apply_url: string | null;
   description: string | null;
   employment_type: string | null;
   experience_level: string | null;
+  experience_level_confidence?: number | null;
   salary_min: number | null;
   salary_max: number | null;
   salary_currency: string | null;
+  salary_period?: string | null;
   source: string;
   ats: string | null;
   posted_at: string | null;
+  source_status?: 'active' | 'stale' | 'closed' | string;
+  last_seen_at?: string | null;
+  closed_at?: string | null;
+  not_seen_count?: number;
   match_score: number | null;
-  score_breakdown: Record<string, number> | null;
+  score_breakdown: Record<string, unknown> | null;
   stage: JobStage;
   tags: string[] | null;
+  metadata_provenance?: Record<string, unknown> | null;
   department: string | null;
   notes: string | null;
   starred: boolean;
@@ -762,10 +777,51 @@ export interface SearchPreference {
   location: string | null;
   remote_only: boolean;
   enabled: boolean;
+  mode?: 'default' | 'startup';
   last_refreshed_at: string | null;
+  last_attempted_at?: string | null;
+  last_success_at?: string | null;
+  last_error?: string | null;
+  last_duration_seconds?: number | null;
   new_jobs_found: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface JobSourceRun {
+  id: string;
+  refresh_run_id: string;
+  source: string;
+  status: string;
+  raw_count: number;
+  new_count: number;
+  existing_count: number;
+  duplicate_count: number;
+  skipped_count: number;
+  error: string | null;
+  duration_seconds: number | null;
+  started_at: string;
+  finished_at: string | null;
+}
+
+export interface JobRefreshRun {
+  id: string;
+  search_preference_id: string | null;
+  mode: string;
+  query: string | null;
+  location: string | null;
+  remote_only: boolean;
+  status: string;
+  total_new: number;
+  total_seen: number;
+  total_existing: number;
+  total_duplicates: number;
+  total_errors: number;
+  error: string | null;
+  duration_seconds: number | null;
+  started_at: string;
+  finished_at: string | null;
+  source_runs: JobSourceRun[];
 }
 
 // Outreach Tracker types
@@ -828,6 +884,13 @@ export interface DashboardSummary {
   overall_response_rate: number;
   upcoming_follow_ups: number;
   active_conversations: number;
+  contacts_found: number;
+  verified_emails: number;
+  warm_paths: number;
+  drafts_created: number;
+  staged_drafts: number;
+  replies: number;
+  interviews: number;
 }
 
 export interface ResponseRateBreakdown {
@@ -950,6 +1013,12 @@ export interface AutoProspectSettings {
 
 export interface ResumeReuseSettings {
   resume_auto_reuse_enabled: boolean;
+}
+
+export interface AccountDeleteResponse {
+  deleted: boolean;
+  auth_identity_deleted: boolean;
+  deleted_tables: Record<string, number>;
 }
 
 export interface LinkedInGraphSyncRun {

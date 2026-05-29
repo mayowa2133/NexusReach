@@ -13,6 +13,8 @@ import httpx
 from bs4 import BeautifulSoup
 from bs4.element import Tag
 
+from app.config import settings
+
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +23,15 @@ DICE_SEARCH_FIELDS = (
     "jobLocation.displayName|detailsPageUrl|redirectUrl|companyLogoUrl|salary|"
     "clientBrandId|companyPageUrl|companyName|isRemote|employerType"
 )
-DICE_HEADERS = {
-    "x-api-key": "1YAt0R9wBg4WfsF9VB2778F5CHLAPMVW3WAZcKd8",
-}
+
+
+def _dice_headers() -> dict[str, str]:
+    """Dice search auth header, sourced from env config (audit C4).
+
+    The key must never be hardcoded in source. When unset, Dice search fails
+    soft to an empty result set rather than raising.
+    """
+    return {"x-api-key": settings.dice_api_key}
 DICE_DETAIL_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -64,7 +72,8 @@ def _extract_dice_configured_url(apply_redirect_url: str | None) -> str | None:
     padded_payload = encoded_payload + ("=" * (-len(encoded_payload) % 4))
     try:
         payload = json.loads(base64.b64decode(padded_payload).decode("utf-8"))
-    except (ValueError, json.JSONDecodeError):
+    except (ValueError, json.JSONDecodeError, UnicodeDecodeError):
+        # Malformed base64 / non-UTF-8 payloads must not crash enrichment (audit L15).
         return None
 
     configured_url = payload.get("configuredUrl")
@@ -159,30 +168,41 @@ async def _search_dice_with_client(
     client: httpx.AsyncClient,
     query: str,
     location: str | None = None,
+    country_code: str | None = None,
     limit: int = 10,
 ) -> list[dict]:
-    params: dict = {
-        "q": query,
-        "countryCode2": "US",
-        "radius": "30",
-        "radiusUnit": "mi",
-        "page": "1",
-        "pageSize": str(min(limit, 20)),
-        "fields": DICE_SEARCH_FIELDS,
-    }
-    if location:
-        params["location"] = location
+    page_size = min(max(limit, 1), 20)
+    max_pages = max(1, min((limit + page_size - 1) // page_size, 5))
+    jobs: list[dict] = []
+    for page in range(1, max_pages + 1):
+        params: dict = {
+            "q": query,
+            "countryCode2": (country_code or "US").upper(),
+            "radius": "30",
+            "radiusUnit": "mi",
+            "page": str(page),
+            "pageSize": str(page_size),
+            "fields": DICE_SEARCH_FIELDS,
+        }
+        if location:
+            params["location"] = location
 
-    resp = await client.get(
-        "https://job-search-api.svc.dhigroupinc.com/v1/dice/jobs/search",
-        params=params,
-        headers=DICE_HEADERS,
-    )
-    if resp.status_code != 200:
-        return []
-    data = resp.json()
+        resp = await client.get(
+            "https://job-search-api.svc.dhigroupinc.com/v1/dice/jobs/search",
+            params=params,
+            headers=_dice_headers(),
+        )
+        if resp.status_code != 200:
+            break
+        data = resp.json()
+        page_jobs = data.get("data", [])
+        if not page_jobs:
+            break
+        jobs.extend(page_jobs)
+        if len(jobs) >= limit:
+            break
 
-    jobs = data.get("data", [])[:limit]
+    jobs = jobs[:limit]
     normalized_jobs = [
         {
             "external_id": f"dice_{j.get('id', '')}",
@@ -208,11 +228,21 @@ async def _search_dice_with_client(
 async def search_dice(
     query: str,
     location: str | None = None,
+    country_code: str | None = None,
     limit: int = 10,
 ) -> list[dict]:
-    """Search Dice for tech jobs."""
+    """Search Dice for tech jobs.
+
+    Fails soft to ``[]`` when no API key is configured (audit C4) so a missing
+    ``NEXUSREACH_DICE_API_KEY`` never breaks discovery for the other sources.
+    """
+    if not settings.dice_api_key:
+        logger.info("Dice search skipped: NEXUSREACH_DICE_API_KEY is not configured.")
+        return []
     async with httpx.AsyncClient(timeout=15) as client:
-        return await _search_dice_with_client(client, query, location=location, limit=limit)
+        return await _search_dice_with_client(
+            client, query, location=location, country_code=country_code, limit=limit
+        )
 
 
 async def search_remotive(query: str, limit: int = 10) -> list[dict]:

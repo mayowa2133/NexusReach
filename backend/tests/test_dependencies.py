@@ -58,6 +58,7 @@ async def test_get_or_create_user_backfills_blank_email_and_defaults():
 async def test_get_current_auth_user_returns_configured_dev_user(monkeypatch):
     dev_user_id = uuid.uuid4()
     monkeypatch.setattr(settings, "auth_mode", "dev")
+    monkeypatch.setattr(settings, "dev_auth_bypass_enabled", True)
     monkeypatch.setattr(settings, "dev_user_id", dev_user_id)
     monkeypatch.setattr(settings, "dev_user_email", "DevUser@example.com")
 
@@ -65,3 +66,11 @@ async def test_get_current_auth_user_returns_configured_dev_user(monkeypatch):
 
     assert auth_user.user_id == dev_user_id
     assert auth_user.email == "devuser@example.com"
+
+
+async def test_get_current_auth_user_fails_closed_when_dev_bypass_not_enabled(monkeypatch):
+    monkeypatch.setattr(settings, "auth_mode", "dev")
+    monkeypatch.setattr(settings, "dev_auth_bypass_enabled", False)
+
+    with pytest.raises(Exception, match="Dev auth bypass requires"):
+        await get_current_auth_user(None)

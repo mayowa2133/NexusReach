@@ -51,6 +51,8 @@ const mockStartLinkedInGraphSync = { mutateAsync: vi.fn(), isPending: false };
 const mockUploadLinkedInGraphFile = { mutateAsync: vi.fn(), isPending: false };
 const mockClearLinkedInGraph = { mutateAsync: vi.fn(), isPending: false };
 const mockUpdateResumeReuseSettings = { mutateAsync: vi.fn(), isPending: false };
+const mockExportAccountData = { mutateAsync: vi.fn(), isPending: false };
+const mockDeleteAccount = { mutateAsync: vi.fn(), isPending: false };
 
 vi.mock('@/hooks/useSettings', () => ({
   useGuardrails: () => mockGuardrails,
@@ -59,6 +61,8 @@ vi.mock('@/hooks/useSettings', () => ({
   useUpdateAutoProspect: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useResumeReuseSettings: () => mockResumeReuseSettings,
   useUpdateResumeReuseSettings: () => mockUpdateResumeReuseSettings,
+  useExportAccountData: () => mockExportAccountData,
+  useDeleteAccount: () => mockDeleteAccount,
 }));
 
 vi.mock('@/hooks/useEmail', () => ({
@@ -163,6 +167,8 @@ beforeEach(() => {
   mockUploadLinkedInGraphFile.mutateAsync.mockReset();
   mockClearLinkedInGraph.mutateAsync.mockReset();
   mockUpdateResumeReuseSettings.mutateAsync.mockReset();
+  mockExportAccountData.mutateAsync.mockReset();
+  mockDeleteAccount.mutateAsync.mockReset();
 });
 
 // ===========================================================================
@@ -201,6 +207,13 @@ describe('SettingsPage — basic', () => {
     expect(screen.getByRole('button', { name: /sync now/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /upload export/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /clear graph data/i })).toBeInTheDocument();
+  });
+
+  it('renders account data controls', () => {
+    renderSettings();
+    expect(screen.getByText('Account Data')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^export$/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^delete$/i })).toBeInTheDocument();
   });
 
   it('defaults resume auto-reuse to confirmation first', () => {

@@ -1,0 +1,96 @@
+{
+  "scrapegraph_configured": false,
+  "scrapegraph_stealth": false,
+  "urls": [
+    {
+      "current_stack": {
+        "crawl4ai": {
+          "elapsed_ms": 4697,
+          "ok": false
+        },
+        "direct": {
+          "elapsed_ms": 203,
+          "ok": false
+        },
+        "firecrawl": {
+          "elapsed_ms": 184,
+          "ok": false
+        },
+        "selected": {
+          "elapsed_ms": 2954,
+          "ok": false
+        }
+      },
+      "scrapegraph": {
+        "extract": {
+          "ok": false,
+          "reason": "skip_extract enabled",
+          "skipped": true
+        },
+        "scrape": {
+          "ok": false,
+          "reason": "missing SGAI_API_KEY",
+          "skipped": true
+        }
+      },
+      "url": "https://wellfound.com/jobs"
+    },
+    {
+      "current_stack": {
+        "crawl4ai": {
+          "content_chars": 138,
+          "elapsed_ms": 3878,
+          "fallback_used": false,
+          "html_chars": 2376,
+          "insufficient_signals": [
+            "akamai",
+            "powered and protected by"
+          ],
+          "markdown_chars": 138,
+          "ok": true,
+          "preview": "Powered and protected by ![Akamai](https://www.akamai.com/site/ko/images/logo/akamai-logo1.svg) [Privacy](https://www.akamai.com/privacy)",
+          "retrieval_method": "crawl4ai",
+          "title": "",
+          "url": "https://www.tesla.com/careers/search/job/software-engineer-autopilot-222331"
+        },
+        "direct": {
+          "elapsed_ms": 177,
+          "ok": false
+        },
+        "firecrawl": {
+          "elapsed_ms": 164,
+          "ok": false
+        },
+        "selected": {
+          "content_chars": 138,
+          "elapsed_ms": 3663,
+          "fallback_used": false,
+          "html_chars": 2376,
+          "insufficient_signals": [
+            "akamai",
+            "powered and protected by"
+          ],
+          "markdown_chars": 138,
+          "ok": true,
+          "preview": "Powered and protected by ![Akamai](https://www.akamai.com/site/ko/images/logo/akamai-logo1.svg) [Privacy](https://www.akamai.com/privacy)",
+          "retrieval_method": "crawl4ai",
+          "title": "",
+          "url": "https://www.tesla.com/careers/search/job/software-engineer-autopilot-222331"
+        }
+      },
+      "scrapegraph": {
+        "extract": {
+          "ok": false,
+          "reason": "skip_extract enabled",
+          "skipped": true
+        },
+        "scrape": {
+          "ok": false,
+          "reason": "missing SGAI_API_KEY",
+          "skipped": true
+        }
+      },
+      "url": "https://www.tesla.com/careers/search/job/software-engineer-autopilot-222331"
+    }
+  ]
+}

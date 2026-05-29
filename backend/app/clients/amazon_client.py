@@ -108,9 +108,12 @@ async def search_amazon_jobs(
         posted_at = _parse_posted_date(j.get("posted_date", ""))
 
         external_id = j.get("id_icims") or j.get("id") or ""
+        # Prefix with the source like every other client so bare numeric IDs
+        # can't collide with another source's IDs during dedup (audit L2).
+        external_id = f"amzn_{external_id}" if external_id else ""
 
         jobs.append({
-            "external_id": str(external_id),
+            "external_id": external_id,
             "title": title,
             "company_name": "Amazon",
             "location": location,

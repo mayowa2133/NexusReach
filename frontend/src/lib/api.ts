@@ -1,14 +1,14 @@
 import { useAuthStore } from '@/stores/auth';
-import { supabase, isDevAuthMode } from '@/lib/supabase';
+import { supabase, isDevAuthMode, isE2EAuthMode } from '@/lib/supabase';
 
 export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 /**
  * Get a valid access token, refreshing via Supabase if needed.
- * In dev mode, returns the static dev token.
+ * In local dev/e2e auth modes, returns the static session token.
  */
 export async function getApiAccessToken(): Promise<string | null> {
-  if (isDevAuthMode) {
+  if (isDevAuthMode || isE2EAuthMode) {
     return useAuthStore.getState().session?.access_token ?? null;
   }
 

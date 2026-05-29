@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import html
 import logging
 import time
 import uuid
@@ -15,6 +16,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.settings import UserSettings
+from app.services.oauth_token_crypto import (
+    OAuthTokenReconnectionRequiredError,
+    decrypt_refresh_token,
+    encrypt_refresh_token,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +42,17 @@ def _get_lock(user_id: uuid.UUID) -> asyncio.Lock:
     if user_id not in _token_locks:
         _token_locks[user_id] = asyncio.Lock()
     return _token_locks[user_id]
+
+
+def _body_to_html(body: str) -> str:
+    """Escape the message body before applying paragraph/line formatting (audit M14).
+
+    Without escaping, a literal '<' or '&' in the draft would break the HTML
+    part or allow markup injection into the recipient's inbox.
+    """
+    escaped = html.escape(body or "")
+    formatted = escaped.replace("\n\n", "</p><p>").replace("\n", "<br>")
+    return f"<p>{formatted}</p>"
 
 
 def get_auth_url(redirect_uri: str, state: str = "") -> str:
@@ -119,9 +136,23 @@ async def _get_access_token(
             if now < expires_at - _EXPIRY_BUFFER_SECONDS:
                 return token
 
-        refresh_token = user_settings.gmail_refresh_token
-        if not refresh_token:
+        stored_refresh_token = user_settings.gmail_refresh_token
+        if not stored_refresh_token:
             raise ValueError("Gmail not connected. Please connect Gmail in Settings.")
+        try:
+            refresh_token = decrypt_refresh_token(stored_refresh_token)
+        except OAuthTokenReconnectionRequiredError as exc:
+            logger.warning(
+                "Gmail refresh token unreadable for user %s — disconnecting",
+                user_id,
+            )
+            user_settings.gmail_refresh_token = None
+            user_settings.gmail_connected = False
+            await db.commit()
+            _token_cache.pop(user_id, None)
+            raise ValueError(
+                "Gmail must be reconnected before it can be used."
+            ) from exc
 
         try:
             access_token, expires_in = await _refresh_access_token_uncached(refresh_token)
@@ -145,6 +176,15 @@ async def _get_access_token(
         return access_token
 
 
+async def get_access_token(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    user_settings: UserSettings,
+) -> str:
+    """Return a valid Gmail access token for a stored, encrypted connection."""
+    return await _get_access_token(db, user_id, user_settings)
+
+
 async def connect_gmail(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -164,7 +204,7 @@ async def connect_gmail(
     if not user_settings:
         raise ValueError("User settings not found.")
 
-    user_settings.gmail_refresh_token = refresh_token
+    user_settings.gmail_refresh_token = encrypt_refresh_token(refresh_token)
     user_settings.gmail_connected = True
     await db.commit()
 
@@ -228,9 +268,8 @@ async def create_draft(
     text_part = MIMEText(body, "plain")
     message.attach(text_part)
 
-    # HTML body (simple paragraph formatting)
-    html_body = body.replace("\n\n", "</p><p>").replace("\n", "<br>")
-    html_part = MIMEText(f"<p>{html_body}</p>", "html")
+    # HTML body (escaped, with simple paragraph formatting)
+    html_part = MIMEText(_body_to_html(body), "html")
     message.attach(html_part)
 
     # Encode for Gmail API
@@ -284,8 +323,7 @@ async def send_message(
     text_part = MIMEText(body, "plain")
     message.attach(text_part)
 
-    html_body = body.replace("\n\n", "</p><p>").replace("\n", "<br>")
-    html_part = MIMEText(f"<p>{html_body}</p>", "html")
+    html_part = MIMEText(_body_to_html(body), "html")
     message.attach(html_part)
 
     raw = base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")

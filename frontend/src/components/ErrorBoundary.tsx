@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { ErrorFallback } from './ErrorFallback';
+import { captureError } from '@/lib/observability';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -22,7 +23,10 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
-    console.error('ErrorBoundary caught:', error, errorInfo);
+    if (import.meta.env.DEV) {
+      console.error('ErrorBoundary caught:', error, errorInfo);
+    }
+    captureError(error, { componentStack: errorInfo.componentStack });
   }
 
   handleReset = (): void => {

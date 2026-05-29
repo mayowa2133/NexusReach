@@ -7,6 +7,7 @@ this service sends a digest email through their connected email provider.
 from __future__ import annotations
 
 import base64
+import html
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -22,6 +23,7 @@ from app.models.job import Job
 from app.models.job_alert import JobAlertPreference
 from app.models.settings import UserSettings
 from app.models.user import User
+from app.services.oauth_token_crypto import is_encrypted_refresh_token
 
 logger = logging.getLogger(__name__)
 
@@ -150,8 +152,15 @@ def _render_digest_html(jobs: list[Job], user_email: str) -> str:
     for company, company_jobs in sorted(by_company.items()):
         items = []
         for job in company_jobs[:10]:  # Cap per company
-            location = job.location or "Location not specified"
-            link = f'<a href="{job.url}" style="color:#2563eb;text-decoration:none">{job.title}</a>' if job.url else job.title
+            # Escape all interpolated job fields so a stray quote/angle bracket
+            # in a URL or title can't break the email HTML or inject markup (audit L11).
+            location = html.escape(job.location or "Location not specified")
+            title = html.escape(job.title or "")
+            if job.url:
+                safe_url = html.escape(job.url, quote=True)
+                link = f'<a href="{safe_url}" style="color:#2563eb;text-decoration:none">{title}</a>'
+            else:
+                link = title
             items.append(
                 f'<li style="margin-bottom:8px">'
                 f'{link}<br>'
@@ -164,7 +173,7 @@ def _render_digest_html(jobs: list[Job], user_email: str) -> str:
 
         sections.append(
             f'<div style="margin-bottom:20px">'
-            f'<h3 style="margin:0 0 8px 0;color:#111827">{company}</h3>'
+            f'<h3 style="margin:0 0 8px 0;color:#111827">{html.escape(company)}</h3>'
             f'<ul style="margin:0;padding-left:20px">{"".join(items)}</ul>'
             f'</div>'
         )
@@ -224,20 +233,36 @@ async def _resolve_email_provider(
 
     preference = prefs.email_provider or "connected"
 
-    if preference == "gmail" and user_settings.gmail_connected:
+    if (
+        preference == "gmail"
+        and user_settings.gmail_connected
+        and is_encrypted_refresh_token(user_settings.gmail_refresh_token)
+    ):
         return "gmail", user_settings
-    if preference == "outlook" and user_settings.outlook_connected:
+    if (
+        preference == "outlook"
+        and user_settings.outlook_connected
+        and is_encrypted_refresh_token(user_settings.outlook_refresh_token)
+    ):
         return "outlook", user_settings
     if preference == "connected":
-        if user_settings.gmail_connected:
+        if (
+            user_settings.gmail_connected
+            and is_encrypted_refresh_token(user_settings.gmail_refresh_token)
+        ):
             return "gmail", user_settings
-        if user_settings.outlook_connected:
+        if (
+            user_settings.outlook_connected
+            and is_encrypted_refresh_token(user_settings.outlook_refresh_token)
+        ):
             return "outlook", user_settings
 
     raise ValueError("No email provider connected. Connect Gmail or Outlook in Settings.")
 
 
 async def _send_via_gmail(
+    db: AsyncSession,
+    user_id: uuid.UUID,
     user_settings: UserSettings,
     user_email: str,
     subject: str,
@@ -245,25 +270,12 @@ async def _send_via_gmail(
     text_body: str,
 ) -> dict:
     """Send an email via Gmail API (send, not draft)."""
-    from app.config import settings
-    from app.services.gmail_service import GOOGLE_TOKEN_URL, GMAIL_API_URL
+    from app.services.gmail_service import GMAIL_API_URL, get_access_token
 
-    if not user_settings.gmail_refresh_token:
+    if not is_encrypted_refresh_token(user_settings.gmail_refresh_token):
         raise ValueError("Gmail not connected")
 
-    # Refresh the access token
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.post(
-            GOOGLE_TOKEN_URL,
-            data={
-                "client_id": settings.google_client_id,
-                "client_secret": settings.google_client_secret,
-                "refresh_token": user_settings.gmail_refresh_token,
-                "grant_type": "refresh_token",
-            },
-        )
-        resp.raise_for_status()
-        access_token = resp.json()["access_token"]
+    access_token = await get_access_token(db, user_id, user_settings)
 
     # Build MIME message
     message = MIMEMultipart("alternative")
@@ -285,32 +297,20 @@ async def _send_via_gmail(
 
 
 async def _send_via_outlook(
+    db: AsyncSession,
+    user_id: uuid.UUID,
     user_settings: UserSettings,
     user_email: str,
     subject: str,
     html_body: str,
 ) -> dict:
     """Send an email via Microsoft Graph API."""
-    from app.config import settings
-    from app.services.outlook_service import MS_TOKEN_URL, GRAPH_API_URL
+    from app.services.outlook_service import GRAPH_API_URL, get_access_token
 
-    if not user_settings.outlook_refresh_token:
+    if not is_encrypted_refresh_token(user_settings.outlook_refresh_token):
         raise ValueError("Outlook not connected")
 
-    # Refresh token
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.post(
-            MS_TOKEN_URL,
-            data={
-                "client_id": settings.microsoft_client_id,
-                "client_secret": settings.microsoft_client_secret,
-                "refresh_token": user_settings.outlook_refresh_token,
-                "grant_type": "refresh_token",
-                "scope": "Mail.Send offline_access",
-            },
-        )
-        resp.raise_for_status()
-        access_token = resp.json()["access_token"]
+    access_token = await get_access_token(db, user_id, user_settings)
 
     # Send via Graph API
     message_payload = {
@@ -389,9 +389,24 @@ async def send_digest_for_user(
     # Send
     try:
         if provider_name == "gmail":
-            await _send_via_gmail(user_settings, user_email, subject, html_body, text_body)
+            await _send_via_gmail(
+                db,
+                user_id,
+                user_settings,
+                user_email,
+                subject,
+                html_body,
+                text_body,
+            )
         elif provider_name == "outlook":
-            await _send_via_outlook(user_settings, user_email, subject, html_body)
+            await _send_via_outlook(
+                db,
+                user_id,
+                user_settings,
+                user_email,
+                subject,
+                html_body,
+            )
         else:
             return {"sent": False, "job_count": len(jobs), "provider": None, "error": "unknown_provider"}
     except Exception:

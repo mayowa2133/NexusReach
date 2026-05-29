@@ -16,6 +16,7 @@ exceptions from this module.
 
 import logging
 from datetime import datetime, timezone
+from urllib.parse import urljoin
 
 import httpx
 
@@ -33,8 +34,8 @@ _HEADERS = {
     "Referer": "https://jobs.careers.microsoft.com/",
 }
 
-_SEARCH_URL = "https://gcsservices.careers.microsoft.com/search/api/v1/search"
-_JOB_URL_TEMPLATE = "https://jobs.careers.microsoft.com/global/en/job/{job_id}"
+_SEARCH_URL = "https://apply.careers.microsoft.com/api/pcsx/search"
+_JOB_URL_TEMPLATE = "https://apply.careers.microsoft.com{path}"
 
 
 def _parse_date(raw: str | None) -> str | None:
@@ -64,6 +65,15 @@ def _parse_date(raw: str | None) -> str | None:
 
     logger.debug("Microsoft: could not parse date %r", raw)
     return None
+
+
+def _epoch_seconds_to_iso(raw: object) -> str | None:
+    if not isinstance(raw, (int, float)) or raw <= 0:
+        return None
+    try:
+        return datetime.fromtimestamp(raw, tz=timezone.utc).isoformat()
+    except (OSError, ValueError, OverflowError):
+        return None
 
 
 def _extract_location(job: dict) -> str:
@@ -103,6 +113,34 @@ def _is_remote(job: dict, location: str) -> bool:
     return False
 
 
+def _work_mode(job: dict, location: str) -> str | None:
+    raw = (
+        job.get("properties", {}).get("workSiteFlexibility")
+        or job.get("workSiteFlexibility")
+        or ""
+    )
+    lowered = f"{raw} {location} {job.get('title') or ''}".lower()
+    if "hybrid" in lowered:
+        return "hybrid"
+    if "remote" in lowered:
+        return "remote"
+    if "onsite" in lowered or "on-site" in lowered or "on site" in lowered:
+        return "onsite"
+    return None
+
+
+def _work_mode_from_position(position: dict, location: str) -> str | None:
+    raw = str(position.get("workLocationOption") or position.get("locationFlexibility") or "").lower()
+    combined = f"{raw} {location} {position.get('name') or ''}".lower()
+    if "hybrid" in combined:
+        return "hybrid"
+    if "remote" in combined:
+        return "remote"
+    if "onsite" in combined or "on-site" in combined or "on site" in combined:
+        return "onsite"
+    return None
+
+
 async def search_microsoft_jobs(
     search_text: str = "",
     limit: int = 20,
@@ -112,25 +150,25 @@ async def search_microsoft_jobs(
     Returns an empty list on any error so callers can treat this as
     best-effort without extra error handling.
     """
-    body: dict = {
-        "QueryString": search_text or "",
-        "PageSize": min(limit, 20),
-        "Page": 1,
-        "Filters": [],
-        "OrderBy": "Relevance",
-        "Fields": [
-            "title",
-            "description",
-            "locations",
-            "datePosted",
-            "jobId",
-            "properties",
-        ],
+    params: dict = {
+        "domain": "microsoft.com",
+        "query": search_text or "",
+        "location": "",
+        "start": 0,
     }
 
     try:
         async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
-            resp = await client.post(_SEARCH_URL, json=body, headers=_HEADERS)
+            resp = await client.get(
+                _SEARCH_URL,
+                params=params,
+                headers={
+                    **_HEADERS,
+                    "X-EF-NS": "pcsx",
+                    "X-EF-REQ-ENDPOINT": "get_position_search_data",
+                    "Referer": "https://apply.careers.microsoft.com/careers",
+                },
+            )
 
             if resp.status_code != 200:
                 logger.debug(
@@ -148,49 +186,50 @@ async def search_microsoft_jobs(
         logger.exception("Microsoft search unexpected error")
         return []
 
-    # The API wraps results in different keys depending on version.
-    postings: list[dict] = (
-        data.get("operationResult", {}).get("result", {}).get("jobs")
-        or data.get("jobs")
-        or data.get("results")
-        or data.get("operationResult", {}).get("result", {}).get("results")
-        or []
-    )
+    postings: list[dict] = data.get("data", {}).get("positions") or []
 
     jobs: list[dict] = []
     for p in postings:
-        title = p.get("title") or ""
+        title = p.get("name") or p.get("title") or ""
         if not title:
             continue
 
-        job_id = str(p.get("jobId") or p.get("id") or "")
-        location = _extract_location(p)
+        job_id = str(p.get("displayJobId") or p.get("atsJobId") or p.get("id") or "")
+        locations = p.get("standardizedLocations") or p.get("locations") or []
+        location = "; ".join(str(loc) for loc in locations if loc) if isinstance(locations, list) else _extract_location(p)
         posted_at = _parse_date(
             p.get("datePosted")
             or p.get("postingDate")
             or p.get("properties", {}).get("datePosted")
-        )
+        ) or _epoch_seconds_to_iso(p.get("postedTs") or p.get("creationTs"))
 
         description = (
             p.get("description")
             or p.get("properties", {}).get("description")
+            or p.get("department")
             or ""
         )
 
-        job_url = _JOB_URL_TEMPLATE.format(job_id=job_id) if job_id else ""
+        position_path = p.get("positionUrl") or ""
+        job_url = _JOB_URL_TEMPLATE.format(path=position_path) if position_path else ""
+        if job_url:
+            job_url = urljoin("https://apply.careers.microsoft.com", job_url)
+        work_mode = _work_mode_from_position(p, location)
 
         jobs.append({
             "external_id": f"ms_{job_id}" if job_id else "",
             "title": title,
             "company_name": "Microsoft",
             "location": location,
-            "remote": _is_remote(p, location),
+            "remote": work_mode == "remote" or _is_remote(p, location),
+            "work_mode": work_mode or _work_mode(p, location),
             "url": job_url,
             "apply_url": job_url or None,
             "description": description,
             "posted_at": posted_at,
             "source": "microsoft",
             "ats": None,
+            "department": p.get("department"),
         })
 
         if len(jobs) >= limit:

@@ -67,6 +67,55 @@ function formatWarmPathType(warmPathType: string | null | undefined): string | n
   return null;
 }
 
+function buildMatchProof(person: Person): string {
+  if (person.match_reason) return person.match_reason;
+  if (person.person_type === 'recruiter') return 'Recruiting role matched the target company.';
+  if (person.person_type === 'hiring_manager') return 'Hiring-side role matched the target team.';
+  if (person.person_type === 'peer') return 'Peer role matched the target company or team.';
+  return 'Matched from available public profile and company signals.';
+}
+
+function buildCompanyTrustProof(
+  person: Person,
+  verification: {
+    current_company_verification_status: string | null;
+    current_company_verification_evidence: string | null;
+  },
+): string {
+  if (verification.current_company_verification_status === 'verified') {
+    return verification.current_company_verification_evidence || 'Current company was verified from trusted profile or public-web evidence.';
+  }
+  if (person.company_match_confidence === 'verified') {
+    return 'Company match was verified by public identity signals.';
+  }
+  if (verification.current_company_verification_evidence) {
+    if (
+      person.fallback_reason &&
+      person.fallback_reason !== verification.current_company_verification_evidence
+    ) {
+      return `${verification.current_company_verification_evidence} ${person.fallback_reason}`;
+    }
+    return verification.current_company_verification_evidence;
+  }
+  if (person.fallback_reason) return person.fallback_reason;
+  if (person.company_match_confidence === 'strong_signal') {
+    return 'Strong same-company signal, pending current-company verification.';
+  }
+  if (person.company_match_confidence === 'weak_signal') {
+    return 'Weak company signal; review before outreach.';
+  }
+  return 'Company trust signal has not been verified yet.';
+}
+
+function buildWarmPathProof(person: Person): string {
+  if (person.warm_path_reason) return person.warm_path_reason;
+  if (person.warm_path_connection?.display_name) {
+    return `Warm path through ${person.warm_path_connection.display_name}.`;
+  }
+  if (person.linkedin_signal_reason) return person.linkedin_signal_reason;
+  return 'No warm path found from your imported LinkedIn graph yet.';
+}
+
 type SavedContactsGroup = {
   key: string;
   companyName: string;
@@ -872,6 +921,18 @@ function PersonCard({
   const verificationStatusLabel = formatCompanyVerificationStatus(
     companyVerification.current_company_verification_status
   );
+  const emailSafetyProof = (() => {
+    if (shownEmail && isVerifiedEmail) {
+      return emailVerificationEvidence || emailVerificationLabel || 'Email is verified and eligible for outreach.';
+    }
+    if (shownEmail) {
+      return emailVerificationEvidence || guessBasisLabel || 'Best-guess email is shown only after safe domain checks.';
+    }
+    if (emailStatus === 'not_found' && emailResult?.failure_reasons?.length) {
+      return `Email withheld: ${emailResult.failure_reasons.map(formatFailureReason).join(', ')}.`;
+    }
+    return 'Email not checked yet; unsafe guesses stay hidden.';
+  })();
 
   const handleOpenInLinkedIn = async () => {
     if (!person.linkedin_url) {
@@ -1002,34 +1063,12 @@ function PersonCard({
           <Badge variant="outline">Following company</Badge>
         )}
 
-        {person.match_reason && (
-          <div className="text-xs text-muted-foreground">{person.match_reason}</div>
-        )}
-
-        {person.warm_path_reason && (
-          <div className="text-xs text-muted-foreground">{person.warm_path_reason}</div>
-        )}
-
-        {person.linkedin_signal_reason && (
-          <div className="text-xs text-muted-foreground">{person.linkedin_signal_reason}</div>
-        )}
-
         {person.usefulness_score != null && person.usefulness_score > 0 && (
           <Badge
             variant={person.usefulness_score >= 70 ? 'secondary' : 'outline'}
           >
             Usefulness: {person.usefulness_score}%
           </Badge>
-        )}
-
-        {person.fallback_reason && person.fallback_reason !== person.match_reason && (
-          <div className="text-xs text-muted-foreground">{person.fallback_reason}</div>
-        )}
-
-        {companyVerification.current_company_verification_evidence && (
-          <div className="text-xs text-muted-foreground">
-            Evidence: {companyVerification.current_company_verification_evidence}
-          </div>
         )}
 
         {person.linkedin_url && companyVerification.current_company_verification_status !== 'verified' && (
@@ -1042,6 +1081,15 @@ function PersonCard({
             {verifyCurrentCompany.isPending ? 'Verifying company...' : 'Verify Current Company'}
           </Button>
         )}
+
+        <ContactProof
+          rows={[
+            ['Why matched', buildMatchProof(person)],
+            ['Company trust', buildCompanyTrustProof(person, companyVerification)],
+            ['Email safety', emailSafetyProof],
+            ['Warm path', buildWarmPathProof(person)],
+          ]}
+        />
 
         {/* Email display with three states */}
         {shownEmail ? (
@@ -1203,5 +1251,21 @@ function PersonCard({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function ContactProof({ rows }: { rows: [string, string][] }) {
+  return (
+    <div className="rounded-md border bg-muted/30 p-2">
+      <div className="mb-1 text-xs font-medium">Proof</div>
+      <dl className="space-y-1">
+        {rows.map(([label, value]) => (
+          <div key={label} className="grid gap-1 text-xs sm:grid-cols-[92px_1fr]">
+            <dt className="text-muted-foreground">{label}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
   );
 }

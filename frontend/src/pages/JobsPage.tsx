@@ -14,6 +14,7 @@ import {
   useUpdateJobStage,
   useToggleJobStar,
   useSavedSearches,
+  useJobRefreshRuns,
   useToggleSavedSearch,
   useDeleteSavedSearch,
   useRefreshJobs,
@@ -27,9 +28,10 @@ import {
 import { toast } from 'sonner';
 import { sanitizeHTML } from '@/lib/sanitize';
 import { formatRelativeDate } from '@/lib/dateUtils';
-import { getJobCountry, getJobCountryOptions } from '@/lib/jobCountry';
+import { getJobCountryOptions } from '@/lib/jobCountry';
 import { getOccupationLabels } from '@/lib/jobOccupation';
 import { getStartupSourceLabels, isStartupJob } from '@/lib/jobStartup';
+import { formatSalaryRange } from '@/lib/jobSalary';
 import { OccupationChipRow } from '@/components/OccupationChipRow';
 import { useOccupations } from '@/hooks/useOccupations';
 import { useProfile } from '@/hooks/useProfile';
@@ -133,6 +135,11 @@ const EXPERIENCE_LEVELS = [
   { value: 'senior', label: 'Senior+' },
 ];
 
+type BrowserCoordinates = {
+  latitude: number;
+  longitude: number;
+};
+
 export function JobsPage() {
   const [query, setQuery] = useState('');
   const [location, setLocation] = useState('');
@@ -152,6 +159,11 @@ export function JobsPage() {
   const [employmentTypeFilter, setEmploymentTypeFilter] = useState('');
   const [experienceLevelFilter, setExperienceLevelFilter] = useState('');
   const [countryFilter, setCountryFilter] = useState('');
+  const [nearLocationFilter, setNearLocationFilter] = useState('');
+  const [radiusKmFilter, setRadiusKmFilter] = useState('50');
+  const [nearCoordinates, setNearCoordinates] = useState<BrowserCoordinates | null>(null);
+  const [includeRemoteInRadius, setIncludeRemoteInRadius] = useState(false);
+  const [nearMeStatus, setNearMeStatus] = useState<string | null>(null);
   const [remoteFilter, setRemoteFilter] = useState(false);
   const [startupFilter, setStartupFilter] = useState(false);
   const [salaryMinFilter, setSalaryMinFilter] = useState('');
@@ -178,6 +190,8 @@ export function JobsPage() {
   const navigate = useNavigate();
   const search = useJobSearch();
   const atsSearch = useATSSearch();
+  const radiusKm = radiusKmFilter ? Number(radiusKmFilter) : undefined;
+  const nearFilterActive = Boolean(nearLocationFilter.trim() || nearCoordinates);
   const { data: savedJobsData } = useJobs({
     stage: stageFilter || undefined,
     sortBy,
@@ -185,6 +199,29 @@ export function JobsPage() {
     employmentType: employmentTypeFilter || undefined,
     experienceLevel: experienceLevelFilter || undefined,
     salaryMin: salaryMinFilter ? Number(salaryMinFilter) : undefined,
+    country: countryFilter || undefined,
+    near: nearCoordinates ? undefined : nearLocationFilter.trim() || undefined,
+    nearLat: nearCoordinates?.latitude,
+    nearLng: nearCoordinates?.longitude,
+    radiusKm: nearFilterActive && radiusKm && radiusKm > 0 ? radiusKm : undefined,
+    includeRemoteInRadius: nearFilterActive ? includeRemoteInRadius : undefined,
+    remote: remoteFilter ? true : undefined,
+    startup: startupFilter ? true : undefined,
+    occupations: selectedOccupations.length > 0 ? selectedOccupations : undefined,
+    search: searchFilter || undefined,
+  });
+  const { data: countryJobsData } = useJobs({
+    stage: stageFilter || undefined,
+    sortBy,
+    starred: starredFilter ? true : undefined,
+    employmentType: employmentTypeFilter || undefined,
+    experienceLevel: experienceLevelFilter || undefined,
+    salaryMin: salaryMinFilter ? Number(salaryMinFilter) : undefined,
+    near: nearCoordinates ? undefined : nearLocationFilter.trim() || undefined,
+    nearLat: nearCoordinates?.latitude,
+    nearLng: nearCoordinates?.longitude,
+    radiusKm: nearFilterActive && radiusKm && radiusKm > 0 ? radiusKm : undefined,
+    includeRemoteInRadius: nearFilterActive ? includeRemoteInRadius : undefined,
     remote: remoteFilter ? true : undefined,
     startup: startupFilter ? true : undefined,
     occupations: selectedOccupations.length > 0 ? selectedOccupations : undefined,
@@ -192,23 +229,19 @@ export function JobsPage() {
   });
   const baseSavedJobs = useMemo(() => savedJobsData?.items ?? [], [savedJobsData?.items]);
   const countryOptions = useMemo(() => {
-    const options = new Set(getJobCountryOptions(baseSavedJobs));
+    const options = new Set(getJobCountryOptions(countryJobsData?.items ?? baseSavedJobs));
     if (countryFilter) {
       options.add(countryFilter);
     }
     return [...options].sort((a, b) => a.localeCompare(b));
-  }, [baseSavedJobs, countryFilter]);
-  const savedJobs = useMemo(
-    () => countryFilter
-      ? baseSavedJobs.filter((job) => getJobCountry(job.location) === countryFilter)
-      : baseSavedJobs,
-    [baseSavedJobs, countryFilter],
-  );
+  }, [baseSavedJobs, countryFilter, countryJobsData?.items]);
+  const savedJobs = baseSavedJobs;
   const updateStage = useUpdateJobStage();
   const toggleStar = useToggleJobStar();
 
   // Saved searches
   const { data: savedSearches } = useSavedSearches();
+  const { data: refreshRuns } = useJobRefreshRuns();
   const toggleSavedSearch = useToggleSavedSearch();
   const deleteSavedSearch = useDeleteSavedSearch();
   const refreshJobs = useRefreshJobs();
@@ -218,6 +251,34 @@ export function JobsPage() {
     () => lastVisited ? savedJobs.filter((j) => j.created_at > lastVisited).length : 0,
     [savedJobs, lastVisited],
   );
+  const latestRefreshRuns = refreshRuns?.slice(0, 3) ?? [];
+
+  const handleUseCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      toast.error('Browser location access is not available.');
+      return;
+    }
+    setNearMeStatus('Requesting location...');
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setNearCoordinates({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        });
+        setNearLocationFilter('');
+        setNearMeStatus('Using your current location');
+      },
+      (error) => {
+        setNearMeStatus(null);
+        toast.error(error.message || 'Location permission was not granted.');
+      },
+      {
+        enableHighAccuracy: false,
+        maximumAge: 300000,
+        timeout: 10000,
+      },
+    );
+  };
 
   const handleSearch = async (e: FormEvent) => {
     e.preventDefault();
@@ -460,7 +521,7 @@ export function JobsPage() {
               <div>
                 <CardTitle className="text-base">Saved Searches</CardTitle>
                 <CardDescription>
-                  Enabled searches auto-refresh hourly and create notifications for new matches.
+                  Enabled searches auto-refresh every 15 minutes and create notifications for new matches.
                 </CardDescription>
               </div>
               <Button
@@ -502,11 +563,22 @@ export function JobsPage() {
                           Remote
                         </Badge>
                       )}
+                      {pref.mode === 'startup' && (
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">
+                          Startup
+                        </Badge>
+                      )}
                     </div>
-                    {pref.last_refreshed_at && (
+                    {(pref.last_success_at || pref.last_refreshed_at || pref.last_attempted_at) && (
                       <span className="text-[11px] text-muted-foreground">
-                        Last refreshed {new Date(pref.last_refreshed_at).toLocaleString()}
+                        Last refreshed {new Date(pref.last_success_at || pref.last_refreshed_at || pref.last_attempted_at || '').toLocaleString()}
                         {pref.new_jobs_found > 0 && ` — ${pref.new_jobs_found} new`}
+                        {pref.last_duration_seconds != null && ` — ${pref.last_duration_seconds.toFixed(1)}s`}
+                      </span>
+                    )}
+                    {pref.last_error && (
+                      <span className="text-[11px] text-destructive truncate">
+                        {pref.last_error}
                       </span>
                     )}
                   </div>
@@ -545,6 +617,54 @@ export function JobsPage() {
                 </div>
               ))}
             </div>
+            {latestRefreshRuns.length > 0 && (
+              <div className="mt-4 border-t pt-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span className="text-xs font-medium uppercase text-muted-foreground">
+                    Refresh Health
+                  </span>
+                  <span className="text-[11px] text-muted-foreground">
+                    Latest {latestRefreshRuns.length}
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {latestRefreshRuns.map((run) => {
+                    const failedSources = run.source_runs.filter((source) => source.status === 'failed');
+                    return (
+                      <div key={run.id} className="rounded-md border px-3 py-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge
+                            variant={run.status === 'success' ? 'secondary' : 'destructive'}
+                            className="text-[10px] px-1.5 py-0"
+                          >
+                            {run.status.replace('_', ' ')}
+                          </Badge>
+                          <span className="text-xs font-medium truncate">
+                            {run.mode === 'ats_discovery' ? 'ATS discovery' : run.query || 'Saved search'}
+                          </span>
+                          <span className="text-[11px] text-muted-foreground">
+                            {new Date(run.started_at).toLocaleString()}
+                          </span>
+                          <span className="text-[11px] text-muted-foreground">
+                            {run.total_new} new / {run.total_seen} seen
+                          </span>
+                          {run.duration_seconds != null && (
+                            <span className="text-[11px] text-muted-foreground">
+                              {run.duration_seconds.toFixed(1)}s
+                            </span>
+                          )}
+                        </div>
+                        {failedSources.length > 0 && (
+                          <p className="mt-1 text-[11px] text-destructive truncate">
+                            Failed: {failedSources.map((source) => source.source).join(', ')}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
@@ -615,6 +735,49 @@ export function JobsPage() {
                   ))}
                 </select>
               </div>
+              <div className="flex items-center gap-1.5">
+                <Label className="text-sm whitespace-nowrap">Near:</Label>
+                <Input
+                  placeholder="Toronto or GTA"
+                  value={nearLocationFilter}
+                  onChange={(e) => {
+                    setNearLocationFilter(e.target.value);
+                    setNearCoordinates(null);
+                    setNearMeStatus(null);
+                  }}
+                  className="h-8 w-36 text-sm"
+                  aria-label="Nearby location filter"
+                />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <Label className="text-sm whitespace-nowrap">Radius:</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  max="500"
+                  value={radiusKmFilter}
+                  onChange={(e) => setRadiusKmFilter(e.target.value)}
+                  className="h-8 w-20 text-sm"
+                  aria-label="Nearby radius in kilometers"
+                />
+                <span className="text-xs text-muted-foreground">km</span>
+              </div>
+              <Button
+                variant={nearCoordinates ? 'default' : 'outline'}
+                size="sm"
+                className="h-8 text-xs"
+                onClick={handleUseCurrentLocation}
+              >
+                Near me
+              </Button>
+              <Button
+                variant={includeRemoteInRadius ? 'default' : 'outline'}
+                size="sm"
+                className="h-8 text-xs"
+                onClick={() => setIncludeRemoteInRadius(!includeRemoteInRadius)}
+              >
+                Include remote
+              </Button>
               <Button
                 variant={starredFilter ? 'default' : 'outline'}
                 size="sm"
@@ -660,8 +823,12 @@ export function JobsPage() {
                 >
                   <option value="score">Match Score</option>
                   <option value="date">Newest First</option>
+                  <option value="distance">Distance</option>
                 </select>
               </div>
+              {nearMeStatus && (
+                <span className="text-xs text-muted-foreground">{nearMeStatus}</span>
+              )}
               <span className="text-sm text-muted-foreground ml-auto">
                 {savedJobs.length} jobs{newJobCount > 0 && (
                   <span className="text-blue-600 dark:text-blue-400 font-medium"> ({newJobCount} new)</span>
@@ -756,6 +923,9 @@ const JobListCard = memo(function JobListCard({
 }) {
   const startupSourceLabels = getStartupSourceLabels(job);
   const occupationLabels = getOccupationLabels(job, occupations);
+  const workModeLabel = job.work_mode
+    ? job.work_mode.replace('-', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
+    : job.remote ? 'Remote' : null;
 
   return (
     <Card
@@ -773,6 +943,16 @@ const JobListCard = memo(function JobListCard({
               {isNew && (
                 <Badge variant="default" className="text-[9px] px-1 py-0 bg-blue-600 hover:bg-blue-600 shrink-0">
                   NEW
+                </Badge>
+              )}
+              {job.source_status === 'stale' && (
+                <Badge variant="outline" className="text-[9px] px-1 py-0 shrink-0">
+                  STALE
+                </Badge>
+              )}
+              {job.source_status === 'closed' && (
+                <Badge variant="destructive" className="text-[9px] px-1 py-0 shrink-0">
+                  CLOSED
                 </Badge>
               )}
             </div>
@@ -810,8 +990,8 @@ const JobListCard = memo(function JobListCard({
           {job.location && (
             <span className="text-xs text-muted-foreground">{job.location}</span>
           )}
-          {job.remote && (
-            <Badge variant="outline" className="text-[10px] px-1 py-0">Remote</Badge>
+          {workModeLabel && (
+            <Badge variant="outline" className="text-[10px] px-1 py-0">{workModeLabel}</Badge>
           )}
           {isStartupJob(job) && (
             <Badge variant="secondary" className="text-[10px] px-1 py-0">Startup</Badge>
@@ -847,6 +1027,10 @@ function JobDetail({
   onTargetCountChange: (value: number) => void;
 }) {
   const startupSourceLabels = getStartupSourceLabels(job);
+  const salaryLabel = formatSalaryRange(job);
+  const workModeLabel = job.work_mode
+    ? job.work_mode.replace('-', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
+    : job.remote ? 'Remote' : null;
 
   return (
     <Card>
@@ -881,7 +1065,7 @@ function JobDetail({
         {/* Metadata */}
         <div className="flex flex-wrap gap-2">
           {job.location && <Badge variant="outline">{job.location}</Badge>}
-          {job.remote && <Badge variant="secondary">Remote</Badge>}
+          {workModeLabel && <Badge variant="secondary">{workModeLabel}</Badge>}
           {isStartupJob(job) && <Badge variant="secondary">Startup</Badge>}
           {startupSourceLabels.map((label) => (
             <Badge key={label} variant="outline">{label}</Badge>
@@ -895,17 +1079,15 @@ function JobDetail({
           {formatRelativeDate(job.posted_at) && (
             <Badge variant="outline">Posted {formatRelativeDate(job.posted_at)!.toLowerCase()}</Badge>
           )}
+          {job.source_status === 'stale' && <Badge variant="outline">Stale source</Badge>}
+          {job.source_status === 'closed' && <Badge variant="destructive">Closed upstream</Badge>}
         </div>
 
         {/* Salary */}
-        {(job.salary_min || job.salary_max) && (
+        {salaryLabel && (
           <div className="text-sm">
             <span className="text-muted-foreground">Salary: </span>
-            {job.salary_min && job.salary_max
-              ? `${job.salary_currency || '$'}${Math.round(job.salary_min).toLocaleString()} – ${Math.round(job.salary_max).toLocaleString()}`
-              : job.salary_min
-              ? `From ${job.salary_currency || '$'}${Math.round(job.salary_min).toLocaleString()}`
-              : `Up to ${job.salary_currency || '$'}${Math.round(job.salary_max!).toLocaleString()}`}
+            {salaryLabel}
           </div>
         )}
 

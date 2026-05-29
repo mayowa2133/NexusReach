@@ -92,12 +92,23 @@ export function LoginPage() {
             </Button>
           </div>
         </CardContent>
-        <CardFooter className="justify-center">
+        <CardFooter className="flex-col gap-2 text-center">
           <p className="text-sm text-muted-foreground">
             Don't have an account?{' '}
             <Link to="/signup" className="font-medium text-primary underline-offset-4 hover:underline">
               Sign up
             </Link>
+          </p>
+          <p className="text-xs text-muted-foreground">
+            By continuing, you agree to the{' '}
+            <Link to="/terms" className="underline underline-offset-4 hover:text-foreground">
+              Terms
+            </Link>{' '}
+            and acknowledge the{' '}
+            <Link to="/privacy" className="underline underline-offset-4 hover:text-foreground">
+              Privacy Policy
+            </Link>
+            .
           </p>
         </CardFooter>
       </Card>

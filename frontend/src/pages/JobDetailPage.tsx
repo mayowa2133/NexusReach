@@ -16,6 +16,7 @@ import { useLinkedInGraphStatus } from '@/hooks/useLinkedInGraph';
 import { sanitizeHTML } from '@/lib/sanitize';
 import { formatRelativeDate } from '@/lib/dateUtils';
 import { getStartupSourceLabels, isStartupJob } from '@/lib/jobStartup';
+import { formatSalaryRange } from '@/lib/jobSalary';
 import {
   clampPeopleSearchTargetCount,
   getStoredPeopleSearchTargetCount,
@@ -219,7 +220,14 @@ function PersonCard({
         <Button
           size="sm"
           className="h-7 text-xs"
-          onClick={() => navigate(`/messages?person_id=${person.id}&job_id=${jobId}`)}
+          onClick={() => {
+            const params = new URLSearchParams({
+              person_id: person.id,
+              job_id: jobId,
+              goal: person.person_type === 'peer' ? 'warm_intro' : 'interview',
+            });
+            navigate(`/messages?${params.toString()}`);
+          }}
         >
           Draft Message
         </Button>
@@ -1313,6 +1321,10 @@ export function JobDetailPage() {
   }
 
   const startupSourceLabels = getStartupSourceLabels(job);
+  const salaryLabel = formatSalaryRange(job);
+  const workModeLabel = job.work_mode
+    ? job.work_mode.replace('-', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
+    : job.remote ? 'Remote' : null;
 
   return (
     <div className="space-y-6">
@@ -1372,7 +1384,7 @@ export function JobDetailPage() {
       {/* Meta badges */}
       <div className="flex flex-wrap gap-2">
         {job.location && <Badge variant="outline">{job.location}</Badge>}
-        {job.remote && <Badge variant="secondary">Remote</Badge>}
+        {workModeLabel && <Badge variant="secondary">{workModeLabel}</Badge>}
         {isStartupJob(job) && <Badge variant="secondary">Startup</Badge>}
         {startupSourceLabels.map((label) => (
           <Badge key={label} variant="outline">{label}</Badge>
@@ -1389,16 +1401,10 @@ export function JobDetailPage() {
       </div>
 
       {/* Salary */}
-      {(job.salary_min || job.salary_max) && (
+      {salaryLabel && (
         <div className="text-sm">
           <span className="text-muted-foreground">Salary: </span>
-          <span className="font-medium">
-            {job.salary_min && job.salary_max
-              ? `${job.salary_currency || '$'}${Math.round(job.salary_min).toLocaleString()} – ${Math.round(job.salary_max).toLocaleString()}`
-              : job.salary_min
-              ? `From ${job.salary_currency || '$'}${Math.round(job.salary_min).toLocaleString()}`
-              : `Up to ${job.salary_currency || '$'}${Math.round(job.salary_max!).toLocaleString()}`}
-          </span>
+          <span className="font-medium">{salaryLabel}</span>
         </div>
       )}
 

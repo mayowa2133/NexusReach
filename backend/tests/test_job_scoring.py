@@ -46,7 +46,8 @@ def _make_job(**overrides):
 class TestScoreJob:
     def test_no_profile_returns_zero(self):
         score, breakdown = _score_job(_make_job(), None)
-        assert score == 0.0
+        assert score is None
+        assert breakdown.get("resume_missing") is True
         assert breakdown.get("resume_not_uploaded") is True
 
     def test_full_profile_high_score(self):
@@ -100,8 +101,9 @@ class TestScoreJob:
 
     def test_no_resume_parsed(self):
         profile = _make_profile(resume_parsed=None)
-        _, breakdown = _score_job(_make_job(), profile)
-        assert breakdown["skills_match"] == 0.0
+        score, breakdown = _score_job(_make_job(), profile)
+        assert score is None
+        assert breakdown["resume_missing"] is True
 
     def test_location_match(self):
         profile = _make_profile(target_locations=["San Francisco"])
@@ -156,6 +158,7 @@ class TestScoreJob:
         profile = _make_profile()
         job = _make_job()
         score, _ = _score_job(job, profile)
+        assert score is not None
         assert 0 <= score <= 100
 
     def test_breakdown_has_category_maxes(self):
@@ -178,6 +181,33 @@ class TestScoreJob:
         detail = breakdown.get("skills_detail", {})
         assert "matched" in detail
         assert isinstance(detail["matched"], list)
+
+    def test_required_skill_detail_and_resume_duration(self):
+        profile = _make_profile(
+            resume_parsed={
+                "skills": ["Python", "React"],
+                "experience": [
+                    {
+                        "title": "Software Engineer",
+                        "company": "OldCo",
+                        "start_date": "2020-01",
+                        "end_date": "2024-12",
+                        "description": "Built APIs",
+                    },
+                ],
+                "education": [],
+            }
+        )
+        job = _make_job(
+            description="Requirements\n5+ years of experience. Python and React required.",
+            experience_level="senior",
+        )
+
+        _, breakdown = _score_job(job, profile)
+
+        assert "python" in breakdown["skills_detail"]["required_matched"]
+        assert breakdown["level_detail"]["user_years"] >= 5
+        assert breakdown["level_fit"] == 5.0
 
     def test_skill_synonym_matching(self):
         """Skills with synonyms should match (e.g., 'JS' matches 'javascript')."""

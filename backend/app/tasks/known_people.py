@@ -1,11 +1,10 @@
 """Celery tasks for known people cache maintenance."""
 
-import asyncio
 import logging
 
 from app.database import async_session
 from app.services.known_people_service import mark_stale_records
-from app.tasks import celery_app
+from app.tasks import celery_app, run_async
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +25,6 @@ async def _maintain_known_people_cache() -> dict:
 )
 def maintain_known_people_cache() -> dict:
     """Celery task: mark stale/expired records in the known people cache."""
-    result = asyncio.run(_maintain_known_people_cache())
+    result = run_async(_maintain_known_people_cache())
     logger.info("Known people cache maintenance: %s", result)
     return result

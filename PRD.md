@@ -1,6 +1,6 @@
 # NexusReach — Product Requirements Document
 
-Last updated: 2026-04-04
+Last updated: 2026-05-24
 
 This PRD reflects the current intended product behavior, including features that are already shipped and the rules they should continue to preserve.
 
@@ -215,7 +215,9 @@ Email lookup should return one of:
   - job/company context
   - prior outreach history
 - provider choice should be abstracted so the product is not locked to one LLM vendor
-- drafts may be staged into Gmail or Outlook, but never auto-sent
+- drafts may be staged into Gmail or Outlook
+- users may optionally enable delayed auto-send for staged email drafts, with a cancellation window before send
+- Gmail and Outlook refresh tokens must be encrypted at rest with versioned app keys
 
 ## Module 9: CRM and contact history
 

@@ -1,23 +1,37 @@
-import { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 
-interface ProfileStepProps {
-  onNext: (data: { fullName: string; linkedinUrl: string }) => void;
-  onSkip: () => void;
+export interface ProfileStepData {
+  fullName: string;
+  linkedinUrl: string;
+  bio: string;
 }
 
-export function ProfileStep({ onNext, onSkip }: ProfileStepProps) {
+interface ProfileStepProps {
+  onNext: (data: ProfileStepData) => void;
+  onSkip: () => void;
+  isSaving?: boolean;
+}
+
+export function ProfileStep({ onNext, onSkip, isSaving = false }: ProfileStepProps) {
   const [fullName, setFullName] = useState('');
   const [linkedinUrl, setLinkedinUrl] = useState('');
+  const [bio, setBio] = useState('');
+
+  const handleSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    onNext({ fullName, linkedinUrl, bio });
+  };
 
   return (
-    <div className="space-y-6 py-4">
+    <form className="space-y-6 py-4" onSubmit={handleSubmit}>
       <div className="space-y-2 text-center">
         <h2 className="text-xl font-bold">Tell us about yourself</h2>
         <p className="text-sm text-muted-foreground">
-          This helps us personalize your outreach messages.
+          Add the basics NexusReach needs for profile-aware jobs and outreach.
         </p>
       </div>
 
@@ -29,6 +43,18 @@ export function ProfileStep({ onNext, onSkip }: ProfileStepProps) {
             placeholder="Jane Doe"
             value={fullName}
             onChange={(e) => setFullName(e.target.value)}
+            disabled={isSaving}
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="bio">Short bio (optional)</Label>
+          <Textarea
+            id="bio"
+            placeholder="Frontend engineer focused on product-led teams and developer tools."
+            value={bio}
+            onChange={(e) => setBio(e.target.value)}
+            disabled={isSaving}
+            rows={3}
           />
         </div>
         <div className="space-y-2">
@@ -38,22 +64,29 @@ export function ProfileStep({ onNext, onSkip }: ProfileStepProps) {
             placeholder="https://linkedin.com/in/janedoe"
             value={linkedinUrl}
             onChange={(e) => setLinkedinUrl(e.target.value)}
+            disabled={isSaving}
           />
         </div>
       </div>
 
       <div className="flex gap-2">
-        <Button variant="outline" onClick={onSkip} className="flex-1">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={onSkip}
+          disabled={isSaving}
+          className="flex-1"
+        >
           Skip for now
         </Button>
         <Button
-          onClick={() => onNext({ fullName, linkedinUrl })}
-          disabled={!fullName.trim()}
+          type="submit"
+          disabled={!fullName.trim() || isSaving}
           className="flex-1"
         >
-          Continue
+          {isSaving ? 'Saving...' : 'Continue'}
         </Button>
       </div>
-    </div>
+    </form>
   );
 }

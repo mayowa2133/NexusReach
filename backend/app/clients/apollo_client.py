@@ -50,7 +50,9 @@ async def search_people(
 
     params: dict = {
         "q_organization_name": company_name,
-        "per_page": min(limit, 25),
+        # Apollo supports up to 100 per page; don't silently shrink a caller's
+        # requested limit (which can be up to 50) down to 25 (audit L9).
+        "per_page": min(limit, 100),
     }
 
     if titles:
@@ -114,10 +116,13 @@ async def enrich_person(
     Returns:
         Dict with work_email, email_verified, apollo_id, or None if unavailable.
     """
-    if not settings.apollo_api_key:
+    # Use the best available key (master preferred), consistent with the other
+    # endpoints — enrichment was silently disabled in master-only setups (audit H5).
+    api_key = _get_api_key()
+    if not api_key:
         return None
 
-    params: dict = {"api_key": settings.apollo_api_key}
+    params: dict = {"api_key": api_key}
 
     if apollo_id:
         params["id"] = apollo_id

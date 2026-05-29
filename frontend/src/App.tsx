@@ -6,6 +6,8 @@ import { useAuthStore } from '@/stores/auth';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { AppLayout } from '@/components/AppLayout';
+import { ObservabilityIdentity } from '@/components/ObservabilityIdentity';
+import { RouteAnalytics } from '@/components/RouteAnalytics';
 import { LoginPage } from '@/pages/LoginPage';
 import { SignupPage } from '@/pages/SignupPage';
 
@@ -22,6 +24,8 @@ const TrackerPage = lazy(() => import('@/pages/TrackerPage').then((m) => ({ defa
 const FindEmailPage = lazy(() => import('@/pages/FindEmailPage').then((m) => ({ default: m.FindEmailPage })));
 const ResumeLibraryPage = lazy(() => import('@/pages/ResumeLibraryPage').then((m) => ({ default: m.ResumeLibraryPage })));
 const TriagePage = lazy(() => import('@/pages/TriagePage').then((m) => ({ default: m.TriagePage })));
+const PrivacyPage = lazy(() => import('@/pages/PrivacyPage').then((m) => ({ default: m.PrivacyPage })));
+const TermsPage = lazy(() => import('@/pages/TermsPage').then((m) => ({ default: m.TermsPage })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -57,6 +61,8 @@ function AppRoutes() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
+      <Route path="/privacy" element={<PageSuspense><PrivacyPage /></PageSuspense>} />
+      <Route path="/terms" element={<PageSuspense><TermsPage /></PageSuspense>} />
 
       <Route
         element={
@@ -90,6 +96,8 @@ export default function App() {
       <ErrorBoundary>
         <BrowserRouter>
           <AppRoutes />
+          <ObservabilityIdentity />
+          <RouteAnalytics />
           <Toaster />
         </BrowserRouter>
       </ErrorBoundary>

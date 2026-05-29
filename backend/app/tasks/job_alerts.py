@@ -1,6 +1,5 @@
 """Celery tasks for job alert email digests."""
 
-import asyncio
 import logging
 
 from sqlalchemy import select
@@ -8,7 +7,7 @@ from sqlalchemy import select
 from app.database import async_session
 from app.models.job_alert import JobAlertPreference
 from app.services.job_alert_service import send_digest_for_user
-from app.tasks import celery_app
+from app.tasks import celery_app, run_async
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +52,6 @@ async def _send_all_digests() -> dict:
 )
 def send_job_alert_digests() -> dict:
     """Celery task: send pending job alert digests for all enabled users."""
-    result = asyncio.run(_send_all_digests())
+    result = run_async(_send_all_digests())
     logger.info("Job alert digest task complete: %s", result)
     return result

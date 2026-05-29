@@ -1,9 +1,38 @@
 """Celery application and task registration."""
 
+import asyncio
+from collections.abc import Coroutine
+from concurrent.futures import ThreadPoolExecutor
+from importlib import import_module
+from typing import Any, TypeVar
+
 from celery import Celery
 from celery.schedules import crontab
 
 from app.config import settings
+from app.observability import init_sentry
+
+_T = TypeVar("_T")
+
+
+def run_async(coro: Coroutine[Any, Any, _T]) -> _T:
+    """Run an async coroutine from a synchronous Celery task safely (audit H12).
+
+    The default prefork pool has no running event loop, so ``asyncio.run`` works.
+    Under gevent/eventlet pools a loop may already be running, which makes
+    ``asyncio.run`` raise "asyncio.run() cannot be called from a running event
+    loop". In that case we execute the coroutine in a fresh loop on a worker
+    thread so the task still completes regardless of the configured pool.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
+
+init_sentry("worker")
 
 celery_app = Celery(
     "nexusreach",
@@ -22,11 +51,11 @@ celery_app.conf.update(
     beat_schedule={
         "refresh-job-feeds": {
             "task": "app.tasks.jobs.refresh_all_job_feeds",
-            "schedule": crontab(minute="0,30"),  # every 30 minutes
+            "schedule": crontab(minute="*/15"),  # every 15 minutes
         },
         "discover-ats-boards": {
             "task": "app.tasks.jobs.discover_ats_boards",
-            "schedule": crontab(minute="15,45"),  # every 30 minutes (offset)
+            "schedule": crontab(minute=7, hour="*/1"),  # hourly, offset from feed refresh
         },
         "reverify-stale-contacts": {
             "task": "app.tasks.reverify.reverify_stale_contacts",
@@ -55,5 +84,19 @@ celery_app.conf.update(
     },
 )
 
-# Auto-discover tasks
+# Celery autodiscover looks for an app.tasks.tasks module by default. Our task
+# modules live directly under app.tasks, so import them explicitly to make the
+# Railway `celery -A app.tasks worker` command register every beat target.
 celery_app.autodiscover_tasks(["app.tasks"])
+
+for module_name in (
+    "app.tasks.auto_prospect",
+    "app.tasks.cadence_digest",
+    "app.tasks.job_alerts",
+    "app.tasks.jobs",
+    "app.tasks.known_people",
+    "app.tasks.linkedin_graph",
+    "app.tasks.outreach_reconcile",
+    "app.tasks.reverify",
+):
+    import_module(module_name)

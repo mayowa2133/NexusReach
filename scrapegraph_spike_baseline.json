@@ -1,0 +1,186 @@
+{
+  "scrapegraph_configured": false,
+  "scrapegraph_stealth": false,
+  "urls": [
+    {
+      "current_stack": {
+        "crawl4ai": {
+          "content_chars": 55749,
+          "elapsed_ms": 2328,
+          "fallback_used": false,
+          "html_chars": 101449,
+          "insufficient_signals": [],
+          "markdown_chars": 55749,
+          "ok": true,
+          "preview": "[Home](https://www.newgrad-jobs.com/list-software-engineer-jobs)[Latest 2026 Internships List](https://www.intern-list.com/)[Top AI/ML Jobs](https://www.careerin.ai/) Others [Hot Jobs](https://www.newgrad-jobs.com/list-software-engineer-jobs)[Job Search Resources](https://www.newgrad-jobs.com/list-s",
+          "retrieval_method": "crawl4ai",
+          "title": "",
+          "url": "https://www.newgrad-jobs.com/list-software-engineer-jobs"
+        },
+        "direct": {
+          "content_chars": 8200,
+          "elapsed_ms": 114,
+          "fallback_used": false,
+          "html_chars": 99852,
+          "insufficient_signals": [],
+          "markdown_chars": 0,
+          "ok": true,
+          "preview": "Entry-Level Software Engineer Jobs for New Grads Home Latest 2026 Internships List Top AI/ML Jobs Others Hot Jobs Job Search Resources AI Resume Builder Feedback & Support Newgrad-jobs.com Kickstart Your Software Engineering Career: Daily Job Updates May 23, 2026 Power Systems Software Engineer - Op",
+          "retrieval_method": "direct",
+          "title": "Entry-Level Software Engineer Jobs for New Grads",
+          "url": "https://www.newgrad-jobs.com/list-software-engineer-jobs"
+        },
+        "firecrawl": {
+          "elapsed_ms": 102,
+          "ok": false
+        },
+        "selected": {
+          "content_chars": 8200,
+          "elapsed_ms": 143,
+          "fallback_used": false,
+          "html_chars": 99852,
+          "insufficient_signals": [],
+          "markdown_chars": 0,
+          "ok": true,
+          "preview": "Entry-Level Software Engineer Jobs for New Grads Home Latest 2026 Internships List Top AI/ML Jobs Others Hot Jobs Job Search Resources AI Resume Builder Feedback & Support Newgrad-jobs.com Kickstart Your Software Engineering Career: Daily Job Updates May 23, 2026 Power Systems Software Engineer - Op",
+          "retrieval_method": "direct",
+          "title": "Entry-Level Software Engineer Jobs for New Grads",
+          "url": "https://www.newgrad-jobs.com/list-software-engineer-jobs"
+        }
+      },
+      "scrapegraph": {
+        "extract": {
+          "ok": false,
+          "reason": "skip_extract enabled",
+          "skipped": true
+        },
+        "scrape": {
+          "ok": false,
+          "reason": "missing SGAI_API_KEY",
+          "skipped": true
+        }
+      },
+      "url": "https://www.newgrad-jobs.com/list-software-engineer-jobs"
+    },
+    {
+      "current_stack": {
+        "crawl4ai": {
+          "content_chars": 21110,
+          "elapsed_ms": 1999,
+          "fallback_used": false,
+          "html_chars": 46945,
+          "insufficient_signals": [],
+          "markdown_chars": 21110,
+          "ok": true,
+          "preview": "Search Results : 114 Job found [see all **114** jobs](https://www.ventureloop.com/ventureloop/activate_paid_search_new.php) [Premium Search](https://www.ventureloop.com/ventureloop/activate_paid_search_new.php) Results page 1 of 5 [1](javascript:void\\(0\\);) [2](javascript:void\\(0\\);) [3](javascript:",
+          "retrieval_method": "crawl4ai",
+          "title": "",
+          "url": "https://www.ventureloop.com/ventureloop/job_search_results.php?pageno=1&btn=1&jcat=12&dc=all&ldata=San%24%24Francisco%2C%24%24CA%2C%24%24US&jt=1&jc=1&jd=1&d=100"
+        },
+        "direct": {
+          "content_chars": 6122,
+          "elapsed_ms": 521,
+          "fallback_used": false,
+          "html_chars": 46679,
+          "insufficient_signals": [],
+          "markdown_chars": 0,
+          "ok": true,
+          "preview": "Search Results : 114 Job found see all 114 jobs Premium Search Results page 1 of 5 1 2 --> 2 3 --> 3 4 --> 4 5 --> 5 --> Date Job Title Company VC Location 05-23-2026 Software Engineer, Unity Engine and XR ByteDance SoftBank Vision Fund San Jose, CA, US 05-23-2026 Senior Software Engineer, AI Agents",
+          "retrieval_method": "direct",
+          "title": "",
+          "url": "https://www.ventureloop.com/ventureloop/job_search_results.php?pageno=1&btn=1&jcat=12&dc=all&ldata=San%24%24Francisco%2C%24%24CA%2C%24%24US&jt=1&jc=1&jd=1&d=100"
+        },
+        "firecrawl": {
+          "elapsed_ms": 186,
+          "ok": false
+        },
+        "selected": {
+          "content_chars": 6122,
+          "elapsed_ms": 628,
+          "fallback_used": false,
+          "html_chars": 46679,
+          "insufficient_signals": [],
+          "markdown_chars": 0,
+          "ok": true,
+          "preview": "Search Results : 114 Job found see all 114 jobs Premium Search Results page 1 of 5 1 2 --> 2 3 --> 3 4 --> 4 5 --> 5 --> Date Job Title Company VC Location 05-23-2026 Software Engineer, Unity Engine and XR ByteDance SoftBank Vision Fund San Jose, CA, US 05-23-2026 Senior Software Engineer, AI Agents",
+          "retrieval_method": "direct",
+          "title": "",
+          "url": "https://www.ventureloop.com/ventureloop/job_search_results.php?pageno=1&btn=1&jcat=12&dc=all&ldata=San%24%24Francisco%2C%24%24CA%2C%24%24US&jt=1&jc=1&jd=1&d=100"
+        }
+      },
+      "scrapegraph": {
+        "extract": {
+          "ok": false,
+          "reason": "skip_extract enabled",
+          "skipped": true
+        },
+        "scrape": {
+          "ok": false,
+          "reason": "missing SGAI_API_KEY",
+          "skipped": true
+        }
+      },
+      "url": "https://www.ventureloop.com/ventureloop/job_search_results.php?pageno=1&btn=1&jcat=12&dc=all&ldata=San%24%24Francisco%2C%24%24CA%2C%24%24US&jt=1&jc=1&jd=1&d=100"
+    },
+    {
+      "current_stack": {
+        "crawl4ai": {
+          "content_chars": 7251,
+          "elapsed_ms": 1962,
+          "fallback_used": false,
+          "html_chars": 175434,
+          "insufficient_signals": [],
+          "markdown_chars": 7251,
+          "ok": true,
+          "preview": "[](https://theorg.com/ \"The Org Home\") Platform Enrich [Pricing](https://theorg.com/pricing) [Log in](https://theorg.com/login \"Log in to The Org\")[Sign up](https://theorg.com/signup \"Sign up to The Org\") ![OpenAI logo](https://cdn.theorg.com/8c196111-c56d-4f9d-82d1-672e155311be_thumb.jpg) # OpenAI ",
+          "retrieval_method": "crawl4ai",
+          "title": "",
+          "url": "https://theorg.com/org/openai"
+        },
+        "direct": {
+          "content_chars": 2047,
+          "elapsed_ms": 70,
+          "fallback_used": false,
+          "html_chars": 214326,
+          "insufficient_signals": [],
+          "markdown_chars": 0,
+          "ok": true,
+          "preview": "OpenAI | The Org Platform Enrich Pricing Log in Sign up OpenAI 866 followers \u200c OpenAI is an AI research and deployment company dedicated to ensuring that general-purpose artificial intelligence benefits all of humanity. AI is an extremely powerful tool that must be created with safety and human need",
+          "retrieval_method": "direct",
+          "title": "OpenAI | The Org",
+          "url": "https://theorg.com/org/openai"
+        },
+        "firecrawl": {
+          "elapsed_ms": 151,
+          "ok": false
+        },
+        "selected": {
+          "content_chars": 2047,
+          "elapsed_ms": 63,
+          "fallback_used": false,
+          "html_chars": 214326,
+          "insufficient_signals": [],
+          "markdown_chars": 0,
+          "ok": true,
+          "preview": "OpenAI | The Org Platform Enrich Pricing Log in Sign up OpenAI 866 followers \u200c OpenAI is an AI research and deployment company dedicated to ensuring that general-purpose artificial intelligence benefits all of humanity. AI is an extremely powerful tool that must be created with safety and human need",
+          "retrieval_method": "direct",
+          "title": "OpenAI | The Org",
+          "url": "https://theorg.com/org/openai"
+        }
+      },
+      "scrapegraph": {
+        "extract": {
+          "ok": false,
+          "reason": "skip_extract enabled",
+          "skipped": true
+        },
+        "scrape": {
+          "ok": false,
+          "reason": "missing SGAI_API_KEY",
+          "skipped": true
+        }
+      },
+      "url": "https://theorg.com/org/openai"
+    }
+  ]
+}

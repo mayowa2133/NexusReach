@@ -2,6 +2,7 @@
 
 import logging
 
+import sentry_sdk
 from fastapi import HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -42,6 +43,7 @@ async def validation_exception_handler(
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Catch-all for unhandled server errors. Logs the traceback, returns 500."""
     logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
+    sentry_sdk.capture_exception(exc)
     return JSONResponse(
         status_code=500,
         content={

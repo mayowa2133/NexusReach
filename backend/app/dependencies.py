@@ -32,6 +32,14 @@ async def get_current_auth_user(
 ) -> AuthenticatedUser:
     """Validate Supabase JWT and return the current user context."""
     if settings.auth_mode == "dev":
+        if not settings.dev_auth_bypass_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=(
+                    "Dev auth bypass requires "
+                    "NEXUSREACH_DEV_AUTH_BYPASS_ENABLED=true."
+                ),
+            )
         email = settings.dev_user_email.strip().lower() if settings.dev_user_email.strip() else None
         return AuthenticatedUser(user_id=settings.dev_user_id, email=email)
 

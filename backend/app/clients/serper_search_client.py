@@ -66,6 +66,9 @@ def _title_batches(
     Returns at most *max_batches* groups to keep API calls reasonable.
     """
     if not titles:
+        # One empty batch is intentional: callers use it to emit company-only
+        # LinkedIn queries (no title constraint), which is a legitimate broad
+        # recall pass — not a wasted call (audit L12 was a false positive).
         return [[]]
     batches: list[list[str]] = []
     for i in range(0, len(titles), batch_size):

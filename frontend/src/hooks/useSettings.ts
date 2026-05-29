@@ -4,6 +4,7 @@ import type {
   AutoProspectSettings,
   GuardrailsSettings,
   ResumeReuseSettings,
+  AccountDeleteResponse,
 } from '@/types';
 
 export function useGuardrails() {
@@ -63,5 +64,29 @@ export function useUpdateResumeReuseSettings() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['settings', 'resume-reuse'] });
     },
+  });
+}
+
+export function useExportAccountData() {
+  return useMutation({
+    mutationFn: async () => {
+      const blob = await api.getBlob('/api/account/export');
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const stamp = new Date().toISOString().slice(0, 10);
+      link.href = url;
+      link.download = `nexusreach-export-${stamp}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    },
+  });
+}
+
+export function useDeleteAccount() {
+  return useMutation({
+    mutationFn: () =>
+      api.post<AccountDeleteResponse>('/api/account/delete', { confirm: true }),
   });
 }

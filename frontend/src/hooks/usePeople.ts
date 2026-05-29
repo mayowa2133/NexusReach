@@ -1,6 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { trackFirstFunnelEvent, trackFunnelEvent } from '@/lib/observability';
 import type { Person, PeopleSearchResult, PaginatedResponse, SearchLogEntry } from '@/types';
+
+function peopleSearchCount(result: PeopleSearchResult): number {
+  return result.recruiters.length + result.hiring_managers.length + result.peers.length;
+}
 
 export function usePeopleSearch() {
   const queryClient = useQueryClient();
@@ -15,7 +20,32 @@ export function usePeopleSearch() {
       target_count_per_bucket?: number;
       include_debug?: boolean;
     }) => api.post<PeopleSearchResult>('/api/people/search', params),
-    onSuccess: (_data, variables) => {
+    onSuccess: (data, variables) => {
+      const resultCount = peopleSearchCount(data);
+      trackFunnelEvent('people_search_completed', {
+        company_name: variables.company_name,
+        job_id: variables.job_id ?? null,
+        result_count: resultCount,
+        recruiters: data.recruiters.length,
+        hiring_managers: data.hiring_managers.length,
+        peers: data.peers.length,
+        warm_path_count:
+          data.your_connections.length +
+          [...data.recruiters, ...data.hiring_managers, ...data.peers].filter(
+            (person) => Boolean(person.warm_path_type),
+          ).length,
+      });
+      if (resultCount > 0) {
+        trackFirstFunnelEvent('first_people_result', 'first_people_result', {
+          company_name: variables.company_name,
+          job_id: variables.job_id ?? null,
+          result_count: resultCount,
+        });
+        trackFirstFunnelEvent('first_saved_contact', 'first_saved_contact', {
+          source: 'people_search',
+          company_name: variables.company_name,
+        });
+      }
       queryClient.invalidateQueries({ queryKey: ['people'] });
       if (variables.job_id) {
         queryClient.invalidateQueries({ queryKey: ['job-command-center', variables.job_id] });
@@ -31,7 +61,16 @@ export function useEnrichPerson() {
   return useMutation({
     mutationFn: (linkedin_url: string) =>
       api.post<Person>('/api/people/enrich', { linkedin_url }),
-    onSuccess: () => {
+    onSuccess: (person) => {
+      trackFunnelEvent('saved_contact_created', {
+        source: 'linkedin_url',
+        person_id: person.id,
+        company_name: person.company?.name ?? null,
+      });
+      trackFirstFunnelEvent('first_saved_contact', 'first_saved_contact', {
+        source: 'linkedin_url',
+        company_name: person.company?.name ?? null,
+      });
       queryClient.invalidateQueries({ queryKey: ['people'] });
     },
   });

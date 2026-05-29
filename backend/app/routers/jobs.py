@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -19,6 +20,8 @@ from app.schemas.jobs import (
     OfferDetailsUpdate,
     SearchPreferenceResponse,
     SearchPreferenceToggle,
+    JobRefreshRunResponse,
+    JobSourceRunResponse,
     DiscoverRequest,
     RefreshResponse,
     MatchAnalysisResponse,
@@ -65,6 +68,7 @@ from app.services.resume_artifact_service import (
     RESUME_REUSE_SCORE_THRESHOLD,
 )
 from app.models.profile import Profile
+from app.models.job_refresh_run import JobRefreshRun, JobSourceRun
 from app.models.resume_artifact import ResumeArtifact
 from app.models.tailored_resume import TailoredResume
 
@@ -155,30 +159,57 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
 def _to_response(job) -> JobResponse:
+    source_status = getattr(job, "source_status", "active")
+    if not isinstance(source_status, str):
+        source_status = "active"
+    last_seen_at = getattr(job, "last_seen_at", None)
+    if not isinstance(last_seen_at, datetime):
+        last_seen_at = None
+    closed_at = getattr(job, "closed_at", None)
+    if not isinstance(closed_at, datetime):
+        closed_at = None
+    not_seen_count = getattr(job, "not_seen_count", 0)
+    if not isinstance(not_seen_count, int):
+        not_seen_count = 0
     return JobResponse(
         id=str(job.id),
         title=job.title,
         company_name=job.company_name,
         company_logo=job.company_logo,
         location=job.location,
+        locations=getattr(job, "locations", None),
+        country_codes=getattr(job, "country_codes", None),
+        countries=getattr(job, "countries", None),
+        location_lat=getattr(job, "location_lat", None),
+        location_lng=getattr(job, "location_lng", None),
+        location_radius_km=getattr(job, "location_radius_km", None),
+        location_geocode_label=getattr(job, "location_geocode_label", None),
         remote=job.remote,
+        work_mode=getattr(job, "work_mode", None),
         url=job.url,
         apply_url=job.apply_url or job.url,
         description=job.description,
         employment_type=job.employment_type,
+        experience_level=job.experience_level,
+        experience_level_confidence=getattr(job, "experience_level_confidence", None),
         salary_min=job.salary_min,
         salary_max=job.salary_max,
         salary_currency=job.salary_currency,
+        salary_period=getattr(job, "salary_period", None),
         source=job.source,
         ats=job.ats,
         posted_at=job.posted_at if job.posted_at and job.posted_at.strip() else None,
+        source_status=source_status or "active",
+        last_seen_at=last_seen_at.isoformat() if last_seen_at else None,
+        closed_at=closed_at.isoformat() if closed_at else None,
+        not_seen_count=not_seen_count,
         match_score=job.match_score,
         score_breakdown=job.score_breakdown,
         stage=job.stage,
         tags=job.tags,
+        metadata_provenance=getattr(job, "metadata_provenance", None),
         department=job.department,
         notes=job.notes,
-        experience_level=job.experience_level,
         starred=job.starred,
         applied_at=job.applied_at.isoformat() if job.applied_at else None,
         interview_rounds=job.interview_rounds,
@@ -244,6 +275,12 @@ async def list_jobs(
     employment_type: str | None = None,
     experience_level: str | None = None,
     salary_min: float | None = None,
+    country: str | None = None,
+    near: str | None = None,
+    near_lat: float | None = None,
+    near_lng: float | None = None,
+    radius_km: float | None = None,
+    include_remote_in_radius: bool = False,
     remote: bool | None = None,
     startup: bool | None = None,
     occupations: str | None = None,
@@ -265,7 +302,10 @@ async def list_jobs(
     jobs, total = await get_jobs(
         db, user_id, stage=stage, sort_by=sort_by, starred=starred,
         employment_type=employment_type, experience_level=experience_level,
-        salary_min=salary_min, remote=remote, startup=startup,
+        salary_min=salary_min, country=country, near=near,
+        near_lat=near_lat, near_lng=near_lng, radius_km=radius_km,
+        include_remote_in_radius=include_remote_in_radius,
+        remote=remote, startup=startup,
         occupations=occupation_keys, search=search,
         limit=limit, offset=offset,
     )
@@ -338,9 +378,57 @@ def _pref_to_response(pref) -> SearchPreferenceResponse:
         enabled=pref.enabled,
         mode=pref.mode or "default",
         last_refreshed_at=pref.last_refreshed_at.isoformat() if pref.last_refreshed_at else None,
+        last_attempted_at=pref.last_attempted_at.isoformat() if getattr(pref, "last_attempted_at", None) else None,
+        last_success_at=pref.last_success_at.isoformat() if getattr(pref, "last_success_at", None) else None,
+        last_error=getattr(pref, "last_error", None),
+        last_duration_seconds=getattr(pref, "last_duration_seconds", None),
         new_jobs_found=pref.new_jobs_found or 0,
         created_at=pref.created_at.isoformat(),
         updated_at=pref.updated_at.isoformat(),
+    )
+
+
+def _source_run_to_response(source_run) -> JobSourceRunResponse:
+    return JobSourceRunResponse(
+        id=str(source_run.id),
+        refresh_run_id=str(source_run.refresh_run_id),
+        source=source_run.source,
+        status=source_run.status,
+        raw_count=source_run.raw_count or 0,
+        new_count=source_run.new_count or 0,
+        existing_count=source_run.existing_count or 0,
+        duplicate_count=source_run.duplicate_count or 0,
+        skipped_count=source_run.skipped_count or 0,
+        error=source_run.error,
+        duration_seconds=source_run.duration_seconds,
+        started_at=source_run.started_at.isoformat(),
+        finished_at=source_run.finished_at.isoformat() if source_run.finished_at else None,
+    )
+
+
+def _refresh_run_to_response(refresh_run, source_runs: list) -> JobRefreshRunResponse:
+    return JobRefreshRunResponse(
+        id=str(refresh_run.id),
+        search_preference_id=(
+            str(refresh_run.search_preference_id)
+            if refresh_run.search_preference_id
+            else None
+        ),
+        mode=refresh_run.mode,
+        query=refresh_run.query,
+        location=refresh_run.location,
+        remote_only=refresh_run.remote_only,
+        status=refresh_run.status,
+        total_new=refresh_run.total_new or 0,
+        total_seen=refresh_run.total_seen or 0,
+        total_existing=refresh_run.total_existing or 0,
+        total_duplicates=refresh_run.total_duplicates or 0,
+        total_errors=refresh_run.total_errors or 0,
+        error=refresh_run.error,
+        duration_seconds=refresh_run.duration_seconds,
+        started_at=refresh_run.started_at.isoformat(),
+        finished_at=refresh_run.finished_at.isoformat() if refresh_run.finished_at else None,
+        source_runs=[_source_run_to_response(source_run) for source_run in source_runs],
     )
 
 
@@ -352,6 +440,40 @@ async def list_saved_searches(
     """List all saved search preferences."""
     prefs = await get_search_preferences(db, user_id)
     return [_pref_to_response(p) for p in prefs]
+
+
+@router.get("/refresh-runs", response_model=list[JobRefreshRunResponse])
+async def list_refresh_runs(
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: int = 5,
+):
+    """List recent job refresh runs with source-level health details."""
+    safe_limit = max(1, min(limit, 25))
+    run_result = await db.execute(
+        select(JobRefreshRun)
+        .where(JobRefreshRun.user_id == user_id)
+        .order_by(JobRefreshRun.started_at.desc())
+        .limit(safe_limit)
+    )
+    runs = list(run_result.scalars().all())
+    if not runs:
+        return []
+
+    run_ids = [run.id for run in runs]
+    source_result = await db.execute(
+        select(JobSourceRun)
+        .where(JobSourceRun.refresh_run_id.in_(run_ids))
+        .order_by(JobSourceRun.started_at.asc())
+    )
+    source_runs_by_refresh: dict[uuid.UUID, list] = {run_id: [] for run_id in run_ids}
+    for source_run in source_result.scalars().all():
+        source_runs_by_refresh.setdefault(source_run.refresh_run_id, []).append(source_run)
+
+    return [
+        _refresh_run_to_response(run, source_runs_by_refresh.get(run.id, []))
+        for run in runs
+    ]
 
 
 @router.put("/saved-searches/{pref_id}", response_model=SearchPreferenceResponse)

@@ -13,6 +13,7 @@ from app.models.outreach import OutreachLog
 from app.models.person import Person
 from app.models.settings import UserSettings
 from app.services import gmail_service, outlook_service
+from app.services.oauth_token_crypto import is_encrypted_refresh_token
 from app.services.outreach_service import create_outreach_log
 
 logger = logging.getLogger(__name__)
@@ -221,9 +222,9 @@ async def resolve_connected_provider(
     settings = result.scalar_one_or_none()
     if not settings:
         return None
-    if settings.gmail_connected and settings.gmail_refresh_token:
+    if settings.gmail_connected and is_encrypted_refresh_token(settings.gmail_refresh_token):
         return "gmail"
-    if settings.outlook_connected and settings.outlook_refresh_token:
+    if settings.outlook_connected and is_encrypted_refresh_token(settings.outlook_refresh_token):
         return "outlook"
     return None
 

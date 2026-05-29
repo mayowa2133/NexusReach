@@ -1,0 +1,199 @@
+{
+  "scrapegraph_configured": true,
+  "scrapegraph_stealth": true,
+  "urls": [
+    {
+      "current_stack": {
+        "crawl4ai": {
+          "content_chars": 518,
+          "elapsed_ms": 5247,
+          "fallback_used": false,
+          "html_chars": 147966,
+          "insufficient_signals": [],
+          "markdown_chars": 518,
+          "ok": true,
+          "preview": "[Skip to main content](https://c-11127-20241121-www-uber-com.i.icims.com#main) * [Uber Careers](https://www.uber.com/us/en/careers/) * [Teams ](https://www.uber.com/us/en/careers/teams/) * [Locations ](https://www.uber.com/us/en/careers/locations/) * [University ](https://www.uber.com/us/en/careers/",
+          "retrieval_method": "crawl4ai",
+          "title": "",
+          "url": "https://www.uber.com/global/ta/careers/list/158009/"
+        },
+        "direct": {
+          "elapsed_ms": 183,
+          "ok": false
+        },
+        "firecrawl": {
+          "elapsed_ms": 168,
+          "ok": false
+        },
+        "selected": {
+          "content_chars": 3874,
+          "elapsed_ms": 71,
+          "fallback_used": false,
+          "html_chars": 390597,
+          "insufficient_signals": [],
+          "markdown_chars": 0,
+          "ok": true,
+          "preview": "Graduate 2026 Software Engineer I, US - San Francisco, California | Uber Careers Skip to main content \u00d7 Browser not supported This probably isn't the experience you were expecting. Internet Explorer isn't supported on Uber.com. Try switching to a different browser to view our site. Uber Careers Team",
+          "retrieval_method": "direct",
+          "title": "Graduate 2026 Software Engineer I, US - San Francisco, California | Uber Careers",
+          "url": "https://www.uber.com/global/ta/careers/list/158009/"
+        }
+      },
+      "scrapegraph": {
+        "extract": {
+          "elapsed_ms": 30005,
+          "error": "",
+          "ok": false
+        },
+        "scrape": {
+          "elapsed_ms": 1938,
+          "error": "{\"error\":{\"type\":\"internal\",\"message\":\"Internal server error\"}}",
+          "ok": false,
+          "status_code": 500
+        }
+      },
+      "url": "https://www.uber.com/global/ta/careers/list/158009/"
+    },
+    {
+      "current_stack": {
+        "crawl4ai": {
+          "content_chars": 138,
+          "elapsed_ms": 4679,
+          "fallback_used": false,
+          "html_chars": 2376,
+          "insufficient_signals": [
+            "akamai",
+            "powered and protected by"
+          ],
+          "markdown_chars": 138,
+          "ok": true,
+          "preview": "Powered and protected by ![Akamai](https://www.akamai.com/site/ko/images/logo/akamai-logo1.svg) [Privacy](https://www.akamai.com/privacy)",
+          "retrieval_method": "crawl4ai",
+          "title": "",
+          "url": "https://www.tesla.com/careers/search/?query=software&site=US"
+        },
+        "direct": {
+          "elapsed_ms": 213,
+          "ok": false
+        },
+        "firecrawl": {
+          "elapsed_ms": 126,
+          "ok": false
+        },
+        "selected": {
+          "content_chars": 138,
+          "elapsed_ms": 3774,
+          "fallback_used": false,
+          "html_chars": 2376,
+          "insufficient_signals": [
+            "akamai",
+            "powered and protected by"
+          ],
+          "markdown_chars": 138,
+          "ok": true,
+          "preview": "Powered and protected by ![Akamai](https://www.akamai.com/site/ko/images/logo/akamai-logo1.svg) [Privacy](https://www.akamai.com/privacy)",
+          "retrieval_method": "crawl4ai",
+          "title": "",
+          "url": "https://www.tesla.com/careers/search/?query=software&site=US"
+        }
+      },
+      "scrapegraph": {
+        "extract": {
+          "elapsed_ms": 3078,
+          "error": "{\"error\":{\"type\":\"fetch_failed\",\"message\":\"Unable to fetch URL\"}}",
+          "ok": false,
+          "status_code": 502
+        },
+        "scrape": {
+          "elapsed_ms": 6704,
+          "error": "{\"error\":{\"type\":\"fetch_failed\",\"message\":\"Unable to fetch URL\"}}",
+          "ok": false,
+          "status_code": 502
+        }
+      },
+      "url": "https://www.tesla.com/careers/search/?query=software&site=US"
+    },
+    {
+      "current_stack": {
+        "crawl4ai": {
+          "content_chars": 59052,
+          "elapsed_ms": 3306,
+          "fallback_used": false,
+          "html_chars": 169212,
+          "insufficient_signals": [],
+          "markdown_chars": 59052,
+          "ok": true,
+          "preview": "https://uhf.microsoft.com/en-US/shell/xml/MSActionCenter?headerId=GlobalCareersPCSHeaderprod&footerid=CareersPCSFooterprod https://careers.microsoft.com/bin/msft/searchheader https://careers.microsoft.com/v2/global/en/sign-in.html https://careers.microsoft.com/v2/ca/fr/connexion.html https://cdn.car",
+          "retrieval_method": "crawl4ai",
+          "title": "",
+          "url": "https://careers.microsoft.com/v2/global/en/programs/students.html"
+        },
+        "direct": {
+          "content_chars": 35250,
+          "elapsed_ms": 308,
+          "fallback_used": false,
+          "html_chars": 142676,
+          "insufficient_signals": [],
+          "markdown_chars": 0,
+          "ok": true,
+          "preview": "Early in profession | Microsoft Careers https://uhf.microsoft.com/en-US/shell/xml/MSActionCenter?headerId=GlobalCareersPCSHeaderprod&footerid=CareersPCSFooterprod https://careers.microsoft.com/bin/msft/searchheader https://careers.microsoft.com/v2/global/en/sign-in.html https://careers.microsoft.com",
+          "retrieval_method": "direct",
+          "title": "Early in profession | Microsoft Careers",
+          "url": "https://careers.microsoft.com/v2/global/en/programs/students.html"
+        },
+        "firecrawl": {
+          "elapsed_ms": 124,
+          "ok": false
+        },
+        "selected": {
+          "content_chars": 35250,
+          "elapsed_ms": 263,
+          "fallback_used": false,
+          "html_chars": 142676,
+          "insufficient_signals": [],
+          "markdown_chars": 0,
+          "ok": true,
+          "preview": "Early in profession | Microsoft Careers https://uhf.microsoft.com/en-US/shell/xml/MSActionCenter?headerId=GlobalCareersPCSHeaderprod&footerid=CareersPCSFooterprod https://careers.microsoft.com/bin/msft/searchheader https://careers.microsoft.com/v2/global/en/sign-in.html https://careers.microsoft.com",
+          "retrieval_method": "direct",
+          "title": "Early in profession | Microsoft Careers",
+          "url": "https://careers.microsoft.com/v2/global/en/programs/students.html"
+        }
+      },
+      "scrapegraph": {
+        "extract": {
+          "elapsed_ms": 1443,
+          "fetch_metadata": {},
+          "has_required_job_fields": true,
+          "id": "452059f1-9ac1-4a78-9a90-755ca6c462a6",
+          "json": {
+            "application_url": null,
+            "company_name": "Microsoft",
+            "description": "Overview: If you are excited by the challenge of designing distributed systems that process petabytes of data for the world's most advanced AI models, this is your team. We are looking for Systems Builders\u2014engineers who understand the internals of distributed compute, treat data infrastructure as a product, and want to architect the backbone of Microsoft Copilot. Join us to build the \"Paved Road\" for AI, owning the platform that transforms raw, massive\u2011scale signals into the fuel that powers training, inference, and evaluation for millions of users.\n\nResponsibilities:\n- Designs and builds, with guidance, the underlying frameworks (based on Spark/Databricks) that allow internal teams to process massive datasets efficiently, abstracting away the complexity of \"ETL\" into self\u2011service infrastructure.\n- Modernizes data stack by moving from batch\u2011heavy patterns to event\u2011driven architectures, utilizing modern streaming architecture to reduce latency for AI inference.\n- Engineers the high\u2011throughput telemetry systems that capture user interactions with Copilot, creating the critical data loops required for Reinforcement Learning and model evaluation.\n- Treats the data platform as software. Defines and deploys all storage, compute, and networking resources using IaC (Bicep/Terraform) rather than manual configuration.\n- Moves beyond simple \"validation checks\" to build automated governance and observability systems that detect anomalies in the data mesh before they impact downstream models.\n- Deep\u2011dives into query execution plans and cluster performance. Optimizes shuffle operations, partition strategies, and resource allocation to ensure our platform is as cost\u2011efficient as it is fast.",
+            "employment_type": null,
+            "is_job_posting": true,
+            "location": "United States, Washington, Redmond",
+            "posted_at": "2026-05-18",
+            "salary": "USD $85,400 - $168,100 per year",
+            "title": "Member of Technical Staff - Copilot",
+            "work_mode": "4 days / week in-office"
+          },
+          "ok": true,
+          "usage": {
+            "completionTokens": 2456,
+            "promptTokens": 13133
+          }
+        },
+        "scrape": {
+          "content_type": "text/html",
+          "elapsed_ms": 2090,
+          "html_chars": 109552,
+          "id": "1cbf4b1d-6ee8-4ad6-a379-c50d4f7a0df1",
+          "markdown_chars": 42807,
+          "markdown_preview": "https://uhf.microsoft.com/en-US/shell/xml/MSActionCenter?headerId=GlobalCareersPCSHeaderprod&footerid=CareersPCSFooterprod https://careers.microsoft.com/bin/msft/searchheader https://careers.microsoft.com/v2/global/en/sign-in.html https://careers.microsoft.com/v2/ca/fr/connexion.html https://cdn.car",
+          "ok": true
+        }
+      },
+      "url": "https://careers.microsoft.com/v2/global/en/programs/students.html"
+    }
+  ]
+}

@@ -284,12 +284,14 @@ async def test_refresh_task_routes_startup_prefs_to_startup_refresh():
     user_id = uuid.uuid4()
 
     default_pref = MagicMock()
+    default_pref.id = uuid.uuid4()
     default_pref.query = "software engineer"
     default_pref.location = None
     default_pref.remote_only = False
     default_pref.mode = "default"
 
     startup_pref = MagicMock()
+    startup_pref.id = uuid.uuid4()
     startup_pref.query = "founding engineer"
     startup_pref.location = None
     startup_pref.remote_only = False
@@ -305,6 +307,7 @@ async def test_refresh_task_routes_startup_prefs_to_startup_refresh():
         return_value=MagicMock(all=MagicMock(return_value=[]))
     )
     db.execute = AsyncMock(side_effect=[prefs_result, starred_result])
+    db.flush = AsyncMock()
     db.commit = AsyncMock()
 
     session_cm = MagicMock()
@@ -318,6 +321,7 @@ async def test_refresh_task_routes_startup_prefs_to_startup_refresh():
         patch.object(jobs_task, "async_session", return_value=session_cm),
         patch.object(jobs_task, "search_jobs", new=search_mock),
         patch.object(jobs_task, "run_startup_refresh_for_query", new=startup_mock),
+        patch.object(jobs_task, "mark_stale_jobs_for_user", new=AsyncMock()),
     ):
         await jobs_task._refresh_user_feeds(user_id)
 

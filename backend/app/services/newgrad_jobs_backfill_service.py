@@ -16,6 +16,7 @@ from app.services.job_service import (
     _refresh_existing_job,
     _score_job,
 )
+from app.utils.job_metadata import normalize_job_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -24,14 +25,25 @@ def _job_snapshot(job: Job) -> tuple:
     return (
         job.external_id,
         job.location,
+        job.locations,
+        job.country_codes,
+        job.countries,
+        job.location_lat,
+        job.location_lng,
+        job.location_radius_km,
+        job.location_geocode_label,
         job.remote,
+        job.work_mode,
         job.apply_url,
         job.description,
         job.employment_type,
         job.salary_min,
         job.salary_max,
         job.salary_currency,
+        job.salary_period,
         job.experience_level,
+        job.experience_level_confidence,
+        job.metadata_provenance,
         job.match_score,
         job.posted_at,
         job.fingerprint,
@@ -99,6 +111,7 @@ async def backfill_newgrad_jobs(
                 "salary_min": job.salary_min,
                 "salary_max": job.salary_max,
                 "salary_currency": job.salary_currency,
+                "salary_period": getattr(job, "salary_period", None),
                 "source": job.source,
                 "ats": job.ats,
                 "ats_slug": job.ats_slug,
@@ -107,6 +120,7 @@ async def backfill_newgrad_jobs(
                 "department": job.department,
             }
             data.update(detail)
+            data = normalize_job_metadata(data)
 
             fingerprint = _fingerprint(
                 data.get("company_name", ""),

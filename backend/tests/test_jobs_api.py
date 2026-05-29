@@ -16,7 +16,15 @@ def _mock_job(user_id, **overrides):
     j.company_name = overrides.get("company_name", "TechCorp")
     j.company_logo = overrides.get("company_logo", None)
     j.location = overrides.get("location", "New York, NY")
+    j.locations = overrides.get("locations", None)
+    j.country_codes = overrides.get("country_codes", None)
+    j.countries = overrides.get("countries", None)
+    j.location_lat = overrides.get("location_lat", None)
+    j.location_lng = overrides.get("location_lng", None)
+    j.location_radius_km = overrides.get("location_radius_km", None)
+    j.location_geocode_label = overrides.get("location_geocode_label", None)
     j.remote = overrides.get("remote", False)
+    j.work_mode = overrides.get("work_mode", None)
     j.url = overrides.get("url", "https://example.com/job/1")
     j.apply_url = overrides.get("apply_url", None)
     j.description = overrides.get("description", "Build things")
@@ -24,6 +32,7 @@ def _mock_job(user_id, **overrides):
     j.salary_min = overrides.get("salary_min", 100000.0)
     j.salary_max = overrides.get("salary_max", 150000.0)
     j.salary_currency = overrides.get("salary_currency", "USD")
+    j.salary_period = overrides.get("salary_period", "year")
     j.source = overrides.get("source", "jsearch")
     j.ats = overrides.get("ats", None)
     j.posted_at = overrides.get("posted_at", "2024-01-15")
@@ -31,15 +40,32 @@ def _mock_job(user_id, **overrides):
     j.score_breakdown = overrides.get("score_breakdown", {"role_match": 30, "skills_match": 20})
     j.stage = overrides.get("stage", "discovered")
     j.tags = overrides.get("tags", None)
+    j.metadata_provenance = overrides.get("metadata_provenance", None)
     j.department = overrides.get("department", None)
     j.experience_level = overrides.get("experience_level", None)
+    j.experience_level_confidence = overrides.get("experience_level_confidence", None)
     j.notes = overrides.get("notes", None)
     j.starred = overrides.get("starred", False)
     j.applied_at = overrides.get("applied_at", None)
+    j.interview_rounds = overrides.get("interview_rounds", None)
     j.offer_details = overrides.get("offer_details", None)
     j.created_at = datetime(2024, 1, 15, tzinfo=timezone.utc)
     j.updated_at = datetime(2024, 1, 15, tzinfo=timezone.utc)
     return j
+
+
+class _ScalarResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def scalars(self):
+        rows = self._rows
+
+        class _Scalars:
+            def all(self):
+                return rows
+
+        return _Scalars()
 
 
 async def test_search_jobs(client, mock_user_id):
@@ -154,6 +180,7 @@ async def test_search_ats_accepts_dev_mode_without_token(unauthed_client, monkey
         yield fake_db
 
     monkeypatch.setattr(settings, "auth_mode", "dev")
+    monkeypatch.setattr(settings, "dev_auth_bypass_enabled", True)
     monkeypatch.setattr(settings, "dev_user_id", uuid.UUID("00000000-0000-0000-0000-000000000001"))
     monkeypatch.setattr(settings, "dev_user_email", "dev@nexusreach.local")
     app.dependency_overrides[get_db] = _override_db
@@ -216,6 +243,108 @@ async def test_list_jobs_with_startup_filter(client, mock_user_id):
     mock_get.assert_called_once()
     call_args = mock_get.call_args
     assert call_args.kwargs.get("startup") is True or call_args[1].get("startup") is True
+
+
+async def test_list_jobs_with_country_filter(client, mock_user_id):
+    """GET /api/jobs?country=Canada passes server-side country filter."""
+    job = _mock_job(mock_user_id, location="Toronto, ON", countries=["Canada"], country_codes=["CA"])
+
+    with patch("app.routers.jobs.get_jobs", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = ([job], 1)
+        resp = await client.get("/api/jobs", params={"country": "Canada"})
+
+    assert resp.status_code == 200
+    mock_get.assert_called_once()
+    call_args = mock_get.call_args
+    assert call_args.kwargs.get("country") == "Canada" or call_args[1].get("country") == "Canada"
+
+
+async def test_list_jobs_with_nearby_filter(client, mock_user_id):
+    """GET /api/jobs passes proximity filters to the service."""
+    job = _mock_job(
+        mock_user_id,
+        location="Toronto, ON, CA",
+        location_lat=43.6532,
+        location_lng=-79.3832,
+    )
+
+    with patch("app.routers.jobs.get_jobs", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = ([job], 1)
+        resp = await client.get(
+            "/api/jobs",
+            params={
+                "near": "GTA",
+                "radius_km": "50",
+                "include_remote_in_radius": "true",
+            },
+        )
+
+    assert resp.status_code == 200
+    call_args = mock_get.call_args
+    kwargs = call_args.kwargs or call_args[1]
+    assert kwargs["near"] == "GTA"
+    assert kwargs["radius_km"] == 50.0
+    assert kwargs["include_remote_in_radius"] is True
+
+
+async def test_list_refresh_runs_exposes_source_health(client, mock_user_id):
+    from app.database import get_db
+    from app.main import app
+
+    refresh_id = uuid.uuid4()
+    run = MagicMock()
+    run.id = refresh_id
+    run.search_preference_id = None
+    run.mode = "default"
+    run.query = "software engineer"
+    run.location = "Toronto"
+    run.remote_only = False
+    run.status = "partial_success"
+    run.total_new = 3
+    run.total_seen = 10
+    run.total_existing = 7
+    run.total_duplicates = 0
+    run.total_errors = 1
+    run.error = None
+    run.duration_seconds = 2.5
+    run.started_at = datetime(2026, 5, 26, 12, 0, tzinfo=timezone.utc)
+    run.finished_at = datetime(2026, 5, 26, 12, 0, 2, tzinfo=timezone.utc)
+
+    source_run = MagicMock()
+    source_run.id = uuid.uuid4()
+    source_run.refresh_run_id = refresh_id
+    source_run.source = "jsearch"
+    source_run.status = "failed"
+    source_run.raw_count = 0
+    source_run.new_count = 0
+    source_run.existing_count = 0
+    source_run.duplicate_count = 0
+    source_run.skipped_count = 0
+    source_run.error = "rate limited"
+    source_run.duration_seconds = 0.4
+    source_run.started_at = run.started_at
+    source_run.finished_at = run.finished_at
+
+    fake_db = MagicMock()
+    fake_db.execute = AsyncMock(
+        side_effect=[_ScalarResult([run]), _ScalarResult([source_run])]
+    )
+
+    async def _override_db():
+        yield fake_db
+
+    app.dependency_overrides[get_db] = _override_db
+    try:
+        resp = await client.get("/api/jobs/refresh-runs")
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data[0]["status"] == "partial_success"
+    assert data[0]["source_runs"][0]["source"] == "jsearch"
+    assert data[0]["source_runs"][0]["status"] == "failed"
+    assert data[0]["source_runs"][0]["error"] == "rate limited"
 
 
 async def test_get_single_job(client, mock_user_id):

@@ -184,7 +184,7 @@ This roadmap turns those findings into sequenced product work.
   - optionally generate the draft inline
   - surface this on Dashboard and Outreach
 - Non-goals:
-  - no auto-send
+  - no silent sends; any auto-send remains explicit, delayed, and cancellable
   - no spammy repeated follow-ups
 - Dependencies:
   - outreach logs

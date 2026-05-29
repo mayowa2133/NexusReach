@@ -1,5 +1,9 @@
 """Outlook/Microsoft integration — OAuth consent flow and draft staging via Graph API."""
 
+import asyncio
+import html
+import logging
+import time
 import uuid
 from urllib.parse import urlencode
 
@@ -9,11 +13,40 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.settings import UserSettings
+from app.services.oauth_token_crypto import (
+    OAuthTokenReconnectionRequiredError,
+    decrypt_refresh_token,
+    encrypt_refresh_token,
+)
+
+logger = logging.getLogger(__name__)
 
 MS_AUTH_URL = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
 MS_TOKEN_URL = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
 GRAPH_API_URL = "https://graph.microsoft.com/v1.0"
 SCOPES = "Mail.ReadWrite Mail.Send offline_access"
+
+# In-memory token cache mirrors the Gmail service (audit H11) so we don't hit
+# the Microsoft token endpoint on every Graph call: {user_id: (token, expiry)}
+_token_cache: dict[uuid.UUID, tuple[str, float]] = {}
+_token_locks: dict[uuid.UUID, asyncio.Lock] = {}
+
+# Refresh the token this many seconds before its actual expiry.
+_EXPIRY_BUFFER_SECONDS = 60
+
+
+def _get_lock(user_id: uuid.UUID) -> asyncio.Lock:
+    """Get or create a per-user lock for token refresh."""
+    if user_id not in _token_locks:
+        _token_locks[user_id] = asyncio.Lock()
+    return _token_locks[user_id]
+
+
+def _body_to_html(body: str) -> str:
+    """Escape the message body before paragraph/line formatting (audit M14)."""
+    escaped = html.escape(body or "")
+    formatted = escaped.replace("\n\n", "</p><p>").replace("\n", "<br>")
+    return f"<p>{formatted}</p>"
 
 
 def get_auth_url(redirect_uri: str, state: str = "") -> str:
@@ -47,8 +80,8 @@ async def exchange_code(code: str, redirect_uri: str) -> dict:
         return resp.json()
 
 
-async def refresh_access_token(refresh_token: str) -> str:
-    """Refresh an expired access token."""
+async def _refresh_access_token_uncached(refresh_token: str) -> tuple[str, int]:
+    """Refresh an access token. Returns (access_token, expires_in_seconds)."""
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(
@@ -62,11 +95,77 @@ async def refresh_access_token(refresh_token: str) -> str:
                 },
             )
             resp.raise_for_status()
-            return resp.json()["access_token"]
+            data = resp.json()
+            return data["access_token"], int(data.get("expires_in", 3600))
     except httpx.HTTPStatusError as exc:
         raise ValueError(
             "Outlook session expired. Please reconnect Outlook in Settings."
         ) from exc
+
+
+async def refresh_access_token(refresh_token: str) -> str:
+    """Refresh an expired access token (compatibility wrapper)."""
+    access_token, _ = await _refresh_access_token_uncached(refresh_token)
+    return access_token
+
+
+async def get_access_token(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    user_settings: UserSettings,
+) -> str:
+    """Return a valid Outlook access token, using cache and per-user locking.
+
+    Mirrors the Gmail service (audit H11): a cached token within its TTL is
+    returned immediately; otherwise it refreshes under a per-user lock so
+    concurrent Graph calls don't each hit the token endpoint.
+    """
+    now = time.time()
+    cached = _token_cache.get(user_id)
+    if cached:
+        token, expires_at = cached
+        if now < expires_at - _EXPIRY_BUFFER_SECONDS:
+            return token
+
+    lock = _get_lock(user_id)
+    async with lock:
+        # Double-check after acquiring the lock — another coroutine may have refreshed.
+        cached = _token_cache.get(user_id)
+        if cached:
+            token, expires_at = cached
+            if now < expires_at - _EXPIRY_BUFFER_SECONDS:
+                return token
+
+        stored_refresh_token = user_settings.outlook_refresh_token
+        if not stored_refresh_token:
+            raise ValueError("Outlook not connected. Please connect Outlook in Settings.")
+
+        try:
+            refresh_token = decrypt_refresh_token(stored_refresh_token)
+        except OAuthTokenReconnectionRequiredError as exc:
+            user_settings.outlook_refresh_token = None
+            user_settings.outlook_connected = False
+            await db.commit()
+            _token_cache.pop(user_id, None)
+            raise ValueError(
+                "Outlook must be reconnected before it can be used."
+            ) from exc
+
+        try:
+            access_token, expires_in = await _refresh_access_token_uncached(refresh_token)
+        except ValueError:
+            user_settings.outlook_refresh_token = None
+            user_settings.outlook_connected = False
+            await db.commit()
+            _token_cache.pop(user_id, None)
+            raise
+        except Exception as exc:
+            raise ValueError(
+                "Outlook session expired. Please reconnect Outlook in Settings."
+            ) from exc
+
+        _token_cache[user_id] = (access_token, now + expires_in)
+        return access_token
 
 
 async def connect_outlook(
@@ -88,9 +187,12 @@ async def connect_outlook(
     if not user_settings:
         raise ValueError("User settings not found.")
 
-    user_settings.outlook_refresh_token = refresh_token
+    user_settings.outlook_refresh_token = encrypt_refresh_token(refresh_token)
     user_settings.outlook_connected = True
     await db.commit()
+
+    # Clear any stale cached token from a prior connection.
+    _token_cache.pop(user_id, None)
     return True
 
 
@@ -109,6 +211,9 @@ async def disconnect_outlook(
     user_settings.outlook_refresh_token = None
     user_settings.outlook_connected = False
     await db.commit()
+
+    # Clear cached token so a disconnected account can't keep sending.
+    _token_cache.pop(user_id, None)
     return True
 
 
@@ -132,16 +237,14 @@ async def create_draft(
     if not user_settings or not user_settings.outlook_refresh_token:
         raise ValueError("Outlook not connected. Please connect Outlook in Settings.")
 
-    # Get fresh access token
-    access_token = await refresh_access_token(user_settings.outlook_refresh_token)
+    access_token = await get_access_token(db, user_id, user_settings)
 
     # Build Graph API message
-    html_body = body.replace("\n\n", "</p><p>").replace("\n", "<br>")
     message_payload = {
         "subject": subject,
         "body": {
             "contentType": "HTML",
-            "content": f"<p>{html_body}</p>",
+            "content": _body_to_html(body),
         },
         "toRecipients": [
             {"emailAddress": {"address": to_email}}
@@ -187,22 +290,14 @@ async def send_message(
     if not user_settings or not user_settings.outlook_refresh_token:
         raise ValueError("Outlook not connected. Please connect Outlook in Settings.")
 
-    try:
-        access_token = await refresh_access_token(user_settings.outlook_refresh_token)
-    except ValueError:
-        raise
-    except Exception as exc:
-        raise ValueError(
-            "Outlook session expired. Please reconnect Outlook in Settings."
-        ) from exc
+    access_token = await get_access_token(db, user_id, user_settings)
 
-    html_body = body.replace("\n\n", "</p><p>").replace("\n", "<br>")
     send_payload = {
         "message": {
             "subject": subject,
             "body": {
                 "contentType": "HTML",
-                "content": f"<p>{html_body}</p>",
+                "content": _body_to_html(body),
             },
             "toRecipients": [
                 {"emailAddress": {"address": to_email}}
@@ -256,7 +351,7 @@ async def check_draft_sent(
     if not user_settings or not user_settings.outlook_refresh_token:
         raise ValueError("Outlook not connected.")
 
-    access_token = await refresh_access_token(user_settings.outlook_refresh_token)
+    access_token = await get_access_token(db, user_id, user_settings)
 
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.get(

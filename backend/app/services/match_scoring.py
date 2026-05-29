@@ -7,6 +7,7 @@ algorithmic matching. No LLM calls — fast enough for batch scoring.
 from __future__ import annotations
 
 import re
+from datetime import date, datetime
 
 from app.models.profile import Profile
 
@@ -225,6 +226,21 @@ _YEARS_PATTERN = re.compile(
     r"(\d+)\+?\s*(?:years?|yrs?)\s*(?:of\s+)?(?:experience|exp)?",
     re.IGNORECASE,
 )
+_DATE_YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2})\b")
+_MONTH_NAMES = {
+    "jan": 1, "january": 1,
+    "feb": 2, "february": 2,
+    "mar": 3, "march": 3,
+    "apr": 4, "april": 4,
+    "may": 5,
+    "jun": 6, "june": 6,
+    "jul": 7, "july": 7,
+    "aug": 8, "august": 8,
+    "sep": 9, "sept": 9, "september": 9,
+    "oct": 10, "october": 10,
+    "nov": 11, "november": 11,
+    "dec": 12, "december": 12,
+}
 
 
 def _extract_years_required(text: str) -> int | None:
@@ -235,11 +251,66 @@ def _extract_years_required(text: str) -> int | None:
     return None
 
 
+def _extract_required_skills(req_text: str, resume_skills: list[str]) -> list[str]:
+    """Return resume skills that appear in the JD requirement section."""
+    if not req_text or not resume_skills:
+        return []
+    canonical_resume = _canonicalize_skills(resume_skills)
+    return sorted(skill for skill in canonical_resume if _skill_in_text(skill, req_text))
+
+
+def _parse_experience_date(value: object, *, default_month: int) -> date | None:
+    """Parse common resume date strings without depending on strict formats."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    lowered = text.lower()
+    if lowered in {"present", "current", "now"}:
+        return date.today()
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        return date(parsed.year, parsed.month, 1)
+    except ValueError:
+        pass
+
+    year_match = _DATE_YEAR_RE.search(text)
+    if not year_match:
+        return None
+    year = int(year_match.group(1))
+    month = default_month
+    for token, number in _MONTH_NAMES.items():
+        if re.search(rf"\b{re.escape(token)}\.?\b", lowered):
+            month = number
+            break
+    return date(year, month, 1)
+
+
 def _estimate_user_years(experience: list[dict]) -> float:
     """Estimate total years of work experience from parsed resume."""
     if not experience:
         return 0.0
-    return float(len(experience))  # rough: 1 entry ≈ 1+ year
+
+    months = 0
+    dated_entries = 0
+    for entry in experience:
+        start = _parse_experience_date(
+            entry.get("start_date") or entry.get("start") or entry.get("from"),
+            default_month=1,
+        )
+        end = _parse_experience_date(
+            entry.get("end_date") or entry.get("end") or entry.get("to"),
+            default_month=12,
+        ) or date.today()
+        if not start or end < start:
+            continue
+        months += (end.year - start.year) * 12 + (end.month - start.month) + 1
+        dated_entries += 1
+
+    if dated_entries:
+        return round(months / 12, 1)
+    return float(len(experience))  # fallback: one parsed entry approximates one year
 
 
 # ---------------------------------------------------------------------------
@@ -255,14 +326,18 @@ _W_EDUCATION = 5
 _W_LEVEL = 5
 
 
-def score_job(job_data: dict, profile: Profile | None) -> tuple[float, dict]:
+def score_job(job_data: dict, profile: Profile | None) -> tuple[float | None, dict]:
     """Score a job against the user's profile and parsed resume.
 
     Returns:
         (score 0-100, breakdown dict with per-axis scores and metadata)
     """
-    if not profile:
-        return 0.0, {"resume_not_uploaded": True}
+    if not profile or not profile.resume_parsed:
+        return None, {
+            "resume_missing": True,
+            "resume_not_uploaded": True,
+            "max_possible": 100,
+        }
 
     title = (job_data.get("title") or "").lower()
     description = (job_data.get("description") or "")
@@ -288,6 +363,7 @@ def score_job(job_data: dict, profile: Profile | None) -> tuple[float, dict]:
     if resume_skills:
         canonical_resume = _canonicalize_skills(resume_skills)
         skills_detail["total_resume_skills"] = len(canonical_resume)
+        skills_detail["required_matched"] = _extract_required_skills(req_text, resume_skills)
 
         matched = []
         for skill in canonical_resume:
@@ -425,6 +501,11 @@ def score_job(job_data: dict, profile: Profile | None) -> tuple[float, dict]:
     user_years = _estimate_user_years(experience)
 
     years_required = _extract_years_required(req_text)
+    breakdown["level_detail"] = {
+        "user_years": user_years,
+        "years_required": years_required,
+        "job_level": inferred_level,
+    }
     if years_required is not None:
         if user_years >= years_required:
             level_score = float(_W_LEVEL)

@@ -4,7 +4,7 @@ import uuid
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import Integer, cast, select, func as sa_func
+from sqlalchemy import Integer, cast, or_, select, func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.api_usage import ApiUsage
@@ -54,6 +54,76 @@ async def get_dashboard_summary(
     )
     total_jobs_tracked = total_jobs_r.scalar() or 0
 
+    # Outcome metrics for the launch dashboard
+    contacts_found_r = await db.execute(
+        select(sa_func.count()).where(Person.user_id == user_id)
+    )
+    contacts_found = contacts_found_r.scalar() or 0
+
+    verified_emails_r = await db.execute(
+        select(sa_func.count()).where(
+            Person.user_id == user_id,
+            Person.work_email.is_not(None),
+            or_(
+                Person.email_verified.is_(True),
+                Person.email_verification_status == "verified",
+            ),
+        )
+    )
+    verified_emails = verified_emails_r.scalar() or 0
+
+    graph_company_expr = sa_func.coalesce(
+        LinkedInGraphConnection.normalized_company_name,
+        LinkedInGraphConnection.current_company_name,
+    )
+    graph_warm_paths_r = await db.execute(
+        select(sa_func.count()).where(
+            LinkedInGraphConnection.user_id == user_id,
+            graph_company_expr.is_not(None),
+        )
+    )
+    graph_warm_paths = graph_warm_paths_r.scalar() or 0
+
+    outreach_warm_paths_r = await db.execute(
+        select(sa_func.count(sa_func.distinct(OutreachLog.person_id))).where(
+            OutreachLog.user_id == user_id,
+            OutreachLog.status.in_(["connected", "responded", "met"]),
+        )
+    )
+    outreach_warm_paths = outreach_warm_paths_r.scalar() or 0
+
+    drafts_created_r = await db.execute(
+        select(sa_func.count()).where(Message.user_id == user_id)
+    )
+    drafts_created = drafts_created_r.scalar() or 0
+
+    staged_drafts_r = await db.execute(
+        select(sa_func.count()).where(
+            Message.user_id == user_id,
+            Message.status == "staged",
+        )
+    )
+    staged_drafts = staged_drafts_r.scalar() or 0
+
+    replies_r = await db.execute(
+        select(sa_func.count()).where(
+            OutreachLog.user_id == user_id,
+            or_(
+                OutreachLog.response_received.is_(True),
+                OutreachLog.status.in_(["responded", "met", "closed"]),
+            ),
+        )
+    )
+    replies = replies_r.scalar() or 0
+
+    interviews_r = await db.execute(
+        select(sa_func.count()).where(
+            Job.user_id == user_id,
+            Job.stage.in_(["interviewing", "offer", "accepted"]),
+        )
+    )
+    interviews = interviews_r.scalar() or 0
+
     # Overall response rate
     total_outreach_r = await db.execute(
         select(sa_func.count()).where(
@@ -100,6 +170,13 @@ async def get_dashboard_summary(
         "overall_response_rate": response_rate,
         "upcoming_follow_ups": upcoming_follow_ups,
         "active_conversations": active_conversations,
+        "contacts_found": contacts_found,
+        "verified_emails": verified_emails,
+        "warm_paths": graph_warm_paths + outreach_warm_paths,
+        "drafts_created": drafts_created,
+        "staged_drafts": staged_drafts,
+        "replies": replies,
+        "interviews": interviews,
     }
 
 

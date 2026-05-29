@@ -27,6 +27,7 @@ import { JobPipelineCard } from '@/components/dashboard/JobPipelineCard';
 import { ApiUsageCard } from '@/components/dashboard/ApiUsageCard';
 import { GraphWarmPathsCard } from '@/components/dashboard/GraphWarmPathsCard';
 import { ActNowCard } from '@/components/dashboard/ActNowCard';
+import { GuidedWorkflowCard } from '@/components/dashboard/GuidedWorkflowCard';
 
 const STATUS_COLORS: Record<string, 'default' | 'secondary' | 'outline' | 'destructive'> = {
   draft: 'outline',
@@ -132,6 +133,8 @@ export function DashboardPage() {
       {/* KPI cards */}
       <MetricCards summary={insights?.summary} isLoading={insightsLoading} />
 
+      <GuidedWorkflowCard summary={insights?.summary} topJob={topJobs[0]} />
+
       {/* Act Now queue (cadence engine) */}
       <ActNowCard limit={5} />
 
@@ -174,7 +177,7 @@ export function DashboardPage() {
               <CardTitle>Latest Jobs</CardTitle>
               <p className="text-sm text-muted-foreground mt-0.5">
                 {enabledSearchCount > 0
-                  ? `${enabledSearchCount} saved search${enabledSearchCount === 1 ? '' : 'es'} auto-refreshing hourly`
+                  ? `${enabledSearchCount} saved search${enabledSearchCount === 1 ? '' : 'es'} auto-refreshing every 15 minutes`
                   : 'Set up your profile to auto-discover jobs'}
               </p>
             </div>

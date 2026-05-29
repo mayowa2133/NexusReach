@@ -1,9 +1,12 @@
 import { create } from 'zustand';
 import type { Session, User } from '@supabase/supabase-js';
-import { devAuthUserEmail, isDevAuthMode, supabase } from '@/lib/supabase';
+import { devAuthUserEmail, isDevAuthMode, isE2EAuthMode, supabase } from '@/lib/supabase';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 const DEV_USER_ID = '00000000-0000-0000-0000-000000000001';
+const E2E_USER_ID = import.meta.env.VITE_E2E_USER_ID || '11111111-1111-4111-8111-111111111111';
+const E2E_USER_EMAIL = import.meta.env.VITE_E2E_USER_EMAIL || 'e2e@nexusreach.local';
+const E2E_ACCESS_TOKEN = import.meta.env.VITE_E2E_ACCESS_TOKEN || '';
 
 function buildDevUser(): User {
   return {
@@ -31,11 +34,43 @@ function buildDevSession(user: User): Session {
   } as Session;
 }
 
-async function bootstrapDevUser(): Promise<void> {
+function buildE2EUser(): User {
+  return {
+    id: E2E_USER_ID,
+    email: E2E_USER_EMAIL,
+    aud: 'authenticated',
+    created_at: new Date().toISOString(),
+    app_metadata: {
+      provider: 'e2e',
+      providers: ['e2e'],
+    },
+    user_metadata: {
+      auth_mode: 'e2e',
+    },
+  } as User;
+}
+
+function buildE2ESession(user: User): Session {
+  if (!E2E_ACCESS_TOKEN) {
+    throw new Error('VITE_AUTH_MODE=e2e requires VITE_E2E_ACCESS_TOKEN.');
+  }
+
+  return {
+    access_token: E2E_ACCESS_TOKEN,
+    refresh_token: 'e2e-refresh-token',
+    expires_in: 60 * 60,
+    token_type: 'bearer',
+    user,
+  } as Session;
+}
+
+async function bootstrapAuthenticatedUser(accessToken?: string): Promise<void> {
   try {
-    await fetch(`${API_URL}/api/auth/me`);
+    await fetch(`${API_URL}/api/auth/me`, {
+      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+    });
   } catch (error) {
-    console.warn('Dev auth bootstrap failed.', error);
+    console.warn('Auth bootstrap failed.', error);
   }
 }
 
@@ -58,7 +93,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   session: null,
   loading: false,
   initialized: false,
-  devMode: isDevAuthMode,
+  devMode: isDevAuthMode || isE2EAuthMode,
 
   initialize: async () => {
     if (get().initialized) return;
@@ -66,7 +101,20 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (isDevAuthMode) {
       const user = buildDevUser();
       const session = buildDevSession(user);
-      await bootstrapDevUser();
+      await bootstrapAuthenticatedUser();
+      set({
+        session,
+        user,
+        initialized: true,
+        devMode: true,
+      });
+      return;
+    }
+
+    if (isE2EAuthMode) {
+      const user = buildE2EUser();
+      const session = buildE2ESession(user);
+      await bootstrapAuthenticatedUser(session.access_token);
       set({
         session,
         user,
@@ -97,9 +145,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   signUp: async (email: string, password: string) => {
-    if (isDevAuthMode) {
-      const user = buildDevUser();
-      set({ user, session: buildDevSession(user), initialized: true, devMode: true });
+    if (isDevAuthMode || isE2EAuthMode) {
+      const user = isE2EAuthMode ? buildE2EUser() : buildDevUser();
+      const session = isE2EAuthMode ? buildE2ESession(user) : buildDevSession(user);
+      set({ user, session, initialized: true, devMode: true });
       return;
     }
 
@@ -114,9 +163,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   signIn: async (email: string, password: string) => {
-    if (isDevAuthMode) {
-      const user = buildDevUser();
-      set({ user, session: buildDevSession(user), initialized: true, devMode: true });
+    if (isDevAuthMode || isE2EAuthMode) {
+      const user = isE2EAuthMode ? buildE2EUser() : buildDevUser();
+      const session = isE2EAuthMode ? buildE2ESession(user) : buildDevSession(user);
+      set({ user, session, initialized: true, devMode: true });
       return;
     }
 
@@ -131,9 +181,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   signInWithGoogle: async () => {
-    if (isDevAuthMode) {
-      const user = buildDevUser();
-      set({ user, session: buildDevSession(user), initialized: true, devMode: true });
+    if (isDevAuthMode || isE2EAuthMode) {
+      const user = isE2EAuthMode ? buildE2EUser() : buildDevUser();
+      const session = isE2EAuthMode ? buildE2ESession(user) : buildDevSession(user);
+      set({ user, session, initialized: true, devMode: true });
       return;
     }
 
@@ -149,9 +200,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   signInWithGithub: async () => {
-    if (isDevAuthMode) {
-      const user = buildDevUser();
-      set({ user, session: buildDevSession(user), initialized: true, devMode: true });
+    if (isDevAuthMode || isE2EAuthMode) {
+      const user = isE2EAuthMode ? buildE2EUser() : buildDevUser();
+      const session = isE2EAuthMode ? buildE2ESession(user) : buildDevSession(user);
+      set({ user, session, initialized: true, devMode: true });
       return;
     }
 
@@ -167,7 +219,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   signOut: async () => {
-    if (isDevAuthMode) {
+    if (isDevAuthMode || isE2EAuthMode) {
       set({ user: null, session: null, initialized: true, devMode: true });
       return;
     }

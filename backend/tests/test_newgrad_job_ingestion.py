@@ -4,7 +4,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.models.job import Job
-from app.services.job_service import _find_existing_job, _store_raw_jobs, discover_jobs, search_jobs
+from app.services.job_service import (
+    _find_existing_job,
+    _store_raw_jobs,
+    discover_jobs,
+    mark_stale_jobs_for_user,
+    search_jobs,
+    store_curated_ats_payloads_for_user,
+)
 from app.services.newgrad_jobs_backfill_service import backfill_newgrad_jobs
 
 pytestmark = pytest.mark.asyncio
@@ -109,6 +116,164 @@ async def test_search_jobs_persists_enriched_newgrad_metadata():
     assert job.apply_url == "https://careers.usbank.com/associate-software-engineer"
 
 
+async def test_search_jobs_records_source_failure_without_aborting_other_sources():
+    user_id = uuid.uuid4()
+    profile = _make_profile()
+    db = MagicMock()
+    db.execute = AsyncMock(
+        side_effect=[_ScalarResult(profile), _ScalarResult([]), _ScalarResult(None)]
+    )
+    db.add = MagicMock()
+    db.commit = AsyncMock()
+    source_stats: list[dict] = []
+
+    with (
+        patch("app.services.job_service.jsearch_client.search_jobs", new_callable=AsyncMock, side_effect=RuntimeError("jsearch down")),
+        patch(
+            "app.services.job_service.newgrad_jobs_client.search_newgrad_jobs",
+            new_callable=AsyncMock,
+            return_value=[_newgrad_job(location="Toronto, ON")],
+        ),
+        patch("app.services.job_service._find_existing_job", new_callable=AsyncMock, return_value=None),
+    ):
+        jobs = await search_jobs(
+            db,
+            user_id,
+            query="software engineer",
+            location="Toronto",
+            sources=["jsearch", "newgrad"],
+            source_stats=source_stats,
+        )
+
+    assert len(jobs) == 1
+    assert {stat["source"]: stat["status"] for stat in source_stats} == {
+        "jsearch": "failed",
+        "newgrad": "success",
+    }
+    added_prefs = [
+        call.args[0]
+        for call in db.add.call_args_list
+        if call.args and call.args[0].__class__.__name__ == "SearchPreference"
+    ]
+    assert added_prefs[0].location == "Toronto"
+
+
+async def test_mark_stale_jobs_marks_stale_and_closed_by_last_seen_at():
+    from datetime import datetime, timedelta, timezone
+
+    user_id = uuid.uuid4()
+    now = datetime.now(timezone.utc)
+    stale_job = MagicMock()
+    stale_job.last_seen_at = now - timedelta(days=20)
+    stale_job.source_status = "active"
+    stale_job.not_seen_count = 0
+    closed_job = MagicMock()
+    closed_job.last_seen_at = now - timedelta(days=60)
+    closed_job.source_status = "active"
+    closed_job.closed_at = None
+    closed_job.not_seen_count = 2
+
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=_ScalarResult([stale_job, closed_job]))
+    db.commit = AsyncMock()
+
+    result = await mark_stale_jobs_for_user(db, user_id)
+
+    assert result == {"stale": 1, "closed": 1}
+    assert stale_job.source_status == "stale"
+    assert stale_job.not_seen_count == 1
+    assert closed_job.source_status == "closed"
+    assert closed_job.closed_at is not None
+    assert closed_job.not_seen_count == 3
+    db.commit.assert_awaited_once()
+
+
+async def test_store_curated_ats_payloads_filters_by_saved_search_before_store():
+    from datetime import datetime, timezone
+
+    user_id = uuid.uuid4()
+    refresh_run_id = uuid.uuid4()
+    profile = _make_profile()
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=_ScalarResult(profile))
+    db.add = MagicMock()
+
+    pref = MagicMock()
+    pref.enabled = True
+    pref.mode = "default"
+    pref.query = "Backend Engineer"
+    pref.location = "Toronto"
+    pref.remote_only = False
+
+    stored_job = MagicMock(spec=Job)
+    stored_job.source = "greenhouse"
+    stored_job.ats = "greenhouse"
+    stored_job.ats_slug = "shopify"
+
+    source_payloads = {
+        "greenhouse:shopify": [
+            {
+                "external_id": "gh_1",
+                "title": "Backend Engineer",
+                "company_name": "Shopify",
+                "location": "Toronto, ON",
+                "description": "Build services.",
+                "source": "greenhouse",
+                "ats": "greenhouse",
+                "ats_slug": "shopify",
+                "url": "https://example.com/1",
+            },
+            {
+                "external_id": "gh_2",
+                "title": "Sales Manager",
+                "company_name": "Shopify",
+                "location": "Vancouver, BC",
+                "description": "Lead sales.",
+                "source": "greenhouse",
+                "ats": "greenhouse",
+                "ats_slug": "shopify",
+                "url": "https://example.com/2",
+            },
+        ]
+    }
+    source_stats = [{
+        "source": "greenhouse:shopify",
+        "status": "success",
+        "started_at": datetime.now(timezone.utc),
+        "finished_at": datetime.now(timezone.utc),
+        "duration_seconds": 0.1,
+        "raw_count": 2,
+        "new_count": 0,
+        "existing_count": 0,
+        "duplicate_count": 0,
+        "skipped_count": 0,
+        "error": None,
+        "details": None,
+    }]
+
+    with patch(
+        "app.services.job_service._store_raw_jobs",
+        new_callable=AsyncMock,
+        return_value=[stored_job],
+    ) as store_mock:
+        new_count = await store_curated_ats_payloads_for_user(
+            db,
+            user_id,
+            source_payloads=source_payloads,
+            source_stats=source_stats,
+            preferences=[pref],
+            refresh_run_id=refresh_run_id,
+        )
+
+    assert new_count == 1
+    filtered_jobs = store_mock.await_args.args[2]
+    assert [job["external_id"] for job in filtered_jobs] == ["gh_1"]
+    source_run = db.add.call_args.args[0]
+    assert source_run.source == "greenhouse:shopify"
+    assert source_run.raw_count == 1
+    assert source_run.new_count == 1
+
+
 async def test_find_existing_job_prefers_source_and_external_id():
     user_id = uuid.uuid4()
     existing_job = MagicMock()
@@ -132,9 +297,13 @@ async def test_find_existing_job_prefers_source_and_external_id():
 
 
 async def test_find_existing_job_reuses_canonical_url_for_non_ats_sources():
+    """Audit H7: URL dedup is an indexed canonical_url match (query stripped)."""
     user_id = uuid.uuid4()
     existing_job = MagicMock()
     existing_job.url = "https://www.newgrad-jobs.com/list-software-engineer-jobs/example_123"
+    existing_job.canonical_url = (
+        "https://www.newgrad-jobs.com/list-software-engineer-jobs/example_123"
+    )
     db = MagicMock()
     db.execute = AsyncMock(return_value=_ScalarResult([existing_job]))
 
@@ -149,9 +318,9 @@ async def test_find_existing_job_reuses_canonical_url_for_non_ats_sources():
     )
 
     assert found is existing_job
+    # Dedup now uses the indexed canonical_url column instead of an in-memory scan.
     compiled = str(db.execute.await_args.args[0])
-    assert "jobs.source" in compiled
-    assert "jobs.url IS NOT NULL" in compiled
+    assert "jobs.canonical_url" in compiled
 
 
 async def test_discover_jobs_stores_same_enriched_newgrad_fields():

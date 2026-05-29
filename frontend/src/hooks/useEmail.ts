@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { trackFirstFunnelEvent, trackFunnelEvent } from '@/lib/observability';
 import type {
   EmailFindResult,
   EmailVerifyResult,
@@ -22,7 +23,13 @@ export function useFindEmail() {
   return useMutation({
     mutationFn: (personId: string) =>
       api.post<EmailFindResult>(`/api/email/find/${personId}`),
-    onSuccess: () => {
+    onSuccess: (result, personId) => {
+      trackFunnelEvent('email_lookup_completed', {
+        person_id: personId,
+        result_type: result.result_type,
+        usable_for_outreach: result.usable_for_outreach,
+        verified: result.verified,
+      });
       queryClient.invalidateQueries({ queryKey: ['people'] });
     },
   });
@@ -34,7 +41,12 @@ export function useVerifyEmail() {
   return useMutation({
     mutationFn: (personId: string) =>
       api.post<EmailVerifyResult>(`/api/email/verify/${personId}`),
-    onSuccess: () => {
+    onSuccess: (result, personId) => {
+      trackFunnelEvent('email_verification_completed', {
+        person_id: personId,
+        status: result.status,
+        result: result.result,
+      });
       queryClient.invalidateQueries({ queryKey: ['people'] });
     },
   });
@@ -92,7 +104,15 @@ export function useStageDraft() {
   return useMutation({
     mutationFn: (params: { message_id: string; provider: string }) =>
       api.post<StageDraftResult>('/api/email/stage-draft', params),
-    onSuccess: () => {
+    onSuccess: (result, variables) => {
+      trackFunnelEvent('staged_draft_created', {
+        message_id: result.message_id ?? variables.message_id,
+        provider: result.provider,
+        draft_id_present: Boolean(result.draft_id),
+      });
+      trackFirstFunnelEvent('first_staged_draft', 'first_staged_draft', {
+        provider: result.provider,
+      });
       queryClient.invalidateQueries({ queryKey: ['messages'] });
     },
   });
@@ -104,7 +124,20 @@ export function useStageDrafts() {
   return useMutation({
     mutationFn: (params: StageDraftsRequest) =>
       api.post<StageDraftsResult>('/api/email/stage-drafts', params),
-    onSuccess: () => {
+    onSuccess: (result, variables) => {
+      trackFunnelEvent('batch_stage_completed', {
+        requested_count: result.requested_count,
+        staged_count: result.staged_count,
+        failed_count: result.failed_count,
+        provider: variables.provider,
+      });
+      if (result.staged_count > 0) {
+        trackFirstFunnelEvent('first_staged_draft', 'first_staged_draft', {
+          source: 'batch',
+          provider: variables.provider,
+          staged_count: result.staged_count,
+        });
+      }
       queryClient.invalidateQueries({ queryKey: ['messages'] });
       queryClient.invalidateQueries({ queryKey: ['outreach'] });
     },
@@ -138,7 +171,12 @@ export function useSendMessage() {
         '/api/email/send',
         params,
       ),
-    onSuccess: () => {
+    onSuccess: (result, variables) => {
+      trackFunnelEvent('message_sent', {
+        message_id: result.message_id,
+        provider: result.provider ?? variables.provider ?? null,
+        status: result.status,
+      });
       queryClient.invalidateQueries({ queryKey: ['messages'] });
       queryClient.invalidateQueries({ queryKey: ['outreach'] });
     },

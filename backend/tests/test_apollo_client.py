@@ -147,15 +147,34 @@ class TestEnrichPerson:
 
     async def test_returns_none_when_no_key(self):
         with patch("app.clients.apollo_client.settings") as s:
+            # enrich_person now honors the master key too (audit H5), so the
+            # "no key" case must clear both.
+            s.apollo_master_api_key = ""
             s.apollo_api_key = ""
             result = await apollo_client.enrich_person(apollo_id="abc")
         assert result is None
 
     async def test_returns_none_when_no_identifiers(self):
         with patch("app.clients.apollo_client.settings") as s:
+            s.apollo_master_api_key = ""
             s.apollo_api_key = "key"
             result = await apollo_client.enrich_person()
         assert result is None
+
+    async def test_enrich_person_uses_master_key_when_only_master_set(self):
+        """Audit H5: master-only Apollo config must still enable enrichment."""
+        mock_resp = _mock_httpx_response({
+            "person": {"id": "p1", "email": "a@b.com", "email_status": "verified"}
+        })
+        mock_client = _mock_client_with(mock_resp)
+        with (
+            patch("app.clients.apollo_client.httpx.AsyncClient", return_value=mock_client),
+            patch("app.clients.apollo_client.settings") as s,
+        ):
+            s.apollo_master_api_key = "master-key"
+            s.apollo_api_key = ""
+            result = await apollo_client.enrich_person(apollo_id="p1")
+        assert result is not None
 
     async def test_returns_none_when_no_email(self):
         mock_resp = _mock_httpx_response({

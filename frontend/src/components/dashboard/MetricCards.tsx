@@ -10,12 +10,13 @@ interface MetricCardsProps {
 export function MetricCards({ summary, isLoading }: MetricCardsProps) {
   const metrics = [
     { label: 'Jobs Tracked', value: summary?.total_jobs_tracked ?? 0 },
-    { label: 'People Contacted', value: summary?.total_contacts ?? 0 },
-    { label: 'Messages Sent', value: summary?.total_messages_sent ?? 0 },
-    {
-      label: 'Response Rate',
-      value: summary ? `${summary.overall_response_rate}%` : '--',
-    },
+    { label: 'Contacts Found', value: summary?.contacts_found ?? 0 },
+    { label: 'Verified Emails', value: summary?.verified_emails ?? 0 },
+    { label: 'Warm Paths', value: summary?.warm_paths ?? 0 },
+    { label: 'Drafts Created', value: summary?.drafts_created ?? 0 },
+    { label: 'Staged Drafts', value: summary?.staged_drafts ?? 0 },
+    { label: 'Replies', value: summary?.replies ?? 0 },
+    { label: 'Interviews', value: summary?.interviews ?? 0 },
   ];
 
   return (

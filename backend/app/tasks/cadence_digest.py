@@ -1,11 +1,10 @@
 """Celery task: weekly cadence digest email."""
 
-import asyncio
 import logging
 
 from app.database import async_session
 from app.services.cadence_digest_service import send_all_cadence_digests
-from app.tasks import celery_app
+from app.tasks import celery_app, run_async
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +23,6 @@ async def _run() -> dict:
 )
 def send_cadence_digests() -> dict:
     """Celery task: send weekly cadence digest to all eligible users."""
-    result = asyncio.run(_run())
+    result = run_async(_run())
     logger.info("Cadence digest task complete: %s", result)
     return result

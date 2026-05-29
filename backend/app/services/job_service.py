@@ -4,10 +4,10 @@ import asyncio
 import hashlib
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse, urlunparse
 
-from sqlalchemy import String, func as sa_func, not_, or_, select
+from sqlalchemy import Date, func as sa_func, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -35,6 +35,7 @@ from app.clients import (
 )
 from app.models.company import Company
 from app.models.job import Job
+from app.models.job_refresh_run import JobSourceRun
 from app.models.message import Message
 from app.models.outreach import OutreachLog
 from app.models.person import Person
@@ -46,10 +47,12 @@ from app.services.job_research_snapshot_service import (
     get_job_research_snapshot,
     serialize_snapshot,
 )
-from app.utils.experience_level import (
-    classify_experience_level_for_job,
-)
 from app.utils.company_identity import normalize_company_name
+from app.utils.job_metadata import (
+    country_code_for_name,
+    geocode_location_query,
+    normalize_job_metadata,
+)
 from app.services.occupation_taxonomy import (
     OCCUPATION_TAG_PREFIX,
     discover_queries_for_occupations,
@@ -73,6 +76,16 @@ from app.utils.startup_jobs import (
 
 logger = logging.getLogger(__name__)
 
+EARTH_RADIUS_KM = 6371.0
+DEFAULT_SEARCH_SOURCES = [
+    "jsearch",
+    "adzuna",
+    "remotive",
+    "jobicy",
+    "dice",
+    "simplify",
+    "newgrad",
+]
 STARTUP_BOARD_SOURCES = ["yc_jobs", "wellfound", "ventureloop"]
 STARTUP_LINK_RESOLVE_CONCURRENCY = 6
 STARTUP_MAX_RESOLVED_LINKS_PER_COMPANY = 3
@@ -89,6 +102,22 @@ def _fingerprint(company_name: str | None, title: str | None, location: str | No
         f"{(location or '').lower().strip()}"
     )
     return hashlib.md5(raw.encode()).hexdigest()
+
+
+def _normalized_pref_location(location: str | None) -> str:
+    """Normalize a saved-search location for dedup (audit M17).
+
+    Uses the geocoder's canonical label when the location is recognized so
+    "New York", "New York, NY" and "NYC" collapse to one key; otherwise falls
+    back to a whitespace/case-folded form. Empty stays empty.
+    """
+    raw = (location or "").strip()
+    if not raw:
+        return ""
+    geo = geocode_location_query(raw)
+    if geo and getattr(geo, "label", None):
+        return " ".join(geo.label.lower().split())
+    return " ".join(raw.lower().split())
 
 
 def _canonical_job_url(url: str | None) -> str | None:
@@ -111,6 +140,50 @@ def _result_first(result) -> Job | None:
     if callable(scalars):
         return scalars().first()
     return result.scalar_one_or_none()
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _source_stat(source: str, *, started_at: datetime | None = None) -> dict:
+    started = started_at or _utcnow()
+    return {
+        "source": source,
+        "status": "success",
+        "started_at": started,
+        "finished_at": None,
+        "duration_seconds": None,
+        "raw_count": 0,
+        "new_count": 0,
+        "existing_count": 0,
+        "duplicate_count": 0,
+        "skipped_count": 0,
+        "error": None,
+        "details": None,
+    }
+
+
+def _finish_source_stat(stat: dict, *, status: str | None = None, error: str | None = None) -> None:
+    finished_at = _utcnow()
+    stat["finished_at"] = finished_at
+    stat["duration_seconds"] = round(
+        (finished_at - stat["started_at"]).total_seconds(), 3
+    )
+    if status:
+        stat["status"] = status
+    if error:
+        stat["error"] = error[:2000]
+
+
+def summarize_source_stats(source_stats: list[dict]) -> dict:
+    return {
+        "total_seen": sum(int(stat.get("raw_count") or 0) for stat in source_stats),
+        "total_new": sum(int(stat.get("new_count") or 0) for stat in source_stats),
+        "total_existing": sum(int(stat.get("existing_count") or 0) for stat in source_stats),
+        "total_duplicates": sum(int(stat.get("duplicate_count") or 0) for stat in source_stats),
+        "total_errors": sum(1 for stat in source_stats if stat.get("status") == "failed"),
+    }
 
 
 def _job_source_key(data: dict | None = None, *, source: str | None = None, ats: str | None = None) -> str | None:
@@ -148,11 +221,7 @@ def _coerce_posted_at(value: str | None) -> str | None:
 
 
 def _experience_level_for_job(job_data: dict) -> str:
-    return classify_experience_level_for_job(
-        job_data.get("title", ""),
-        source=job_data.get("source"),
-        level_label=job_data.get("level_label"),
-    )
+    return normalize_job_metadata(job_data).get("experience_level") or "mid"
 
 
 def _employment_type_for_job(job_data: dict, experience_level: str) -> str | None:
@@ -173,6 +242,23 @@ def _apply_if_present(job: Job, attr: str, value) -> None:
         setattr(job, attr, value)
 
 
+def _distance_km_expression(latitude: float, longitude: float):
+    """Return SQL expression for distance from a job to a point in kilometers."""
+    lat_rad = sa_func.radians(latitude)
+    lng_rad = sa_func.radians(longitude)
+    job_lat_rad = sa_func.radians(Job.location_lat)
+    job_lng_rad = sa_func.radians(Job.location_lng)
+    cosine_distance = (
+        sa_func.cos(lat_rad)
+        * sa_func.cos(job_lat_rad)
+        * sa_func.cos(job_lng_rad - lng_rad)
+        + sa_func.sin(lat_rad)
+        * sa_func.sin(job_lat_rad)
+    )
+    bounded = sa_func.least(1.0, sa_func.greatest(-1.0, cosine_distance))
+    return EARTH_RADIUS_KM * sa_func.acos(bounded)
+
+
 def _with_extra_tags(data: dict, extra_tags: list[str] | None) -> dict:
     if not extra_tags:
         return data
@@ -187,7 +273,7 @@ def _refresh_existing_job(
     data: dict,
     *,
     fingerprint: str,
-    score: float,
+    score: float | None,
     breakdown: dict,
     experience_level: str,
 ) -> None:
@@ -196,9 +282,29 @@ def _refresh_existing_job(
     _apply_if_present(job, "company_name", data.get("company_name"))
     _apply_if_present(job, "company_logo", data.get("company_logo"))
     _apply_if_present(job, "location", data.get("location"))
+    # Only overwrite location/geocode fields when the refresh actually provides
+    # them — otherwise a source that omits location on re-fetch would wipe
+    # previously enriched data (audit M1).
+    for _field in (
+        "locations",
+        "country_codes",
+        "countries",
+        "location_lat",
+        "location_lng",
+        "location_radius_km",
+        "location_geocode_label",
+    ):
+        _value = data.get(_field)
+        if _value is not None:
+            setattr(job, _field, _value)
     if data.get("remote") is not None:
         job.remote = bool(data.get("remote"))
+    job.work_mode = data.get("work_mode")
     _apply_if_present(job, "url", data.get("url"))
+    # Keep the indexed canonical URL in sync so dedup stays fast (audit H7).
+    new_canonical = _canonical_job_url(data.get("url"))
+    if new_canonical:
+        job.canonical_url = new_canonical
     _apply_if_present(job, "apply_url", data.get("apply_url") or data.get("url"))
     _apply_if_present(job, "description", data.get("description"))
     _apply_if_present(job, "source", data.get("source"))
@@ -207,14 +313,18 @@ def _refresh_existing_job(
     _apply_if_present(job, "posted_at", data.get("posted_at"))
     job.match_score = score
     job.score_breakdown = breakdown
+    job.scored_at = datetime.now(timezone.utc) if score is not None else None
+    job.last_seen_at = _utcnow()
+    job.source_status = "active"
+    job.closed_at = None
+    job.not_seen_count = 0
     job.fingerprint = fingerprint
     _apply_if_present(job, "department", data.get("department"))
     _apply_if_present(job, "employment_type", _employment_type_for_job(data, experience_level))
-    if data.get("salary_min") is not None:
-        job.salary_min = data.get("salary_min")
-    if data.get("salary_max") is not None:
-        job.salary_max = data.get("salary_max")
-    _apply_if_present(job, "salary_currency", data.get("salary_currency"))
+    job.salary_min = data.get("salary_min")
+    job.salary_max = data.get("salary_max")
+    job.salary_currency = data.get("salary_currency")
+    job.salary_period = data.get("salary_period")
     if data.get("tags") is not None:
         # Carry over startup tags from the incoming payload (existing behavior),
         # then layer in any new occupation:* tags inferred from the latest data
@@ -230,17 +340,19 @@ def _refresh_existing_job(
             merged = merge_tags(merged, incoming_occupation_tags)
         job.tags = merged
     job.experience_level = experience_level
+    job.experience_level_confidence = data.get("experience_level_confidence")
+    job.metadata_provenance = data.get("metadata_provenance")
 
 
 def _build_job(
     *,
     user_id: uuid.UUID,
     data: dict,
-    score: float,
+    score: float | None,
     breakdown: dict,
     fingerprint: str,
 ) -> Job:
-    experience_level = _experience_level_for_job(data)
+    experience_level = data.get("experience_level") or _experience_level_for_job(data)
     return Job(
         user_id=user_id,
         external_id=data.get("external_id"),
@@ -248,24 +360,40 @@ def _build_job(
         company_name=data.get("company_name", "Unknown"),
         company_logo=data.get("company_logo"),
         location=data.get("location"),
+        locations=data.get("locations"),
+        country_codes=data.get("country_codes"),
+        countries=data.get("countries"),
+        location_lat=data.get("location_lat"),
+        location_lng=data.get("location_lng"),
+        location_radius_km=data.get("location_radius_km"),
+        location_geocode_label=data.get("location_geocode_label"),
         remote=data.get("remote", False),
+        work_mode=data.get("work_mode"),
         url=data.get("url"),
+        canonical_url=_canonical_job_url(data.get("url")),
         apply_url=data.get("apply_url") or data.get("url"),
         description=data.get("description"),
         employment_type=_employment_type_for_job(data, experience_level),
         experience_level=experience_level,
+        experience_level_confidence=data.get("experience_level_confidence"),
         salary_min=data.get("salary_min"),
         salary_max=data.get("salary_max"),
         salary_currency=data.get("salary_currency"),
+        salary_period=data.get("salary_period"),
         source=data.get("source", "unknown"),
         ats=data.get("ats"),
         ats_slug=data.get("ats_slug"),
         posted_at=_coerce_posted_at(data.get("posted_at")),
         match_score=score,
         score_breakdown=breakdown,
+        scored_at=datetime.now(timezone.utc) if score is not None else None,
         fingerprint=fingerprint,
         tags=data.get("tags"),
+        metadata_provenance=data.get("metadata_provenance"),
         department=data.get("department"),
+        source_status="active",
+        last_seen_at=_utcnow(),
+        not_seen_count=0,
     )
 
 
@@ -293,16 +421,34 @@ async def _find_existing_job(
 
     normalized_url = _canonical_job_url(url)
     if normalized_url:
-        filters = [Job.user_id == user_id, Job.url.is_not(None)]
-        if source_key:
-            filters.append(Job.source == source_key)
+        # Indexed exact match on the stored canonical URL (audit H7) — replaces
+        # the previous unbounded scan that loaded every job for the user+source
+        # and recomputed canonical URLs in Python.
         result = await db.execute(
             select(Job)
-            .where(*filters)
+            .where(Job.user_id == user_id, Job.canonical_url == normalized_url)
             .order_by(Job.created_at.asc(), Job.id.asc())
         )
-        for existing in result.scalars().all():
+        existing = _result_first(result)
+        if existing:
+            return existing
+
+        # Fallback for legacy rows ingested before canonical_url existed: scan
+        # only rows that still lack it, narrowed by host, and backfill on match.
+        host = urlparse(normalized_url).netloc
+        legacy_filters = [
+            Job.user_id == user_id,
+            Job.url.is_not(None),
+            Job.canonical_url.is_(None),
+        ]
+        if host:
+            legacy_filters.append(Job.url.ilike(f"%{host}%"))
+        legacy_result = await db.execute(
+            select(Job).where(*legacy_filters).order_by(Job.created_at.asc(), Job.id.asc())
+        )
+        for existing in legacy_result.scalars().all():
             if _canonical_job_url(existing.url) == normalized_url:
+                existing.canonical_url = normalized_url
                 return existing
 
     if fingerprint:
@@ -321,7 +467,7 @@ async def _find_existing_job(
 # --- Scoring ---
 
 
-def _score_job(job_data: dict, profile: Profile | None) -> tuple[float, dict]:
+def _score_job(job_data: dict, profile: Profile | None) -> tuple[float | None, dict]:
     """Score a job against the user's profile using the enhanced scorer.
 
     Delegates to match_scoring.score_job for multi-axis algorithmic matching
@@ -334,6 +480,172 @@ def _score_job(job_data: dict, profile: Profile | None) -> tuple[float, dict]:
     return score_job(job_data, profile)
 
 
+def _adzuna_country_for_location(location: str | None) -> str:
+    geocode = geocode_location_query(location)
+    if geocode and geocode.country_code:
+        return geocode.country_code.lower()
+    country_code = country_code_for_name(location)
+    if country_code:
+        return country_code.lower()
+    lowered = (location or "").lower()
+    if any(token in lowered for token in ("canada", "ontario", "toronto", "gta", "vancouver")):
+        return "ca"
+    if any(token in lowered for token in ("united kingdom", "uk", "london")):
+        return "gb"
+    return "us"
+
+
+def _job_matches_refresh_filters(data: dict, *, location: str | None, remote_only: bool) -> bool:
+    if remote_only and not bool(data.get("remote")) and data.get("work_mode") != "remote":
+        return False
+
+    if not location or not location.strip():
+        return True
+
+    requested = location.strip().lower()
+    geocode = geocode_location_query(location)
+    requested_country = (
+        geocode.country_code if geocode and geocode.country_code else country_code_for_name(location)
+    )
+    location_text = " ".join(
+        str(part or "")
+        for part in [
+            data.get("location"),
+            data.get("location_geocode_label"),
+            " ".join(data.get("countries") or []),
+            " ".join(data.get("country_codes") or []),
+        ]
+    ).lower()
+
+    if requested in location_text:
+        return True
+    if geocode and geocode.label.lower() in location_text:
+        return True
+
+    country_codes = {str(code).upper() for code in (data.get("country_codes") or [])}
+    if requested_country:
+        if country_codes and requested_country.upper() not in country_codes:
+            return False
+        if requested_country.upper() in country_codes and not geocode:
+            return True
+
+    if geocode and data.get("location_lat") is not None and data.get("location_lng") is not None:
+        try:
+            from math import asin, cos, radians, sin, sqrt
+
+            lat1 = radians(float(geocode.latitude))
+            lng1 = radians(float(geocode.longitude))
+            lat2 = radians(float(data["location_lat"]))
+            lng2 = radians(float(data["location_lng"]))
+            dlat = lat2 - lat1
+            dlng = lng2 - lng1
+            distance = 2 * EARTH_RADIUS_KM * asin(
+                sqrt(sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlng / 2) ** 2)
+            )
+            return distance <= max(float(geocode.radius_km), 50.0)
+        except (TypeError, ValueError, OverflowError):
+            return False
+
+    # Remote roles are location-eligible (audit H9). If a job is remote and was
+    # not already excluded by a non-matching explicit country code above, treat
+    # it as a match instead of requiring the literal word "remote" in its HQ
+    # location string — a remote role listed as "San Francisco, CA (Remote)"
+    # is still reachable by a candidate filtering for, say, Canada.
+    if bool(data.get("remote")) or data.get("work_mode") == "remote":
+        return True
+
+    return False
+
+
+async def _fetch_jobs_for_source(
+    source: str,
+    *,
+    query: str,
+    location: str | None,
+    remote_only: bool,
+    limit: int,
+) -> tuple[list[dict], dict]:
+    stat = _source_stat(source)
+    try:
+        if source == "jsearch":
+            jobs = await jsearch_client.search_jobs(
+                query, location=location, remote_only=remote_only, limit=limit
+            )
+        elif source == "adzuna":
+            jobs = await adzuna_client.search_jobs(
+                query,
+                location=location,
+                country=_adzuna_country_for_location(location),
+                limit=limit,
+            )
+        elif source == "remotive":
+            jobs = await remote_jobs_client.search_remotive(query, limit=limit)
+        elif source == "jobicy":
+            jobs = await remote_jobs_client.search_jobicy(query, limit=limit)
+        elif source == "dice":
+            jobs = await remote_jobs_client.search_dice(
+                query,
+                location=location,
+                country_code=(
+                    geocode_location_query(location).country_code
+                    if geocode_location_query(location)
+                    else country_code_for_name(location)
+                ),
+                limit=limit,
+            )
+        elif source == "simplify":
+            jobs = await remote_jobs_client.fetch_simplify_jobs(limit=limit)
+        elif source == "newgrad":
+            jobs = await newgrad_jobs_client.search_newgrad_jobs(query=query)
+        elif source == "yc_jobs":
+            jobs = await yc_jobs_client.search_yc_jobs(query=query, limit=max(limit, 50))
+        elif source == "wellfound":
+            jobs = await wellfound_jobs_client.search_wellfound_jobs(query=query, limit=max(limit, 50))
+        elif source == "ventureloop":
+            jobs = await ventureloop_jobs_client.search_ventureloop_jobs(query=query, limit=max(limit, 100))
+        else:
+            jobs = []
+            stat["details"] = {"skipped_reason": "unknown_source"}
+
+        for job in jobs:
+            job["_fetch_source_key"] = source
+        stat["raw_count"] = len(jobs)
+        _finish_source_stat(stat, status="success")
+        return jobs, stat
+    except Exception as exc:
+        logger.exception("Job source fetch failed: %s", source)
+        _finish_source_stat(stat, status="failed", error=str(exc))
+        return [], stat
+
+
+async def _record_source_runs(
+    db: AsyncSession,
+    *,
+    refresh_run_id: uuid.UUID | None,
+    source_stats: list[dict],
+) -> None:
+    if not refresh_run_id:
+        return
+    for stat in source_stats:
+        db.add(
+            JobSourceRun(
+                refresh_run_id=refresh_run_id,
+                source=stat["source"],
+                status=stat.get("status") or "success",
+                raw_count=int(stat.get("raw_count") or 0),
+                new_count=int(stat.get("new_count") or 0),
+                existing_count=int(stat.get("existing_count") or 0),
+                duplicate_count=int(stat.get("duplicate_count") or 0),
+                skipped_count=int(stat.get("skipped_count") or 0),
+                error=stat.get("error"),
+                details=stat.get("details"),
+                started_at=stat["started_at"],
+                finished_at=stat.get("finished_at"),
+                duration_seconds=stat.get("duration_seconds"),
+            )
+        )
+
+
 # --- Aggregation ---
 
 async def search_jobs(
@@ -344,15 +656,22 @@ async def search_jobs(
     remote_only: bool = False,
     sources: list[str] | None = None,
     limit: int = 20,
+    refresh_run_id: uuid.UUID | None = None,
+    source_stats: list[dict] | None = None,
 ) -> list[Job]:
     """Search for jobs across all sources, deduplicate, score, and store.
+
+    Returns every job that matched this search — both newly created rows and
+    existing rows that were refreshed in place. Each returned ``Job`` carries a
+    transient ``_is_new_job`` flag (True for newly created rows) so the Celery
+    refresh task can keep new-only counts and notifications accurate.
 
     Args:
         sources: List of sources to search. None = all.
                  Options: jsearch, adzuna, remotive, jobicy, dice, simplify, newgrad,
                  yc_jobs, wellfound, ventureloop
     """
-    all_sources = sources or ["jsearch", "adzuna", "remotive", "dice", "newgrad"]
+    all_sources = sources or DEFAULT_SEARCH_SOURCES
 
     # Load user profile for scoring
     result = await db.execute(
@@ -360,37 +679,21 @@ async def search_jobs(
     )
     profile = result.scalar_one_or_none()
 
-    # Gather jobs from all sources
-    raw_jobs: list[dict] = []
-
-    if "jsearch" in all_sources:
-        raw_jobs.extend(await jsearch_client.search_jobs(
-            query, location=location, remote_only=remote_only, limit=limit
-        ))
-    if "adzuna" in all_sources:
-        raw_jobs.extend(await adzuna_client.search_jobs(
-            query, location=location, limit=limit
-        ))
-    if "remotive" in all_sources:
-        raw_jobs.extend(await remote_jobs_client.search_remotive(query, limit=limit))
-    if "jobicy" in all_sources:
-        raw_jobs.extend(await remote_jobs_client.search_jobicy(query, limit=limit))
-    if "dice" in all_sources:
-        raw_jobs.extend(await remote_jobs_client.search_dice(query, location=location, limit=limit))
-    if "simplify" in all_sources:
-        raw_jobs.extend(await remote_jobs_client.fetch_simplify_jobs(limit=limit))
-    if "newgrad" in all_sources:
-        # newgrad-jobs.com serves ~100 jobs per category across 5 categories.
-        # Let it pull all available instead of capping to the generic limit.
-        raw_jobs.extend(await newgrad_jobs_client.search_newgrad_jobs(
-            query=query,
-        ))
-    if "yc_jobs" in all_sources:
-        raw_jobs.extend(await yc_jobs_client.search_yc_jobs(query=query, limit=max(limit, 50)))
-    if "wellfound" in all_sources:
-        raw_jobs.extend(await wellfound_jobs_client.search_wellfound_jobs(query=query, limit=max(limit, 50)))
-    if "ventureloop" in all_sources:
-        raw_jobs.extend(await ventureloop_jobs_client.search_ventureloop_jobs(query=query, limit=max(limit, 100)))
+    fetch_results = await asyncio.gather(
+        *(
+            _fetch_jobs_for_source(
+                source,
+                query=query,
+                location=location,
+                remote_only=remote_only,
+                limit=limit,
+            )
+            for source in all_sources
+        )
+    )
+    raw_jobs = [job for jobs, _ in fetch_results for job in jobs]
+    local_source_stats = [stat for _, stat in fetch_results]
+    stats_by_source = {stat["source"]: stat for stat in local_source_stats}
 
     # Deduplicate and store
     stored_jobs: list[Job] = []
@@ -400,7 +703,14 @@ async def search_jobs(
     )
 
     for data in raw_jobs:
+        data = dict(data)
+        fetch_source_key = data.pop("_fetch_source_key", None) or _job_source_key(data) or "unknown"
+        stat = stats_by_source.setdefault(fetch_source_key, _source_stat(fetch_source_key))
         _infer_startup_tags_for_job(data, known_startup_companies)
+        data = normalize_job_metadata(data)
+        if not _job_matches_refresh_filters(data, location=location, remote_only=remote_only):
+            stat["skipped_count"] += 1
+            continue
         fp = _fingerprint(
             data.get("company_name", ""),
             data.get("title", ""),
@@ -409,6 +719,7 @@ async def search_jobs(
         job_key = _job_identity_key(data, fingerprint=fp)
 
         if job_key in seen_job_keys:
+            stat["duplicate_count"] += 1
             continue
         seen_job_keys.add(job_key)
 
@@ -426,6 +737,7 @@ async def search_jobs(
         experience_level = _experience_level_for_job(data)
 
         if existing:
+            stat["existing_count"] += 1
             _refresh_existing_job(
                 existing,
                 data,
@@ -434,6 +746,12 @@ async def search_jobs(
                 breakdown=breakdown,
                 experience_level=experience_level,
             )
+            # Return refreshed matches too so the search endpoint shows results
+            # even when every hit dedup-matched an existing row (audit C3). The
+            # transient flag lets the refresh task keep "new" counts/notifications
+            # scoped to genuinely new rows.
+            existing._is_new_job = False  # type: ignore[attr-defined]
+            stored_jobs.append(existing)
             continue
 
         job = _build_job(
@@ -443,17 +761,30 @@ async def search_jobs(
             breakdown=breakdown,
             fingerprint=fp,
         )
+        job._is_new_job = True  # type: ignore[attr-defined]
         db.add(job)
         stored_jobs.append(job)
+        stat["new_count"] += 1
 
-    # Auto-save search preference for Celery auto-refresh
+    # Auto-save search preference for Celery auto-refresh. Match on a normalized
+    # location so "New York", "New York, NY" and "new york " don't each spawn a
+    # separate hourly refresh cycle (audit M17).
     pref_stmt = select(SearchPreference).where(
         SearchPreference.user_id == user_id,
         SearchPreference.query == query.strip(),
+        SearchPreference.remote_only == remote_only,
         SearchPreference.mode == "default",
     )
     pref_result = await db.execute(pref_stmt)
-    existing_pref = pref_result.scalar_one_or_none()
+    target_location_key = _normalized_pref_location(location)
+    existing_pref = next(
+        (
+            pref
+            for pref in pref_result.scalars().all()
+            if _normalized_pref_location(pref.location) == target_location_key
+        ),
+        None,
+    )
     if not existing_pref:
         db.add(SearchPreference(
             user_id=user_id,
@@ -463,6 +794,11 @@ async def search_jobs(
             mode="default",
         ))
 
+    if source_stats is not None:
+        source_stats.extend(local_source_stats)
+    await _record_source_runs(
+        db, refresh_run_id=refresh_run_id, source_stats=local_source_stats
+    )
     await db.commit()
     return stored_jobs
 
@@ -509,9 +845,7 @@ async def search_ats_jobs(
             raw_jobs = await ats_client.fetch_exact_job(parsed_job_url)
         except ats_client.ExactJobFetchError as exc:
             raise ValueError(str(exc)) from exc
-        exact_job_lookup = True
     else:
-        exact_job_lookup = False
         if not company_slug or adapter.search_board is None:
             raise ValueError("This job platform currently requires a direct job posting URL.")
         raw_jobs = await adapter.search_board(company_slug, limit)
@@ -520,7 +854,7 @@ async def search_ats_jobs(
     board_jobs: list[Job] = []
     seen_job_keys: set[str] = set()
     for raw_data in raw_jobs:
-        data = _with_extra_tags(raw_data, extra_tags)
+        data = normalize_job_metadata(_with_extra_tags(raw_data, extra_tags))
         fp = _fingerprint(data.get("company_name", ""), data["title"], data.get("location", ""))
         job_key = _job_identity_key(data, fingerprint=fp)
         if job_key in seen_job_keys:
@@ -541,15 +875,14 @@ async def search_ats_jobs(
             fingerprint=fp,
         )
         if existing_job:
-            if exact_job_lookup or extra_tags:
-                _refresh_existing_job(
-                    existing_job,
-                    data,
-                    fingerprint=fp,
-                    score=score,
-                    breakdown=breakdown,
-                    experience_level=experience_level,
-                )
+            _refresh_existing_job(
+                existing_job,
+                data,
+                fingerprint=fp,
+                score=score,
+                breakdown=breakdown,
+                experience_level=experience_level,
+            )
             board_jobs.append(existing_job)
             continue
 
@@ -674,6 +1007,12 @@ async def get_jobs(
     employment_type: str | None = None,
     experience_level: str | None = None,
     salary_min: float | None = None,
+    country: str | None = None,
+    near: str | None = None,
+    near_lat: float | None = None,
+    near_lng: float | None = None,
+    radius_km: float | None = None,
+    include_remote_in_radius: bool = False,
     remote: bool | None = None,
     startup: bool | None = None,
     occupations: list[str] | None = None,
@@ -688,6 +1027,7 @@ async def get_jobs(
     from app.utils.pagination import paginate
 
     query = select(Job).where(Job.user_id == user_id)
+    distance_expr = None
     if stage:
         query = query.where(Job.stage == stage)
     if starred is not None:
@@ -705,7 +1045,43 @@ async def get_jobs(
     if experience_level:
         query = query.where(Job.experience_level == experience_level)
     if salary_min is not None:
-        query = query.where(Job.salary_max >= salary_min)
+        query = query.where(
+            or_(Job.salary_max >= salary_min, Job.salary_min >= salary_min)
+        )
+    if country:
+        country_name = country.strip()
+        country_code = country_code_for_name(country_name)
+        clauses = []
+        if country_code:
+            clauses.append(Job.country_codes.contains([country_code]))
+        if country_name:
+            clauses.append(Job.countries.contains([country_name]))
+            clauses.append(Job.location.ilike(f"%{country_name}%"))
+        if clauses:
+            query = query.where(or_(*clauses))
+    if near_lat is None or near_lng is None:
+        geocode = geocode_location_query(near)
+        if geocode:
+            near_lat = geocode.latitude
+            near_lng = geocode.longitude
+            if radius_km is None:
+                radius_km = geocode.radius_km
+    if near_lat is not None and near_lng is not None:
+        effective_radius_km = radius_km if radius_km is not None else 50.0
+        distance_expr = _distance_km_expression(near_lat, near_lng)
+        local_clause = (
+            Job.location_lat.is_not(None)
+            & Job.location_lng.is_not(None)
+            & (distance_expr <= effective_radius_km)
+        )
+        if include_remote_in_radius:
+            query = query.where(or_(local_clause, Job.remote.is_(True)))
+        else:
+            query = query.where(local_clause)
+    elif near:
+        # Last-resort fallback for unrecognized manual entries. Known cities and
+        # metro aliases use the coordinate path above.
+        query = query.where(Job.location.ilike(f"%{near.strip()}%"))
     if remote is not None:
         query = query.where(Job.remote == remote)
     if startup is not None:
@@ -727,15 +1103,20 @@ async def get_jobs(
 
     if sort_by == "score":
         query = query.order_by(Job.match_score.desc().nullslast())
-    elif sort_by == "date":
-        # Sort by the actual posting date when available, fall back to created_at
-        query = query.order_by(
-            sa_func.coalesce(Job.posted_at, Job.created_at.cast(String)).desc()
-        )
+    elif sort_by == "distance" and distance_expr is not None:
+        query = query.order_by(distance_expr.asc().nullslast())
     else:
-        query = query.order_by(
-            sa_func.coalesce(Job.posted_at, Job.created_at.cast(String)).desc()
+        # Date sort (and default). `posted_at` is a free-form String(50) holding
+        # heterogeneous formats (ISO timestamps, "3 days ago", partial dates), so
+        # comparing it lexicographically — or against created_at cast to text —
+        # sorts stale jobs above recent ones (audit H6). Instead, parse only a
+        # clean leading ISO date (YYYY-MM-DD) to a real Date, fall back to the
+        # reliable ingest timestamp, and break ties by created_at.
+        posted_date = sa_func.cast(
+            sa_func.substring(Job.posted_at, r"^\d{4}-\d{2}-\d{2}"), Date
         )
+        recency = sa_func.coalesce(posted_date, sa_func.cast(Job.created_at, Date))
+        query = query.order_by(recency.desc().nullslast(), Job.created_at.desc())
 
     jobs, total = await paginate(db, query, limit=limit, offset=offset)
     await _repair_missing_apply_urls(db, jobs)
@@ -1267,7 +1648,8 @@ ATS_DISCOVER_BOARDS: list[dict[str, str]] = [
     {"slug": "runway", "ats": "ashby"},
     {"slug": "deel", "ats": "ashby"},
     {"slug": "vanta", "ats": "ashby"},
-    {"slug": "plaid", "ats": "ashby"},
+    # Plaid runs its board on Greenhouse (see GREENHOUSE_DISCOVER_BOARDS); the
+    # duplicate Ashby entry was removed to avoid double/stale imports (audit M5).
     {"slug": "elevenlabs", "ats": "ashby"},
     {"slug": "replit", "ats": "ashby"},
     {"slug": "perplexity", "ats": "ashby"},
@@ -1313,75 +1695,172 @@ async def _discover_ats_boards(
     db: AsyncSession,
     user_id: uuid.UUID,
     limit_per_board: int = 50,
+    refresh_run_id: uuid.UUID | None = None,
 ) -> int:
     """Pull jobs from curated Greenhouse, Ashby, Lever, and Workday boards."""
+    source_payloads, source_stats = await fetch_curated_ats_source_payloads(
+        limit_per_board=limit_per_board
+    )
+    return await store_curated_ats_payloads_for_user(
+        db,
+        user_id,
+        source_payloads=source_payloads,
+        source_stats=source_stats,
+        preferences=None,
+        refresh_run_id=refresh_run_id,
+    )
+
+
+async def fetch_curated_ats_source_payloads(
+    limit_per_board: int = 50,
+) -> tuple[dict[str, list[dict]], list[dict]]:
+    """Fetch curated ATS/proprietary sources once for fanout to users."""
+    semaphore = asyncio.Semaphore(8)
+    source_fetches = []
+
+    async def run_source(source_key: str, fetcher) -> tuple[str, list[dict], dict]:
+        stat = _source_stat(source_key)
+        try:
+            async with semaphore:
+                raw_jobs = await fetcher()
+            for job in raw_jobs:
+                job["_source_run_key"] = source_key
+            stat["raw_count"] = len(raw_jobs)
+            _finish_source_stat(stat, status="success")
+            return source_key, raw_jobs, stat
+        except Exception as exc:
+            logger.exception("Curated job source failed: %s", source_key)
+            _finish_source_stat(stat, status="failed", error=str(exc))
+            return source_key, [], stat
+
+    for board in ATS_DISCOVER_BOARDS:
+        source_key = f"{board['ats']}:{board['slug']}"
+
+        async def fetch_board(board=board) -> list[dict]:
+            adapter = ats_client.get_adapter(board["ats"])
+            return (
+                await adapter.search_board(board["slug"], limit_per_board)
+                if adapter and adapter.search_board is not None
+                else []
+            )
+
+        source_fetches.append(run_source(source_key, fetch_board))
+
+    for slug in LEVER_DISCOVER_SLUGS:
+        source_key = f"lever:{slug}"
+
+        async def fetch_lever(slug=slug) -> list[dict]:
+            return await lever_scrape_client.search_lever_html(slug, limit=limit_per_board)
+
+        source_fetches.append(run_source(source_key, fetch_lever))
+
+    async def fetch_workday() -> list[dict]:
+        return await workday_client.discover_all_workday(limit_per_company=20)
+
+    source_fetches.append(run_source("workday:curated", fetch_workday))
+
+    proprietary_sources: list[tuple[str, object]] = [
+        ("amazon", amazon_client.search_amazon_jobs),
+        ("microsoft", microsoft_client.search_microsoft_jobs),
+        ("apple", apple_client.search_apple_jobs),
+        ("google", google_client.search_google_jobs),
+        ("tesla", tesla_client.search_tesla_jobs),
+        ("meta", meta_client.search_meta_jobs),
+    ]
+    for source_key, fetcher in proprietary_sources:
+        async def fetch_proprietary(fetcher=fetcher) -> list[dict]:
+            return await fetcher(limit=20)
+
+        source_fetches.append(run_source(source_key, fetch_proprietary))
+
+    source_payloads: dict[str, list[dict]] = {}
+    source_stats: list[dict] = []
+    for source_key, raw_jobs, stat in await asyncio.gather(*source_fetches):
+        source_payloads[source_key] = raw_jobs
+        source_stats.append(stat)
+
+    return source_payloads, source_stats
+
+
+def job_matches_refresh_preferences(
+    raw_job: dict,
+    preferences,
+) -> bool:
+    """Return whether a crawled board job matches at least one saved search."""
+    normalized = normalize_job_metadata(dict(raw_job))
+    for pref in preferences:
+        if not getattr(pref, "enabled", True):
+            continue
+        if (getattr(pref, "mode", "default") or "default") != "default":
+            continue
+        query = (getattr(pref, "query", "") or "").strip()
+        if query and not job_matches_any_query(normalized, [query]):
+            continue
+        if not _job_matches_refresh_filters(
+            normalized,
+            location=getattr(pref, "location", None),
+            remote_only=bool(getattr(pref, "remote_only", False)),
+        ):
+            continue
+        return True
+    return False
+
+
+def _source_run_key_for_stored_job(job: Job) -> str:
+    if job.ats in {"greenhouse", "ashby", "lever"} and job.ats_slug:
+        return f"{job.ats}:{job.ats_slug}"
+    if job.source == "workday":
+        return "workday:curated"
+    if job.source == "google_careers":
+        return "google"
+    if job.source == "apple_jobs":
+        return "apple"
+    return job.source or job.ats or "unknown"
+
+
+async def store_curated_ats_payloads_for_user(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    source_payloads: dict[str, list[dict]],
+    source_stats: list[dict],
+    preferences=None,
+    refresh_run_id: uuid.UUID | None = None,
+) -> int:
+    """Store one global ATS crawl for a user after saved-search filtering."""
     result = await db.execute(select(Profile).where(Profile.user_id == user_id))
     profile = result.scalar_one_or_none()
 
-    total_new = 0
+    filtered_jobs: list[dict] = []
+    matched_counts_by_source: dict[str, int] = {}
+    for source_key, jobs in source_payloads.items():
+        for raw_job in jobs:
+            if preferences is not None and not job_matches_refresh_preferences(raw_job, preferences):
+                continue
+            matched = dict(raw_job)
+            matched["_source_run_key"] = source_key
+            filtered_jobs.append(matched)
+            matched_counts_by_source[source_key] = matched_counts_by_source.get(source_key, 0) + 1
 
-    # --- Greenhouse + Ashby (API-based) ---
-    for board in ATS_DISCOVER_BOARDS:
-        try:
-            stored = await search_ats_jobs(
-                db,
-                user_id,
-                company_slug=board["slug"],
-                ats_type=board["ats"],
-                limit=limit_per_board,
-            )
-            if stored:
-                logger.info(
-                    "ATS discover %s/%s: %d new jobs",
-                    board["ats"], board["slug"], len(stored),
-                )
-            total_new += len(stored)
-        except Exception:
-            logger.exception(
-                "ATS discover failed for %s/%s", board["ats"], board["slug"]
-            )
+    stored = await _store_raw_jobs(db, user_id, filtered_jobs, profile)
+    stored_counts_by_source: dict[str, int] = {}
+    for job in stored:
+        source_key = _source_run_key_for_stored_job(job)
+        stored_counts_by_source[source_key] = stored_counts_by_source.get(source_key, 0) + 1
 
-    # --- Lever (HTML scraping) ---
-    for slug in LEVER_DISCOVER_SLUGS:
-        try:
-            raw_jobs = await lever_scrape_client.search_lever_html(slug, limit=limit_per_board)
-            stored = await _store_raw_jobs(db, user_id, raw_jobs, profile)
-            if stored:
-                logger.info("Lever discover %s: %d new jobs", slug, len(stored))
-            total_new += len(stored)
-        except Exception:
-            logger.exception("Lever discover failed for %s", slug)
+    user_source_stats: list[dict] = []
+    for stat in source_stats:
+        user_stat = dict(stat)
+        source_key = user_stat["source"]
+        if user_stat.get("status") == "success":
+            user_stat["raw_count"] = matched_counts_by_source.get(source_key, 0)
+        user_stat["new_count"] = stored_counts_by_source.get(source_key, 0)
+        user_source_stats.append(user_stat)
 
-    # --- Workday (hidden JSON API) ---
-    try:
-        raw_jobs = await workday_client.discover_all_workday(limit_per_company=20)
-        stored = await _store_raw_jobs(db, user_id, raw_jobs, profile)
-        if stored:
-            logger.info("Workday discover: %d new jobs", len(stored))
-        total_new += len(stored)
-    except Exception:
-        logger.exception("Workday discover failed")
-
-    # --- Proprietary career sites (best-effort) ---
-    proprietary_sources: list[tuple[str, object]] = [
-        ("Amazon", amazon_client.search_amazon_jobs),
-        ("Microsoft", microsoft_client.search_microsoft_jobs),
-        ("Apple", apple_client.search_apple_jobs),
-        ("Google", google_client.search_google_jobs),
-        ("Tesla", tesla_client.search_tesla_jobs),
-        ("Meta", meta_client.search_meta_jobs),
-    ]
-    for source_label, fetcher in proprietary_sources:
-        try:
-            raw_jobs = await fetcher(limit=20)
-            stored = await _store_raw_jobs(db, user_id, raw_jobs, profile)
-            if stored:
-                logger.info("%s discover: %d new jobs", source_label, len(stored))
-            total_new += len(stored)
-        except Exception:
-            logger.exception("%s discover failed", source_label)
-
-    return total_new
+    await _record_source_runs(
+        db, refresh_run_id=refresh_run_id, source_stats=user_source_stats
+    )
+    return len(stored)
 
 
 async def _load_known_startup_company_names(
@@ -1466,6 +1945,7 @@ async def _store_raw_jobs(
     for data in raw_jobs:
         _infer_startup_tags_for_job(data, known_startup_companies)
         _infer_occupation_tags_for_job(data)
+        data = normalize_job_metadata(data)
         fp = _fingerprint(data.get("company_name", ""), data.get("title", ""), data.get("location", ""))
         job_key = _job_identity_key(data, fingerprint=fp)
         if job_key in seen_job_keys:
@@ -1516,6 +1996,46 @@ async def _store_raw_jobs(
             logger.debug("Auto-prospect trigger check failed", exc_info=True)
 
     return stored
+
+
+async def mark_stale_jobs_for_user(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    stale_after_days: int = 14,
+    closed_after_days: int = 45,
+) -> dict:
+    """Mark jobs that have not been seen recently as stale/closed.
+
+    This avoids presenting old postings as confidently active while preserving
+    user tracking state for jobs they may have saved or applied to.
+    """
+    now = _utcnow()
+    stale_cutoff = now - timedelta(days=stale_after_days)
+    closed_cutoff = now - timedelta(days=closed_after_days)
+    result = await db.execute(
+        select(Job).where(
+            Job.user_id == user_id,
+            Job.last_seen_at.is_not(None),
+            Job.last_seen_at < stale_cutoff,
+            Job.source_status != "closed",
+        )
+    )
+    stale_count = 0
+    closed_count = 0
+    for job in result.scalars().all():
+        if job.last_seen_at and job.last_seen_at < closed_cutoff:
+            job.source_status = "closed"
+            job.closed_at = job.closed_at or now
+            closed_count += 1
+        else:
+            job.source_status = "stale"
+            stale_count += 1
+        job.not_seen_count = (job.not_seen_count or 0) + 1
+
+    if stale_count or closed_count:
+        await db.commit()
+    return {"stale": stale_count, "closed": closed_count}
 
 
 async def _maybe_auto_prospect(
@@ -1585,8 +2105,13 @@ async def _discover_startup_direct_sources(
         ("ventureloop", ventureloop_jobs_client.search_ventureloop_jobs),
     ]
 
+    # Forward the query so each fetcher applies its built-in filtering instead of
+    # returning everything (audit H8). Only pass it when there's a single query —
+    # passing one of several would drop jobs matching the other queries, so the
+    # multi-query discover path stays broad and relies on the post-hoc filter.
+    fetch_query = queries[0] if len(queries) == 1 else None
     results = await asyncio.gather(
-        *(fetcher(limit=200) for _, fetcher in fetchers),
+        *(fetcher(query=fetch_query, limit=200) for _, fetcher in fetchers),
         return_exceptions=True,
     )
     for (source_key, _fetcher), result in zip(fetchers, results):

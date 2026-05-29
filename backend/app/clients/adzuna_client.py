@@ -6,6 +6,35 @@ from app.config import settings
 
 ADZUNA_BASE_URL = "https://api.adzuna.com/v1/api/jobs"
 
+# Adzuna salaries are denominated in the local currency of the country endpoint,
+# not USD. Map every Adzuna-supported country to its ISO-4217 currency (audit C5).
+ADZUNA_COUNTRY_CURRENCY = {
+    "at": "EUR",  # Austria
+    "au": "AUD",  # Australia
+    "be": "EUR",  # Belgium
+    "br": "BRL",  # Brazil
+    "ca": "CAD",  # Canada
+    "ch": "CHF",  # Switzerland
+    "de": "EUR",  # Germany
+    "es": "EUR",  # Spain
+    "fr": "EUR",  # France
+    "gb": "GBP",  # United Kingdom
+    "in": "INR",  # India
+    "it": "EUR",  # Italy
+    "mx": "MXN",  # Mexico
+    "nl": "EUR",  # Netherlands
+    "nz": "NZD",  # New Zealand
+    "pl": "PLN",  # Poland
+    "sg": "SGD",  # Singapore
+    "us": "USD",  # United States
+    "za": "ZAR",  # South Africa
+}
+
+
+def _adzuna_currency(country: str | None) -> str:
+    """Return the local currency for an Adzuna country code, defaulting to USD."""
+    return ADZUNA_COUNTRY_CURRENCY.get((country or "").lower(), "USD")
+
 
 async def search_jobs(
     query: str,
@@ -61,7 +90,7 @@ async def search_jobs(
             "posted_at": j.get("created") or None,
             "salary_min": j.get("salary_min"),
             "salary_max": j.get("salary_max"),
-            "salary_currency": "USD" if country == "us" else "GBP" if country == "gb" else "USD",
+            "salary_currency": _adzuna_currency(country),
             "source": "adzuna",
         }
         for j in jobs

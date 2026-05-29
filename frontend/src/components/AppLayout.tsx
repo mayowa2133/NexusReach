@@ -82,6 +82,20 @@ export function AppLayout() {
                 >
                   Settings
                 </Link>
+                <Link
+                  to="/privacy"
+                  onClick={() => setMobileOpen(false)}
+                  className="flex h-10 items-center rounded-lg px-3 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  Privacy
+                </Link>
+                <Link
+                  to="/terms"
+                  onClick={() => setMobileOpen(false)}
+                  className="flex h-10 items-center rounded-lg px-3 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  Terms
+                </Link>
               </nav>
             </SheetContent>
           </Sheet>
@@ -126,6 +140,12 @@ export function AppLayout() {
                 </DropdownMenuItem>
                 <DropdownMenuItem>
                   <Link to="/settings" className="w-full">Settings</Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem>
+                  <Link to="/privacy" className="w-full">Privacy</Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem>
+                  <Link to="/terms" className="w-full">Terms</Link>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => signOut()}>

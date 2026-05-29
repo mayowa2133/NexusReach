@@ -314,6 +314,7 @@ async def test_verify_people_current_company_can_verify_public_profile_without_l
         ):
         mock_settings.employment_verify_enabled = True
         mock_settings.employment_verify_top_n = 10
+        mock_settings.employment_verify_concurrency = 3
         mock_settings.employment_verify_timeout_seconds = 5
         await verify_people_current_company(
             bucketed,
@@ -356,6 +357,7 @@ async def test_verify_people_current_company_does_not_shortcut_team_page_without
     ):
         mock_settings.employment_verify_enabled = True
         mock_settings.employment_verify_top_n = 10
+        mock_settings.employment_verify_concurrency = 3
         mock_settings.employment_verify_timeout_seconds = 5
         await verify_people_current_company(
             bucketed,
@@ -403,6 +405,7 @@ async def test_verify_people_current_company_records_crawl4ai_public_fallback():
     ):
         mock_settings.employment_verify_enabled = True
         mock_settings.employment_verify_top_n = 10
+        mock_settings.employment_verify_concurrency = 3
         mock_settings.employment_verify_timeout_seconds = 5
         await verify_people_current_company(
             bucketed,
@@ -442,6 +445,7 @@ async def test_verify_people_current_company_respects_max_candidates_override():
         patch("app.services.employment_verification_service.settings") as mock_settings,
     ):
         mock_settings.employment_verify_top_n = 10
+        mock_settings.employment_verify_concurrency = 3
         await verify_people_current_company(
             bucketed,
             company_name="Twitch",

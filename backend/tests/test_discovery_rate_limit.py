@@ -5,7 +5,20 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
+import app.utils.discovery_rate_limit as drl
 from app.utils.discovery_rate_limit import check_discovery_rate_limit
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limit_redis_singleton():
+    """Reset the shared Redis client so each test re-creates it from the mock.
+
+    The limiter now reuses one client/pool (audit H4); without resetting,
+    the first test's mock would leak into later tests.
+    """
+    drl._redis_client = None
+    yield
+    drl._redis_client = None
 
 
 @pytest.fixture()

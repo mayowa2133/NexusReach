@@ -34,6 +34,7 @@ import { AutoProspectPanel } from '@/components/settings/AutoProspectPanel';
 import { CadenceSettingsPanel } from '@/components/settings/CadenceSettingsPanel';
 import { GuardrailsPanel } from '@/components/settings/GuardrailsPanel';
 import { JobAlertsPanel } from '@/components/settings/JobAlertsPanel';
+import { AccountDataPanel } from '@/components/settings/AccountDataPanel';
 import { toast } from 'sonner';
 import type { LinkedInGraphSyncSession } from '@/types';
 
@@ -306,13 +307,18 @@ export function SettingsPage() {
 
       <ResumeAiAssistCard />
 
+      <AccountDataPanel />
+
+      <Separator />
+
       {/* Email Integrations */}
       <Card>
         <CardHeader>
           <CardTitle>Email Integrations</CardTitle>
           <CardDescription>
             Connect your email to stage AI-drafted messages as drafts in your inbox.
-            You always review and send manually — nothing is sent automatically.
+            NexusReach is draft-first by default; delayed auto-send is optional
+            and can be cancelled before send.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

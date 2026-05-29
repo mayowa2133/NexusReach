@@ -101,12 +101,57 @@ async def test_microsoft_search_handles_failure(monkeypatch):
         async def __aexit__(self, *a):
             pass
 
-        async def post(self, *a, **kw):
+        async def get(self, *a, **kw):
             raise httpx.ConnectError("offline")
 
     monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: _FailClient())
     result = await search_microsoft_jobs(search_text="engineer", limit=5)
     assert result == []
+
+
+async def test_microsoft_search_parses_pcsx_payload(monkeypatch):
+    """search_microsoft_jobs parses the current apply.careers.microsoft.com API."""
+    import httpx
+
+    payload = {
+        "data": {
+            "positions": [
+                {
+                    "id": 1970393556642878,
+                    "displayJobId": "200016554",
+                    "name": "Software Engineer II",
+                    "standardizedLocations": ["Redmond, WA, US"],
+                    "postedTs": 1768321638,
+                    "department": "Software Engineering",
+                    "workLocationOption": "onsite",
+                    "positionUrl": "/careers/job/1970393556642878",
+                }
+            ]
+        }
+    }
+
+    class _Resp:
+        status_code = 200
+        text = "ok"
+
+        def json(self):
+            return payload
+
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            pass
+
+        async def get(self, *a, **kw):
+            return _Resp()
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: _Client())
+    result = await search_microsoft_jobs(search_text="engineer", limit=5)
+    assert result[0]["external_id"] == "ms_200016554"
+    assert result[0]["title"] == "Software Engineer II"
+    assert result[0]["location"] == "Redmond, WA, US"
 
 
 # ---------- Apple ----------
@@ -241,7 +286,7 @@ async def test_google_search_parses_xml_feed(monkeypatch):
     <published>2026-03-17T09:00:15.503Z</published>
     <description>&lt;p&gt;Build cloud infrastructure.&lt;/p&gt;</description>
     <jobtype>FULL_TIME</jobtype>
-    <locations><location>Mountain View, CA, USA</location></locations>
+    <locations><location><city>Mountain View</city><state>CA</state><country>USA</country></location></locations>
     <categories><category>SOFTWARE_ENGINEERING</category></categories>
   </entry>
   <entry>
@@ -292,6 +337,54 @@ async def test_google_search_parses_xml_feed(monkeypatch):
     assert result[1]["company_name"] == "DeepMind"
     assert result[1]["remote"] is True
     assert "London" in result[1]["location"]
+
+
+async def test_google_search_parses_current_jobs_root(monkeypatch):
+    """Google's live feed now uses <jobs><job> rather than Atom entries."""
+    import httpx
+    from app.clients.google_client import search_google_jobs
+
+    _MOCK_XML = b"""<?xml version="1.0" encoding="UTF-8"?>
+<jobs>
+  <updated>2026-05-26T21:23:45+00:00</updated>
+  <job>
+    <published>2026-05-14T13:32:34.936Z</published>
+    <jobid>111974858979451590</jobid>
+    <title>Senior Software Engineer, Android</title>
+    <description>&lt;p&gt;Build Gemini applications.&lt;/p&gt;</description>
+    <url>https://www.google.com/about/careers/applications/jobs/results/111974858979451590</url>
+    <jobtype>FULL_TIME</jobtype>
+    <employer>Google DeepMind</employer>
+    <remote>onsite</remote>
+    <isRemote>No</isRemote>
+    <isHybrid>No</isHybrid>
+    <locations><location>Mountain View, CA, USA</location></locations>
+    <categories><category>SOFTWARE_ENGINEERING</category></categories>
+  </job>
+</jobs>"""
+
+    class _MockStream:
+        status_code = 200
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            pass
+        async def aiter_bytes(self, chunk_size=65536):
+            yield _MOCK_XML
+
+    class _MockClient:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            pass
+        def stream(self, *a, **kw):
+            return _MockStream()
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: _MockClient())
+    result = await search_google_jobs(search_text="software engineer", limit=10)
+    assert len(result) == 1
+    assert result[0]["company_name"] == "Google DeepMind"
+    assert "Mountain View" in result[0]["location"]
 
 
 async def test_google_search_filters_by_query(monkeypatch):

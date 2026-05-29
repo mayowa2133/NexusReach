@@ -1,0 +1,120 @@
+{
+  "scrapegraph_configured": true,
+  "scrapegraph_stealth": true,
+  "urls": [
+    {
+      "current_stack": {
+        "crawl4ai": {
+          "elapsed_ms": 4778,
+          "ok": false
+        },
+        "direct": {
+          "elapsed_ms": 206,
+          "ok": false
+        },
+        "firecrawl": {
+          "elapsed_ms": 397,
+          "ok": false
+        },
+        "selected": {
+          "elapsed_ms": 3241,
+          "ok": false
+        }
+      },
+      "scrapegraph": {
+        "extract": {
+          "elapsed_ms": 1171,
+          "fetch_metadata": {},
+          "has_required_job_fields": false,
+          "id": "bc54a471-5641-4572-8b76-5e30f0781cba",
+          "json": {
+            "application_url": null,
+            "company_name": null,
+            "description": null,
+            "employment_type": null,
+            "is_job_posting": false,
+            "location": null,
+            "posted_at": null,
+            "salary": null,
+            "title": null,
+            "work_mode": null
+          },
+          "ok": true,
+          "usage": {
+            "completionTokens": 1237,
+            "promptTokens": 14253
+          }
+        },
+        "scrape": {
+          "content_type": "text/html",
+          "elapsed_ms": 4524,
+          "html_chars": 174639,
+          "id": "67be2d74-23da-44c4-8731-fb7d556a5177",
+          "markdown_chars": 33765,
+          "markdown_preview": "[](https://wellfound.com/) [Overview](https://wellfound.com/candidates/overview) [Jobs](https://wellfound.com/jobs) [Featured](https://wellfound.com/candidates/featured) [Remote](https://wellfound.com/candidates/remote) [For companies](https://wellfound.com/recruit/overview) Log In Sign Up ![](https",
+          "ok": true
+        }
+      },
+      "url": "https://wellfound.com/jobs"
+    },
+    {
+      "current_stack": {
+        "crawl4ai": {
+          "content_chars": 138,
+          "elapsed_ms": 5640,
+          "fallback_used": false,
+          "html_chars": 2376,
+          "insufficient_signals": [
+            "akamai",
+            "powered and protected by"
+          ],
+          "markdown_chars": 138,
+          "ok": true,
+          "preview": "Powered and protected by ![Akamai](https://www.akamai.com/site/ko/images/logo/akamai-logo1.svg) [Privacy](https://www.akamai.com/privacy)",
+          "retrieval_method": "crawl4ai",
+          "title": "",
+          "url": "https://www.tesla.com/careers/search/job/software-engineer-autopilot-222331"
+        },
+        "direct": {
+          "elapsed_ms": 226,
+          "ok": false
+        },
+        "firecrawl": {
+          "elapsed_ms": 156,
+          "ok": false
+        },
+        "selected": {
+          "content_chars": 138,
+          "elapsed_ms": 3791,
+          "fallback_used": false,
+          "html_chars": 2376,
+          "insufficient_signals": [
+            "akamai",
+            "powered and protected by"
+          ],
+          "markdown_chars": 138,
+          "ok": true,
+          "preview": "Powered and protected by ![Akamai](https://www.akamai.com/site/ko/images/logo/akamai-logo1.svg) [Privacy](https://www.akamai.com/privacy)",
+          "retrieval_method": "crawl4ai",
+          "title": "",
+          "url": "https://www.tesla.com/careers/search/job/software-engineer-autopilot-222331"
+        }
+      },
+      "scrapegraph": {
+        "extract": {
+          "elapsed_ms": 3046,
+          "error": "{\"error\":{\"type\":\"not_found\",\"message\":\"Not found: https://www.tesla.com/careers/search/job/software-engineer-autopilot-222331\"}}",
+          "ok": false,
+          "status_code": 404
+        },
+        "scrape": {
+          "elapsed_ms": 3986,
+          "error": "{\"error\":{\"type\":\"not_found\",\"message\":\"Not found: https://www.tesla.com/careers/search/job/software-engineer-autopilot-222331\"}}",
+          "ok": false,
+          "status_code": 404
+        }
+      },
+      "url": "https://www.tesla.com/careers/search/job/software-engineer-autopilot-222331"
+    }
+  ]
+}

@@ -317,4 +317,4 @@ Keep that file updated when:
 2. Decide whether startup sources should remain manual-only or join saved-search/hourly refresh behavior.
 3. Add a separate “venture-backed” taxonomy before bringing in broader VC portfolio boards like Sequoia, Accel, and General Catalyst.
 4. Harden the LinkedIn browser sync flow against more live DOM and challenge variations.
-5. Thread warm-path context into drafting suggestions without changing the no-auto-send rule.
+5. Thread warm-path context into drafting suggestions without changing the draft-first, opt-in delayed auto-send rule.

@@ -10,6 +10,13 @@ class DashboardSummary(BaseModel):
     overall_response_rate: float
     upcoming_follow_ups: int
     active_conversations: int
+    contacts_found: int
+    verified_emails: int
+    warm_paths: int
+    drafts_created: int
+    staged_drafts: int
+    replies: int
+    interviews: int
 
 
 class ResponseRateBreakdown(BaseModel):

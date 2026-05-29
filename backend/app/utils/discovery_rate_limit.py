@@ -19,6 +19,18 @@ logger = logging.getLogger(__name__)
 
 _WINDOW_SECONDS = 86_400  # 24 hours
 
+# Reuse a single Redis client/connection pool instead of opening a new TCP
+# connection per request (audit H4). redis.asyncio clients are safe to share
+# across coroutines and manage their own connection pool.
+_redis_client: aioredis.Redis | None = None
+
+
+def _client() -> aioredis.Redis:
+    global _redis_client
+    if _redis_client is None:
+        _redis_client = aioredis.from_url(settings.redis_url, decode_responses=True)
+    return _redis_client
+
 
 async def check_discovery_rate_limit(
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
@@ -29,7 +41,7 @@ async def check_discovery_rate_limit(
     ``settings.discovery_daily_limit`` discovery requests in the
     past 24 hours.
     """
-    r = aioredis.from_url(settings.redis_url, decode_responses=True)
+    r = _client()
     try:
         key = f"nexusreach:discovery_daily:{user_id}"
         now = time.time()
@@ -56,5 +68,3 @@ async def check_discovery_rate_limit(
         # If Redis is unavailable, log and allow the request through
         # rather than blocking all discovery.
         logger.warning("Discovery rate-limit check failed; allowing request", exc_info=True)
-    finally:
-        await r.aclose()

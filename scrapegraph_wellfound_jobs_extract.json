@@ -1,0 +1,145 @@
+{
+  "body": {
+    "id": "fd08ac11-0fbb-4a78-9844-4d71ebf5a9c0",
+    "json": {
+      "jobs": [
+        {
+          "company_name": "Zipline",
+          "description": null,
+          "employment_type": null,
+          "evidence": null,
+          "job_url": "https://wellfound.com/jobs/4255462-senior-full-stack-software-engineer-application-software-remote",
+          "location": "Remote",
+          "remote": true,
+          "salary": "$180k - $270k",
+          "title": "Senior Full Stack Software Engineer, Application Software (Remote)"
+        },
+        {
+          "company_name": "Lyv Health",
+          "description": null,
+          "employment_type": null,
+          "evidence": null,
+          "job_url": "https://wellfound.com/jobs/4140148-senior-full-stack-software-engineer-front-end-leaning",
+          "location": "New York",
+          "remote": false,
+          "salary": "$170k - $200k",
+          "title": "Senior Full Stack Software Engineer (Front-End Leaning)"
+        },
+        {
+          "company_name": "Ambient.ai",
+          "description": null,
+          "employment_type": null,
+          "evidence": null,
+          "job_url": "https://wellfound.com/jobs/4249319-software-engineer-backend-product",
+          "location": "Redwood City",
+          "remote": false,
+          "salary": "$168k - $205k",
+          "title": "Software Engineer - Backend (Product)"
+        },
+        {
+          "company_name": "Mechanize",
+          "description": null,
+          "employment_type": null,
+          "evidence": null,
+          "job_url": "https://wellfound.com/jobs/4249080-software-engineer",
+          "location": "San Francisco",
+          "remote": false,
+          "salary": "$300k - $380k",
+          "title": "Software Engineer"
+        },
+        {
+          "company_name": "CodePath",
+          "description": null,
+          "employment_type": null,
+          "evidence": null,
+          "job_url": "https://wellfound.com/jobs/2870439-staff-software-engineer",
+          "location": "Remote",
+          "remote": true,
+          "salary": "$150k - $175k",
+          "title": "Staff Software Engineer"
+        },
+        {
+          "company_name": "Labelbox",
+          "description": null,
+          "employment_type": null,
+          "evidence": null,
+          "job_url": "https://wellfound.com/jobs/3727456-full-stack-engineer-ai-data-platform",
+          "location": "San Francisco",
+          "remote": false,
+          "salary": "$130k - $200k",
+          "title": "Full-Stack Engineer, AI Data Platform"
+        },
+        {
+          "company_name": "Scale AI",
+          "description": null,
+          "employment_type": null,
+          "evidence": null,
+          "job_url": "https://wellfound.com/jobs/3122415-mission-software-engineer-public-sector",
+          "location": "Baltimore",
+          "remote": false,
+          "salary": "$184k - $292k",
+          "title": "Mission Software Engineer, Public Sector"
+        },
+        {
+          "company_name": "Lyv Health",
+          "description": null,
+          "employment_type": null,
+          "evidence": null,
+          "job_url": "https://wellfound.com/jobs/4255445-founding-product-manager",
+          "location": "New York",
+          "remote": false,
+          "salary": "$150k - $175k",
+          "title": "Founding Product Manager"
+        },
+        {
+          "company_name": "Kodiak Robotics",
+          "description": null,
+          "employment_type": null,
+          "evidence": null,
+          "job_url": "https://wellfound.com/jobs/4255385-group-product-manager",
+          "location": "Mountain View",
+          "remote": false,
+          "salary": "$240k - $280k",
+          "title": "Group Product Manager"
+        },
+        {
+          "company_name": "Simply Bread Co",
+          "description": null,
+          "employment_type": null,
+          "evidence": null,
+          "job_url": "https://wellfound.com/jobs/4248633-marketing-product-manager-growth",
+          "location": "Remote",
+          "remote": true,
+          "salary": "$80k - $110k",
+          "title": "Marketing Product Manager (Growth)"
+        }
+      ],
+      "page_type": "jobs",
+      "reason": null
+    },
+    "metadata": {
+      "chunker": {
+        "chunks": [
+          {
+            "size": 5000
+          },
+          {
+            "size": 5000
+          },
+          {
+            "size": 636
+          }
+        ]
+      },
+      "fetch": {}
+    },
+    "raw": null,
+    "usage": {
+      "completionTokens": 5678,
+      "promptTokens": 16352
+    }
+  },
+  "elapsed_ms": 5973,
+  "ok": true,
+  "status_code": 200
+}

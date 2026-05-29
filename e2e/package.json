@@ -3,10 +3,11 @@
   "private": true,
   "scripts": {
     "test": "npx playwright test",
+    "test:real": "npx playwright test --config=playwright.real.config.ts",
     "test:headed": "npx playwright test --headed",
     "test:ui": "npx playwright test --ui"
   },
   "devDependencies": {
-    "@playwright/test": "^1.49.0"
+    "@playwright/test": "^1.60.0"
   }
 }

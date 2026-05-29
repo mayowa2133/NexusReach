@@ -31,7 +31,12 @@ Thumbs.db
 # Logs
 *.log
 .playwright-mcp/
+e2e/playwright-report/
+e2e/test-results/
 
 # Keep example env files
 !.env.example
 backend/.venv312/
+
+# Claude Code agent scratch (worktree copies — never commit)
+.claude/worktrees/

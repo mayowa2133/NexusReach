@@ -10,6 +10,7 @@ import uuid
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.config import settings
 from app.main import app
 from app.dependencies import get_current_user_id
 from app.middleware.rate_limit import limiter
@@ -52,9 +53,10 @@ async def client(authed_client):
 
 
 @pytest.fixture
-async def unauthed_client():
+async def unauthed_client(monkeypatch):
     """Async HTTP client with no auth override (for 401 tests)."""
     app.dependency_overrides.clear()
+    monkeypatch.setattr(settings, "auth_mode", "supabase")
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac

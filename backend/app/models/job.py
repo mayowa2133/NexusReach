@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, Boolean, Text, DateTime, Float, ForeignKey, func
+from sqlalchemy import String, Boolean, Text, DateTime, Float, ForeignKey, Integer, func
 from sqlalchemy.dialects.postgresql import UUID, JSONB, ARRAY
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -24,24 +24,40 @@ class Job(Base):
     company_name: Mapped[str] = mapped_column(String(255), nullable=False)
     company_logo: Mapped[str | None] = mapped_column(String(500))
     location: Mapped[str | None] = mapped_column(String(255))
+    locations: Mapped[list[dict] | None] = mapped_column(JSONB)
+    country_codes: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+    countries: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+    location_lat: Mapped[float | None] = mapped_column(Float)
+    location_lng: Mapped[float | None] = mapped_column(Float)
+    location_radius_km: Mapped[float | None] = mapped_column(Float)
+    location_geocode_label: Mapped[str | None] = mapped_column(String(255))
     remote: Mapped[bool] = mapped_column(Boolean, default=False)
+    work_mode: Mapped[str | None] = mapped_column(String(50))
     url: Mapped[str | None] = mapped_column(String(1000))
     apply_url: Mapped[str | None] = mapped_column(String(1000))
     description: Mapped[str | None] = mapped_column(Text)
     employment_type: Mapped[str | None] = mapped_column(String(50))
     experience_level: Mapped[str | None] = mapped_column(String(50))  # noqa: F821
     # intern | new_grad | mid | senior
+    experience_level_confidence: Mapped[float | None] = mapped_column(Float)
 
     # Salary
     salary_min: Mapped[float | None] = mapped_column(Float)
     salary_max: Mapped[float | None] = mapped_column(Float)
     salary_currency: Mapped[str | None] = mapped_column(String(10))
+    salary_period: Mapped[str | None] = mapped_column(String(50))
 
     # Source tracking
     source: Mapped[str] = mapped_column(String(50), nullable=False)
     ats: Mapped[str | None] = mapped_column(String(50))
     ats_slug: Mapped[str | None] = mapped_column(String(255))
     posted_at: Mapped[str | None] = mapped_column(String(50))
+    source_status: Mapped[str] = mapped_column(
+        String(32), default="active", server_default="active"
+    )
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    not_seen_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
     # Scoring
     match_score: Mapped[float | None] = mapped_column(Float)
@@ -52,6 +68,10 @@ class Job(Base):
 
     # Dedup fingerprint
     fingerprint: Mapped[str | None] = mapped_column(String(255), index=True)
+    # Canonical (query/fragment-stripped, ATS-resolved) URL for indexed dedup.
+    # Lets URL dedup match with a single indexed lookup instead of scanning and
+    # canonicalizing every job for the user+source in Python (audit H7).
+    canonical_url: Mapped[str | None] = mapped_column(String(1000), index=True)
 
     # Kanban status
     stage: Mapped[str] = mapped_column(
@@ -63,12 +83,15 @@ class Job(Base):
     # Application tracking
     applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Interview rounds: [{round, type, scheduled_at, completed, interviewer, notes}]
-    interview_rounds: Mapped[dict | None] = mapped_column(JSONB)
+    # Stored as a JSON array of round dicts; annotated as list|dict for the
+    # rare legacy dict-shaped value (audit L1).
+    interview_rounds: Mapped[list | dict | None] = mapped_column(JSONB)
     # Offer details: {salary, equity, bonus, deadline, status, notes}
     offer_details: Mapped[dict | None] = mapped_column(JSONB)
 
     # Tags / metadata
     tags: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+    metadata_provenance: Mapped[dict | None] = mapped_column(JSONB)
     department: Mapped[str | None] = mapped_column(String(255))
     notes: Mapped[str | None] = mapped_column(Text)
     starred: Mapped[bool] = mapped_column(Boolean, default=False)

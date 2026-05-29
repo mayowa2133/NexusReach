@@ -1,6 +1,5 @@
 """Celery task: reconcile staged email drafts against provider send state."""
 
-import asyncio
 import logging
 import uuid
 
@@ -9,7 +8,7 @@ from sqlalchemy import select
 from app.database import async_session
 from app.models.outreach import OutreachLog
 from app.services.outreach_reconcile_service import reconcile_sent_drafts
-from app.tasks import celery_app
+from app.tasks import celery_app, run_async
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +53,7 @@ async def _reconcile_all_users() -> dict:
 )
 def reconcile_outreach_sends() -> dict:
     """Celery task: detect drafts sent from Gmail/Outlook UI."""
-    return asyncio.run(_reconcile_all_users())
+    return run_async(_reconcile_all_users())
 
 
 async def reconcile_for_user(user_id: uuid.UUID) -> dict:

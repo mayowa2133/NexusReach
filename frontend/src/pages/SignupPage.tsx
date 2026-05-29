@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { useAuthStore } from '@/stores/auth';
+import { trackFunnelEvent } from '@/lib/observability';
 import { toast } from 'sonner';
 
 export function SignupPage() {
@@ -44,6 +45,9 @@ export function SignupPage() {
     }
     try {
       await signUp(email, password);
+      trackFunnelEvent('signup', {
+        method: 'email',
+      });
       toast.success('Account created! Check your email to confirm.');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to sign up');
@@ -105,20 +109,37 @@ export function SignupPage() {
           </div>
 
           <div className="grid grid-cols-2 gap-2">
-            <Button variant="outline" onClick={() => signInWithGoogle()}>
+            <Button variant="outline" onClick={() => {
+              trackFunnelEvent('signup', { method: 'google' });
+              void signInWithGoogle();
+            }}>
               Google
             </Button>
-            <Button variant="outline" onClick={() => signInWithGithub()}>
+            <Button variant="outline" onClick={() => {
+              trackFunnelEvent('signup', { method: 'github' });
+              void signInWithGithub();
+            }}>
               GitHub
             </Button>
           </div>
         </CardContent>
-        <CardFooter className="justify-center">
+        <CardFooter className="flex-col gap-2 text-center">
           <p className="text-sm text-muted-foreground">
             Already have an account?{' '}
             <Link to="/login" className="font-medium text-primary underline-offset-4 hover:underline">
               Sign in
             </Link>
+          </p>
+          <p className="text-xs text-muted-foreground">
+            By creating an account, you agree to the{' '}
+            <Link to="/terms" className="underline underline-offset-4 hover:text-foreground">
+              Terms
+            </Link>{' '}
+            and acknowledge the{' '}
+            <Link to="/privacy" className="underline underline-offset-4 hover:text-foreground">
+              Privacy Policy
+            </Link>
+            .
           </p>
         </CardFooter>
       </Card>

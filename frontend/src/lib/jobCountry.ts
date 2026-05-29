@@ -168,9 +168,16 @@ export function getJobCountry(location: string | null | undefined): string | nul
   return null;
 }
 
-export function getJobCountryOptions(jobs: Array<{ location: string | null }>): string[] {
+export function getJobCountryOptions(
+  jobs: Array<{ location: string | null; countries?: string[] | null }>,
+): string[] {
   const countries = new Set<string>();
   for (const job of jobs) {
+    for (const country of job.countries ?? []) {
+      if (country) {
+        countries.add(country);
+      }
+    }
     const country = getJobCountry(job.location);
     if (country) {
       countries.add(country);

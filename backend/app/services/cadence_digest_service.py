@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.settings import UserSettings
 from app.models.user import User
 from app.services.cadence_service import NextAction, compute_next_actions
+from app.services.oauth_token_crypto import is_encrypted_refresh_token
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +113,8 @@ def _render_text(actions: list[NextAction]) -> str:
 
 
 async def _send(
+    db: AsyncSession,
+    user_id: uuid.UUID,
     user_settings: UserSettings,
     user_email: str,
     subject: str,
@@ -121,11 +124,32 @@ async def _send(
     """Send via whichever provider is connected. Returns provider name."""
     from app.services.job_alert_service import _send_via_gmail, _send_via_outlook  # noqa: PLC0415
 
-    if user_settings.gmail_connected and user_settings.gmail_refresh_token:
-        await _send_via_gmail(user_settings, user_email, subject, html_body, text_body)
+    if (
+        user_settings.gmail_connected
+        and is_encrypted_refresh_token(user_settings.gmail_refresh_token)
+    ):
+        await _send_via_gmail(
+            db,
+            user_id,
+            user_settings,
+            user_email,
+            subject,
+            html_body,
+            text_body,
+        )
         return "gmail"
-    if user_settings.outlook_connected and user_settings.outlook_refresh_token:
-        await _send_via_outlook(user_settings, user_email, subject, html_body)
+    if (
+        user_settings.outlook_connected
+        and is_encrypted_refresh_token(user_settings.outlook_refresh_token)
+    ):
+        await _send_via_outlook(
+            db,
+            user_id,
+            user_settings,
+            user_email,
+            subject,
+            html_body,
+        )
         return "outlook"
     raise ValueError("No email provider connected")
 
@@ -149,7 +173,14 @@ async def send_cadence_digest_for_user(
         return {"sent": False, "error": "no_settings"}
     if not user_settings.cadence_digest_enabled:
         return {"sent": False, "error": "digest_disabled"}
-    if not (user_settings.gmail_connected or user_settings.outlook_connected):
+    has_connected_provider = (
+        user_settings.gmail_connected
+        and is_encrypted_refresh_token(user_settings.gmail_refresh_token)
+    ) or (
+        user_settings.outlook_connected
+        and is_encrypted_refresh_token(user_settings.outlook_refresh_token)
+    )
+    if not has_connected_provider:
         return {"sent": False, "error": "no_email_provider"}
 
     # Guard: skip if sent recently
@@ -178,7 +209,15 @@ async def send_cadence_digest_for_user(
     text_body = _render_text(actions)
 
     try:
-        provider = await _send(user_settings, user_email, subject, html_body, text_body)
+        provider = await _send(
+            db,
+            user_id,
+            user_settings,
+            user_email,
+            subject,
+            html_body,
+            text_body,
+        )
     except Exception:
         logger.exception("Cadence digest send failed for user %s", user_id)
         return {"sent": False, "error": "send_failed", "action_count": len(actions)}

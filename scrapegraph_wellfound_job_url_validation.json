@@ -1,0 +1,40 @@
+{
+  "results": [
+    {
+      "company_match": true,
+      "elapsed_ms": 2767,
+      "error": null,
+      "expected_company": "Zipline",
+      "expected_title": "Senior Full Stack Software Engineer, Application Software (Remote)",
+      "markdown_chars": 18111,
+      "preview": "[](https://wellfound.com/) [Discover](https://wellfound.com/discover)[Find Jobs](https://wellfound.com/jobs)[For Recruiters](https://wellfound.com/recruit/overview) Log In Sign Up [![Avatar for Zipline](https://wellfound.com/cdn-cgi/image/width=128,height=128,fit=scale-down,gravity=0.5x0.5,quality=90,format=auto/https://photos.wellfound.com/startups/i/3100353-b9dc0f9a070af26296fbaf58f37d624f-medium_jpg.jpg?buster=1680554415)](https://wellfound.com/company/zipline-international-1) [Zipline](https",
+      "status_code": 200,
+      "title_match": true,
+      "url": "https://wellfound.com/jobs/4255462-senior-full-stack-software-engineer-application-software-remote"
+    },
+    {
+      "company_match": true,
+      "elapsed_ms": 2261,
+      "error": null,
+      "expected_company": "Lyv Health",
+      "expected_title": "Senior Full Stack Software Engineer (Front-End Leaning)",
+      "markdown_chars": 15524,
+      "preview": "[](https://wellfound.com/) [Discover](https://wellfound.com/discover)[Find Jobs](https://wellfound.com/jobs)[For Recruiters](https://wellfound.com/recruit/overview) Log In Sign Up [![Avatar for Lyv Health](https://wellfound.com/cdn-cgi/image/width=128,height=128,fit=scale-down,gravity=0.5x0.5,quality=90,format=auto/https://photos.wellfound.com/startups/i/10524109-a92338e6bfb67985423677d4c81c572a-medium_jpg.jpg?buster=1765558441)](https://wellfound.com/company/lyv-health) [Lyv Health](https://wel",
+      "status_code": 200,
+      "title_match": true,
+      "url": "https://wellfound.com/jobs/4140148-senior-full-stack-software-engineer-front-end-leaning"
+    },
+    {
+      "company_match": true,
+      "elapsed_ms": 3147,
+      "error": null,
+      "expected_company": "Ambient.ai",
+      "expected_title": "Software Engineer - Backend (Product)",
+      "markdown_chars": 18602,
+      "preview": "[](https://wellfound.com/) [Discover](https://wellfound.com/discover)[Find Jobs](https://wellfound.com/jobs)[For Recruiters](https://wellfound.com/recruit/overview) Log In Sign Up [![Avatar for Ambient.ai](https://wellfound.com/cdn-cgi/image/width=128,height=128,fit=scale-down,gravity=0.5x0.5,quality=90,format=auto/https://photos.wellfound.com/startups/i/4622890-f1a837924c209a369c713329d9ca7f6c-medium_jpg.jpg?buster=1583871918)](https://wellfound.com/company/ambient-ai-1) [Ambient.ai](https://we",
+      "status_code": 200,
+      "title_match": true,
+      "url": "https://wellfound.com/jobs/4249319-software-engineer-backend-product"
+    }
+  ]
+}

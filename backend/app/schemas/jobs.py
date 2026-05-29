@@ -74,22 +74,37 @@ class JobResponse(BaseModel):
     company_name: str
     company_logo: str | None
     location: str | None
+    locations: list[dict] | None = None
+    country_codes: list[str] | None = None
+    countries: list[str] | None = None
+    location_lat: float | None = None
+    location_lng: float | None = None
+    location_radius_km: float | None = None
+    location_geocode_label: str | None = None
     remote: bool
+    work_mode: str | None = None
     url: str | None
     apply_url: str | None = None
     description: str | None
     employment_type: str | None
     experience_level: str | None
+    experience_level_confidence: float | None = None
     salary_min: float | None
     salary_max: float | None
     salary_currency: str | None
+    salary_period: str | None = None
     source: str
     ats: str | None
     posted_at: str | None
+    source_status: str = "active"
+    last_seen_at: str | None = None
+    closed_at: str | None = None
+    not_seen_count: int = 0
     match_score: float | None
     score_breakdown: dict | None
     stage: str
     tags: list[str] | None
+    metadata_provenance: dict | None = None
     department: str | None
     notes: str | None
     starred: bool = False
@@ -114,6 +129,10 @@ class SearchPreferenceResponse(BaseModel):
     enabled: bool
     mode: Literal["default", "startup"] = "default"
     last_refreshed_at: str | None = None
+    last_attempted_at: str | None = None
+    last_success_at: str | None = None
+    last_error: str | None = None
+    last_duration_seconds: float | None = None
     new_jobs_found: int = 0
     created_at: str
     updated_at: str
@@ -133,6 +152,42 @@ class DiscoverRequest(BaseModel):
 
 class RefreshResponse(BaseModel):
     new_jobs_found: int
+
+
+class JobSourceRunResponse(BaseModel):
+    id: str
+    refresh_run_id: str
+    source: str
+    status: str
+    raw_count: int = 0
+    new_count: int = 0
+    existing_count: int = 0
+    duplicate_count: int = 0
+    skipped_count: int = 0
+    error: str | None = None
+    duration_seconds: float | None = None
+    started_at: str
+    finished_at: str | None = None
+
+
+class JobRefreshRunResponse(BaseModel):
+    id: str
+    search_preference_id: str | None = None
+    mode: str
+    query: str | None = None
+    location: str | None = None
+    remote_only: bool = False
+    status: str
+    total_new: int = 0
+    total_seen: int = 0
+    total_existing: int = 0
+    total_duplicates: int = 0
+    total_errors: int = 0
+    error: str | None = None
+    duration_seconds: float | None = None
+    started_at: str
+    finished_at: str | None = None
+    source_runs: list[JobSourceRunResponse] = []
 
 
 class MatchAnalysisResponse(BaseModel):

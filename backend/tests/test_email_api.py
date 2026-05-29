@@ -58,7 +58,9 @@ async def test_email_status(client, mock_user_id):
     """GET /api/email/status returns connection status."""
     mock_settings = MagicMock()
     mock_settings.gmail_connected = True
+    mock_settings.gmail_refresh_token = "nexusreach_oauth_token:v1:ciphertext"
     mock_settings.outlook_connected = False
+    mock_settings.outlook_refresh_token = None
 
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = mock_settings

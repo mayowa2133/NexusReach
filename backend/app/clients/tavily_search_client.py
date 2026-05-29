@@ -51,23 +51,34 @@ def _recruiter_targeted_queries(
 ) -> list[str]:
     geo_label = next((term for term in (geo_terms or []) if term and "," not in term), "")
     team_label = next((term for term in (team_keywords or []) if term), "")
+    # Use the job's actual geo (when known) rather than hardcoding Canada/Toronto,
+    # which biased recruiter discovery toward one region for every user (audit H1).
+    geo = geo_label
     queries = [
-        f'site:linkedin.com/in "{company_name}" recruiter {geo_label} Canada'.strip(),
-        f'"{company_name}" recruiter {geo_label} Canada LinkedIn'.strip(),
-        f'site:linkedin.com/in "{company_name}" "talent acquisition" {geo_label} Canada'.strip(),
-        f'"{company_name}" "talent acquisition" {geo_label} Canada LinkedIn'.strip(),
-        f'site:linkedin.com/in "{company_name}" ("lead talent acquisition" OR "head of talent acquisition" OR "talent acquisition leader") Canada'.strip(),
-        f'"{company_name}" ("lead talent acquisition" OR "head of talent acquisition" OR "talent acquisition leader") Canada LinkedIn'.strip(),
-        f'site:ca.linkedin.com/in "{company_name}" ("lead talent acquisition" OR "head of talent acquisition" OR recruiter) Toronto Canada'.strip(),
-        f'site:linkedin.com/in "{company_name}" ("responsible for hiring in Canada" OR "hiring in Canada and the US" OR "hiring in Canada")'.strip(),
-        f'"{company_name}" ("hiring in Canada" OR "responsible for hiring in Canada") LinkedIn'.strip(),
-        f'"{company_name}" ("Canada recruiting lead" OR "Canada talent acquisition" OR "Canada recruiting") LinkedIn'.strip(),
-        f'"{company_name}" "engineering recruiter" {geo_label} LinkedIn'.strip(),
-        f'"{company_name}" "technical recruiter" {geo_label} LinkedIn'.strip(),
+        f'site:linkedin.com/in "{company_name}" recruiter {geo}',
+        f'"{company_name}" recruiter {geo} LinkedIn',
+        f'site:linkedin.com/in "{company_name}" "talent acquisition" {geo}',
+        f'"{company_name}" "talent acquisition" {geo} LinkedIn',
+        f'site:linkedin.com/in "{company_name}" ("lead talent acquisition" OR "head of talent acquisition" OR "talent acquisition leader") {geo}',
+        f'"{company_name}" ("lead talent acquisition" OR "head of talent acquisition" OR "talent acquisition leader") {geo} LinkedIn',
+        f'"{company_name}" "engineering recruiter" {geo} LinkedIn',
+        f'"{company_name}" "technical recruiter" {geo} LinkedIn',
     ]
+    if geo:
+        queries.append(
+            f'site:linkedin.com/in "{company_name}" ("responsible for hiring in {geo}" OR "hiring in {geo}") recruiter'
+        )
     if team_label:
-        queries.append(f'"{company_name}" recruiter "{team_label}" {geo_label} LinkedIn'.strip())
-    return [query for query in queries if query]
+        queries.append(f'"{company_name}" recruiter "{team_label}" {geo} LinkedIn')
+    # Collapse whitespace left by an empty geo and drop duplicates/empties.
+    seen: set[str] = set()
+    cleaned: list[str] = []
+    for query in queries:
+        normalized = re.sub(r"\s+", " ", query).strip()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            cleaned.append(normalized)
+    return cleaned
 
 
 def _peer_targeted_queries(
@@ -171,7 +182,6 @@ async def search_public_people(
                     f'"{company_name}" "Software Engineering Manager" "{geo_label}"',
                     f'"{company_name}" "Engineering Manager" "{geo_label}"',
                     f'"{company_name}" "Engineering Director" "{geo_label}"',
-                    f'"{company_name} Canada" "Engineering Manager" "{geo_label}"',
                 ],
             )
         )

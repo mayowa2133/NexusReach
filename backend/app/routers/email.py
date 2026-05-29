@@ -25,6 +25,7 @@ from app.schemas.email import (
     CancelSendResponse,
     EmailConnectionStatus,
 )
+from app.services.oauth_token_crypto import is_encrypted_refresh_token
 from app.services.email_lookup_service import lookup_email
 from app.services import gmail_service, outlook_service
 from app.services.draft_staging_service import (
@@ -114,8 +115,14 @@ async def connection_status(
     )
     user_settings = result.scalar_one_or_none()
     return EmailConnectionStatus(
-        gmail_connected=user_settings.gmail_connected if user_settings else False,
-        outlook_connected=user_settings.outlook_connected if user_settings else False,
+        gmail_connected=(
+            bool(user_settings and user_settings.gmail_connected)
+            and is_encrypted_refresh_token(user_settings.gmail_refresh_token)
+        ),
+        outlook_connected=(
+            bool(user_settings and user_settings.outlook_connected)
+            and is_encrypted_refresh_token(user_settings.outlook_refresh_token)
+        ),
     )
 
 

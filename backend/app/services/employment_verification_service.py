@@ -510,6 +510,20 @@ async def verify_people_current_company(
     )
     shortlisted_ids = {person.id for person in shortlist}
 
+    # Bound concurrent verification so we don't open 10+ simultaneous HTTP
+    # connections across providers (Crawl4AI, search_router, public_page) and
+    # trip rate limits (audit M7). Mirrors the bounded LinkedIn backfill.
+    semaphore = asyncio.Semaphore(max(1, settings.employment_verify_concurrency))
+
+    async def _verify_bounded(person: Person):
+        async with semaphore:
+            return await _verify_person(
+                person,
+                company_name=company_name,
+                company_domain=company_domain,
+                company_public_identity_slugs=company_public_identity_slugs,
+            )
+
     tasks = []
     task_people: list[Person] = []
     for person in shortlist:
@@ -520,14 +534,7 @@ async def verify_people_current_company(
         ):
             continue
         task_people.append(person)
-        tasks.append(
-            _verify_person(
-                person,
-                company_name=company_name,
-                company_domain=company_domain,
-                company_public_identity_slugs=company_public_identity_slugs,
-            )
-        )
+        tasks.append(_verify_bounded(person))
 
     if tasks:
         results = await asyncio.gather(*tasks)

@@ -153,9 +153,13 @@ describe('DashboardPage — metric cards', () => {
   it('shows KPI labels', () => {
     renderDashboard();
     expect(screen.getByText('Jobs Tracked')).toBeInTheDocument();
-    expect(screen.getByText('People Contacted')).toBeInTheDocument();
-    expect(screen.getByText('Messages Sent')).toBeInTheDocument();
-    expect(screen.getByText('Response Rate')).toBeInTheDocument();
+    expect(screen.getByText('Contacts Found')).toBeInTheDocument();
+    expect(screen.getByText('Verified Emails')).toBeInTheDocument();
+    expect(screen.getAllByText('Warm Paths').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText('Drafts Created')).toBeInTheDocument();
+    expect(screen.getByText('Staged Drafts')).toBeInTheDocument();
+    expect(screen.getByText('Replies')).toBeInTheDocument();
+    expect(screen.getByText('Interviews')).toBeInTheDocument();
   });
 
   it('shows loading state with skeleton placeholders', () => {
@@ -176,6 +180,13 @@ describe('DashboardPage — metric cards', () => {
           overall_response_rate: 33.3,
           upcoming_follow_ups: 5,
           active_conversations: 7,
+          contacts_found: 24,
+          verified_emails: 9,
+          warm_paths: 8,
+          drafts_created: 14,
+          staged_drafts: 3,
+          replies: 4,
+          interviews: 2,
         },
         response_by_channel: [],
         response_by_role: [],
@@ -191,8 +202,66 @@ describe('DashboardPage — metric cards', () => {
     };
     renderDashboard();
     expect(screen.getByText('45')).toBeInTheDocument();
-    expect(screen.getByText('18')).toBeInTheDocument();
-    expect(screen.getByText('33.3%')).toBeInTheDocument();
+    expect(screen.getByText('24')).toBeInTheDocument();
+    expect(screen.getByText('9')).toBeInTheDocument();
+    expect(screen.getByText('8')).toBeInTheDocument();
+    expect(screen.getByText('14')).toBeInTheDocument();
+    expect(screen.getByText('3')).toBeInTheDocument();
+    expect(screen.getByText('4')).toBeInTheDocument();
+    expect(screen.getByText('2')).toBeInTheDocument();
+  });
+
+  it('renders the guided first-win workflow', () => {
+    mockInsights = {
+      data: {
+        summary: {
+          total_contacts: 0,
+          total_messages_sent: 0,
+          total_jobs_tracked: 1,
+          overall_response_rate: 0,
+          upcoming_follow_ups: 0,
+          active_conversations: 0,
+          contacts_found: 0,
+          verified_emails: 0,
+          warm_paths: 0,
+          drafts_created: 0,
+          staged_drafts: 0,
+          replies: 0,
+          interviews: 0,
+        },
+        response_by_channel: [],
+        response_by_role: [],
+        response_by_company: [],
+        angle_effectiveness: [],
+        network_growth: [],
+        network_gaps: [],
+        warm_paths: [],
+        warm_path_companies: [],
+        company_openness: [],
+        job_pipeline: [],
+        api_usage_by_service: [],
+        graph_warm_paths: [],
+      },
+      isLoading: false,
+    };
+    mockJobs = {
+      data: {
+        items: [{ id: 'j1', title: 'Senior SWE', company_name: 'Acme', match_score: 85 }],
+        total: 1,
+        limit: null,
+        offset: 0,
+      },
+      isLoading: false,
+    };
+
+    renderDashboard();
+    expect(screen.getByText('First Win Path')).toBeInTheDocument();
+    expect(screen.getByText('Pick a strong role')).toBeInTheDocument();
+    expect(screen.getByText('Find a trusted contact')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /find a trusted contact/i })).toHaveAttribute(
+      'href',
+      '/people?job_id=j1&company=Acme&title=Senior+SWE&target_count=3',
+    );
   });
 });
 
@@ -223,7 +292,7 @@ describe('DashboardPage — chart sections', () => {
 
   it('renders warm paths section', () => {
     renderDashboard();
-    expect(screen.getByText('Warm Paths')).toBeInTheDocument();
+    expect(screen.getAllByText('Warm Paths').length).toBeGreaterThanOrEqual(1);
   });
 
   it('shows unified warm-path counts when graph and outreach data exist', () => {
@@ -236,6 +305,13 @@ describe('DashboardPage — chart sections', () => {
           overall_response_rate: 33.3,
           upcoming_follow_ups: 5,
           active_conversations: 7,
+          contacts_found: 24,
+          verified_emails: 9,
+          warm_paths: 8,
+          drafts_created: 14,
+          staged_drafts: 3,
+          replies: 4,
+          interviews: 2,
         },
         response_by_channel: [],
         response_by_role: [],

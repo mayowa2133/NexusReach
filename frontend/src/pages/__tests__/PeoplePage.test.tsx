@@ -161,6 +161,19 @@ beforeEach(() => {
 });
 
 describe('PeoplePage', () => {
+  it('shows proof for match, company trust, email safety, and warm path on contacts', () => {
+    renderPeople();
+
+    expect(screen.getByText('Proof')).toBeInTheDocument();
+    expect(screen.getByText('Why matched')).toBeInTheDocument();
+    expect(screen.getByText('Company trust')).toBeInTheDocument();
+    expect(screen.getByText('Email safety')).toBeInTheDocument();
+    expect(screen.getByText('Warm path')).toBeInTheDocument();
+    expect(screen.getByText(/adjacent backend teammate at the target company/i)).toBeInTheDocument();
+    expect(screen.getByText(/unsafe guesses stay hidden/i)).toBeInTheDocument();
+    expect(screen.getByText(/no warm path found/i)).toBeInTheDocument();
+  });
+
   it('renders best-guess email details after email search', async () => {
     mockFindEmail.mutateAsync.mockResolvedValue({
       email: 'alex.lee@affirm.com',
@@ -219,7 +232,7 @@ describe('PeoplePage', () => {
     await userEvent.click(screen.getByRole('button', { name: /get email/i }));
 
     expect(await screen.findByText(/email withheld until company domain is verified/i)).toBeInTheDocument();
-    expect(screen.getByText(/company domain untrusted/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/company domain untrusted/i).length).toBeGreaterThanOrEqual(1);
   });
 
   it('renders current-company verification state and allows manual refresh', async () => {
@@ -469,7 +482,7 @@ describe('PeoplePage', () => {
 
     expect(await screen.findByRole('heading', { name: /your connections at affirm/i })).toBeInTheDocument();
     expect(screen.getByText('Jamie Rivera')).toBeInTheDocument();
-    expect(screen.getByText(/warm path/i)).toBeInTheDocument();
+    expect(screen.getByText('Warm Path')).toBeInTheDocument();
     expect(screen.getByText(/you already know jamie rivera at affirm\./i)).toBeInTheDocument();
   });
 
@@ -514,7 +527,7 @@ describe('PeoplePage', () => {
 
     expect(await screen.findByText('Following company')).toBeInTheDocument();
     expect(screen.getByText(/you follow cursor on linkedin\./i)).toBeInTheDocument();
-    expect(screen.queryByText('Warm path')).not.toBeInTheDocument();
+    expect(screen.queryByText('Warm Path')).not.toBeInTheDocument();
     expect(screen.queryByText('Same-company bridge')).not.toBeInTheDocument();
     expect(screen.queryByText('Direct connection')).not.toBeInTheDocument();
   });

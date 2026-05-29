@@ -1,6 +1,6 @@
 # NexusReach — AI Agent Context
 
-Last updated: 2026-04-04
+Last updated: 2026-05-24
 
 This file is the current AI-facing project snapshot for NexusReach. It is intended for Codex, Claude, and other repo-aware assistants. `CLAUDE.md` intentionally mirrors the same project story so different tools inherit the same context.
 
@@ -12,10 +12,10 @@ NexusReach is a networking assistant for job seekers. It helps a user:
 - recover LinkedIn/public profile evidence for those people
 - surface warm paths from the user's imported first-degree LinkedIn graph
 - find or guess work emails safely
-- draft outreach messages and stage email drafts
+- draft outreach messages, stage email drafts, and optionally auto-send staged email drafts after a user-configured delay
 - track networking activity in a lightweight CRM
 
-The human is always in the loop. Nothing is ever sent automatically.
+NexusReach defaults to draft-first workflows. Users can optionally enable delayed auto-send for staged email drafts and cancel scheduled sends before they go out.
 
 ## Current product snapshot
 
@@ -130,6 +130,8 @@ The human is always in the loop. Nothing is ever sent automatically.
   - learned same-company pattern
 - Ambiguous-company protections still block unsafe guesses.
 - Public identity trust and email-domain trust are intentionally separate.
+- Gmail and Outlook refresh tokens are encrypted at rest with versioned app keys.
+- Legacy plaintext OAuth tokens are cleared by migration and require reconnect.
 
 ### Message drafting
 - Message drafting supports multiple providers through `llm_client.py`.
@@ -138,7 +140,7 @@ The human is always in the loop. Nothing is ever sent automatically.
   - `openai`
   - `gemini`
   - `groq`
-- The drafting flow still follows the same product rule: generate only drafts, never send automatically.
+- The drafting flow is draft-first by default, with optional delayed auto-send for staged email drafts when the user explicitly enables it.
 - LinkedIn graph warm-path context is not yet threaded into drafting in v1.
 
 ### Frontend state and UX
@@ -157,6 +159,9 @@ The human is always in the loop. Nothing is ever sent automatically.
 - People search can show:
   - a `Your Connections at {company}` section above the live buckets
   - warm-path badges and explanations on cold contacts
+- Contact cards now show proof for why the person matched, why the company is trusted, why the email is safe, and whether a warm path exists.
+- Dashboard now has a guided first-win path from job to contact to draft to staged inbox draft.
+- Dashboard outcome metrics now include contacts found, verified emails, warm paths, drafts created, staged drafts, replies, and interviews.
 - Settings includes a LinkedIn Graph card with:
   - sync status
   - last sync time
@@ -164,6 +169,10 @@ The human is always in the loop. Nothing is ever sent automatically.
   - `Upload Export`
   - `Clear Graph Data`
   - generated local connector commands for CDP or dedicated-profile browser sync
+- Settings includes Account Data controls for JSON export and permanent account deletion.
+- Public `/privacy` and `/terms` routes exist for launch compliance.
+- Frontend Sentry and PostHog initialize only when configured. PostHog autocapture
+  and session recording are disabled by default.
 
 ## Tech stack
 
@@ -198,6 +207,18 @@ The human is always in the loop. Nothing is ever sent automatically.
 - GitHub API: engineer/public profile context
 - Crawl4AI / Firecrawl: public-page retrieval fallback stack
 - Gmail API / Microsoft Graph: draft staging
+
+### Production deployment target
+- Vercel serves the frontend from the `frontend` project root.
+- Railway runs three backend services from `backend`:
+  - FastAPI web service using `backend/railway.web.toml`
+  - Celery worker using `backend/railway.worker.toml`
+  - Celery beat using `backend/railway.beat.toml`
+- Supabase provides hosted Postgres and auth.
+- Railway Redis is shared by Celery, search cache, and rate-limit storage.
+- SearXNG runs on Railway or another private reachable host.
+- `backend/Dockerfile` is the production backend runtime and installs TeX Live for `pdflatex` resume PDF generation.
+- `DEPLOYMENT_RUNBOOK.md` is the source of truth for deploy order, secrets, smoke checks, alerts, and rollback.
 
 ### Local helper tooling
 - Playwright is used by the LinkedIn graph browser connector (`backend/scripts/linkedin_graph_connector.py`).
@@ -279,6 +300,11 @@ cd backend && pytest
 cd backend && celery -A app.tasks worker --loglevel=info
 cd backend && celery -A app.tasks beat --loglevel=info
 
+# Real browser E2E
+cd e2e && npm install
+cd e2e && npx playwright install chromium
+cd e2e && npm run test:real
+
 # LinkedIn graph local connector
 cd backend && python scripts/linkedin_graph_connector.py --help
 ```
@@ -291,10 +317,18 @@ NEXUSREACH_DATABASE_URL=postgresql+asyncpg://...
 NEXUSREACH_REDIS_URL=redis://...
 NEXUSREACH_SUPABASE_URL=https://...
 NEXUSREACH_SUPABASE_KEY=...
+NEXUSREACH_SUPABASE_SERVICE_ROLE_KEY=...
 NEXUSREACH_SUPABASE_JWT_SECRET=...
 NEXUSREACH_AUTH_MODE=supabase
+NEXUSREACH_DEV_AUTH_BYPASS_ENABLED=false
 NEXUSREACH_DEV_USER_ID=00000000-0000-0000-0000-000000000001
 NEXUSREACH_DEV_USER_EMAIL=dev@nexusreach.local
+NEXUSREACH_APP_RELEASE=...
+NEXUSREACH_SENTRY_DSN=...
+NEXUSREACH_SENTRY_TRACES_SAMPLE_RATE=0.05
+NEXUSREACH_SENTRY_PROFILES_SAMPLE_RATE=0.0
+NEXUSREACH_TOKEN_ENCRYPTION_PRIMARY_VERSION=v1
+NEXUSREACH_TOKEN_ENCRYPTION_KEYS={"v1":"..."}
 
 NEXUSREACH_APOLLO_API_KEY=...
 NEXUSREACH_APOLLO_MASTER_API_KEY=...
@@ -349,8 +383,19 @@ NEXUSREACH_LINKEDIN_GRAPH_MAX_IMPORT_BATCH_SIZE=250
 ### Frontend
 ```env
 VITE_API_URL=http://localhost:8000
+VITE_AUTH_MODE=supabase
+VITE_DEV_AUTH_BYPASS_ENABLED=false
 VITE_SUPABASE_URL=https://...
 VITE_SUPABASE_ANON_KEY=...
+VITE_APP_ENVIRONMENT=development
+VITE_APP_RELEASE=...
+VITE_SENTRY_DSN=...
+VITE_SENTRY_TRACES_SAMPLE_RATE=0.05
+VITE_SENTRY_REPLAYS_SESSION_SAMPLE_RATE=0
+VITE_SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE=1
+VITE_POSTHOG_KEY=...
+VITE_POSTHOG_HOST=https://us.i.posthog.com
+VITE_ANALYTICS_ENABLED=true
 ```
 
 ## Critical implementation truths
@@ -383,6 +428,8 @@ VITE_SUPABASE_ANON_KEY=...
 26. `POST /api/jobs/discover` supports `mode: "default" | "startup"`. The startup mode is a dedicated discover flow; it does not yet change hourly saved-search refresh behavior.
 27. Startup ecosystem imports must preserve the underlying `source` / `ats` from the resolved posting while merging startup provenance into `job.tags` on dedupe.
 28. Wellfound is intentionally best-effort right now. Live fetches can return `403` anti-bot pages and should fail soft to `[]` rather than breaking startup discover.
+29. `auth_mode=dev` is fail-closed unless `NEXUSREACH_DEV_AUTH_BYPASS_ENABLED=true`; the frontend has the same explicit `VITE_DEV_AUTH_BYPASS_ENABLED=true` guard.
+30. Real E2E uses `VITE_AUTH_MODE=e2e` with a Supabase-compatible JWT, boots backend/frontend on isolated ports, drops and recreates `nexusreach_e2e`, and runs Alembic from zero before the browser test.
 
 ## Pre-commit checklist
 
@@ -393,4 +440,5 @@ cd frontend && npx eslint .
 cd frontend && npx tsc -b
 cd frontend && npm run test
 cd frontend && npm run build
+cd e2e && npm run test:real
 ```

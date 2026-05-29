@@ -1,5 +1,6 @@
 import uuid
 
+from cryptography.fernet import Fernet
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -21,7 +22,9 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_key: str = ""
     supabase_jwt_secret: str = ""
+    supabase_service_role_key: str = ""
     auth_mode: str = "supabase"
+    dev_auth_bypass_enabled: bool = False
     dev_user_id: uuid.UUID = uuid.UUID("00000000-0000-0000-0000-000000000001")
     dev_user_email: str = "dev@nexusreach.local"
 
@@ -34,6 +37,7 @@ class Settings(BaseSettings):
     jsearch_api_key: str = ""
     adzuna_app_id: str = ""
     adzuna_api_key: str = ""
+    dice_api_key: str = ""
     anthropic_api_key: str = ""
     openai_api_key: str = ""
     google_api_key: str = ""
@@ -44,6 +48,7 @@ class Settings(BaseSettings):
     tavily_api_key: str = ""
     firecrawl_base_url: str = ""
     firecrawl_api_key: str = ""
+    scrapegraph_api_key: str = ""
     searxng_base_url: str = "http://localhost:8888"
     search_cache_ttl_seconds: int = 86_400
     search_linkedin_provider_order: str = "searxng,serper,brave,google_cse"
@@ -66,13 +71,19 @@ class Settings(BaseSettings):
     google_client_secret: str = ""
     microsoft_client_id: str = ""
     microsoft_client_secret: str = ""
+    token_encryption_primary_version: str = "v1"
+    token_encryption_keys: dict[str, str] = {}
 
     # App
     environment: str = "development"
+    app_release: str = ""
     frontend_url: str = "http://localhost:5173"
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
     companion_extension_origins: list[str] = []
     companion_extension_origin_regex: str = ""
+    sentry_dsn: str = ""
+    sentry_traces_sample_rate: float = 0.05
+    sentry_profiles_sample_rate: float = 0.0
 
     # Usage limits
     daily_llm_token_limit: int = 100_000
@@ -81,6 +92,7 @@ class Settings(BaseSettings):
     employment_verify_top_n: int = 10
     employment_verify_timeout_seconds: int = 20
     employment_verify_enabled: bool = True
+    employment_verify_concurrency: int = 3
 
     # Discovery rate limiting
     discovery_rate_limit: str = "10/minute"
@@ -112,8 +124,28 @@ class Settings(BaseSettings):
             errors.append("NEXUSREACH_SUPABASE_KEY is empty")
         if not self.supabase_jwt_secret:
             errors.append("NEXUSREACH_SUPABASE_JWT_SECRET is empty")
+        if not self.supabase_service_role_key:
+            errors.append("NEXUSREACH_SUPABASE_SERVICE_ROLE_KEY is empty")
         if self.auth_mode == "dev":
             errors.append("NEXUSREACH_AUTH_MODE=dev must not be used in production")
+        if self.dev_auth_bypass_enabled:
+            errors.append("NEXUSREACH_DEV_AUTH_BYPASS_ENABLED must not be true in production")
+        if not self.sentry_dsn:
+            errors.append("NEXUSREACH_SENTRY_DSN is empty")
+        if not self.token_encryption_keys:
+            errors.append("NEXUSREACH_TOKEN_ENCRYPTION_KEYS is empty")
+        elif self.token_encryption_primary_version not in self.token_encryption_keys:
+            errors.append(
+                "NEXUSREACH_TOKEN_ENCRYPTION_PRIMARY_VERSION has no matching key"
+            )
+        else:
+            for version, key in self.token_encryption_keys.items():
+                try:
+                    Fernet(key.encode("utf-8"))
+                except (TypeError, ValueError):
+                    errors.append(
+                        f"NEXUSREACH_TOKEN_ENCRYPTION_KEYS[{version}] is invalid"
+                    )
         if errors:
             raise ValueError(
                 "Production configuration errors:\n  - " + "\n  - ".join(errors)

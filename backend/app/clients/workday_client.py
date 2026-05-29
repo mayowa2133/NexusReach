@@ -90,21 +90,35 @@ async def search_workday(
     search_text: str = "",
     limit: int = 20,
 ) -> list[dict]:
-    """Fetch jobs from a Workday careers site's hidden JSON API."""
+    """Fetch jobs from a Workday careers site's hidden JSON API.
+
+    Workday caps each request at 20 postings, so we page through with the
+    ``offset`` parameter until we reach ``limit`` or run out (audit M16) —
+    large employers (IBM, Salesforce, NVIDIA) have far more than 20 openings.
+    """
     url = f"https://{company}.{wd}.myworkdayjobs.com/wday/cxs/{company}/{site}/jobs"
-    body: dict = {"limit": min(limit, 20), "offset": 0, "appliedFacets": {}}
-    if search_text:
-        body["searchText"] = search_text
-
-    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
-        resp = await client.post(url, json=body, headers=_HEADERS)
-        if resp.status_code != 200:
-            logger.debug("Workday %d for %s/%s", resp.status_code, company, site)
-            return []
-
-    data = resp.json()
-    postings = data.get("jobPostings", [])
     base_url = f"https://{company}.{wd}.myworkdayjobs.com"
+    page_size = 20
+
+    postings: list[dict] = []
+    total = 0
+    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+        for offset in range(0, max(limit, 1), page_size):
+            body: dict = {"limit": page_size, "offset": offset, "appliedFacets": {}}
+            if search_text:
+                body["searchText"] = search_text
+            resp = await client.post(url, json=body, headers=_HEADERS)
+            if resp.status_code != 200:
+                logger.debug("Workday %d for %s/%s", resp.status_code, company, site)
+                break
+            data = resp.json()
+            total = data.get("total", total)
+            page_postings = data.get("jobPostings", [])
+            if not page_postings:
+                break
+            postings.extend(page_postings)
+            if len(postings) >= limit or len(page_postings) < page_size:
+                break
 
     jobs: list[dict] = []
     for p in postings:
@@ -133,7 +147,7 @@ async def search_workday(
         if len(jobs) >= limit:
             break
 
-    logger.info("Workday %s: %d jobs (of %d total)", label, len(jobs), data.get("total", 0))
+    logger.info("Workday %s: %d jobs (of %d total)", label, len(jobs), total)
     return jobs
 
 

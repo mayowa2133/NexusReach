@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { trackFirstFunnelEvent, trackFunnelEvent } from '@/lib/observability';
 import type {
   ATSSearchRequest,
   DiscoverJobsRequest,
@@ -7,6 +8,7 @@ import type {
   JobCommandCenter,
   InterviewRound,
   Job,
+  JobRefreshRun,
   JobSearchRequest,
   JobStage,
   OfferDetails,
@@ -17,13 +19,27 @@ import type {
   TailoredResume,
 } from '@/types';
 
+function trackJobsFound(source: string, count: number): void {
+  trackFunnelEvent('job_discovery_completed', {
+    source,
+    jobs_found: count,
+  });
+  if (count > 0) {
+    trackFirstFunnelEvent('first_job', 'first_job', {
+      source,
+      jobs_found: count,
+    });
+  }
+}
+
 export function useJobSearch() {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: (params: JobSearchRequest) =>
       api.post<Job[]>('/api/jobs/search', params),
-    onSuccess: () => {
+    onSuccess: (jobs) => {
+      trackJobsFound('job_search', jobs.length);
       queryClient.invalidateQueries({ queryKey: ['jobs'] });
       queryClient.invalidateQueries({ queryKey: ['saved-searches'] });
     },
@@ -36,7 +52,8 @@ export function useATSSearch() {
   return useMutation({
     mutationFn: (params: ATSSearchRequest) =>
       api.post<Job[]>('/api/jobs/search/ats', params),
-    onSuccess: () => {
+    onSuccess: (jobs) => {
+      trackJobsFound('ats_search', jobs.length);
       queryClient.invalidateQueries({ queryKey: ['jobs'] });
     },
   });
@@ -49,6 +66,12 @@ export interface JobFilters {
   employmentType?: string;
   experienceLevel?: string;
   salaryMin?: number;
+  country?: string;
+  near?: string;
+  nearLat?: number;
+  nearLng?: number;
+  radiusKm?: number;
+  includeRemoteInRadius?: boolean;
   remote?: boolean;
   startup?: boolean;
   occupations?: string[];
@@ -56,7 +79,24 @@ export interface JobFilters {
 }
 
 export function useJobs(filters: JobFilters = {}) {
-  const { stage, sortBy, starred, employmentType, experienceLevel, salaryMin, remote, startup, occupations, search } = filters;
+  const {
+    stage,
+    sortBy,
+    starred,
+    employmentType,
+    experienceLevel,
+    salaryMin,
+    country,
+    near,
+    nearLat,
+    nearLng,
+    radiusKm,
+    includeRemoteInRadius,
+    remote,
+    startup,
+    occupations,
+    search,
+  } = filters;
   const occupationsKey = occupations && occupations.length > 0 ? [...occupations].sort().join(',') : '';
   const params = new URLSearchParams();
   if (stage) params.set('stage', stage);
@@ -65,6 +105,14 @@ export function useJobs(filters: JobFilters = {}) {
   if (employmentType) params.set('employment_type', employmentType);
   if (experienceLevel) params.set('experience_level', experienceLevel);
   if (salaryMin !== undefined) params.set('salary_min', String(salaryMin));
+  if (country) params.set('country', country);
+  if (near) params.set('near', near);
+  if (nearLat !== undefined) params.set('near_lat', String(nearLat));
+  if (nearLng !== undefined) params.set('near_lng', String(nearLng));
+  if (radiusKm !== undefined) params.set('radius_km', String(radiusKm));
+  if (includeRemoteInRadius !== undefined) {
+    params.set('include_remote_in_radius', String(includeRemoteInRadius));
+  }
   if (remote !== undefined) params.set('remote', String(remote));
   if (startup !== undefined) params.set('startup', String(startup));
   if (occupationsKey) params.set('occupations', occupationsKey);
@@ -72,7 +120,25 @@ export function useJobs(filters: JobFilters = {}) {
   const qs = params.toString();
 
   return useQuery({
-    queryKey: ['jobs', stage, sortBy, starred, employmentType, experienceLevel, salaryMin, remote, startup, occupationsKey, search],
+    queryKey: [
+      'jobs',
+      stage,
+      sortBy,
+      starred,
+      employmentType,
+      experienceLevel,
+      salaryMin,
+      country,
+      near,
+      nearLat,
+      nearLng,
+      radiusKm,
+      includeRemoteInRadius,
+      remote,
+      startup,
+      occupationsKey,
+      search,
+    ],
     queryFn: () => api.get<PaginatedResponse<Job>>(`/api/jobs${qs ? `?${qs}` : ''}`),
   });
 }
@@ -157,9 +223,11 @@ export function useRefreshJobs() {
   return useMutation({
     mutationFn: () =>
       api.post<{ new_jobs_found: number }>('/api/jobs/refresh', {}),
-    onSuccess: () => {
+    onSuccess: (result) => {
+      trackJobsFound('refresh', result.new_jobs_found);
       queryClient.invalidateQueries({ queryKey: ['jobs'] });
       queryClient.invalidateQueries({ queryKey: ['saved-searches'] });
+      queryClient.invalidateQueries({ queryKey: ['job-refresh-runs'] });
     },
   });
 }
@@ -172,7 +240,8 @@ export function useSeedDefaultJobs() {
   return useMutation({
     mutationFn: () =>
       api.post<{ new_jobs_found: number }>('/api/jobs/seed-defaults', {}),
-    onSuccess: () => {
+    onSuccess: (result) => {
+      trackJobsFound('seed_defaults', result.new_jobs_found);
       queryClient.invalidateQueries({ queryKey: ['jobs'] });
       queryClient.invalidateQueries({ queryKey: ['saved-searches'] });
     },
@@ -187,7 +256,8 @@ export function useDiscoverJobs() {
   return useMutation({
     mutationFn: (params?: DiscoverJobsRequest) =>
       api.post<{ new_jobs_found: number }>('/api/jobs/discover', params ?? {}),
-    onSuccess: () => {
+    onSuccess: (result, variables) => {
+      trackJobsFound(variables?.mode === 'startup' ? 'startup_discover' : 'discover', result.new_jobs_found);
       queryClient.invalidateQueries({ queryKey: ['jobs'] });
       queryClient.invalidateQueries({ queryKey: ['saved-searches'] });
     },
@@ -200,6 +270,13 @@ export function useSavedSearches() {
   return useQuery({
     queryKey: ['saved-searches'],
     queryFn: () => api.get<SearchPreference[]>('/api/jobs/saved-searches'),
+  });
+}
+
+export function useJobRefreshRuns() {
+  return useQuery({
+    queryKey: ['job-refresh-runs'],
+    queryFn: () => api.get<JobRefreshRun[]>('/api/jobs/refresh-runs'),
   });
 }
 

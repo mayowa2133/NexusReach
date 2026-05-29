@@ -1,7 +1,6 @@
 """People discovery service for company and job-aware search."""
 
 import asyncio
-import copy
 import logging
 import re
 import time
@@ -16,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.clients import apollo_client, github_client, proxycurl_client, search_router_client, tavily_search_client, theorg_client
+from app.config import settings
 from app.models.company import Company
 from app.models.job import Job
 from app.models.person import Person
@@ -117,6 +117,9 @@ CURRENT_TRUSTED_SOURCES = {
     "proxycurl",
     "brave_hiring_team",
     "serper_hiring_team",
+    # SearXNG is the default primary search provider; its hiring-team results
+    # must be trusted on par with the paid fallbacks (audit C1).
+    "searxng_hiring_team",
 }
 CURRENT_TRUSTED_PUBLIC_HOSTS = {
     "theorg.com",
@@ -126,19 +129,25 @@ PUBLIC_WEB_SOURCES = {
     "brave_public_web",
     "serper_public_web",
     "tavily_public_web",
+    "searxng_public_web",
 }
 SOURCE_PRIORITY = {
     "apollo": 0,
     "proxycurl": 1,
     "brave_hiring_team": 1,
     "serper_hiring_team": 1,
+    # SearXNG is the default primary provider — rank its results alongside the
+    # equivalent paid-provider families, not at the fallback floor (audit C1).
+    "searxng_hiring_team": 1,
     "theorg_traversal": 2,
     "brave_search": 3,
     "serper_search": 3,
+    "searxng_search": 3,
     "google_cse": 3,
     "brave_public_web": 4,
     "serper_public_web": 4,
     "tavily_public_web": 4,
+    "searxng_public_web": 4,
     "github": 4,
 }
 SENIOR_MANAGER_LEVELS = {"staff", "principal", "manager", "director", "vp", "executive"}
@@ -1098,7 +1107,9 @@ async def _recover_title_from_theorg_page(
     if not matches_public_company_identity(public_url, company_name, trusted_slugs):
         return None
 
-    page = await theorg_client.fetch_page(public_url, timeout_seconds=20)
+    page = await theorg_client.fetch_page(
+        public_url, timeout_seconds=settings.theorg_timeout_seconds
+    )
     if not page:
         return None
 
@@ -1499,7 +1510,7 @@ async def _backfill_linkedin_profiles(
             data["linkedin_url"] = chosen.get("linkedin_url", "")
             recovered_title = chosen.get("title", "")
             if recovered_title and (
-                bucket != "peer"
+                bucket != "peers"
                 or data.get("_weak_title")
                 or _title_is_weak(data.get("title"), company_name)
             ):
@@ -1867,13 +1878,16 @@ def _sanitize_search_keywords(keywords: list[str], *, company_name: str) -> list
 
 def _has_recruiter_lead_candidate(candidates: list[dict]) -> bool:
     for candidate in candidates:
+        # Seniority/role signals come from title + snippet only. Including the
+        # location let a candidate's city (e.g. "Canada") match a lead keyword
+        # (audit M9), and "canada" was itself a region bias (audit H1).
         haystack = " ".join(
-            part for part in [candidate.get("title", ""), candidate.get("snippet", ""), candidate.get("location", "")]
+            part for part in [candidate.get("title", ""), candidate.get("snippet", "")]
             if part
         ).lower()
         if not _is_recruiter_like(haystack):
             continue
-        if any(keyword in haystack for keyword in ("lead", "head", "manager", "director", "canada", "university recruitment")):
+        if any(keyword in haystack for keyword in ("lead", "head", "manager", "director", "university recruitment")):
             return True
     return False
 
@@ -2801,23 +2815,28 @@ def _dedupe_candidates(*groups: list[dict]) -> list[dict]:
 def _balanced_candidate_mix(*groups: list[dict], limit: int) -> list[dict]:
     mixed: list[dict] = []
     seen: set[str] = set()
-    index = 0
+    # Per-group cursors so a duplicate in one group doesn't waste another group's
+    # round-robin slot. Previously a single shared index advanced for every group
+    # whenever any candidate was skipped, starving groups with early dupes (M8).
+    pointers = [0] * len(groups)
     active = True
     while active and len(mixed) < limit:
         active = False
-        for group in groups:
-            if index >= len(group):
-                continue
-            active = True
-            candidate = group[index]
-            key = _candidate_key(candidate)
-            if key in seen:
-                continue
-            seen.add(key)
-            mixed.append(candidate)
+        for group_index, group in enumerate(groups):
+            # Consume exactly one fresh (not-yet-seen) candidate from this group,
+            # advancing past any duplicates encountered along the way.
+            while pointers[group_index] < len(group):
+                candidate = group[pointers[group_index]]
+                pointers[group_index] += 1
+                key = _candidate_key(candidate)
+                if key in seen:
+                    continue
+                seen.add(key)
+                mixed.append(candidate)
+                active = True
+                break
             if len(mixed) >= limit:
                 break
-        index += 1
     return mixed
 
 
@@ -2979,7 +2998,10 @@ async def _search_candidates(
                 db, company_name=company_name, limit=limit,
             )
         except Exception:
-            logger.debug("Known people cache lookup failed for %s", company_name, exc_info=True)
+            # Warning, not debug: a persistent failure here (Redis down, schema
+            # drift, SQLAlchemy error) should be visible, not silently swallowed
+            # while the feature appears to "work" with empty cache (audit M12).
+            logger.warning("Known people cache lookup failed for %s", company_name, exc_info=True)
             cached_results = []
 
         if debug_bucket is not None:
@@ -3393,7 +3415,14 @@ async def _store_person(
         linkedin_url=linkedin or None,
         github_url=data.get("github_url"),
         work_email=data.get("work_email"),
-        email_source=data.get("source") if data.get("work_email") else None,
+        # Prefer an explicit email-specific source; fall back to the discovery
+        # source only when the email came directly from it (e.g. Apollo). The
+        # email finder service overwrites this with its own source later (L13).
+        email_source=(
+            data.get("email_source") or data.get("source")
+            if data.get("work_email")
+            else None
+        ),
         email_verified=data.get("email_verified", False),
         person_type=person_type,
         profile_data=profile_data or {k: v for k, v in data.items() if k != "source"},
@@ -3558,7 +3587,18 @@ def _linkedin_signal_rank(person: Person) -> int:
     return 2
 
 
-def _person_location_match_rank(person: Person) -> int:
+def _person_location_match_rank(
+    person: Person, location_terms: list[str] | None = None
+) -> int:
+    """Rank 0 when a person's location matches one of the job's target locations.
+
+    Target locations come from the job/company context (audit H1). Previously
+    this hardcoded Toronto/Ontario, which only ever helped users searching in one
+    region. With no target locations, location is neutral (rank 1 for everyone)
+    so it never silently reorders toward a fixed city.
+    """
+    if not location_terms:
+        return 1
     raw_profile_data = getattr(person, "profile_data", None)
     profile_data = raw_profile_data if isinstance(raw_profile_data, dict) else {}
     location = (
@@ -3569,8 +3609,10 @@ def _person_location_match_rank(person: Person) -> int:
     if not location:
         return 1
     location_text = str(location).lower()
-    if any(term in location_text for term in ("toronto", "greater toronto area", "gta", "mississauga", "ontario")):
-        return 0
+    for term in location_terms:
+        token = str(term or "").strip().lower()
+        if len(token) >= 3 and token in location_text:
+            return 0
     return 1
 
 
@@ -3647,6 +3689,7 @@ def _finalize_bucketed(
     bucketed: dict[str, list[Person]],
     *,
     target_count_per_bucket: int,
+    location_terms: list[str] | None = None,
 ) -> dict[str, list[Person]]:
     finalized: dict[str, list[Person]] = {}
     for bucket, people in bucketed.items():
@@ -3676,7 +3719,7 @@ def _finalize_bucketed(
                 else 1,
                 _manager_person_title_specificity_rank(person) if bucket == "hiring_managers" else 0,
                 _recruiter_person_scope_rank(person) if bucket == "recruiters" else 1,
-                _person_location_match_rank(person) if bucket in {"recruiters", "peers"} else 1,
+                _person_location_match_rank(person, location_terms) if bucket in {"recruiters", "peers"} else 1,
                 _peer_person_title_alignment_rank(person) if bucket == "peers" else 1,
                 _warm_path_rank(person),
                 _linkedin_signal_rank(person),
@@ -3694,6 +3737,23 @@ def _finalize_bucketed(
         bucket: people[:target_count_per_bucket]
         for bucket, people in deduped.items()
     }
+
+
+def _detached_person_copy(person: Person) -> Person:
+    """Clone a Person for cross-bucket display without sharing ORM state.
+
+    ``copy.copy`` on a mapped instance shares ``_sa_instance_state`` with the
+    original, so the session would treat the clone as the same persistent row
+    (audit M10). Constructing a fresh ``Person`` gives the clone its own state;
+    we then copy over loaded column values and dynamic ranking attributes. The
+    clone is never added to the session, so it stays transient.
+    """
+    clone = Person()
+    for key, value in person.__dict__.items():
+        if key == "_sa_instance_state":
+            continue
+        clone.__dict__[key] = value
+    return clone
 
 
 def _backfill_sparse_hiring_manager_bucket(
@@ -3714,7 +3774,7 @@ def _backfill_sparse_hiring_manager_bucket(
         if not (_is_senior_ic_fallback(person.title) or getattr(person, "org_level", None) in {"manager", "director_plus"}):
             continue
 
-        fallback_person = copy.copy(person)
+        fallback_person = _detached_person_copy(person)
         fallback_person.person_type = "hiring_manager"
         fallback_person.match_quality = "next_best"
         fallback_person.match_reason = "Senior IC fallback at the target company."
@@ -3919,7 +3979,7 @@ async def search_people_at_company(
             company_domain=company.domain if hasattr(company, "domain") else None,
         )
     except Exception:
-        logger.debug("Known people cache write-through failed for %s", company_name, exc_info=True)
+        logger.warning("Known people cache write-through failed for %s", company_name, exc_info=True)
 
     recruiter_results = _prepare_candidates(
         recruiter_candidates,
@@ -4220,7 +4280,11 @@ async def search_people_at_company(
         direct_follows=direct_follows,
         company_follows=company_follows,
     )
-    finalized = _finalize_bucketed(bucketed, target_count_per_bucket=target_count_per_bucket)
+    finalized = _finalize_bucketed(
+        bucketed,
+        target_count_per_bucket=target_count_per_bucket,
+        location_terms=getattr(roles_context, "job_geo_terms", None),
+    )
 
     # Record search in audit log
     elapsed = _time.monotonic() - _t0
@@ -4387,66 +4451,56 @@ async def search_people_for_job(
         company_name=job.company_name,
     )
 
-    recruiter_search_started_at = time.monotonic()
-    recruiter_candidates = await _search_candidates(
-        job.company_name,
-        titles=recruiter_titles,
-        departments=context.apollo_departments,
-        team_keywords=search_keywords,
-        geo_terms=recruiter_geo_terms,
-        public_identity_terms=public_identity_terms,
-        company_domain=search_domain,
-        limit=search_limit,
-        min_results=recruiter_min_results,
-        debug_bucket=debug["searches"].setdefault("recruiters_initial", {}) if debug is not None else None,
-        search_profile=interactive_search_profile,
-    )
-    _record_timing(
-        debug,
-        stage="recruiters_initial_search",
-        started_at=recruiter_search_started_at,
-        recruiter_candidates=len(recruiter_candidates),
-    )
-    manager_search_started_at = time.monotonic()
-    manager_candidates = await _search_candidates(
-        job.company_name,
-        titles=manager_titles,
-        departments=context.apollo_departments,
-        seniority=_manager_seniority_filters(context),
-        team_keywords=search_keywords,
-        geo_terms=manager_geo_terms,
-        public_identity_terms=public_identity_terms,
-        company_domain=search_domain,
-        limit=search_limit,
-        min_results=manager_min_results,
-        debug_bucket=debug["searches"].setdefault("hiring_managers_initial", {}) if debug is not None else None,
-        search_profile=interactive_search_profile,
-    )
-    _record_timing(
-        debug,
-        stage="hiring_managers_initial_search",
-        started_at=manager_search_started_at,
-        manager_candidates=len(manager_candidates),
-    )
-    peer_search_started_at = time.monotonic()
-    peer_candidates = await _search_candidates(
-        job.company_name,
-        titles=peer_titles,
-        departments=context.apollo_departments,
-        seniority=_peer_seniority_filters(context),
-        team_keywords=search_keywords,
-        geo_terms=peer_geo_terms,
-        public_identity_terms=public_identity_terms,
-        company_domain=search_domain,
-        limit=search_limit,
-        min_results=peer_min_results,
-        debug_bucket=debug["searches"].setdefault("peers_initial", {}) if debug is not None else None,
-        search_profile=interactive_search_profile,
+    # Run the three initial bucket searches concurrently (audit H2) to match the
+    # company-level path — previously sequential, adding 6-12s of avoidable latency.
+    initial_searches_started_at = time.monotonic()
+    recruiter_candidates, manager_candidates, peer_candidates = await asyncio.gather(
+        _search_candidates(
+            job.company_name,
+            titles=recruiter_titles,
+            departments=context.apollo_departments,
+            team_keywords=search_keywords,
+            geo_terms=recruiter_geo_terms,
+            public_identity_terms=public_identity_terms,
+            company_domain=search_domain,
+            limit=search_limit,
+            min_results=recruiter_min_results,
+            debug_bucket=debug["searches"].setdefault("recruiters_initial", {}) if debug is not None else None,
+            search_profile=interactive_search_profile,
+        ),
+        _search_candidates(
+            job.company_name,
+            titles=manager_titles,
+            departments=context.apollo_departments,
+            seniority=_manager_seniority_filters(context),
+            team_keywords=search_keywords,
+            geo_terms=manager_geo_terms,
+            public_identity_terms=public_identity_terms,
+            company_domain=search_domain,
+            limit=search_limit,
+            min_results=manager_min_results,
+            debug_bucket=debug["searches"].setdefault("hiring_managers_initial", {}) if debug is not None else None,
+            search_profile=interactive_search_profile,
+        ),
+        _search_candidates(
+            job.company_name,
+            titles=peer_titles,
+            departments=context.apollo_departments,
+            seniority=_peer_seniority_filters(context),
+            team_keywords=search_keywords,
+            geo_terms=peer_geo_terms,
+            public_identity_terms=public_identity_terms,
+            company_domain=search_domain,
+            limit=search_limit,
+            min_results=peer_min_results,
+            debug_bucket=debug["searches"].setdefault("peers_initial", {}) if debug is not None else None,
+            search_profile=interactive_search_profile,
+        ),
     )
     _record_timing(
         debug,
         stage="initial_bucket_searches",
-        started_at=peer_search_started_at,
+        started_at=initial_searches_started_at,
         recruiter_candidates=len(recruiter_candidates),
         manager_candidates=len(manager_candidates),
         peer_candidates=len(peer_candidates),
@@ -4641,21 +4695,25 @@ async def search_people_for_job(
         identity_hints=company.identity_hints if isinstance(company.identity_hints, dict) else None,
     ) or None
 
+    # Recover titles for all three buckets concurrently (audit H3) — each may hit
+    # The Org pages with a 20s timeout, so running them serially was a bottleneck.
     recovery_started_at = time.monotonic()
-    recruiter_candidates = await _recover_candidate_titles(
-        recruiter_candidates,
-        company=company,
-        company_name=job.company_name,
-    )
-    manager_candidates = await _recover_candidate_titles(
-        manager_candidates,
-        company=company,
-        company_name=job.company_name,
-    )
-    peer_candidates = await _recover_candidate_titles(
-        peer_candidates,
-        company=company,
-        company_name=job.company_name,
+    recruiter_candidates, manager_candidates, peer_candidates = await asyncio.gather(
+        _recover_candidate_titles(
+            recruiter_candidates,
+            company=company,
+            company_name=job.company_name,
+        ),
+        _recover_candidate_titles(
+            manager_candidates,
+            company=company,
+            company_name=job.company_name,
+        ),
+        _recover_candidate_titles(
+            peer_candidates,
+            company=company,
+            company_name=job.company_name,
+        ),
     )
     manager_candidates = _dedupe_candidates(
         manager_candidates,
@@ -5477,6 +5535,7 @@ async def search_people_for_job(
     filtered_bucketed = _finalize_bucketed(
         bucketed,
         target_count_per_bucket=target_count_per_bucket,
+        location_terms=getattr(context, "job_geo_terms", None),
     )
     if debug is not None:
         debug["final"] = {

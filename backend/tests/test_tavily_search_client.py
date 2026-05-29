@@ -118,7 +118,9 @@ async def test_search_public_people_uses_manager_geo_queries_for_engineering_lea
     assert results
     queries = [call.kwargs["json"]["query"] for call in mock_client.post.call_args_list]
     assert any("Software Engineering Manager" in query for query in queries)
-    assert any("Intuit Canada" in query for query in queries)
+    # Manager-leader queries are emitted and the provided geo terms are used,
+    # rather than a hardcoded "<company> Canada" construct (audit H1).
+    assert any("Engineering Director" in query for query in queries)
     assert any("Toronto" in query for query in queries)
 
 
