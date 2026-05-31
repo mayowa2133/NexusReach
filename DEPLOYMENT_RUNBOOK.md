@@ -178,6 +178,7 @@ NEXUSREACH_GITHUB_TOKEN=<key>
 NEXUSREACH_JSEARCH_API_KEY=<key>
 NEXUSREACH_ADZUNA_APP_ID=<key>
 NEXUSREACH_ADZUNA_API_KEY=<key>
+NEXUSREACH_DICE_API_KEY=<rotated-key>   # optional; old committed key must be rotated
 
 NEXUSREACH_SEARXNG_BASE_URL=https://<searxng-service>
 NEXUSREACH_SERPER_API_KEY=<optional-key>
