@@ -7,11 +7,67 @@ from sqlalchemy import select, func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.models.job import Job
+from app.models.message import Message
 from app.models.outreach import OutreachLog
 from app.models.person import Person
 
 
 VALID_STATUSES = {"draft", "sent", "connected", "responded", "met", "following_up", "closed"}
+
+
+async def _assert_owned_references(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    job_id: uuid.UUID | None,
+    message_id: uuid.UUID | None,
+) -> None:
+    """Reject cross-user job_id/message_id references (audit pass-2 P9).
+
+    Outreach logs are user-scoped, but job_id/message_id were previously stored
+    without verifying ownership — letting a user attach another user's job or
+    message id (and, once P1's eager-loaded relationships exist, surface that
+    job's title cross-user).
+    """
+    if job_id is not None:
+        owned = await db.execute(
+            select(Job.id).where(Job.id == job_id, Job.user_id == user_id)
+        )
+        if owned.scalar_one_or_none() is None:
+            raise ValueError("Job not found.")
+    if message_id is not None:
+        owned = await db.execute(
+            select(Message.id).where(Message.id == message_id, Message.user_id == user_id)
+        )
+        if owned.scalar_one_or_none() is None:
+            raise ValueError("Message not found.")
+
+
+def _outreach_load_options():
+    """Eager-load every relationship the response serializer touches.
+
+    ``_to_response`` reads ``log.person``, ``log.person.company`` and ``log.job``.
+    In async SQLAlchemy, accessing an un-eager-loaded relationship triggers a
+    lazy load that raises ``MissingGreenlet`` and 500s the request (audit pass-2
+    P1). Loading them up front keeps the serializer crash-free.
+    """
+    return (
+        selectinload(OutreachLog.person).selectinload(Person.company),
+        selectinload(OutreachLog.job),
+    )
+
+
+async def _reload_with_relations(
+    db: AsyncSession, user_id: uuid.UUID, log_id: uuid.UUID
+) -> OutreachLog:
+    """Re-fetch a log with serializer relationships eager-loaded (audit pass-2 P1)."""
+    result = await db.execute(
+        select(OutreachLog)
+        .where(OutreachLog.id == log_id, OutreachLog.user_id == user_id)
+        .options(*_outreach_load_options())
+    )
+    return result.scalar_one()
 
 
 async def create_outreach_log(
@@ -38,6 +94,8 @@ async def create_outreach_log(
     if status not in VALID_STATUSES:
         raise ValueError(f"Invalid status: {status}")
 
+    await _assert_owned_references(db, user_id, job_id=job_id, message_id=message_id)
+
     log = OutreachLog(
         user_id=user_id,
         person_id=person_id,
@@ -51,8 +109,7 @@ async def create_outreach_log(
     )
     db.add(log)
     await db.commit()
-    await db.refresh(log)
-    return log
+    return await _reload_with_relations(db, user_id, log.id)
 
 
 async def update_outreach_log(
@@ -75,13 +132,19 @@ async def update_outreach_log(
         if updates["status"] not in VALID_STATUSES:
             raise ValueError(f"Invalid status: {updates['status']}")
 
+    await _assert_owned_references(
+        db,
+        user_id,
+        job_id=updates.get("job_id") if isinstance(updates.get("job_id"), uuid.UUID) else None,
+        message_id=updates.get("message_id") if isinstance(updates.get("message_id"), uuid.UUID) else None,
+    )
+
     for key, value in updates.items():
         if value is not None and hasattr(log, key):
             setattr(log, key, value)
 
     await db.commit()
-    await db.refresh(log)
-    return log
+    return await _reload_with_relations(db, user_id, log.id)
 
 
 async def get_outreach_logs(
@@ -103,7 +166,7 @@ async def get_outreach_logs(
     query = (
         select(OutreachLog)
         .where(OutreachLog.user_id == user_id)
-        .options(selectinload(OutreachLog.person))
+        .options(*_outreach_load_options())
         .order_by(OutreachLog.updated_at.desc())
     )
 
@@ -126,7 +189,7 @@ async def get_outreach_log(
     result = await db.execute(
         select(OutreachLog)
         .where(OutreachLog.id == log_id, OutreachLog.user_id == user_id)
-        .options(selectinload(OutreachLog.person))
+        .options(*_outreach_load_options())
     )
     return result.scalar_one_or_none()
 
@@ -143,7 +206,7 @@ async def get_outreach_timeline(
             OutreachLog.user_id == user_id,
             OutreachLog.person_id == person_id,
         )
-        .options(selectinload(OutreachLog.person))
+        .options(*_outreach_load_options())
         .order_by(OutreachLog.created_at.desc())
     )
     return list(result.scalars().all())

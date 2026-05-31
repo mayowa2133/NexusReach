@@ -12,9 +12,17 @@ pytestmark = pytest.mark.asyncio
 
 
 class _Response:
-    def __init__(self, *, text: str, url: str, content_type: str = "text/html") -> None:
+    def __init__(
+        self,
+        *,
+        text: str,
+        url: str,
+        content_type: str = "text/html",
+        status_code: int = 200,
+    ) -> None:
         self.text = text
         self.url = url
+        self.status_code = status_code
         self.headers = {"content-type": content_type}
 
     def raise_for_status(self) -> None:

@@ -13,6 +13,7 @@ import httpx
 
 from app.clients import crawl4ai_client, firecrawl_client
 from app.utils.job_metadata import parse_json_ld_base_salary
+from app.utils.url_safety import is_safe_public_url, safe_get
 
 JSON_LD_RE = re.compile(
     r"<script[^>]+type=[\"']application/ld\+json[\"'][^>]*>(?P<payload>.*?)</script>",
@@ -705,11 +706,15 @@ async def _fetch_direct_exact_page(
         )
     }
 
+    # SSRF-safe fetch: validates the host and every redirect hop so a public URL
+    # can't bounce to an internal/metadata target (audit pass-2 P4). The module's
+    # own client is passed so it stays mockable in tests.
     try:
-        async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True) as client:
-            resp = await client.get(url, headers=headers)
-            resp.raise_for_status()
+        async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=False) as client:
+            resp = await safe_get(url, headers=headers, client=client)
     except httpx.HTTPError:
+        return None
+    if resp is None or resp.status_code >= 400:
         return None
 
     body = resp.text
@@ -759,6 +764,8 @@ async def _fetch_exact_page_candidates(
 
 async def _probe_workday_job_redirect(parsed: ParsedATSJobURL) -> str | None:
     url = parsed.canonical_url or ""
+    if not is_safe_public_url(url):  # SSRF guard (audit pass-2 P4)
+        return None
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -1137,6 +1144,11 @@ def _parse_generic_exact_url(job_url: str) -> ParsedATSJobURL | None:
     parsed = urlparse((job_url or "").strip())
     host = parsed.netloc.lower()
     if parsed.scheme not in {"http", "https"} or not host:
+        return None
+    # Block SSRF at the user entry point: the generic adapter accepts arbitrary
+    # hosts, so reject private/loopback/link-local/metadata targets before the
+    # server ever fetches them (audit pass-2 P4).
+    if not is_safe_public_url(job_url):
         return None
     return ParsedATSJobURL(
         ats_type="generic_exact",

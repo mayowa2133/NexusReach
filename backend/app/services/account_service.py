@@ -17,6 +17,7 @@ from app.models.company import Company
 from app.models.interview_prep_brief import InterviewPrepBrief
 from app.models.job import Job
 from app.models.job_alert import JobAlertPreference
+from app.models.job_refresh_run import JobRefreshRun
 from app.models.job_research_snapshot import JobResearchSnapshot
 from app.models.linkedin_graph import (
     LinkedInGraphConnection,
@@ -58,6 +59,7 @@ EXPORT_MODELS = [
     LinkedInGraphSyncRun,
     JobAlertPreference,
     JobResearchSnapshot,
+    JobRefreshRun,  # user's saved-search refresh history (audit pass-2 P16)
     TailoredResume,
     ResumeArtifact,
     Story,

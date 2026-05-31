@@ -275,20 +275,34 @@ async def _process_pending_sends() -> dict:
     scheduled_send_at timestamps for that user (cancels queue).
     Rate-limited to 10 sends per user per cycle.
     """
-    from sqlalchemy import select, distinct  # noqa: PLC0415
+    from sqlalchemy import select, distinct, update  # noqa: PLC0415
     from app.models.message import Message  # noqa: PLC0415
     from app.models.settings import UserSettings  # noqa: PLC0415
     from app.services.draft_staging_service import (  # noqa: PLC0415
         send_staged_message,
         resolve_connected_provider,
+        claim_message_for_send,
     )
     from app.services.notification_service import create_notification  # noqa: PLC0415
 
     stats = {"sent": 0, "cancelled": 0, "errors": 0}
     now = datetime.now(timezone.utc)
 
+    async def _cancel_queue(db, uid) -> int:
+        pending = await db.execute(
+            select(Message).where(
+                Message.user_id == uid,
+                Message.scheduled_send_at.isnot(None),
+            )
+        )
+        count = 0
+        for msg in pending.scalars().all():
+            msg.scheduled_send_at = None
+            count += 1
+        return count
+
+    # Discover affected users in a short-lived session.
     async with async_session() as db:
-        # Find all users with pending sends
         user_ids_result = await db.execute(
             select(distinct(Message.user_id)).where(
                 Message.status == "staged",
@@ -298,79 +312,104 @@ async def _process_pending_sends() -> dict:
         )
         user_ids = [row[0] for row in user_ids_result.all()]
 
-        for uid in user_ids:
-            # Re-check setting
-            settings_result = await db.execute(
-                select(UserSettings).where(UserSettings.user_id == uid)
-            )
-            user_settings = settings_result.scalar_one_or_none()
-
-            if not user_settings or not user_settings.auto_send_enabled:
-                # Cancel all scheduled sends for this user
-                pending_result = await db.execute(
-                    select(Message).where(
-                        Message.user_id == uid,
-                        Message.scheduled_send_at.isnot(None),
+    # Process each user in its OWN session so a failure for one user can't poison
+    # the shared transaction and starve subsequent users (audit pass-2 P10).
+    for uid in user_ids:
+        async with async_session() as db:
+            try:
+                user_settings = (
+                    await db.execute(
+                        select(UserSettings).where(UserSettings.user_id == uid)
                     )
-                )
-                for msg in pending_result.scalars().all():
-                    msg.scheduled_send_at = None
-                    stats["cancelled"] += 1
-                await db.commit()
-                continue
+                ).scalar_one_or_none()
 
-            # Get up to 10 ready messages
-            ready_result = await db.execute(
-                select(Message).where(
-                    Message.user_id == uid,
-                    Message.status == "staged",
-                    Message.scheduled_send_at.isnot(None),
-                    Message.scheduled_send_at <= now,
-                ).limit(10)
-            )
-            ready_messages = list(ready_result.scalars().all())
-
-            provider = await resolve_connected_provider(db, uid)
-            if not provider:
-                # No provider — cancel and notify
-                for msg in ready_messages:
-                    msg.scheduled_send_at = None
-                    stats["cancelled"] += 1
-                await db.commit()
-                await create_notification(
-                    db, uid,
-                    type="auto_send_failed",
-                    title="Auto-send cancelled",
-                    body="No email provider connected. Scheduled sends cancelled.",
-                )
-                continue
-
-            sent_count = 0
-            for msg in ready_messages:
-                try:
-                    await send_staged_message(
-                        db=db,
-                        user_id=uid,
-                        message_id=msg.id,
-                        provider=provider,
-                    )
-                    stats["sent"] += 1
-                    sent_count += 1
-                except Exception:
-                    stats["errors"] += 1
-                    msg.scheduled_send_at = None
+                if not user_settings or not user_settings.auto_send_enabled:
+                    stats["cancelled"] += await _cancel_queue(db, uid)
                     await db.commit()
-                    logger.debug(
-                        "Auto-send failed: message=%s", msg.id, exc_info=True,
-                    )
+                    continue
 
-            if sent_count > 0:
-                await create_notification(
-                    db, uid,
-                    type="auto_send_complete",
-                    title="Auto-send complete",
-                    body=f"Sent {sent_count} email(s) automatically.",
-                )
+                ready_ids = [
+                    row[0]
+                    for row in (
+                        await db.execute(
+                            select(Message.id).where(
+                                Message.user_id == uid,
+                                Message.status == "staged",
+                                Message.scheduled_send_at.isnot(None),
+                                Message.scheduled_send_at <= now,
+                            ).limit(10)
+                        )
+                    ).all()
+                ]
+
+                sent_count = 0
+                for msg_id in ready_ids:
+                    # Re-check consent + connection right before each send so a
+                    # mid-cycle disable/disconnect takes effect immediately
+                    # (audit pass-2 P11/P18), not just at the next 5-min tick.
+                    still_enabled = (
+                        await db.execute(
+                            select(UserSettings.auto_send_enabled).where(
+                                UserSettings.user_id == uid
+                            )
+                        )
+                    ).scalar_one_or_none()
+                    if not still_enabled:
+                        stats["cancelled"] += await _cancel_queue(db, uid)
+                        await db.commit()
+                        break
+
+                    provider = await resolve_connected_provider(db, uid)
+                    if not provider:
+                        stats["cancelled"] += await _cancel_queue(db, uid)
+                        await db.commit()
+                        await create_notification(
+                            db, uid,
+                            type="auto_send_failed",
+                            title="Auto-send cancelled",
+                            body="No email provider connected. Scheduled sends cancelled.",
+                        )
+                        await db.commit()
+                        break
+
+                    # Atomic claim BEFORE the network send (audit pass-2 P2/P5).
+                    if not await claim_message_for_send(db, user_id=uid, message_id=msg_id):
+                        continue  # lost the race / already handled — never double-send
+
+                    try:
+                        await send_staged_message(
+                            db=db, user_id=uid, message_id=msg_id, provider=provider,
+                        )
+                        stats["sent"] += 1
+                        sent_count += 1
+                    except Exception:
+                        stats["errors"] += 1
+                        await db.rollback()
+                        # Release the claim: back to staged, unscheduled (visible,
+                        # not auto-retried, never double-sent).
+                        await db.execute(
+                            update(Message)
+                            .where(
+                                Message.id == msg_id,
+                                Message.user_id == uid,
+                                Message.status == "sending",
+                            )
+                            .values(status="staged", scheduled_send_at=None)
+                        )
+                        await db.commit()
+                        logger.debug("Auto-send failed: message=%s", msg_id, exc_info=True)
+
+                if sent_count > 0:
+                    await create_notification(
+                        db, uid,
+                        type="auto_send_complete",
+                        title="Auto-send complete",
+                        body=f"Sent {sent_count} email(s) automatically.",
+                    )
+                    await db.commit()
+            except Exception:
+                await db.rollback()
+                logger.exception("process_pending_sends failed for user %s", uid)
 
     return stats
 

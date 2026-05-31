@@ -8,6 +8,7 @@ import re
 import httpx
 
 from app.clients import crawl4ai_client, firecrawl_client
+from app.utils.url_safety import safe_get
 
 TITLE_RE = re.compile(r"<title>(.*?)</title>", flags=re.IGNORECASE | re.DOTALL)
 SCRIPT_STYLE_RE = re.compile(r"<(?:script|style)[^>]*>.*?</(?:script|style)>", flags=re.IGNORECASE | re.DOTALL)
@@ -85,18 +86,22 @@ def _is_page_sufficient(page: dict | None) -> bool:
 
 
 async def fetch_direct_page(url: str, *, timeout_seconds: int = 20) -> dict | None:
-    """Fetch a public page directly over HTTP."""
+    """Fetch a public page directly over HTTP (SSRF-safe — audit pass-2 P4)."""
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
         )
     }
+    # Validate the host and every redirect hop so a page URL can't reach an
+    # internal/metadata target. The module's own client is passed so it stays
+    # mockable in tests.
     try:
-        async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True) as client:
-            resp = await client.get(url, headers=headers)
-            resp.raise_for_status()
+        async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=False) as client:
+            resp = await safe_get(url, headers=headers, client=client)
     except httpx.HTTPError:
+        return None
+    if resp is None or resp.status_code >= 400:
         return None
 
     content_type = (resp.headers.get("content-type") or "").lower()

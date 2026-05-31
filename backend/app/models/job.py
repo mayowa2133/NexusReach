@@ -1,7 +1,7 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import String, Boolean, Text, DateTime, Float, ForeignKey, Integer, func
+from sqlalchemy import Date, String, Boolean, Text, DateTime, Float, ForeignKey, Integer, func
 from sqlalchemy.dialects.postgresql import UUID, JSONB, ARRAY
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -52,6 +52,9 @@ class Job(Base):
     ats: Mapped[str | None] = mapped_column(String(50))
     ats_slug: Mapped[str | None] = mapped_column(String(255))
     posted_at: Mapped[str | None] = mapped_column(String(50))
+    # Calendar-validated parse of posted_at (NULL when unparseable/invalid).
+    # Used for crash-proof, indexed date ordering (audit pass-2 P3).
+    posted_date: Mapped[date | None] = mapped_column(Date, index=True)
     source_status: Mapped[str] = mapped_column(
         String(32), default="active", server_default="active"
     )

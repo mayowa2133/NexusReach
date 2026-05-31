@@ -8,6 +8,7 @@ Runs via Celery beat every Monday at 09:00 UTC. Only fires when:
 
 from __future__ import annotations
 
+import html
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -56,12 +57,15 @@ def _render_html(actions: list[NextAction], user_email: str) -> str:
             job = a.job_title or ""
             label = f"{who} — {job}" if who and job else who or job or "—"
             age = f"{a.age_days:.0f}d ago" if a.age_days is not None else ""
+            # Escape all interpolated fields — person/company/job names come from
+            # scraped/imported data and could carry HTML/script payloads (audit
+            # pass-2 P6; same class as the job-alert digest fix L11).
             rows.append(
                 f'<tr style="border-bottom:1px solid #f3f4f6">'
-                f'<td style="padding:8px 12px;font-weight:500">{kind}</td>'
-                f'<td style="padding:8px 12px;color:#374151">{label}</td>'
-                f'<td style="padding:8px 4px;color:#6b7280;font-size:12px">{age}</td>'
-                f'<td style="padding:8px 12px;color:#6b7280;font-size:12px">{a.reason}</td>'
+                f'<td style="padding:8px 12px;font-weight:500">{html.escape(kind)}</td>'
+                f'<td style="padding:8px 12px;color:#374151">{html.escape(label)}</td>'
+                f'<td style="padding:8px 4px;color:#6b7280;font-size:12px">{html.escape(age)}</td>'
+                f'<td style="padding:8px 12px;color:#6b7280;font-size:12px">{html.escape(a.reason)}</td>'
                 f'</tr>'
             )
         return (

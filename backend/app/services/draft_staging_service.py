@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.message import Message
@@ -17,6 +17,32 @@ from app.services.oauth_token_crypto import is_encrypted_refresh_token
 from app.services.outreach_service import create_outreach_log
 
 logger = logging.getLogger(__name__)
+
+
+async def claim_message_for_send(
+    db: AsyncSession, *, user_id: uuid.UUID, message_id: uuid.UUID
+) -> bool:
+    """Atomically claim a staged message for sending (audit pass-2 P2/P5).
+
+    Transitions ``staged -> sending`` in a single ``UPDATE ... WHERE status='staged'``
+    and commits it **before** the network send. Returns True only for the caller
+    that won the claim (rowcount == 1); a concurrent worker or a redelivered task
+    loses the claim and must not send. Because the scheduler only selects
+    ``status='staged'`` rows, a message left ``sending`` after a crash/failed
+    commit is never re-selected — closing both the double-send race and the
+    commit-after-send window.
+    """
+    result = await db.execute(
+        update(Message)
+        .where(
+            Message.id == message_id,
+            Message.user_id == user_id,
+            Message.status == "staged",
+        )
+        .values(status="sending", scheduled_send_at=None)
+    )
+    await db.commit()
+    return (result.rowcount or 0) == 1
 
 
 def _message_job_id(message: Message) -> uuid.UUID | None:

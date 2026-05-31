@@ -3,8 +3,9 @@
 import asyncio
 import hashlib
 import logging
+import re
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from urllib.parse import urlparse, urlunparse
 
 from sqlalchemy import Date, func as sa_func, not_, or_, select
@@ -220,6 +221,28 @@ def _coerce_posted_at(value: str | None) -> str | None:
     return None
 
 
+_POSTED_DATE_RE = re.compile(r"^\s*(\d{4})-(\d{2})-(\d{2})")
+
+
+def _parse_posted_date(value: str | None) -> date | None:
+    """Parse a calendar-valid leading ISO date (YYYY-MM-DD) from posted_at.
+
+    Returns None for missing, non-date-shaped, or date-shaped-but-invalid values
+    (e.g. "2026-02-30", "2026-13-01"). This validated value feeds the indexed
+    ``posted_date`` column so date ordering never casts a bad string at query
+    time (audit pass-2 P3).
+    """
+    if not isinstance(value, str):
+        return None
+    match = _POSTED_DATE_RE.match(value)
+    if not match:
+        return None
+    try:
+        return date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+    except ValueError:
+        return None
+
+
 def _experience_level_for_job(job_data: dict) -> str:
     return normalize_job_metadata(job_data).get("experience_level") or "mid"
 
@@ -299,7 +322,11 @@ def _refresh_existing_job(
             setattr(job, _field, _value)
     if data.get("remote") is not None:
         job.remote = bool(data.get("remote"))
-    job.work_mode = data.get("work_mode")
+    # Only overwrite work_mode when the refresh actually detected one — a source
+    # that yields work_mode=None must not wipe a previously detected hybrid/remote
+    # label (audit pass-2 P7; same class as M1).
+    if data.get("work_mode") is not None:
+        job.work_mode = data.get("work_mode")
     _apply_if_present(job, "url", data.get("url"))
     # Keep the indexed canonical URL in sync so dedup stays fast (audit H7).
     new_canonical = _canonical_job_url(data.get("url"))
@@ -311,6 +338,10 @@ def _refresh_existing_job(
     _apply_if_present(job, "ats", data.get("ats"))
     _apply_if_present(job, "ats_slug", data.get("ats_slug"))
     _apply_if_present(job, "posted_at", data.get("posted_at"))
+    # Keep the validated posted_date in sync when a new posted_at is provided.
+    new_posted_date = _parse_posted_date(data.get("posted_at"))
+    if new_posted_date is not None:
+        job.posted_date = new_posted_date
     job.match_score = score
     job.score_breakdown = breakdown
     job.scored_at = datetime.now(timezone.utc) if score is not None else None
@@ -384,6 +415,7 @@ def _build_job(
         ats=data.get("ats"),
         ats_slug=data.get("ats_slug"),
         posted_at=_coerce_posted_at(data.get("posted_at")),
+        posted_date=_parse_posted_date(data.get("posted_at")),
         match_score=score,
         score_breakdown=breakdown,
         scored_at=datetime.now(timezone.utc) if score is not None else None,
@@ -442,7 +474,10 @@ async def _find_existing_job(
             Job.canonical_url.is_(None),
         ]
         if host:
-            legacy_filters.append(Job.url.ilike(f"%{host}%"))
+            # Escape LIKE metacharacters so a host containing % or _ can't widen
+            # the scan (audit pass-2 P14).
+            safe_host = host.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            legacy_filters.append(Job.url.ilike(f"%{safe_host}%", escape="\\"))
         legacy_result = await db.execute(
             select(Job).where(*legacy_filters).order_by(Job.created_at.asc(), Job.id.asc())
         )
@@ -549,8 +584,9 @@ def _job_matches_refresh_filters(data: dict, *, location: str | None, remote_onl
     # Remote roles are location-eligible (audit H9). If a job is remote and was
     # not already excluded by a non-matching explicit country code above, treat
     # it as a match instead of requiring the literal word "remote" in its HQ
-    # location string — a remote role listed as "San Francisco, CA (Remote)"
-    # is still reachable by a candidate filtering for, say, Canada.
+    # location string. Note: a remote role with an explicit foreign country_code
+    # (e.g. US-only) is still rejected at the country-code gate above before
+    # reaching here (audit pass-2 P19 — comment corrected).
     if bool(data.get("remote")) or data.get("work_mode") == "remote":
         return True
 
@@ -1106,16 +1142,13 @@ async def get_jobs(
     elif sort_by == "distance" and distance_expr is not None:
         query = query.order_by(distance_expr.asc().nullslast())
     else:
-        # Date sort (and default). `posted_at` is a free-form String(50) holding
-        # heterogeneous formats (ISO timestamps, "3 days ago", partial dates), so
-        # comparing it lexicographically — or against created_at cast to text —
-        # sorts stale jobs above recent ones (audit H6). Instead, parse only a
-        # clean leading ISO date (YYYY-MM-DD) to a real Date, fall back to the
-        # reliable ingest timestamp, and break ties by created_at.
-        posted_date = sa_func.cast(
-            sa_func.substring(Job.posted_at, r"^\d{4}-\d{2}-\d{2}"), Date
-        )
-        recency = sa_func.coalesce(posted_date, sa_func.cast(Job.created_at, Date))
+        # Date sort (and default). Order by the pre-parsed, calendar-validated
+        # `posted_date` column (populated at ingest), falling back to the ingest
+        # timestamp. The previous approach cast a substring of the free-form
+        # `posted_at` string to ::date at query time, which raised and aborted
+        # the whole query on a date-shaped-but-invalid value like "2026-02-30"
+        # (audit pass-2 P3). Using a real Date column is crash-proof and indexed.
+        recency = sa_func.coalesce(Job.posted_date, sa_func.cast(Job.created_at, Date))
         query = query.order_by(recency.desc().nullslast(), Job.created_at.desc())
 
     jobs, total = await paginate(db, query, limit=limit, offset=offset)

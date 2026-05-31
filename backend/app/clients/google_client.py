@@ -107,7 +107,10 @@ async def search_google_jobs(
                 if resp.status_code != 200:
                     logger.debug("Google Careers feed returned %d", resp.status_code)
                     return
-                parser = XMLPullParser(events=("end",))
+                # start+end events so we know when we're inside an <entry> and
+                # never let feed-level <title>/<category>/... seed the first job
+                # (audit pass-2 P17).
+                parser = XMLPullParser(events=("start", "end"))
                 async for chunk in resp.aiter_bytes(chunk_size=65536):
                     parser.feed(chunk)
                     for event, elem in parser.read_events():
@@ -123,11 +126,21 @@ async def search_google_jobs(
     current_locations: list[str] = []
     current_categories: list[str] = []
     current_location_parts: list[str] = []
+    in_entry = False
 
     try:
         async for event, elem in _iter_feed_events():
             # Strip namespace prefix if present
             tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+
+            if event == "start":
+                if tag in {"entry", "job"}:
+                    in_entry = True
+                    current_entry = {}
+                    current_locations = []
+                    current_categories = []
+                    current_location_parts = []
+                continue  # never clear() on a start event
 
             if tag in {"entry", "job"}:
                 # Finished an entry — process it
@@ -198,28 +211,23 @@ async def search_google_jobs(
                 current_locations = []
                 current_categories = []
                 current_location_parts = []
+                in_entry = False
                 elem.clear()
                 continue
 
-            # Detect entry start by tracking child elements
-            # In Atom feeds, entries contain these child elements
+            # Only populate fields while inside an <entry> — feed-level elements
+            # (before the first entry) are ignored (audit pass-2 P17).
+            if not in_entry or current_entry is None:
+                elem.clear()
+                continue
+
             if tag in (
                 "title", "jobid", "url", "employer", "remote",
                 "isRemote", "isHybrid", "published", "description", "jobtype",
             ):
-                if current_entry is None:
-                    current_entry = {}
-                    current_locations = []
-                    current_categories = []
-                text = elem.text or ""
-                current_entry[tag] = text
+                current_entry[tag] = elem.text or ""
 
             elif tag == "location":
-                if current_entry is None:
-                    current_entry = {}
-                    current_locations = []
-                    current_categories = []
-                    current_location_parts = []
                 if elem.text and elem.text.strip():
                     current_locations.append(elem.text.strip())
                 elif current_location_parts:
@@ -227,15 +235,10 @@ async def search_google_jobs(
                 current_location_parts = []
 
             elif tag in {"city", "state", "country"}:
-                if current_entry is not None and elem.text and elem.text.strip():
+                if elem.text and elem.text.strip():
                     current_location_parts.append(elem.text.strip())
 
             elif tag == "category":
-                if current_entry is None:
-                    current_entry = {}
-                    current_locations = []
-                    current_categories = []
-                    current_location_parts = []
                 if elem.text:
                     current_categories.append(elem.text.strip())
 

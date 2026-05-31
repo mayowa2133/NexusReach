@@ -34,8 +34,40 @@ from app.services.draft_staging_service import (
     send_staged_message,
 )
 from app.services.email_finder_service import find_email_for_person, verify_person_email
+from app.config import settings
+from urllib.parse import urlparse
 
 router = APIRouter(prefix="/email", tags=["email"])
+
+
+def _origin_of(url: str) -> str | None:
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return None
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _validate_redirect_uri(redirect_uri: str) -> str:
+    """Reject OAuth redirect_uris that aren't one of our known frontends.
+
+    Defense-in-depth against open-redirect / token-leak: only origins we serve
+    (frontend_url + configured CORS origins) may be used (audit pass-2 P15).
+    """
+    origin = _origin_of(redirect_uri)
+    allowed = {
+        o
+        for o in (
+            _origin_of(settings.frontend_url or ""),
+            *(_origin_of(o) for o in (settings.cors_origins or [])),
+        )
+        if o
+    }
+    if not origin or (allowed and origin not in allowed):
+        raise HTTPException(status_code=400, detail="redirect_uri is not allowed.")
+    return redirect_uri
 
 
 # --- Email Finding ---
@@ -131,7 +163,7 @@ async def gmail_auth_url(
     redirect_uri: str = Query(...),
 ):
     """Get the Gmail OAuth consent URL."""
-    url = gmail_service.get_auth_url(redirect_uri)
+    url = gmail_service.get_auth_url(_validate_redirect_uri(redirect_uri))
     return OAuthUrlResponse(auth_url=url)
 
 
@@ -143,7 +175,9 @@ async def gmail_connect(
 ):
     """Complete Gmail OAuth — exchange code for tokens."""
     try:
-        await gmail_service.connect_gmail(db, user_id, body.code, body.redirect_uri)
+        await gmail_service.connect_gmail(
+            db, user_id, body.code, _validate_redirect_uri(body.redirect_uri)
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"status": "connected", "provider": "gmail"}
@@ -164,7 +198,7 @@ async def outlook_auth_url(
     redirect_uri: str = Query(...),
 ):
     """Get the Outlook OAuth consent URL."""
-    url = outlook_service.get_auth_url(redirect_uri)
+    url = outlook_service.get_auth_url(_validate_redirect_uri(redirect_uri))
     return OAuthUrlResponse(auth_url=url)
 
 
@@ -176,7 +210,9 @@ async def outlook_connect(
 ):
     """Complete Outlook OAuth — exchange code for tokens."""
     try:
-        await outlook_service.connect_outlook(db, user_id, body.code, body.redirect_uri)
+        await outlook_service.connect_outlook(
+            db, user_id, body.code, _validate_redirect_uri(body.redirect_uri)
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"status": "connected", "provider": "outlook"}

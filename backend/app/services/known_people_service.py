@@ -112,7 +112,9 @@ async def lookup_known_people(
             KnownPersonCompany.normalized_company_name == normalized,
             KnownPersonCompany.is_current == True,  # noqa: E712
             KnownPerson.verification_status != "expired",
-            KnownPerson.created_at >= cutoff,
+            # Age out by when the record was last (re)discovered, not when it was
+            # first created — a re-discovered record is fresh (audit pass-2 P13).
+            KnownPerson.last_discovered_at >= cutoff,
         )
         .order_by(KnownPerson.discovery_count.desc())
         .limit(limit)
@@ -151,6 +153,22 @@ async def get_known_people_count(
 # ---------------------------------------------------------------------------
 # Write-through — populate cache after discovery
 # ---------------------------------------------------------------------------
+
+
+def _sanitize_profile_data_for_cache(profile_data: dict | None) -> dict | None:
+    """Strip per-user search context before writing to the GLOBAL cache.
+
+    Candidates carry the searching user's ``search_query``/``search_geo_terms``/
+    ``search_provider``/etc. These describe one user's job/geo and must not leak
+    into the shared row that other users read back (audit pass-2 P13).
+    """
+    if not isinstance(profile_data, dict):
+        return profile_data
+    return {
+        key: value
+        for key, value in profile_data.items()
+        if not (isinstance(key, str) and key.startswith("search_"))
+    } or None
 
 
 async def write_candidates_to_cache(
@@ -201,11 +219,12 @@ async def write_candidates_to_cache(
             if source and source not in (existing.all_sources or []):
                 existing.all_sources = list(existing.all_sources or []) + [source]
 
-            # Update profile data
-            if candidate.get("profile_data"):
+            # Update profile data (per-user search context stripped — P13)
+            sanitized = _sanitize_profile_data_for_cache(candidate.get("profile_data"))
+            if sanitized:
                 existing.profile_data = {
                     **(existing.profile_data or {}),
-                    **candidate["profile_data"],
+                    **sanitized,
                 }
 
             # Ensure company association exists
@@ -227,7 +246,7 @@ async def write_candidates_to_cache(
                 github_url=(candidate.get("github_url") or "").strip() or None,
                 work_email=(candidate.get("work_email") or "").strip() or None,
                 apollo_id=apollo_id,
-                profile_data=candidate.get("profile_data"),
+                profile_data=_sanitize_profile_data_for_cache(candidate.get("profile_data")),
                 github_data=candidate.get("github_data"),
                 primary_source=source,
                 all_sources=[source] if source else [],

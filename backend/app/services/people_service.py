@@ -1,6 +1,7 @@
 """People discovery service for company and job-aware search."""
 
 import asyncio
+import copy
 import logging
 import re
 import time
@@ -3658,7 +3659,10 @@ def _dedupe_bucket_assignments(bucketed: dict[str, list[Person]]) -> dict[str, l
     winners: dict[uuid.UUID, tuple[str, tuple[int, int, int, int, int, int, str]]] = {}
     for bucket, people in bucketed.items():
         for person in people:
-            if not person.id:
+            if not person.id or getattr(person, "_synthetic_fallback", False):
+                # Synthetic cross-bucket clones (e.g. the senior-IC hiring-manager
+                # fallback) don't contest id ownership — they coexist with the
+                # original (audit pass-2 P8).
                 continue
             usefulness = getattr(person, "usefulness_score", None) or 0
             rank = (
@@ -3680,7 +3684,9 @@ def _dedupe_bucket_assignments(bucketed: dict[str, list[Person]]) -> dict[str, l
         deduped[bucket] = [
             person
             for person in people
-            if not person.id or winners.get(person.id, (None, None))[0] == bucket
+            if not person.id
+            or getattr(person, "_synthetic_fallback", False)
+            or winners.get(person.id, (None, None))[0] == bucket
         ]
     return deduped
 
@@ -3747,12 +3753,20 @@ def _detached_person_copy(person: Person) -> Person:
     (audit M10). Constructing a fresh ``Person`` gives the clone its own state;
     we then copy over loaded column values and dynamic ranking attributes. The
     clone is never added to the session, so it stays transient.
+
+    Mutable container attributes (``profile_data``/``github_data``) are deep-copied
+    so mutating the clone can never corrupt the original peer's data (audit
+    pass-2 P12).
     """
     clone = Person()
+    mutable_keys = {"profile_data", "github_data"}
     for key, value in person.__dict__.items():
         if key == "_sa_instance_state":
             continue
-        clone.__dict__[key] = value
+        if key in mutable_keys and isinstance(value, (dict, list)):
+            clone.__dict__[key] = copy.deepcopy(value)
+        else:
+            clone.__dict__[key] = value
     return clone
 
 
@@ -3780,6 +3794,10 @@ def _backfill_sparse_hiring_manager_bucket(
         fallback_person.match_reason = "Senior IC fallback at the target company."
         fallback_person.fallback_reason = "Senior IC fallback at the target company."
         fallback_person.org_level = getattr(person, "org_level", None) or "ic"
+        # Mark as a deliberate cross-bucket clone so id-based dedup keeps it in
+        # hiring_managers instead of discarding it in favor of the original peer
+        # (audit pass-2 P8 — this backfill was otherwise dead code).
+        fallback_person._synthetic_fallback = True  # type: ignore[attr-defined]
         bucketed["hiring_managers"].append(fallback_person)
         existing_ids.add(fallback_person.id)
         if len(bucketed["hiring_managers"]) >= target_count_per_bucket:
