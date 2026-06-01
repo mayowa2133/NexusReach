@@ -1,0 +1,67 @@
+# SearXNG settings for NexusReach (production).
+#
+# Mount this at /etc/searxng/settings.yml in the SearXNG service (the official
+# searxng/searxng image reads it there). The NexusReach backend calls SearXNG's
+# JSON API, so the `json` format MUST be enabled (it is off by default).
+#
+# REQUIRED before first boot:
+#   - Set a real `server.secret_key` (a long random string). With the official
+#     searxng-docker image you can instead set the env var SEARXNG_SECRET and the
+#     entrypoint substitutes it; if you do that, leave the placeholder below.
+#       python -c "import secrets; print(secrets.token_hex(32))"
+#
+# Then set NEXUSREACH_SEARXNG_BASE_URL on the backend to this service's URL.
+
+use_default_settings: true
+
+general:
+  debug: false
+  instance_name: "NexusReach Search"
+  # Don't expose stats/metrics publicly on a private instance.
+  enable_metrics: false
+
+server:
+  # CHANGE THIS (or provide via SEARXNG_SECRET env var on the official image).
+  secret_key: "CHANGE_ME_TO_A_LONG_RANDOM_STRING"
+  # Abuse limiter. Recommended by the deploy runbook. If the backend starts
+  # getting throttled (HTTP 429) because it shares an egress IP, either set this
+  # to false on a private-network-only instance, or allowlist the backend in a
+  # mounted limiter.toml. See the note at the bottom.
+  limiter: true
+  image_proxy: false
+  # The backend talks to SearXNG over the private network; no public method
+  # restriction is needed, but keep POST allowed for the JSON API.
+  method: "POST"
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  # CRITICAL: the NexusReach backend depends on the JSON API.
+  formats:
+    - html
+    - json
+
+# Keep the default engine set from use_default_settings. To trim noise/latency
+# you can disable engines you don't want here, e.g.:
+# engines:
+#   - name: wikidata
+#     disabled: true
+
+ui:
+  static_use_hash: true
+
+outgoing:
+  request_timeout: 6.0
+  max_request_timeout: 10.0
+  pool_connections: 100
+  pool_maxsize: 20
+# ---------------------------------------------------------------------------
+# If `limiter: true` throttles the backend (you'll see SearXNG return 429 and
+# the app's search router falling through to paid providers), the cleanest fix
+# for a private instance is to either:
+#   (a) set `limiter: false` since only your backend can reach it, or
+#   (b) mount a limiter.toml that allowlists the backend's egress, e.g.:
+#         [botdetection.ip_limit]
+#         link_token = false
+#       and relax the per-IP request budget.
+# ---------------------------------------------------------------------------
