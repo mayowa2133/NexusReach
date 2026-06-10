@@ -11,6 +11,8 @@ import uuid
 
 import aiodns
 
+from app.utils.url_safety import is_safe_public_host_async
+
 logger = logging.getLogger(__name__)
 
 # Total timeout for the entire find_email_by_pattern operation
@@ -176,6 +178,17 @@ async def _find_email_inner(
     if not mx_host:
         logger.debug("No MX record found for %s", domain)
         return {"email": None, "domain_status": "no_mx"}
+
+    # SSRF guard (audit M5): the domain is user-influenced, so refuse to open a
+    # raw SMTP socket to an MX target that resolves to a private/internal/loopback
+    # address — that would let a user probe internal services via this server.
+    if not await is_safe_public_host_async(mx_host):
+        logger.warning(
+            "MX host %s for domain %s resolves to a non-public address; skipping SMTP",
+            mx_host,
+            domain,
+        )
+        return {"email": None, "domain_status": "unsafe_mx"}
 
     # Check if MX host belongs to a known Secure Email Gateway (SEG).
     # These providers intercept all inbound mail — SMTP RCPT TO checks are

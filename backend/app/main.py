@@ -107,7 +107,12 @@ app.include_router(account.router, prefix="/api")
 
 @app.get("/api/health")
 async def health():
-    """Health check that verifies core dependencies."""
+    """Health check that verifies core dependencies.
+
+    Returns only a coarse ok/error per check (audit M4). This endpoint is
+    unauthenticated, so raw exception detail (which can leak DB host/driver
+    internals) is logged server-side rather than returned to the caller.
+    """
     checks: dict[str, str] = {}
 
     # Postgres
@@ -118,17 +123,19 @@ async def health():
         async with _session_factory() as db:
             await db.execute(text("SELECT 1"))
         checks["postgres"] = "ok"
-    except Exception as exc:
-        checks["postgres"] = f"error: {exc}"
+    except Exception:
+        logger.warning("Health check: postgres unavailable", exc_info=True)
+        checks["postgres"] = "error"
 
     # Redis
     try:
         from app.clients import search_cache_client
 
         pong = await search_cache_client.ping()
-        checks["redis"] = "ok" if pong else "error: no pong"
-    except Exception as exc:
-        checks["redis"] = f"error: {exc}"
+        checks["redis"] = "ok" if pong else "error"
+    except Exception:
+        logger.warning("Health check: redis unavailable", exc_info=True)
+        checks["redis"] = "error"
 
     healthy = all(v == "ok" for v in checks.values())
     status_code = 200 if healthy else 503

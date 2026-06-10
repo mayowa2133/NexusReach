@@ -169,11 +169,15 @@ async def _auto_draft_for_job(user_id: uuid.UUID, job_id: uuid.UUID) -> dict:
         drafted_message_ids: list[uuid.UUID] = []
 
         for person in people:
-            # Skip if draft already exists for this person + job
+            # Skip only if a draft already exists for this person AND THIS job
+            # (audit M7). Keying on person alone wrongly suppressed drafts for a
+            # second job targeting the same contact. job_id lives in the message
+            # context_snapshot JSON.
             existing_draft = await db.execute(
                 select(Message.id).where(
                     Message.user_id == user_id,
                     Message.person_id == person.id,
+                    Message.context_snapshot["job_id"].astext == str(job_id),
                 ).limit(1)
             )
             if existing_draft.scalar_one_or_none():

@@ -3,11 +3,12 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_user_id
+from app.middleware.rate_limit import limiter
 from app.schemas.job_alerts import (
     JobAlertDigestResult,
     JobAlertPreferenceResponse,
@@ -58,7 +59,9 @@ async def update_job_alerts(
 
 
 @router.post("/test", response_model=JobAlertDigestResult)
+@limiter.limit("3/minute")
 async def test_job_alert_digest(
+    request: Request,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):

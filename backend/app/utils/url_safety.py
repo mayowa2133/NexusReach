@@ -89,6 +89,49 @@ async def is_safe_public_url_async(url: str | None) -> bool:
     return await loop.run_in_executor(None, is_safe_public_url, url)
 
 
+def is_safe_public_host(host: str | None) -> bool:
+    """Return True only if a bare hostname resolves entirely to public IPs.
+
+    Used before opening a raw socket to a host derived from user input (e.g. an
+    MX target before an SMTP probe) — audit M5. Unlike ``is_safe_public_url``,
+    an unresolvable host fails CLOSED here: we are about to connect to it, so if
+    it can't be safely resolved we refuse rather than allow.
+    """
+    if not host:
+        return False
+    host = host.strip().rstrip(".")
+    if not host or host.lower() in _BLOCKED_HOSTNAMES:
+        return False
+
+    # IP literal — check directly.
+    try:
+        return not _ip_is_blocked(ipaddress.ip_address(host))
+    except ValueError:
+        pass
+
+    try:
+        infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    except OSError:
+        return False
+    saw_address = False
+    for info in infos:
+        addr = info[4][0]
+        try:
+            ip = ipaddress.ip_address(addr.split("%")[0])
+        except ValueError:
+            continue
+        saw_address = True
+        if _ip_is_blocked(ip):
+            return False
+    return saw_address
+
+
+async def is_safe_public_host_async(host: str | None) -> bool:
+    """Async wrapper that runs the (DNS-resolving) host check off the event loop."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, is_safe_public_host, host)
+
+
 async def safe_get(
     url: str,
     *,

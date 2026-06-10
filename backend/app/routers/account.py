@@ -4,12 +4,13 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_user_id
+from app.middleware.rate_limit import limiter
 from app.schemas.account import AccountDeleteRequest, AccountDeleteResponse
 from app.services import account_service
 
@@ -17,7 +18,9 @@ router = APIRouter(prefix="/account", tags=["account"])
 
 
 @router.get("/export")
+@limiter.limit("5/minute")
 async def export_account_data(
+    request: Request,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> JSONResponse:

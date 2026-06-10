@@ -18,6 +18,22 @@ from app.clients.email_pattern_client import (
 pytestmark = pytest.mark.asyncio
 
 
+@pytest.fixture(autouse=True)
+def _allow_public_mx(monkeypatch):
+    """Treat MX hosts as public so these unit tests stay hermetic.
+
+    The SSRF guard added in audit M5 (``is_safe_public_host_async``) does real
+    DNS resolution; these tests mock ``_resolve_mx`` with hostnames and assert
+    the SMTP/SEG logic, not the guard. The guard's reject path is covered
+    directly in test_audit_medium_fixes.py.
+    """
+    monkeypatch.setattr(
+        email_pattern_client,
+        "is_safe_public_host_async",
+        AsyncMock(return_value=True),
+    )
+
+
 class TestNormalize:
     def test_lowercase(self):
         assert _normalize("John") == "john"

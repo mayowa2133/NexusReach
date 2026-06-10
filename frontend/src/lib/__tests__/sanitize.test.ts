@@ -37,4 +37,10 @@ describe('sanitizeHTML', () => {
   it('returns empty string for empty input', () => {
     expect(sanitizeHTML('')).toBe('');
   });
+
+  it('forces rel=noopener noreferrer on target=_blank links', () => {
+    const result = sanitizeHTML('<a href="https://example.com" target="_blank">x</a>');
+    expect(result).toContain('rel="noopener noreferrer"');
+    expect(result).toContain('target="_blank"');
+  });
 });

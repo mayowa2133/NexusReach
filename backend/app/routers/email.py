@@ -35,37 +35,20 @@ from app.services.draft_staging_service import (
     send_staged_message,
 )
 from app.services.email_finder_service import find_email_for_person, verify_person_email
-from app.config import settings
-from urllib.parse import urlparse
+from app.utils.origins import allowed_frontend_origins, origin_of
 
 router = APIRouter(prefix="/email", tags=["email"])
-
-
-def _origin_of(url: str) -> str | None:
-    try:
-        parsed = urlparse(url)
-    except ValueError:
-        return None
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        return None
-    return f"{parsed.scheme}://{parsed.netloc}"
 
 
 def _validate_redirect_uri(redirect_uri: str) -> str:
     """Reject OAuth redirect_uris that aren't one of our known frontends.
 
     Defense-in-depth against open-redirect / token-leak: only origins we serve
-    (frontend_url + configured CORS origins) may be used (audit pass-2 P15).
+    may be used (audit pass-2 P15). The allowlist is production-aware (audit
+    M6) — localhost dev origins are NOT trusted in production.
     """
-    origin = _origin_of(redirect_uri)
-    allowed = {
-        o
-        for o in (
-            _origin_of(settings.frontend_url or ""),
-            *(_origin_of(o) for o in (settings.cors_origins or [])),
-        )
-        if o
-    }
+    origin = origin_of(redirect_uri)
+    allowed = allowed_frontend_origins()
     if not origin or (allowed and origin not in allowed):
         raise HTTPException(status_code=400, detail="redirect_uri is not allowed.")
     return redirect_uri

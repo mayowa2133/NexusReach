@@ -2,9 +2,9 @@ import uuid
 from dataclasses import dataclass
 from typing import Annotated
 
+import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError, jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -67,7 +67,13 @@ async def get_current_auth_user(
         email = payload.get("email")
         normalized_email = email.strip().lower() if isinstance(email, str) and email.strip() else None
         return AuthenticatedUser(user_id=uuid.UUID(sub), email=normalized_email)
-    except JWTError as e:
+    except jwt.PyJWTError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid token: {e}",
+        )
+    except ValueError as e:
+        # sub is present but not a valid UUID — reject as a bad token, not a 500.
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Invalid token: {e}",
