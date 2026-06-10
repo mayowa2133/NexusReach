@@ -1,5 +1,6 @@
 import logging
 
+import posthog
 from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -137,6 +138,20 @@ async def health():
         content={"status": "ok" if healthy else "degraded", "checks": checks},
         status_code=status_code,
     )
+
+
+@app.on_event("startup")
+async def init_posthog() -> None:
+    if settings.posthog_api_key:
+        posthog.api_key = settings.posthog_api_key
+        posthog.host = settings.posthog_host
+        posthog.debug = settings.environment != "production"
+
+
+@app.on_event("shutdown")
+async def shutdown_posthog() -> None:
+    if settings.posthog_api_key:
+        posthog.flush()
 
 
 @app.on_event("startup")

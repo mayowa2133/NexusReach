@@ -9,6 +9,7 @@ from sqlalchemy.orm.attributes import NO_VALUE
 from app.database import get_db
 from app.dependencies import get_current_user_id
 from app.middleware.rate_limit import limiter
+from app.observability import capture_event
 from app.utils.discovery_rate_limit import check_discovery_rate_limit
 from app.schemas.people import (
     CompanyResponse,
@@ -171,6 +172,13 @@ async def search_people(
         except Exception:
             # Snapshot persistence is best-effort — never block search on it.
             pass
+        capture_event(str(user_id), "people_searched", properties={
+            "recruiters_found": len(response.recruiters),
+            "hiring_managers_found": len(response.hiring_managers),
+            "peers_found": len(response.peers),
+            "your_connections_found": len(response.your_connections),
+            "has_job_context": True,
+        })
         return response
 
     result = await search_people_at_company(
@@ -181,7 +189,15 @@ async def search_people(
         github_org=body.github_org,
         target_count_per_bucket=body.target_count_per_bucket,
     )
-    return _serialize_people_search_result(result)
+    response = _serialize_people_search_result(result)
+    capture_event(str(user_id), "people_searched", properties={
+        "recruiters_found": len(response.recruiters),
+        "hiring_managers_found": len(response.hiring_managers),
+        "peers_found": len(response.peers),
+        "your_connections_found": len(response.your_connections),
+        "has_job_context": False,
+    })
+    return response
 
 
 @router.post("/enrich", response_model=PersonResponse)
@@ -199,6 +215,7 @@ async def enrich_person(
         user_id=user_id,
         linkedin_url=body.linkedin_url,
     )
+    capture_event(str(user_id), "contact_enriched", properties={"has_email": bool(getattr(person, "work_email", None))})
     return _serialize_person(person)
 
 

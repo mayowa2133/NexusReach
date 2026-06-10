@@ -163,14 +163,26 @@ async def delete_user_data(db: AsyncSession, user_id: uuid.UUID) -> dict[str, in
         raise
 
 
-async def delete_supabase_auth_user(user_id: uuid.UUID) -> bool:
-    if settings.auth_mode == "dev":
-        return False
+def ensure_auth_deletion_available() -> None:
+    """Pre-flight check that the auth identity *can* be deleted (audit H3).
 
+    Called before any app data is destroyed so a permanently-misconfigured
+    deployment fails closed without orphaning data. In dev mode there is no
+    Supabase identity to delete, which is allowed.
+    """
+    if settings.auth_mode == "dev":
+        return
     if not settings.supabase_url or not settings.supabase_service_role_key:
         raise AccountDeletionUnavailableError(
             "Supabase service role key is required to delete auth identities."
         )
+
+
+async def delete_supabase_auth_user(user_id: uuid.UUID) -> bool:
+    if settings.auth_mode == "dev":
+        return False
+
+    ensure_auth_deletion_available()
 
     base_url = settings.supabase_url.rstrip("/")
     url = f"{base_url}/auth/v1/admin/users/{user_id}"

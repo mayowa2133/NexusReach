@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.dependencies import get_current_user_id
 from app.middleware.rate_limit import limiter
+from app.observability import capture_event
 from app.schemas.jobs import (
     JobSearchRequest,
     ATSSearchRequest,
@@ -61,8 +62,8 @@ from app.services.resume_artifact_service import (
     get_resume_artifact_for_job,
     get_resume_reuse_candidates_for_job,
     list_resume_artifacts_for_user,
-    render_resume_artifact_pdf,
-    render_resume_artifact_redline_pdf,
+    render_resume_artifact_pdf_async,
+    render_resume_artifact_redline_pdf_async,
     reuse_resume_artifact_for_job,
     score_resume_content_against_job,
     RESUME_REUSE_SCORE_THRESHOLD,
@@ -350,6 +351,7 @@ async def discover_jobs_endpoint(
     new_count = await discover_jobs(
         db, user_id, queries=queries, mode=mode, occupations=occupations_arg
     )
+    capture_event(str(user_id), "job_discovered", properties={"new_jobs_found": new_count, "mode": mode})
     return RefreshResponse(new_jobs_found=new_count)
 
 
@@ -948,7 +950,9 @@ async def update_resume_artifact_decisions(
 
 
 @router.get("/{job_id}/resume-artifact/pdf")
+@limiter.limit("10/minute")
 async def download_resume_artifact_pdf(
+    request: Request,
     job_id: str,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -966,7 +970,7 @@ async def download_resume_artifact_pdf(
             job_id=uuid.UUID(job_id),
         )
 
-    pdf_bytes = render_resume_artifact_pdf(artifact.content)
+    pdf_bytes = await render_resume_artifact_pdf_async(artifact.content)
     pdf_filename = artifact.filename.rsplit(".", 1)[0] + ".pdf"
 
     return StreamingResponse(
@@ -979,7 +983,9 @@ async def download_resume_artifact_pdf(
 
 
 @router.get("/{job_id}/resume-artifact/redline-pdf")
+@limiter.limit("10/minute")
 async def preview_resume_artifact_redline_pdf(
+    request: Request,
     job_id: str,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -1003,7 +1009,7 @@ async def preview_resume_artifact_redline_pdf(
         job_id=job_id,
         artifact=artifact,
     )
-    pdf_bytes = render_resume_artifact_redline_pdf(
+    pdf_bytes = await render_resume_artifact_redline_pdf_async(
         response.content,
         [preview.model_dump() for preview in response.rewrite_previews],
         response.rewrite_decisions,
@@ -1038,6 +1044,7 @@ async def update_stage(
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    capture_event(str(user_id), "job_stage_updated", properties={"stage": body.stage, "company_name": job.company_name, "job_title": job.title})
     return _to_response(job)
 
 
@@ -1058,6 +1065,7 @@ async def star_job(
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    capture_event(str(user_id), "job_starred", properties={"starred": body.starred})
     return _to_response(job)
 
 

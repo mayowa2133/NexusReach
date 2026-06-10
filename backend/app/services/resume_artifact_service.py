@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -1998,6 +1999,40 @@ def render_resume_artifact_redline_pdf(
         auto_accept_inferred=auto_accept_inferred,
     )
     return render_resume_artifact_pdf(redline_content)
+
+
+# pdflatex is a blocking subprocess and CPU/IO heavy. Run it off the event loop
+# (audit H1) and bound concurrency so a burst of PDF requests can't spawn an
+# unbounded number of pdflatex processes and exhaust the host.
+_PDF_RENDER_SEMAPHORE = asyncio.Semaphore(2)
+
+
+async def render_resume_artifact_pdf_async(content: str) -> bytes:
+    """Async wrapper around ``render_resume_artifact_pdf`` (audit H1).
+
+    Offloads the blocking pdflatex subprocess to a worker thread so it never
+    freezes the event loop, and caps concurrent compilations.
+    """
+    async with _PDF_RENDER_SEMAPHORE:
+        return await asyncio.to_thread(render_resume_artifact_pdf, content)
+
+
+async def render_resume_artifact_redline_pdf_async(
+    content: str,
+    rewrites: list[dict[str, Any]] | None,
+    decisions: dict[str, str] | None = None,
+    *,
+    auto_accept_inferred: bool = False,
+) -> bytes:
+    """Async wrapper around ``render_resume_artifact_redline_pdf`` (audit H1)."""
+    async with _PDF_RENDER_SEMAPHORE:
+        return await asyncio.to_thread(
+            render_resume_artifact_redline_pdf,
+            content,
+            rewrites,
+            decisions,
+            auto_accept_inferred=auto_accept_inferred,
+        )
 
 
 def _build_resume_reuse_candidate(

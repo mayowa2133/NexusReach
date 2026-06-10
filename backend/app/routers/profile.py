@@ -1,16 +1,20 @@
+import asyncio
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user_id
+from app.middleware.rate_limit import limiter
 from app.models.profile import Profile
 from app.models.search_preference import SearchPreference
 from app.schemas.profile import AutofillProfileResponse, ProfileResponse, ProfileUpdate
 from app.services.resume_parser import extract_text, parse_resume
+from app.utils.uploads import read_upload_capped
 
 router = APIRouter(prefix="/profile", tags=["profile"])
 
@@ -201,7 +205,9 @@ async def update_profile(
 
 
 @router.post("/resume", response_model=ProfileResponse)
+@limiter.limit("5/minute")
 async def upload_resume(
+    request: Request,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
     file: UploadFile = File(...),
@@ -218,11 +224,13 @@ async def upload_resume(
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
 
-    file_bytes = await file.read()
+    file_bytes = await read_upload_capped(file, settings.max_resume_upload_bytes)
 
+    # pypdf / python-docx parsing is synchronous CPU work; run it off the event
+    # loop so a large or complex resume can't freeze other requests (audit H1).
     try:
-        raw_text = extract_text(file_bytes, file.content_type)
-        parsed = parse_resume(file_bytes, file.content_type)
+        raw_text = await asyncio.to_thread(extract_text, file_bytes, file.content_type)
+        parsed = await asyncio.to_thread(parse_resume, file_bytes, file.content_type)
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"Failed to parse resume: {e}")
 

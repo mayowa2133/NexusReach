@@ -417,7 +417,18 @@ def _zip_connection_candidates(names: list[str]) -> list[str]:
     )
 
 
-def parse_linkedin_connections_zip(file_bytes: bytes) -> list[dict[str, Any]]:
+def parse_linkedin_connections_zip(
+    file_bytes: bytes,
+    *,
+    max_decompressed_bytes: int | None = None,
+) -> list[dict[str, Any]]:
+    # Bound the decompressed size to defuse zip bombs (audit H2): a tiny ZIP can
+    # declare/expand to gigabytes of CSV and OOM the worker.
+    cap = (
+        max_decompressed_bytes
+        if max_decompressed_bytes is not None
+        else settings.max_linkedin_zip_decompressed_bytes
+    )
     try:
         archive = zipfile.ZipFile(io.BytesIO(file_bytes))
     except zipfile.BadZipFile as exc:
@@ -427,16 +438,32 @@ def parse_linkedin_connections_zip(file_bytes: bytes) -> list[dict[str, Any]]:
         candidates = _zip_connection_candidates(archive.namelist())
         if not candidates:
             raise ValueError("No LinkedIn connections CSV was found in the ZIP export.")
+        info = archive.getinfo(candidates[0])
+        # Reject up front when the declared size is already over the cap.
+        if info.file_size > cap:
+            raise ValueError("LinkedIn connections file in the ZIP is too large.")
         with archive.open(candidates[0]) as extracted:
-            return parse_linkedin_connections_csv(extracted.read())
+            # Never trust the declared size — read at most cap+1 bytes and reject
+            # if the real stream exceeds the cap.
+            data = extracted.read(cap + 1)
+            if len(data) > cap:
+                raise ValueError("LinkedIn connections file in the ZIP is too large.")
+        return parse_linkedin_connections_csv(data)
 
 
-def parse_linkedin_connections_file(filename: str | None, file_bytes: bytes) -> list[dict[str, Any]]:
+def parse_linkedin_connections_file(
+    filename: str | None,
+    file_bytes: bytes,
+    *,
+    max_decompressed_bytes: int | None = None,
+) -> list[dict[str, Any]]:
     suffix = PurePosixPath(filename or "").suffix.lower()
     if suffix in CSV_EXTENSIONS:
         return parse_linkedin_connections_csv(file_bytes)
     if suffix in ZIP_EXTENSIONS:
-        return parse_linkedin_connections_zip(file_bytes)
+        return parse_linkedin_connections_zip(
+            file_bytes, max_decompressed_bytes=max_decompressed_bytes
+        )
     raise ValueError("Upload a LinkedIn connections CSV or ZIP export.")
 
 

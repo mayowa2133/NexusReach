@@ -85,6 +85,10 @@ class Settings(BaseSettings):
     sentry_traces_sample_rate: float = 0.05
     sentry_profiles_sample_rate: float = 0.0
 
+    # PostHog
+    posthog_api_key: str = ""
+    posthog_host: str = "https://us.i.posthog.com"
+
     # Usage limits
     daily_llm_token_limit: int = 100_000
     daily_api_call_limit: int = 50
@@ -107,6 +111,12 @@ class Settings(BaseSettings):
     # Stale contact re-verification
     reverify_stale_days: int = 14
     reverify_batch_size: int = 20
+
+    # Upload size limits (audit H2). Bound in-memory upload reads so a single
+    # request can't OOM the worker; the ZIP cap bounds decompressed size.
+    max_resume_upload_bytes: int = 10 * 1024 * 1024  # 10 MiB
+    max_linkedin_upload_bytes: int = 25 * 1024 * 1024  # 25 MiB
+    max_linkedin_zip_decompressed_bytes: int = 50 * 1024 * 1024  # 50 MiB
 
     @model_validator(mode="after")
     def _validate_production_config(self) -> "Settings":

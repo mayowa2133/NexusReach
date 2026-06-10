@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
+from app.observability import capture_event, identify_user
 from app.models.user import User
 from app.models.profile import Profile
 from app.models.settings import UserSettings
@@ -101,6 +102,9 @@ async def get_or_create_user(
         db.add(Profile(user_id=user_id))
         db.add(UserSettings(user_id=user_id))
         changed = True
+
+        identify_user(str(user_id), {"email": desired_email})
+        capture_event(str(user_id), "user_signed_up")
     else:
         placeholder_email = _fallback_email(user_id)
         if (not user.email or user.email == placeholder_email) and auth_user.email:

@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_user_id
+from app.observability import capture_event
 from app.schemas.outreach import (
     CreateOutreachRequest,
     UpdateOutreachRequest,
@@ -74,6 +75,7 @@ async def create_outreach(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    capture_event(str(user_id), "outreach_logged", properties={"status": body.status, "channel": body.channel})
     return _to_response(log)
 
 

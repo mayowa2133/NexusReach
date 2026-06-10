@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.dependencies import get_current_user_id
 from app.middleware.rate_limit import limiter
+from app.observability import capture_event
 from app.models.settings import UserSettings
 from app.schemas.email import (
     OAuthCallbackRequest,
@@ -92,6 +93,7 @@ async def find_email(
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    capture_event(str(user_id), "email_found", properties={"found": bool(result.get("email")), "mode": mode})
     return result
 
 
@@ -254,6 +256,7 @@ async def stage_draft(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    capture_event(str(user_id), "email_draft_staged", properties={"provider": body.provider})
     return StageDraftResponse(
         draft_id=draft["draft_id"],
         provider=body.provider,

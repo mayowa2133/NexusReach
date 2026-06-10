@@ -646,7 +646,10 @@ async def test_download_resume_artifact_pdf(client, mock_user_id):
     artifact.content = "\\documentclass{article}\n"
 
     with patch("app.routers.jobs.get_resume_artifact_for_job", new_callable=AsyncMock) as mock_get:
-        with patch("app.routers.jobs.render_resume_artifact_pdf") as mock_render:
+        with patch(
+            "app.routers.jobs.render_resume_artifact_pdf_async",
+            new_callable=AsyncMock,
+        ) as mock_render:
             mock_get.return_value = artifact
             mock_render.return_value = b"%PDF-test"
             resp = await client.get(f"/api/jobs/{job_id}/resume-artifact/pdf")
@@ -704,7 +707,10 @@ async def test_preview_resume_artifact_redline_pdf(client, mock_user_id):
     ) as mock_get, patch(
         "app.routers.jobs._build_artifact_response",
         side_effect=_fake_build,
-    ), patch("app.routers.jobs.render_resume_artifact_redline_pdf") as mock_render:
+    ), patch(
+        "app.routers.jobs.render_resume_artifact_redline_pdf_async",
+        new_callable=AsyncMock,
+    ) as mock_render:
         mock_get.return_value = artifact
         mock_render.return_value = b"%PDF-redline"
         resp = await client.get(f"/api/jobs/{job_id}/resume-artifact/redline-pdf")

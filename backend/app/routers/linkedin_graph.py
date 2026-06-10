@@ -1,11 +1,13 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user_id
+from app.middleware.rate_limit import limiter
 from app.schemas.linkedin_graph import (
     LinkedInGraphImportBatchRequest,
     LinkedInGraphImportFollowBatchRequest,
@@ -13,6 +15,7 @@ from app.schemas.linkedin_graph import (
     LinkedInGraphSyncSessionResponse,
 )
 from app.services import linkedin_graph_service
+from app.utils.uploads import read_upload_capped
 
 router = APIRouter(prefix="/linkedin-graph", tags=["linkedin-graph"])
 
@@ -66,17 +69,20 @@ async def import_follow_batch(
 
 
 @router.post("/import-file", response_model=LinkedInGraphStatusResponse)
+@limiter.limit("5/minute")
 async def import_file(
+    request: Request,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
     file: UploadFile = File(...),
 ):
+    file_bytes = await read_upload_capped(file, settings.max_linkedin_upload_bytes)
     try:
         return await linkedin_graph_service.import_file(
             db,
             user_id,
             filename=file.filename,
-            file_bytes=await file.read(),
+            file_bytes=file_bytes,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

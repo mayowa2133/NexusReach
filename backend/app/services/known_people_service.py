@@ -155,19 +155,32 @@ async def get_known_people_count(
 # ---------------------------------------------------------------------------
 
 
+# Profile-data keys that may carry a discovered/guessed email. They must never
+# be written to the GLOBAL cache, or one user's email finding would leak to
+# others via profile_data even though the dedicated column is no longer cached
+# (audit H4).
+_EMAIL_PROFILE_KEYS = frozenset(
+    {"email", "work_email", "personal_email", "email_address", "emails"}
+)
+
+
 def _sanitize_profile_data_for_cache(profile_data: dict | None) -> dict | None:
-    """Strip per-user search context before writing to the GLOBAL cache.
+    """Strip per-user search context and emails before writing to the GLOBAL cache.
 
     Candidates carry the searching user's ``search_query``/``search_geo_terms``/
     ``search_provider``/etc. These describe one user's job/geo and must not leak
-    into the shared row that other users read back (audit pass-2 P13).
+    into the shared row that other users read back (audit pass-2 P13). Email
+    fields are dropped for the same reason (audit H4).
     """
     if not isinstance(profile_data, dict):
         return profile_data
     return {
         key: value
         for key, value in profile_data.items()
-        if not (isinstance(key, str) and key.startswith("search_"))
+        if not (
+            isinstance(key, str)
+            and (key.startswith("search_") or key.lower() in _EMAIL_PROFILE_KEYS)
+        )
     } or None
 
 
@@ -244,7 +257,10 @@ async def write_candidates_to_cache(
                 seniority=(candidate.get("seniority") or "").strip() or None,
                 linkedin_url=linkedin_url,
                 github_url=(candidate.get("github_url") or "").strip() or None,
-                work_email=(candidate.get("work_email") or "").strip() or None,
+                # work_email is intentionally NOT cached. The known-people cache is
+                # GLOBAL (shared across users); a work email discovered/guessed by
+                # one user must stay scoped to that user, not handed to others
+                # (audit H4). Emails live only on per-user Person rows.
                 apollo_id=apollo_id,
                 profile_data=_sanitize_profile_data_for_cache(candidate.get("profile_data")),
                 github_data=candidate.get("github_data"),
@@ -426,7 +442,8 @@ def _to_candidate_dict(kp: KnownPerson, kpc: KnownPersonCompany) -> dict:
         "seniority": kp.seniority,
         "linkedin_url": kp.linkedin_url,
         "github_url": kp.github_url,
-        "work_email": kp.work_email,
+        # No work_email: the global cache must never surface one user's discovered
+        # email to another (audit H4). Each user re-derives emails for themselves.
         "apollo_id": kp.apollo_id,
         "profile_data": {
             **(kp.profile_data or {}),

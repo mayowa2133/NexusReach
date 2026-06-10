@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.dependencies import get_current_user_id
 from app.middleware.rate_limit import limiter
+from app.observability import capture_event
 from app.schemas.messages import (
     BatchDraftItem,
     BatchDraftRequest,
@@ -129,6 +130,11 @@ async def create_draft(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    capture_event(str(user_id), "message_drafted", properties={
+        "channel": body.channel,
+        "goal": body.goal,
+        "has_job_context": bool(body.job_id),
+    })
     return DraftResponse(
         message=_to_response(
             result["message"],
