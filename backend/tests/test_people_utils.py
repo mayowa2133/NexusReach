@@ -477,7 +477,7 @@ class TestEmploymentAndRanking:
         )
 
         with patch(
-            "app.services.people_service._search_candidates",
+            "app.services.people.candidates._search_candidates",
             new_callable=AsyncMock,
         ) as mock_search:
             mock_search.return_value = [
@@ -1604,7 +1604,7 @@ class TestEmploymentAndRanking:
     @pytest.mark.asyncio
     async def test_backfill_top_candidates_only_backfills_provisional_top_slice(self):
         with patch(
-            "app.services.people_service._backfill_linkedin_profiles",
+            "app.services.people.linkedin_backfill._backfill_linkedin_profiles",
             new_callable=AsyncMock,
         ) as mock_backfill:
             mock_backfill.return_value = [

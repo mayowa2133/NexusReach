@@ -17,7 +17,7 @@ async def _auto_prospect_job(user_id: uuid.UUID, job_id: uuid.UUID) -> dict:
     2. For each person found, attempt to find their email.
     3. Return summary stats.
     """
-    from app.services.people_service import search_people_for_job  # noqa: PLC0415
+    from app.services.people import search_people_for_job  # noqa: PLC0415
     from app.services.email_finder_service import find_email_for_person  # noqa: PLC0415
     from app.services.notification_service import create_notification  # noqa: PLC0415
 

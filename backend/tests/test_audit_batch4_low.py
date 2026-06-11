@@ -99,9 +99,9 @@ def test_l11_job_alert_digest_escapes_html():
 def test_l13_email_source_prefers_explicit():
     import inspect
 
-    from app.services import people_service
+    from app.services.people import persistence
 
-    src = inspect.getsource(people_service)
+    src = inspect.getsource(persistence)
     assert 'data.get("email_source") or data.get("source")' in src
 
 

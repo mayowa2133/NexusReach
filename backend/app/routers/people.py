@@ -22,7 +22,7 @@ from app.schemas.people import (
     SearchLogResponse,
 )
 from app.schemas.linkedin_graph import LinkedInGraphConnectionResponse
-from app.services.people_service import (
+from app.services.people import (
     search_people_at_company,
     search_people_for_job,
     enrich_person_from_linkedin,

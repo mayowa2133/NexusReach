@@ -54,9 +54,9 @@ def test_c2_peer_bucket_guard_uses_plural():
     """
     import inspect
 
-    from app.services import people_service
+    from app.services.people import linkedin_backfill
 
-    source = inspect.getsource(people_service)
+    source = inspect.getsource(linkedin_backfill)
     # The buggy singular comparison must be gone.
     assert 'bucket != "peer"' not in source
     # The corrected plural comparison must be present.

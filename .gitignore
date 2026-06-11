@@ -40,3 +40,4 @@ backend/.venv312/
 
 # Claude Code agent scratch (worktree copies — never commit)
 .claude/worktrees/
+graphify-out/
