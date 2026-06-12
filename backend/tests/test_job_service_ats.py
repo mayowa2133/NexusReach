@@ -67,7 +67,7 @@ async def test_search_ats_jobs_fetches_full_board_by_default():
     adapter.search_board = AsyncMock(return_value=raw_jobs)
     adapter.fetch_exact = None
 
-    with patch("app.services.job_service.ats_client.get_adapter", return_value=adapter):
+    with patch("app.services.job_service.ats.get_adapter", return_value=adapter):
         jobs = await search_ats_jobs(db, user_id, "affirm", "greenhouse")
 
     adapter.search_board.assert_awaited_once_with("affirm", None)
@@ -86,7 +86,7 @@ async def test_search_ats_jobs_passes_explicit_limit_through():
     adapter.search_board = AsyncMock(return_value=[])
     adapter.fetch_exact = None
 
-    with patch("app.services.job_service.ats_client.get_adapter", return_value=adapter):
+    with patch("app.services.job_service.ats.get_adapter", return_value=adapter):
         await search_ats_jobs(db, user_id, "affirm", "greenhouse", limit=5)
 
     adapter.search_board.assert_awaited_once_with("affirm", 5)
@@ -128,7 +128,7 @@ async def test_search_ats_jobs_reuses_existing_external_id_without_error():
             }
         ]
     )
-    with patch("app.services.job_service.ats_client.get_adapter", return_value=adapter):
+    with patch("app.services.job_service.ats.get_adapter", return_value=adapter):
         jobs = await search_ats_jobs(
             db,
             user_id,
@@ -169,9 +169,9 @@ async def test_search_ats_jobs_dispatches_workable_exact_job_lookup():
     adapter.search_board = None
 
     with (
-        patch("app.services.job_service.ats_client.get_adapter", return_value=adapter),
+        patch("app.services.job_service.ats.get_adapter", return_value=adapter),
         patch(
-            "app.services.job_service.ats_client.fetch_exact_job",
+            "app.services.job_service.ats.fetch_exact_job",
             new_callable=AsyncMock,
         ) as mock_fetch_exact,
     ):
@@ -215,9 +215,9 @@ async def test_search_ats_jobs_dispatches_apple_exact_job_lookup():
     }
 
     with (
-        patch("app.services.job_service.ats_client.get_adapter", return_value=adapter),
+        patch("app.services.job_service.ats.get_adapter", return_value=adapter),
         patch(
-            "app.services.job_service.ats_client.fetch_exact_job",
+            "app.services.job_service.ats.fetch_exact_job",
             new_callable=AsyncMock,
         ) as mock_fetch_exact,
     ):
@@ -264,9 +264,9 @@ async def test_search_ats_jobs_dispatches_workday_exact_job_lookup():
     }
 
     with (
-        patch("app.services.job_service.ats_client.get_adapter", return_value=adapter),
+        patch("app.services.job_service.ats.get_adapter", return_value=adapter),
         patch(
-            "app.services.job_service.ats_client.fetch_exact_job",
+            "app.services.job_service.ats.fetch_exact_job",
             new_callable=AsyncMock,
         ) as mock_fetch_exact,
     ):
@@ -331,9 +331,9 @@ async def test_search_ats_jobs_refreshes_existing_exact_job_metadata():
     }
 
     with (
-        patch("app.services.job_service.ats_client.get_adapter", return_value=adapter),
+        patch("app.services.job_service.ats.get_adapter", return_value=adapter),
         patch(
-            "app.services.job_service.ats_client.fetch_exact_job",
+            "app.services.job_service.ats.fetch_exact_job",
             new_callable=AsyncMock,
             return_value=[refreshed_job],
         ),
@@ -384,9 +384,9 @@ async def test_search_ats_jobs_dispatches_generic_exact_job_lookup():
     }
 
     with (
-        patch("app.services.job_service.ats_client.get_adapter", return_value=adapter),
+        patch("app.services.job_service.ats.get_adapter", return_value=adapter),
         patch(
-            "app.services.job_service.ats_client.fetch_exact_job",
+            "app.services.job_service.ats.fetch_exact_job",
             new_callable=AsyncMock,
         ) as mock_fetch_exact,
     ):
@@ -432,9 +432,9 @@ async def test_search_ats_jobs_allows_exact_job_without_location():
     }
 
     with (
-        patch("app.services.job_service.ats_client.get_adapter", return_value=adapter),
+        patch("app.services.job_service.ats.get_adapter", return_value=adapter),
         patch(
-            "app.services.job_service.ats_client.fetch_exact_job",
+            "app.services.job_service.ats.fetch_exact_job",
             new_callable=AsyncMock,
         ) as mock_fetch_exact,
     ):

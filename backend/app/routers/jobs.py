@@ -56,7 +56,7 @@ from app.services.search_preference_service import (
     delete_search_preference,
 )
 from app.tasks.jobs import refresh_user_feeds
-from app.services.resume_artifact_service import (
+from app.services.resume_artifact import (
     generate_resume_artifact_for_job,
     get_resume_auto_reuse_enabled,
     get_resume_artifact_for_job,

@@ -162,7 +162,7 @@ async def test_discover_jobs_startup_mode_resolves_speedrun_company_to_ats_board
             return_value=[{"company_name": "Cartesia", "website_url": "https://cartesia.ai"}],
         ),
         patch("app.services.job_service.public_page_client.fetch_direct_page", new_callable=AsyncMock, return_value=homepage),
-        patch("app.services.job_service.ats_client.get_adapter", return_value=adapter),
+        patch("app.services.job_service.ats.get_adapter", return_value=adapter),
         patch("app.services.job_service._find_existing_job", new_callable=AsyncMock, return_value=None),
     ):
         total_new = await discover_jobs(db, user_id, mode="startup")
@@ -197,7 +197,7 @@ async def test_search_ats_jobs_merges_startup_tags_into_existing_job():
     adapter.fetch_exact = None
 
     with (
-        patch("app.services.job_service.ats_client.get_adapter", return_value=adapter),
+        patch("app.services.job_service.ats.get_adapter", return_value=adapter),
         patch("app.services.job_service._find_existing_job", new_callable=AsyncMock, return_value=existing_job),
     ):
         await search_ats_jobs(

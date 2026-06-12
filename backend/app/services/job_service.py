@@ -16,7 +16,7 @@ from app.clients import (
     adzuna_client,
     amazon_client,
     apple_client,
-    ats_client,
+    ats,
     conviction_jobs_client,
     curated_startups_client,
     google_client,
@@ -124,7 +124,7 @@ def _normalized_pref_location(location: str | None) -> str:
 def _canonical_job_url(url: str | None) -> str | None:
     if not url:
         return None
-    parsed = ats_client.parse_ats_job_url(url)
+    parsed = ats.parse_ats_job_url(url)
     if parsed and parsed.canonical_url:
         return parsed.canonical_url.rstrip("/")
     normalized = url.rstrip("/")
@@ -853,10 +853,10 @@ async def search_ats_jobs(
     """Search a supported board-backed ATS or ingest a single exact job URL."""
     target_external_id: str | None = None
     target_url: str | None = None
-    parsed_job_url: ats_client.ParsedATSJobURL | None = None
+    parsed_job_url: ats.ParsedATSJobURL | None = None
 
     if job_url:
-        parsed_job_url = ats_client.parse_ats_job_url(job_url)
+        parsed_job_url = ats.parse_ats_job_url(job_url)
         if not parsed_job_url:
             raise ValueError("Unsupported or invalid job posting URL.")
         company_slug = parsed_job_url.company_slug
@@ -867,7 +867,7 @@ async def search_ats_jobs(
     if not ats_type:
         raise ValueError("ATS search requires either job_url or company_slug plus ats_type.")
 
-    adapter = ats_client.get_adapter(ats_type)
+    adapter = ats.get_adapter(ats_type)
     if not adapter:
         raise ValueError("Unsupported or invalid job posting URL.")
 
@@ -878,8 +878,8 @@ async def search_ats_jobs(
 
     if job_url and parsed_job_url and adapter.fetch_exact is not None:
         try:
-            raw_jobs = await ats_client.fetch_exact_job(parsed_job_url)
-        except ats_client.ExactJobFetchError as exc:
+            raw_jobs = await ats.fetch_exact_job(parsed_job_url)
+        except ats.ExactJobFetchError as exc:
             raise ValueError(str(exc)) from exc
     else:
         if not company_slug or adapter.search_board is None:
@@ -1770,7 +1770,7 @@ async def fetch_curated_ats_source_payloads(
         source_key = f"{board['ats']}:{board['slug']}"
 
         async def fetch_board(board=board) -> list[dict]:
-            adapter = ats_client.get_adapter(board["ats"])
+            adapter = ats.get_adapter(board["ats"])
             return (
                 await adapter.search_board(board["slug"], limit_per_board)
                 if adapter and adapter.search_board is not None
@@ -2167,7 +2167,7 @@ async def _import_startup_candidate_link(
     candidate_url: str,
     queries: list[str],
 ) -> int:
-    parsed = ats_client.parse_ats_job_url(candidate_url)
+    parsed = ats.parse_ats_job_url(candidate_url)
     if not parsed:
         return 0
 
@@ -2177,7 +2177,7 @@ async def _import_startup_candidate_link(
         and parsed.exact_url_only is False
         and parsed.ats_type in {"greenhouse", "lever", "ashby"}
     ):
-        adapter = ats_client.get_adapter(parsed.ats_type)
+        adapter = ats.get_adapter(parsed.ats_type)
         if adapter is None or adapter.search_board is None:
             return 0
         raw_jobs = await adapter.search_board(parsed.company_slug, None)

@@ -1,6 +1,6 @@
 # NexusReach — Claude Context
 
-Last updated: 2026-05-24
+Last updated: 2026-06-11
 
 This file mirrors `AGENTS.md` so Claude and Codex see the same project state. If these files ever drift, update both together.
 
@@ -238,10 +238,13 @@ NexusReach/
 ├── backend/
 │   ├── app/
 │   │   ├── clients/
+│   │   │   └── ats/
 │   │   ├── models/
 │   │   ├── routers/
 │   │   ├── schemas/
 │   │   ├── services/
+│   │   │   ├── people/
+│   │   │   └── resume_artifact/
 │   │   ├── tasks/
 │   │   └── utils/
 │   ├── alembic/
@@ -430,6 +433,8 @@ VITE_ANALYTICS_ENABLED=true
 28. Wellfound is intentionally best-effort right now. Live fetches can return `403` anti-bot pages and should fail soft to `[]` rather than breaking startup discover.
 29. `auth_mode=dev` is fail-closed unless `NEXUSREACH_DEV_AUTH_BYPASS_ENABLED=true`; the frontend has the same explicit `VITE_DEV_AUTH_BYPASS_ENABLED=true` guard.
 30. Real E2E uses `VITE_AUTH_MODE=e2e` with a Supabase-compatible JWT, boots backend/frontend on isolated ports, drops and recreates `nexusreach_e2e`, and runs Alembic from zero before the browser test.
+31. `people_service.py`, `ats_client.py`, and `resume_artifact_service.py` are compatibility shims. The implementations live in `app/services/people/`, `app/clients/ats/`, and `app/services/resume_artifact/` as layered packages (each module imports only from layers below it). New code should import from the packages, not the shims.
+32. Frontend types live in domain files under `frontend/src/types/` (`jobs.ts`, `people.ts`, `messages.ts`, ...); `types/index.ts` is a barrel re-export, so `@/types` imports keep working. Beware DOM-global name shadowing when adding types (e.g. `MessageChannel`, `Notification`): a missing cross-file type import resolves silently to the DOM type instead of erroring.
 
 ## Pre-commit checklist
 

@@ -281,7 +281,7 @@ class TestFetchExactJob:
         }
 
         with patch(
-            "app.clients.ats_client._fetch_exact_page_candidates",
+            "app.clients.ats.exact._fetch_exact_page_candidates",
             new_callable=AsyncMock,
         ) as mock_fetch_page_candidates:
             mock_fetch_page_candidates.return_value = [page]
@@ -331,7 +331,7 @@ class TestFetchExactJob:
         }
 
         with patch(
-            "app.clients.ats_client._fetch_exact_page_candidates",
+            "app.clients.ats.exact._fetch_exact_page_candidates",
             new_callable=AsyncMock,
         ) as mock_fetch_page_candidates:
             mock_fetch_page_candidates.return_value = [page]
@@ -388,7 +388,7 @@ class TestFetchExactJob:
         }
 
         with patch(
-            "app.clients.ats_client._fetch_exact_page_candidates",
+            "app.clients.ats.exact._fetch_exact_page_candidates",
             new_callable=AsyncMock,
         ) as mock_fetch_page_candidates:
             mock_fetch_page_candidates.return_value = [page]
@@ -450,7 +450,7 @@ class TestFetchExactJob:
         }
 
         with patch(
-            "app.clients.ats_client._fetch_exact_page_candidates",
+            "app.clients.ats.exact._fetch_exact_page_candidates",
             new_callable=AsyncMock,
         ) as mock_fetch_page_candidates:
             mock_fetch_page_candidates.return_value = [page]
@@ -485,11 +485,11 @@ class TestFetchExactJob:
 
         with (
             patch(
-                "app.clients.ats_client._probe_workday_job_redirect",
+                "app.clients.ats.exact._probe_workday_job_redirect",
                 new_callable=AsyncMock,
             ) as mock_probe_redirect,
             patch(
-                "app.clients.ats_client._fetch_exact_page_candidates",
+                "app.clients.ats.exact._fetch_exact_page_candidates",
                 new_callable=AsyncMock,
             ) as mock_fetch_page_candidates,
         ):
@@ -513,7 +513,7 @@ class TestFetchExactJob:
         }
 
         with patch(
-            "app.clients.ats_client._fetch_exact_page_candidates",
+            "app.clients.ats.exact._fetch_exact_page_candidates",
             new_callable=AsyncMock,
         ) as mock_fetch_page_candidates:
             mock_fetch_page_candidates.return_value = [page]

@@ -38,9 +38,9 @@ async def test_render_pdf_async_runs_off_event_loop(monkeypatch):
         seen["thread"] = threading.get_ident()
         return b"%PDF-fake"
 
-    monkeypatch.setattr(
-        resume_artifact_service, "render_resume_artifact_pdf", fake_render
-    )
+    from app.services.resume_artifact import latex
+
+    monkeypatch.setattr(latex, "render_resume_artifact_pdf", fake_render)
 
     result = await resume_artifact_service.render_resume_artifact_pdf_async("hello")
 
@@ -61,11 +61,9 @@ async def test_render_redline_pdf_async_forwards_args(monkeypatch):
         )
         return b"%PDF-redline"
 
-    monkeypatch.setattr(
-        resume_artifact_service,
-        "render_resume_artifact_redline_pdf",
-        fake_redline,
-    )
+    from app.services.resume_artifact import redline
+
+    monkeypatch.setattr(redline, "render_resume_artifact_redline_pdf", fake_redline)
 
     result = await resume_artifact_service.render_resume_artifact_redline_pdf_async(
         "body",

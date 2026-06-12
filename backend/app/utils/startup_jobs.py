@@ -7,7 +7,7 @@ from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
-from app.clients import ats_client
+from app.clients import ats
 from app.services.occupation_taxonomy import startup_query_strings_for_occupations
 
 STARTUP_TAG = "startup"
@@ -192,7 +192,7 @@ def is_exactish_generic_job_url(url: str) -> bool:
 
 
 def is_supported_job_link(url: str) -> bool:
-    parsed = ats_client.parse_ats_job_url(url)
+    parsed = ats.parse_ats_job_url(url)
     if not parsed:
         return False
     if parsed.ats_type != "generic_exact":
