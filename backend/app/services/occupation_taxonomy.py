@@ -1052,7 +1052,14 @@ def discover_queries_for_occupations(keys: list[str] | None) -> list[dict]:
             if not normalized or key in seen:
                 continue
             seen.add(key)
-            queries.append({"query": normalized, "location": None, "remote_only": False})
+            queries.append(
+                {
+                    "query": normalized,
+                    "location": None,
+                    "remote_only": False,
+                    "occupation": occ.key,
+                }
+            )
     return queries
 
 
@@ -1141,12 +1148,16 @@ def occupation_tags_for_job(
     title: str | None,
     description: str | None = None,
     explicit_keys: list[str] | None = None,
+    fallback_keys: list[str] | None = None,
 ) -> list[str]:
     """Build occupation tag values for a job during ingestion.
 
     - `explicit_keys`: hints from the source itself (e.g., the newgrad-jobs path
       that yielded the job). These always win.
     - Falls back to title/description classification when no explicit hint.
+    - `fallback_keys`: weakest signal (e.g., the occupation whose discover query
+      surfaced the job). Used only when both stronger signals produced nothing,
+      so query noise can never override a confident title classification.
     """
     keys: list[str] = []
     seen: set[str] = set()
@@ -1160,6 +1171,12 @@ def occupation_tags_for_job(
             if key not in seen:
                 seen.add(key)
                 keys.append(key)
+    if not keys:
+        for key in (fallback_keys or []):
+            occ = occupation_by_key(key)
+            if occ and occ.key not in seen:
+                seen.add(occ.key)
+                keys.append(occ.key)
     return [occupation_tag(key) for key in keys]
 
 

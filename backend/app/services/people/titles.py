@@ -55,6 +55,9 @@ MANAGER_TITLE_KEYWORDS = (
     "head",
     "vice president",
     "vp",
+    # Startup hiring contacts: founders and chiefs lead the teams that hire.
+    "founder",
+    "chief",
 )
 
 
@@ -75,6 +78,18 @@ DIRECTOR_PLUS_KEYWORDS = (
 )
 
 
+_FOUNDER_EXEC_TITLE_RE = re.compile(
+    r"\b(co[- ]?founder|founder|founding|cto|ceo|coo|cpo"
+    r"|chief\s+\w+(\s+\w+)?\s+officer|chief\s+(technology|executive|operating|product|people))\b",
+    re.IGNORECASE,
+)
+
+
+def _is_founder_exec_title(title: str | None) -> bool:
+    """True for founder / C-level titles - the de-facto hiring managers at startups."""
+    return bool(title) and bool(_FOUNDER_EXEC_TITLE_RE.search(title))
+
+
 ROLE_HINT_KEYWORDS = (
     "engineer",
     "developer",
@@ -87,6 +102,15 @@ ROLE_HINT_KEYWORDS = (
     "director",
     "lead",
     "partner",
+    # Founder/executive titles: at small startups these ARE the hiring
+    # contacts, and without them the company gate rejects founders outright.
+    "founder",
+    "chief",
+    "head",
+    "officer",
+    "president",
+    "principal",
+    "vp",
 )
 
 

@@ -1,6 +1,7 @@
 """Candidate search, dedupe, limits, and recovery gates for people discovery."""
 
 import logging
+import re
 from typing import Any, TypeVar
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -391,7 +392,19 @@ def _should_expand_with_theorg(
     target_count_per_bucket = _clamp_target_count_per_bucket(target_count_per_bucket)
     if is_ambiguous_company_name(company_name):
         return True
-    return any(count < target_count_per_bucket for count in current_counts.values())
+    if any(count < target_count_per_bucket for count in current_counts.values()):
+        return True
+    # Hiring managers are the hardest bucket to get right from titles alone.
+    # When the job context carries team keywords, The Org's team pages can
+    # cross-check who actually leads that team, so expand unless the bucket
+    # is already overflowing.
+    if (
+        context is not None
+        and getattr(context, "team_keywords", None)
+        and current_counts.get("hiring_managers", 0) < target_count_per_bucket + 2
+    ):
+        return True
+    return False
 
 
 def _dedupe_candidate_bucket_groups(
@@ -491,6 +504,27 @@ def _should_run_manager_geo_recovery(
     ) or not _has_local_geo_match(candidates, context=context)
 
 
+def _cached_title_matches(candidate_title: str | None, requested_titles: list[str]) -> bool:
+    """True when a cached candidate's title is relevant to the requested bucket.
+
+    The known-people cache is company-wide, so without this check a handful of
+    cached rows from one bucket (e.g. recruiters) would short-circuit the live
+    search for a different bucket (e.g. hiring managers) and leave it empty.
+    A requested title matches when all of its significant tokens appear in the
+    candidate title. An empty request list means any title qualifies.
+    """
+    if not requested_titles:
+        return True
+    if not candidate_title:
+        return False
+    haystack = candidate_title.casefold()
+    for requested in requested_titles:
+        tokens = [tok for tok in re.split(r"[^a-z0-9]+", requested.casefold()) if len(tok) > 2]
+        if tokens and all(tok in haystack for tok in tokens):
+            return True
+    return False
+
+
 async def _search_candidates(
     company_name: str,
     *,
@@ -540,14 +574,19 @@ async def _search_candidates(
             logger.warning("Known people cache lookup failed for %s", company_name, exc_info=True)
             cached_results = []
 
+        relevant_cached = [
+            item for item in cached_results
+            if _cached_title_matches(item.get("title"), titles)
+        ]
         if debug_bucket is not None:
             debug_bucket["known_people"] = {
                 "count": len(cached_results),
-                "cache_hit": len(cached_results) >= min_results,
-                "sample_results": [_debug_candidate_summary(item) for item in cached_results[:5]],
+                "relevant_count": len(relevant_cached),
+                "cache_hit": len(relevant_cached) >= min_results,
+                "sample_results": [_debug_candidate_summary(item) for item in relevant_cached[:5]],
             }
-        if len(cached_results) >= min_results:
-            return cached_results[: max(limit, 8)]
+        if len(relevant_cached) >= min_results:
+            return relevant_cached[: max(limit, 8)]
 
     apollo_filtered = await apollo_client.search_people(
         company_name,

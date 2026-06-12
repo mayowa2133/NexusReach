@@ -1,0 +1,131 @@
+{
+ "company_name": "Lumastack",
+ "public_identity_terms": [
+  "lumastack"
+ ],
+ "context": {
+  "department": "engineering",
+  "team_keywords": [
+   "platform",
+   "infrastructure"
+  ],
+  "domain_keywords": [
+   "developer tools"
+  ],
+  "product_team_names": [],
+  "seniority": "mid",
+  "early_career": false,
+  "manager_titles": [
+   "Head of Engineering",
+   "Co-Founder",
+   "CTO",
+   "Engineering Manager"
+  ],
+  "peer_titles": [
+   "Software Engineer",
+   "Platform Engineer"
+  ],
+  "recruiter_titles": [
+   "Recruiter",
+   "Talent"
+  ],
+  "apollo_departments": [
+   "engineering_technical"
+  ],
+  "job_locations": [
+   "Austin, TX"
+  ],
+  "job_geo_terms": [
+   "austin"
+  ],
+  "startup": true
+ },
+ "recruiters": [
+  {
+   "full_name": "Dana Whitfield",
+   "title": "Talent Partner",
+   "source": "searxng_search",
+   "snippet": "Talent Partner at Lumastack hiring founding engineers in Austin.",
+   "location": "Austin, Texas, United States",
+   "linkedin_url": "https://www.linkedin.com/in/danawhitfield",
+   "profile_data": {
+    "company_match_confidence": "strong_signal"
+   }
+  },
+  {
+   "full_name": "Marcus Bell",
+   "title": "Senior Technical Recruiter",
+   "source": "searxng_search",
+   "snippet": "Senior Technical Recruiter at TalentBridge Agency placing startup engineers.",
+   "location": "Remote",
+   "linkedin_url": "https://www.linkedin.com/in/marcusbellrecruits",
+   "profile_data": {
+    "company_match_confidence": "weak_signal"
+   }
+  },
+  {
+   "full_name": "Priya Anand",
+   "title": "Recruiting Coordinator",
+   "source": "searxng_search",
+   "snippet": "Former Recruiting Coordinator at Lumastack, now at Scalebase.",
+   "location": "Austin, Texas, United States",
+   "linkedin_url": "https://www.linkedin.com/in/priyaanand",
+   "profile_data": {
+    "company_match_confidence": "strong_signal"
+   }
+  }
+ ],
+ "hiring_managers": [
+  {
+   "full_name": "Theo Marchetti",
+   "title": "Co-Founder & CTO",
+   "source": "searxng_search",
+   "snippet": "Co-Founder & CTO at Lumastack building platform infrastructure in Austin.",
+   "location": "Austin, Texas, United States",
+   "linkedin_url": "https://www.linkedin.com/in/theomarchetti",
+   "profile_data": {
+    "company_match_confidence": "verified"
+   }
+  },
+  {
+   "full_name": "Imogen Hart",
+   "title": "Head of Engineering",
+   "source": "searxng_search",
+   "snippet": "Head of Engineering at Lumastack. Hiring platform engineers.",
+   "location": "Austin, Texas, United States",
+   "linkedin_url": "https://www.linkedin.com/in/imogenhart",
+   "profile_data": {
+    "company_match_confidence": "strong_signal"
+   }
+  },
+  {
+   "full_name": "Rob Castellano",
+   "title": "Engineering Manager",
+   "source": "searxng_search",
+   "snippet": "Former Engineering Manager at Lumastack, now leading teams at BigCo.",
+   "location": "Austin, Texas, United States",
+   "linkedin_url": "https://www.linkedin.com/in/robcastellano",
+   "profile_data": {
+    "company_match_confidence": "strong_signal"
+   }
+  },
+  {
+   "full_name": "Felicity Zhou",
+   "title": "Director of Operations",
+   "source": "searxng_search",
+   "snippet": "Director of Operations at Lumastack overseeing finance and people.",
+   "location": "Denver, Colorado, United States",
+   "linkedin_url": "https://www.linkedin.com/in/felicityzhou",
+   "profile_data": {
+    "company_match_confidence": "strong_signal"
+   }
+  }
+ ],
+ "expected": {
+  "top_recruiter": "Dana Whitfield",
+  "top_hiring_managers": [
+   "Theo Marchetti",
+   "Imogen Hart"
+  ]
+ }
+}

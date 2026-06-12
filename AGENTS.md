@@ -59,6 +59,7 @@ NexusReach defaults to draft-first workflows. Users can optionally enable delaye
   - recruiters
   - hiring managers
   - peers
+- Hiring-manager ranking is startup-aware: when the job carries the reserved `startup` tag, verification tier and founder/C-level status outrank manager-title-seed alignment (at small companies the verified founder is the hiring manager); non-startup searches keep title fit on top.
 - Results are ranked as a same-company hierarchy:
   - `direct`
   - `adjacent`

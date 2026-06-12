@@ -14,7 +14,7 @@ from app.utils.relevance_scorer import score_candidate_relevance
 
 from app.services.people.classify import _compute_match_metadata
 from app.services.people.identity import _contains_any_keyword, _keyword_in_text, _normalize_identity
-from app.services.people.titles import CONTROLLED_LEAD_KEYWORDS, MANAGER_TITLE_KEYWORDS, SENIORITY_ORDER, TALENT_TITLE_KEYWORDS, _candidate_seniority_level, _is_adjacent_recruiter_like, _is_manager_like, _is_recruiter_like, _is_senior_ic_fallback, _role_like_title
+from app.services.people.titles import CONTROLLED_LEAD_KEYWORDS, MANAGER_TITLE_KEYWORDS, SENIORITY_ORDER, TALENT_TITLE_KEYWORDS, _candidate_seniority_level, _is_adjacent_recruiter_like, _is_manager_like, _is_recruiter_like, _is_senior_ic_fallback, _role_like_title, _is_founder_exec_title
 from app.services.people.company_match import CURRENT_TRUSTED_SOURCES, _classify_employment_status, _trusted_public_match
 from app.services.people.context import _location_match_rank
 logger = logging.getLogger(__name__)
@@ -381,7 +381,20 @@ def _candidate_sort_key(data: dict, *, bucket: str, context: JobContext | None) 
     if bucket == "hiring_managers":
         manager_keywords = MANAGER_TITLE_KEYWORDS + CONTROLLED_LEAD_KEYWORDS
         explicit_role_rank = 0 if _contains_any_keyword(title, manager_keywords) else 1 if _contains_any_keyword(snippet, manager_keywords) else 2
+        # At startups the verified founder/C-level IS the hiring manager and
+        # the decision maker, so verification tier and founder status outrank
+        # title-seed alignment. Big-company searches keep title fit on top -
+        # there, hundreds of employees are "verified" and the title is the
+        # only thing that picks the right person.
+        startup_priority: tuple = ()
+        if context is not None and getattr(context, "startup", False):
+            confidence = str(profile_data.get("company_match_confidence") or "")
+            startup_priority = (
+                _confidence_rank(confidence),
+                0 if _is_founder_exec_title(title) else 1,
+            )
         return (
+            *startup_priority,
             0 if data.get("_actively_hiring") else 1,
             _team_keyword_match_rank(data, bucket=bucket, context=context),
             location_rank,

@@ -89,6 +89,8 @@ DEFAULT_SEARCH_SOURCES = [
 ]
 STARTUP_BOARD_SOURCES = ["yc_jobs", "wellfound", "ventureloop"]
 STARTUP_LINK_RESOLVE_CONCURRENCY = 6
+DISCOVER_LIMIT_PER_SOURCE = 50
+DISCOVER_LOCATION_FANOUT = 2
 STARTUP_MAX_RESOLVED_LINKS_PER_COMPANY = 3
 APPLY_URL_REPAIR_MAX_JOBS = 20
 
@@ -694,6 +696,7 @@ async def search_jobs(
     limit: int = 20,
     refresh_run_id: uuid.UUID | None = None,
     source_stats: list[dict] | None = None,
+    occupation_hint: str | None = None,
 ) -> list[Job]:
     """Search for jobs across all sources, deduplicate, score, and store.
 
@@ -742,7 +745,10 @@ async def search_jobs(
         data = dict(data)
         fetch_source_key = data.pop("_fetch_source_key", None) or _job_source_key(data) or "unknown"
         stat = stats_by_source.setdefault(fetch_source_key, _source_stat(fetch_source_key))
+        if occupation_hint:
+            data.setdefault("_occupation_hint", occupation_hint)
         _infer_startup_tags_for_job(data, known_startup_companies)
+        _infer_occupation_tags_for_job(data)
         data = normalize_job_metadata(data)
         if not _job_matches_refresh_filters(data, location=location, remote_only=remote_only):
             stat["skipped_count"] += 1
@@ -1944,8 +1950,11 @@ def _infer_occupation_tags_for_job(data: dict) -> None:
 
     Honors any explicit occupation tags already present (e.g., from the
     newgrad-jobs scraper's source-category hint). Otherwise falls back to
-    title/description classification.
+    title/description classification, and finally to the occupation whose
+    discover query surfaced the job (``_occupation_hint``), so query-seeded
+    jobs with unclassifiable titles stay visible to occupation filters.
     """
+    hint = data.pop("_occupation_hint", None)
     existing = data.get("tags") or []
     explicit_keys: list[str] = []
     for tag in existing:
@@ -1956,6 +1965,7 @@ def _infer_occupation_tags_for_job(data: dict) -> None:
         title=data.get("title"),
         description=data.get("description"),
         explicit_keys=explicit_keys or None,
+        fallback_keys=[hint] if isinstance(hint, str) and hint else None,
     )
     if inferred:
         data["tags"] = merge_tags(existing, inferred)
@@ -2454,7 +2464,17 @@ async def discover_jobs(
     # 1. Standard job search (JSearch, Dice, Remotive — newgrad excluded here)
     #    newgrad is scraped once unfiltered below instead of 7× with keyword filters
     #    that would discard most results.
+    target_locations = [
+        loc for loc in ((profile.target_locations if profile else None) or []) if loc
+    ][:DISCOVER_LOCATION_FANOUT]
+    expanded_seeds: list[dict] = []
     for seed in search_list:
+        expanded_seeds.append(seed)
+        if seed.get("location") is None and not seed.get("remote_only"):
+            for loc in target_locations:
+                expanded_seeds.append({**seed, "location": loc})
+
+    for seed in expanded_seeds:
         try:
             stored = await search_jobs(
                 db,
@@ -2462,7 +2482,9 @@ async def discover_jobs(
                 query=seed["query"],  # type: ignore[arg-type]
                 location=seed["location"],  # type: ignore[arg-type]
                 remote_only=seed["remote_only"],  # type: ignore[arg-type]
-                sources=["jsearch", "adzuna", "remotive", "dice"],
+                sources=["jsearch", "adzuna", "remotive", "jobicy", "dice", "simplify"],
+                limit=DISCOVER_LIMIT_PER_SOURCE,
+                occupation_hint=seed.get("occupation"),
             )
             total_new += len(stored)
         except Exception:

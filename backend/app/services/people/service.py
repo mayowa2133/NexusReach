@@ -31,7 +31,8 @@ from app.services.occupation_taxonomy import (
 
 from app.services.people.buckets import _append_bucket, _backfill_sparse_hiring_manager_bucket, _bucketed_linkedin_slugs, _finalize_bucketed
 from app.services.people.candidates import DEFAULT_TARGET_COUNT_PER_BUCKET, _clamp_target_count_per_bucket, _debug_candidate_summary, _dedupe_candidate_bucket_groups, _dedupe_candidates, _expand_peer_candidates, _has_recruiter_lead_candidate, _interactive_enrichment_limit_for_target, _limit_interactive_bucket, _minimum_results_for_target, _needs_more_bucket_candidates, _needs_more_bucket_size_only, _prepare_candidates, _prepare_limit_for_target, _search_candidates, _search_limit_for_target, _should_expand_with_theorg, _should_run_manager_geo_recovery, _should_run_peer_targeted_recovery, _should_run_recruiter_targeted_recovery
-from app.services.people.classify import _classify_org_level, _classify_person
+from app.services.people.classify import _classify_org_level, _classify_person, _classify_person_with_confidence
+from app.services.people.title_llm import normalize_title_key, resolve_ambiguous_titles
 from app.services.people.company_match import _candidate_matches_company, _classify_employment_status
 from app.services.people.context import _bucket_geo_terms, _build_roles_context
 from app.services.people.linkedin_backfill import _backfill_linkedin_profiles, _mark_linkedin_backfill_deferred
@@ -81,6 +82,39 @@ def _record_timing(
             **details,
         }
     )
+
+
+async def _title_overrides_for(candidates: list[dict]) -> dict[str, str]:
+    """Resolve LLM bucket overrides for candidates with ambiguous titles."""
+    ambiguous = [
+        c.get("title", "")
+        for c in candidates
+        if not _classify_person_with_confidence(
+            c.get("title", ""),
+            snippet=c.get("snippet", ""),
+            source=c.get("source", ""),
+        )[1]
+    ]
+    if not ambiguous:
+        return {}
+    return await resolve_ambiguous_titles(ambiguous)
+
+
+def _bucket_with_tiebreak(
+    candidate: dict, overrides: dict[str, str], *, use_snippet: bool = True
+) -> str:
+    """Keyword bucket with the LLM override applied to the ambiguous tail."""
+    snippet = candidate.get("snippet", "") if use_snippet else ""
+    source = candidate.get("source", "") if use_snippet else ""
+    bucket, confident = _classify_person_with_confidence(
+        candidate.get("title", ""), snippet=snippet, source=source
+    )
+    if confident:
+        return bucket
+    override = overrides.get(normalize_title_key(candidate.get("title")))
+    if override in ("recruiter", "hiring_manager", "peer"):
+        return override
+    return bucket
 
 
 async def search_people_at_company(
@@ -456,13 +490,14 @@ async def search_people_at_company(
         person = await _store_person(db, user_id, company, data, "recruiter")
         _append_bucket(bucketed, seen, person, data, explicit_type="recruiter", context=roles_context, company_name=company_name, public_identity_slugs=public_identity_terms)
 
+    manager_overrides = await _title_overrides_for(manager_results)
     for data in manager_results:
         person = await _store_person(
             db,
             user_id,
             company,
             data,
-            _classify_person(data.get("title", "")),
+            _bucket_with_tiebreak(data, manager_overrides, use_snippet=False),
         )
         _append_bucket(bucketed, seen, person, data, context=roles_context, company_name=company_name, public_identity_slugs=public_identity_terms)
 
@@ -878,17 +913,18 @@ async def search_people_for_job(
     except Exception:
         logger.debug("Hiring-people supplementary search failed for %s", job.company_name, exc_info=True)
 
+    hiring_team_overrides = await _title_overrides_for(hiring_team_candidates)
     recruiter_candidates = _dedupe_candidates(
         recruiter_candidates,
-        [candidate for candidate in hiring_team_candidates if _classify_person(candidate.get("title", ""), snippet=candidate.get("snippet", ""), source=candidate.get("source", "")) == "recruiter"],
+        [candidate for candidate in hiring_team_candidates if _bucket_with_tiebreak(candidate, hiring_team_overrides) == "recruiter"],
     )
     manager_candidates = _dedupe_candidates(
         manager_candidates,
-        [candidate for candidate in hiring_team_candidates if _classify_person(candidate.get("title", ""), snippet=candidate.get("snippet", ""), source=candidate.get("source", "")) == "hiring_manager"],
+        [candidate for candidate in hiring_team_candidates if _bucket_with_tiebreak(candidate, hiring_team_overrides) == "hiring_manager"],
     )
     peer_candidates = _dedupe_candidates(
         peer_candidates,
-        [candidate for candidate in hiring_team_candidates if _classify_person(candidate.get("title", ""), snippet=candidate.get("snippet", ""), source=candidate.get("source", "")) == "peer"],
+        [candidate for candidate in hiring_team_candidates if _bucket_with_tiebreak(candidate, hiring_team_overrides) == "peer"],
     )
     peer_retry_started_at = time.monotonic()
     peer_candidates = await _expand_peer_candidates(

@@ -8,7 +8,7 @@ from app.utils.job_context import (
 )
 
 from app.services.people.identity import _keyword_in_text
-from app.services.people.titles import CONTROLLED_LEAD_KEYWORDS, DIRECTOR_PLUS_KEYWORDS, MANAGER_TITLE_KEYWORDS, _SENIOR_LEADERSHIP_PREFIXES, _is_adjacent_recruiter_like, _is_ic_manager_title, _is_recruiter_like
+from app.services.people.titles import CONTROLLED_LEAD_KEYWORDS, DIRECTOR_PLUS_KEYWORDS, MANAGER_TITLE_KEYWORDS, _SENIOR_LEADERSHIP_PREFIXES, _is_adjacent_recruiter_like, _is_ic_manager_title, _is_recruiter_like, _role_like_title
 logger = logging.getLogger(__name__)
 
 
@@ -32,22 +32,45 @@ def _classify_org_level(title: str, source: str = "", snippet: str = "") -> str:
 
 def _classify_person(title: str, source: str = "", snippet: str = "") -> str:
     """Classify a result into recruiter, hiring_manager, or peer."""
+    bucket, _ = _classify_person_with_confidence(title, source=source, snippet=snippet)
+    return bucket
+
+
+def _classify_person_with_confidence(
+    title: str, source: str = "", snippet: str = ""
+) -> tuple[str, bool]:
+    """Classify a result and report whether any bucket signal actually fired.
+
+    The final fallback is "peer", which is confident when the title carries a
+    recognizable role hint (engineer, designer, analyst, ...) and ambiguous
+    otherwise - the ambiguous tail is what the LLM tie-break re-examines.
+    """
     haystack = " ".join(part for part in [title, snippet, source] if part).lower()
-    if _is_recruiter_like(haystack):
-        return "recruiter"
+    title_lower = (title or "").lower()
+    if _is_recruiter_like(title_lower):
+        return "recruiter", True
     # IC manager titles (Product Manager, Program Manager, etc.) are peers
     # UNLESS they carry a senior leadership prefix (Group PM, Director of
     # Product, VP Product, Head of Product).
     if _is_ic_manager_title(haystack):
-        title_lower = (title or "").lower()
         if _SENIOR_LEADERSHIP_PREFIXES.search(title_lower):
-            return "hiring_manager"
-        return "peer"
+            return "hiring_manager", True
+        return "peer", True
+    # A manager-like TITLE wins before snippet-level recruiter hints: a Head
+    # of Engineering whose snippet says "hiring engineers" is a hiring
+    # manager, not a recruiter.
+    if title_lower and (
+        any(keyword in title_lower for keyword in MANAGER_TITLE_KEYWORDS)
+        or any(keyword in title_lower for keyword in CONTROLLED_LEAD_KEYWORDS)
+    ):
+        return "hiring_manager", True
+    if _is_recruiter_like(haystack):
+        return "recruiter", True
     if any(keyword in haystack for keyword in MANAGER_TITLE_KEYWORDS):
-        return "hiring_manager"
+        return "hiring_manager", True
     if any(keyword in haystack for keyword in CONTROLLED_LEAD_KEYWORDS):
-        return "hiring_manager"
-    return "peer"
+        return "hiring_manager", True
+    return "peer", _role_like_title(haystack)
 
 
 def _compute_match_metadata(

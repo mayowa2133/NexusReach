@@ -1,0 +1,121 @@
+{
+ "company_name": "Zip",
+ "public_identity_terms": [
+  "zip-co"
+ ],
+ "context": {
+  "department": "engineering",
+  "team_keywords": [
+   "payments",
+   "checkout"
+  ],
+  "domain_keywords": [
+   "fintech"
+  ],
+  "product_team_names": [],
+  "seniority": "mid",
+  "early_career": false,
+  "manager_titles": [
+   "Engineering Manager",
+   "Head of Engineering"
+  ],
+  "peer_titles": [
+   "Software Engineer"
+  ],
+  "recruiter_titles": [
+   "Recruiter",
+   "Talent"
+  ],
+  "apollo_departments": [
+   "engineering_technical"
+  ],
+  "job_locations": [
+   "New York, NY"
+  ],
+  "job_geo_terms": [
+   "new york"
+  ]
+ },
+ "recruiters": [
+  {
+   "full_name": "Lena Forsberg",
+   "title": "Senior Recruiter",
+   "source": "searxng_search",
+   "snippet": "Senior Recruiter at Zip (zip.co) growing the New York payments team.",
+   "location": "New York, New York, United States",
+   "linkedin_url": "https://www.linkedin.com/in/lenaforsberg",
+   "profile_data": {
+    "company_match_confidence": "verified",
+    "current_company_verified": true
+   }
+  },
+  {
+   "full_name": "Tom Gallagher",
+   "title": "Talent Sourcer",
+   "source": "searxng_search",
+   "snippet": "Talent Sourcer at ZipRecruiter connecting employers and candidates.",
+   "location": "Santa Monica, California, United States",
+   "linkedin_url": "https://www.linkedin.com/in/tomgallagher",
+   "profile_data": {
+    "company_match_confidence": "weak_signal"
+   }
+  },
+  {
+   "full_name": "Rosa Jimenez",
+   "title": "Recruiting Lead",
+   "source": "searxng_search",
+   "snippet": "Recruiting Lead at Zip Co for engineering and product hiring.",
+   "location": "New York, New York, United States",
+   "linkedin_url": "https://www.linkedin.com/in/rosajimenez",
+   "profile_data": {
+    "company_match_confidence": "strong_signal"
+   }
+  }
+ ],
+ "hiring_managers": [
+  {
+   "full_name": "Avi Shankar",
+   "title": "Engineering Manager, Checkout",
+   "source": "searxng_search",
+   "snippet": "Engineering Manager at Zip (zip.co) leading the checkout payments team in New York.",
+   "location": "New York, New York, United States",
+   "linkedin_url": "https://www.linkedin.com/in/avishankar",
+   "profile_data": {
+    "company_match_confidence": "verified",
+    "current_company_verified": true
+   }
+  },
+  {
+   "full_name": "Carla Mendes",
+   "title": "Head of Engineering",
+   "source": "searxng_search",
+   "snippet": "Head of Engineering at Zip Co building fintech infrastructure.",
+   "location": "New York, New York, United States",
+   "linkedin_url": "https://www.linkedin.com/in/carlamendes",
+   "profile_data": {
+    "company_match_confidence": "strong_signal"
+   }
+  },
+  {
+   "full_name": "Doug Pratt",
+   "title": "Engineering Manager",
+   "source": "searxng_search",
+   "snippet": "Engineering Manager at ZipRecruiter working on marketplace search.",
+   "location": "Santa Monica, California, United States",
+   "linkedin_url": "https://www.linkedin.com/in/dougpratt",
+   "profile_data": {
+    "company_match_confidence": "weak_signal"
+   }
+  }
+ ],
+ "expected": {
+  "top_recruiter": "Lena Forsberg",
+  "top_hiring_managers": [
+   "Avi Shankar"
+  ],
+  "must_not_rank_first": [
+   "Tom Gallagher",
+   "Doug Pratt"
+  ]
+ }
+}

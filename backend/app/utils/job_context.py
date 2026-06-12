@@ -164,6 +164,7 @@ class JobContext:
     seniority: str = "mid"
     early_career: bool = False
     manager_titles: list[str] = field(default_factory=list)
+    startup: bool = False
     peer_titles: list[str] = field(default_factory=list)
     recruiter_titles: list[str] = field(default_factory=list)
     apollo_departments: list[str] = field(default_factory=list)
@@ -427,6 +428,44 @@ def _extract_core_role(title: str) -> str:
 
 def _keyword_label(keyword: str) -> str:
     return keyword.replace("_", " ").title()
+
+
+_REPORTING_LINE_RE = re.compile(
+    r"report(?:s|ing)?\s+(?:directly\s+)?(?:in)?to\s+(?:the\s+|our\s+|a\s+)?"
+    r"(?P<title>[A-Z][A-Za-z/&-]*(?:\s+(?:of|and|&|[A-Z][A-Za-z/&-]*)){0,5})"
+)
+_REPORTING_TITLE_KEYWORDS = (
+    "manager", "director", "head", "lead", "vp", "vice president",
+    "chief", "officer", "principal", "supervisor", "founder", "president",
+)
+
+
+def _extract_reporting_line_titles(description: str | None) -> list[str]:
+    """Pull explicit reporting-line titles out of a job description.
+
+    Postings often name the hiring manager's role directly ("You will report
+    to the Director of Data Engineering"). That phrase is the single most
+    accurate hiring-manager signal available, so extracted titles are placed
+    ahead of the heuristic manager-title seeds.
+    """
+    if not description:
+        return []
+    titles: list[str] = []
+    seen: set[str] = set()
+    for match in _REPORTING_LINE_RE.finditer(description):
+        candidate = match.group("title").strip().rstrip(".,;:")
+        words = candidate.split()
+        while words and words[-1].lower() in {"and", "of", "the", "for", "&", "or", "to"}:
+            words.pop()
+        candidate = " ".join(words)
+        lowered = candidate.lower()
+        if not any(keyword in lowered for keyword in _REPORTING_TITLE_KEYWORDS):
+            continue
+        if lowered in seen or len(candidate) > 70:
+            continue
+        seen.add(lowered)
+        titles.append(candidate)
+    return titles[:3]
 
 
 def _build_manager_titles(
@@ -990,6 +1029,11 @@ def extract_job_context(
         seniority = "junior"
     apollo_departments = APOLLO_DEPARTMENT_SLUGS.get(department, ["engineering_technical"])
     manager_titles = _build_manager_titles(department, team_keywords, title, seniority)
+    reported_titles = _extract_reporting_line_titles(description)
+    if reported_titles:
+        manager_titles = reported_titles + [
+            t for t in manager_titles if t.lower() not in {r.lower() for r in reported_titles}
+        ]
     peer_titles = _build_peer_titles(title, team_keywords, seniority, department)
     recruiter_titles = _build_recruiter_titles(
         department,
@@ -1007,8 +1051,17 @@ def extract_job_context(
     if not occupation_keys:
         occupation_keys = _classify_occupation_title(title, description)
 
+    # Reserved startup provenance tags ("startup", "startup_source:<key>") -
+    # checked locally to avoid importing the startup_jobs module (and its
+    # client dependencies) into this low-level util.
+    is_startup = any(
+        isinstance(tag, str) and (tag == "startup" or tag.startswith("startup_source:"))
+        for tag in (tags or [])
+    )
+
     return JobContext(
         department=department,
+        startup=is_startup,
         team_keywords=team_keywords,
         domain_keywords=domain_keywords,
         product_team_names=product_team_names,

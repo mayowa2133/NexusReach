@@ -1,0 +1,130 @@
+{
+ "company_name": "Northbridge Health",
+ "public_identity_terms": [
+  "northbridge-health"
+ ],
+ "context": {
+  "department": "healthcare",
+  "team_keywords": [
+   "nursing",
+   "clinical"
+  ],
+  "domain_keywords": [
+   "patient care"
+  ],
+  "product_team_names": [],
+  "seniority": "mid",
+  "early_career": false,
+  "manager_titles": [
+   "Director of Nursing",
+   "Nurse Manager",
+   "Clinical Manager"
+  ],
+  "peer_titles": [
+   "Registered Nurse",
+   "Staff Nurse"
+  ],
+  "recruiter_titles": [
+   "Nurse Recruiter",
+   "Clinical Recruiter",
+   "Talent Acquisition"
+  ],
+  "apollo_departments": [
+   "medical_health"
+  ],
+  "job_locations": [
+   "Chicago, IL"
+  ],
+  "job_geo_terms": [
+   "chicago"
+  ]
+ },
+ "recruiters": [
+  {
+   "full_name": "Alma Reyes",
+   "title": "Clinical Talent Acquisition Partner",
+   "source": "searxng_search",
+   "snippet": "Clinical Talent Acquisition Partner at Northbridge Health recruiting nurses in Chicago.",
+   "location": "Chicago, Illinois, United States",
+   "linkedin_url": "https://www.linkedin.com/in/almareyes",
+   "profile_data": {
+    "company_match_confidence": "strong_signal"
+   }
+  },
+  {
+   "full_name": "Gordon Pike",
+   "title": "Healthcare Recruiter",
+   "source": "searxng_search",
+   "snippet": "Healthcare Recruiter at MedStaff Solutions staffing hospitals nationwide.",
+   "location": "Dallas, Texas, United States",
+   "linkedin_url": "https://www.linkedin.com/in/gordonpike",
+   "profile_data": {
+    "company_match_confidence": "weak_signal"
+   }
+  },
+  {
+   "full_name": "Sue Tran",
+   "title": "HR Generalist",
+   "source": "searxng_search",
+   "snippet": "HR Generalist at Northbridge Health supporting benefits and payroll.",
+   "location": "Chicago, Illinois, United States",
+   "linkedin_url": "https://www.linkedin.com/in/suetran",
+   "profile_data": {
+    "company_match_confidence": "strong_signal"
+   }
+  }
+ ],
+ "hiring_managers": [
+  {
+   "full_name": "Beatrice Okonkwo",
+   "title": "Director of Nursing",
+   "source": "searxng_search",
+   "snippet": "Director of Nursing at Northbridge Health leading clinical teams in Chicago.",
+   "location": "Chicago, Illinois, United States",
+   "linkedin_url": "https://www.linkedin.com/in/beatriceokonkwo",
+   "profile_data": {
+    "company_match_confidence": "verified"
+   }
+  },
+  {
+   "full_name": "Hal Brennan",
+   "title": "Nurse Manager, Medical-Surgical Unit",
+   "source": "searxng_search",
+   "snippet": "Nurse Manager at Northbridge Health overseeing the med-surg unit.",
+   "location": "Chicago, Illinois, United States",
+   "linkedin_url": "https://www.linkedin.com/in/halbrennan",
+   "profile_data": {
+    "company_match_confidence": "strong_signal"
+   }
+  },
+  {
+   "full_name": "Vivian Cho",
+   "title": "Director of Nursing",
+   "source": "searxng_search",
+   "snippet": "Former Director of Nursing at Northbridge Health, now with Lakeview Medical.",
+   "location": "Chicago, Illinois, United States",
+   "linkedin_url": "https://www.linkedin.com/in/viviancho",
+   "profile_data": {
+    "company_match_confidence": "strong_signal"
+   }
+  },
+  {
+   "full_name": "Stan Kubica",
+   "title": "Facilities Manager",
+   "source": "searxng_search",
+   "snippet": "Facilities Manager at Northbridge Health managing building operations.",
+   "location": "Chicago, Illinois, United States",
+   "linkedin_url": "https://www.linkedin.com/in/stankubica",
+   "profile_data": {
+    "company_match_confidence": "strong_signal"
+   }
+  }
+ ],
+ "expected": {
+  "top_recruiter": "Alma Reyes",
+  "top_hiring_managers": [
+   "Beatrice Okonkwo",
+   "Hal Brennan"
+  ]
+ }
+}
