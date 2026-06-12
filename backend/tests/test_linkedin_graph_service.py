@@ -305,7 +305,7 @@ async def test_resolve_warm_path_for_person_returns_direct_match():
     )
 
     with patch(
-        "app.services.linkedin_graph_service.get_connections_for_company",
+        "app.services.linkedin_graph.warm_paths.get_connections_for_company",
         new=AsyncMock(return_value=[connection]),
     ):
         result = await resolve_warm_path_for_person(
@@ -349,7 +349,7 @@ async def test_resolve_warm_path_for_person_picks_recruiter_bridge():
     )
 
     with patch(
-        "app.services.linkedin_graph_service.get_connections_for_company",
+        "app.services.linkedin_graph.warm_paths.get_connections_for_company",
         new=AsyncMock(return_value=[engineer, recruiter]),
     ):
         result = await resolve_warm_path_for_person(
@@ -377,7 +377,7 @@ async def test_resolve_warm_path_for_person_returns_none_without_company_or_conn
         company=SimpleNamespace(name="Acme", public_identity_slugs=[]),
     )
     with patch(
-        "app.services.linkedin_graph_service.get_connections_for_company",
+        "app.services.linkedin_graph.warm_paths.get_connections_for_company",
         new=AsyncMock(return_value=[]),
     ):
         assert (
@@ -407,11 +407,11 @@ async def test_resolve_linkedin_signal_prefers_followed_person_over_company():
 
     with (
         patch(
-            "app.services.linkedin_graph_service.get_followed_people_by_linkedin_slugs",
+            "app.services.linkedin_graph.warm_paths.get_followed_people_by_linkedin_slugs",
             new=AsyncMock(return_value=[followed_person]),
         ) as people_mock,
         patch(
-            "app.services.linkedin_graph_service.get_followed_companies_for_company",
+            "app.services.linkedin_graph.warm_paths.get_followed_companies_for_company",
             new=AsyncMock(return_value=[]),
         ) as company_mock,
     ):
@@ -444,11 +444,11 @@ async def test_resolve_linkedin_signal_returns_company_affinity_not_warm_path():
 
     with (
         patch(
-            "app.services.linkedin_graph_service.get_followed_people_by_linkedin_slugs",
+            "app.services.linkedin_graph.warm_paths.get_followed_people_by_linkedin_slugs",
             new=AsyncMock(return_value=[]),
         ),
         patch(
-            "app.services.linkedin_graph_service.get_followed_companies_for_company",
+            "app.services.linkedin_graph.warm_paths.get_followed_companies_for_company",
             new=AsyncMock(return_value=[company_follow]),
         ),
     ):
