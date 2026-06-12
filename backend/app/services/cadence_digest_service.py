@@ -11,13 +11,15 @@ from __future__ import annotations
 import html
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.message import Message
 from app.models.settings import UserSettings
 from app.models.user import User
+from app.services import message_service
 from app.services.cadence_service import NextAction, compute_next_actions
 from app.services.oauth_token_crypto import is_encrypted_refresh_token
 
@@ -40,6 +42,76 @@ MIN_DAYS_BETWEEN_DIGESTS = 6
 # ---------------------------------------------------------------------------
 # HTML / text rendering
 # ---------------------------------------------------------------------------
+
+
+MAX_AUTO_DRAFTS_PER_DIGEST = 3
+AUTO_DRAFT_KINDS = {"reply_needed", "awaiting_reply", "thank_you_due"}
+RECENT_DRAFT_GUARD_DAYS = 7
+
+
+async def _has_recent_draft(
+    db: AsyncSession, user_id: uuid.UUID, person_id: uuid.UUID
+) -> bool:
+    """True when an unsent draft for this person already exists (last N days)."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=RECENT_DRAFT_GUARD_DAYS)
+    result = await db.execute(
+        select(Message.id)
+        .where(
+            Message.user_id == user_id,
+            Message.person_id == person_id,
+            Message.status == "draft",
+            Message.created_at >= cutoff,
+        )
+        .limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def auto_draft_due_actions(
+    db: AsyncSession, user_id: uuid.UUID, actions: list[NextAction]
+) -> int:
+    """Pre-draft messages for due follow-up actions (draft-first, never sends).
+
+    Caps at ``MAX_AUTO_DRAFTS_PER_DIGEST`` LLM drafts per digest run, skips
+    actions that already point at a message or whose person already has a
+    fresh unsent draft, and tolerates per-action failures so one bad draft
+    cannot sink the digest.
+    """
+    drafted = 0
+    for action in actions:
+        if drafted >= MAX_AUTO_DRAFTS_PER_DIGEST:
+            break
+        if action.kind not in AUTO_DRAFT_KINDS:
+            continue
+        if action.message_id or not action.person_id:
+            continue
+        if not action.suggested_channel or not action.suggested_goal:
+            continue
+        try:
+            person_id = uuid.UUID(action.person_id)
+            if await _has_recent_draft(db, user_id, person_id):
+                continue
+            result = await message_service.draft_message(
+                db,
+                user_id,
+                person_id=person_id,
+                channel=action.suggested_channel,
+                goal=action.suggested_goal,
+                job_id=uuid.UUID(action.job_id) if action.job_id else None,
+            )
+            message = result.get("message")
+            if message is not None:
+                action.message_id = str(message.id)
+                action.meta["auto_drafted"] = True
+                drafted += 1
+        except Exception:
+            logger.exception(
+                "Cadence auto-draft failed for user=%s person=%s kind=%s",
+                user_id,
+                action.person_id,
+                action.kind,
+            )
+    return drafted
 
 
 def _render_html(actions: list[NextAction], user_email: str) -> str:
@@ -106,7 +178,8 @@ def _render_text(actions: list[NextAction]) -> str:
             kind = KIND_LABEL.get(a.kind, a.kind)
             who = a.person_name or a.company_name or ""
             age = f" ({a.age_days:.0f}d)" if a.age_days is not None else ""
-            lines.append(f"  • {kind}: {who}{age} — {a.reason}")
+            draft_note = " [draft ready]" if a.message_id else ""
+            lines.append(f"  • {kind}: {who}{age} — {a.reason}{draft_note}")
     lines.append("\n---\nManage digest in Settings → Cadence Thresholds.")
     return "\n".join(lines)
 
@@ -201,6 +274,10 @@ async def send_cadence_digest_for_user(
     if not actions:
         return {"sent": False, "error": None, "action_count": 0}
 
+    auto_drafted = 0
+    if getattr(user_settings, "cadence_auto_draft_enabled", False):
+        auto_drafted = await auto_draft_due_actions(db, user_id, actions)
+
     # Get user email
     user_stmt = select(User.email).where(User.id == user_id)
     user_result = await db.execute(user_stmt)
@@ -233,7 +310,13 @@ async def send_cadence_digest_for_user(
         "Sent cadence digest: user=%s actions=%d provider=%s",
         user_id, len(actions), provider,
     )
-    return {"sent": True, "action_count": len(actions), "provider": provider, "error": None}
+    return {
+        "sent": True,
+        "action_count": len(actions),
+        "auto_drafted": auto_drafted,
+        "provider": provider,
+        "error": None,
+    }
 
 
 # ---------------------------------------------------------------------------

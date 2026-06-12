@@ -54,6 +54,8 @@ def _mock_outreach_log(user_id, **overrides):
     )
     log.next_follow_up_at = overrides.get("next_follow_up_at", None)
     log.response_received = overrides.get("response_received", False)
+    log.replied_at = overrides.get("replied_at", None)
+    log.last_reply_snippet = overrides.get("last_reply_snippet", None)
     log.created_at = datetime(2024, 3, 1, tzinfo=timezone.utc)
     log.updated_at = datetime(2024, 3, 1, tzinfo=timezone.utc)
 

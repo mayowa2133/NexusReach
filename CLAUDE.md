@@ -131,6 +131,7 @@ NexusReach defaults to draft-first workflows. Users can optionally enable delaye
 - Ambiguous-company protections still block unsafe guesses.
 - Public identity trust and email-domain trust are intentionally separate.
 - Staged drafts and sent mail are reconciled against the provider on a 30-minute beat: drafts sent from the Gmail/Outlook UI flip to `sent`, and thread replies flip `sent` to `responded` (with notification + `outreach_reply_received` analytics event) for up to 45 days after send.
+- Reply reconciliation captures `replied_at` and a plain-text `last_reply_snippet` on the outreach log; drafting automatically switches to respond-to-their-reply mode when a contact has replied, and the reply snippet is exposed through the outreach API.
 - Gmail and Outlook refresh tokens are encrypted at rest with versioned app keys.
 - Legacy plaintext OAuth tokens are cleared by migration and require reconnect.
 
@@ -142,6 +143,7 @@ NexusReach defaults to draft-first workflows. Users can optionally enable delaye
   - `gemini`
   - `groq`
 - The drafting flow is draft-first by default, with optional delayed auto-send for staged email drafts when the user explicitly enables it.
+- The weekly cadence digest can pre-draft due follow-ups (`cadence_auto_draft_enabled`, opt-in, capped at 3 LLM drafts per digest); drafts are attached to next actions and never sent automatically.
 - Warm-path context (type, reason, connection) is threaded into drafting and shown on draft cards.
 
 ### Frontend state and UX

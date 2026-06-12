@@ -45,6 +45,7 @@ class UserSettings(Base):
     applied_untouched_threshold_days: Mapped[int] = mapped_column(Integer, default=7)
     thank_you_window_hours: Mapped[int] = mapped_column(Integer, default=48)
     cadence_digest_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    cadence_auto_draft_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     cadence_digest_last_sent_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )

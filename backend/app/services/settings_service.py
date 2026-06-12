@@ -38,6 +38,7 @@ CADENCE_FIELDS = (
     "applied_untouched_threshold_days",
     "thank_you_window_hours",
     "cadence_digest_enabled",
+    "cadence_auto_draft_enabled",
 )
 
 CADENCE_DEFAULTS = {
@@ -46,6 +47,7 @@ CADENCE_DEFAULTS = {
     "applied_untouched_threshold_days": 7,
     "thank_you_window_hours": 48,
     "cadence_digest_enabled": True,
+    "cadence_auto_draft_enabled": False,
 }
 
 RESUME_REUSE_FIELDS = ("resume_auto_reuse_enabled",)

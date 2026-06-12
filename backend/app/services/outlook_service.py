@@ -425,19 +425,24 @@ async def check_reply_received(
                     f"conversationId eq '{escaped}' "
                     f"and receivedDateTime ge {since_iso}"
                 ),
-                "$select": "id,receivedDateTime",
+                "$select": "id,receivedDateTime,bodyPreview",
                 "$top": "10",
             },
         )
         list_resp.raise_for_status()
 
     received = [
-        item.get("receivedDateTime")
+        (item.get("receivedDateTime"), item.get("bodyPreview") or None)
         for item in list_resp.json().get("value") or []
         if item.get("receivedDateTime")
     ]
+    last_reply_at = None
+    last_reply_snippet = None
+    if received:
+        last_reply_at, last_reply_snippet = max(received, key=lambda item: item[0])
     return {
         "replied": bool(received),
         "reply_count": len(received),
-        "last_reply_at": max(received) if received else None,
+        "last_reply_at": last_reply_at,
+        "last_reply_snippet": last_reply_snippet,
     }

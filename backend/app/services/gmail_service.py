@@ -440,7 +440,7 @@ async def check_reply_received(
         thread_resp.raise_for_status()
 
     since_ms = int(since.timestamp() * 1000)
-    replies = []
+    replies: list[tuple[int, str | None]] = []
     for message in thread_resp.json().get("messages") or []:
         if message.get("id") == provider_message_id:
             continue
@@ -452,15 +452,18 @@ async def check_reply_received(
         except (TypeError, ValueError):
             continue
         if internal_ms > since_ms:
-            replies.append(internal_ms)
+            replies.append((internal_ms, message.get("snippet") or None))
 
     last_reply_at = None
+    last_reply_snippet = None
     if replies:
+        newest_ms, last_reply_snippet = max(replies, key=lambda item: item[0])
         last_reply_at = datetime.fromtimestamp(
-            max(replies) / 1000, tz=timezone.utc
+            newest_ms / 1000, tz=timezone.utc
         ).isoformat()
     return {
         "replied": bool(replies),
         "reply_count": len(replies),
         "last_reply_at": last_reply_at,
+        "last_reply_snippet": last_reply_snippet,
     }

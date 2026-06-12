@@ -96,6 +96,19 @@ async def reconcile_sent_drafts(
     return stats
 
 
+def _parse_reply_timestamp(value: str | None) -> datetime | None:
+    """Parse an ISO-8601 provider timestamp, tolerating a trailing Z."""
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
 def _reply_checker(provider: str | None):
     """Look up the reply checker lazily so patches applied in tests are picked up."""
     if provider == "gmail":
@@ -162,6 +175,11 @@ async def reconcile_replies(
 
         log.status = "responded"
         log.response_received = True
+        replied_at = _parse_reply_timestamp(outcome.get("last_reply_at"))
+        log.replied_at = replied_at or datetime.now(timezone.utc)
+        snippet = (outcome.get("last_reply_snippet") or "").strip() or None
+        if snippet:
+            log.last_reply_snippet = snippet[:1000]
         stats["replied"] += 1
 
         person_name = getattr(log.person, "full_name", None) if log.person else None
@@ -170,13 +188,18 @@ async def reconcile_replies(
             if person_name
             else "A contact replied to your outreach"
         )
+        if snippet:
+            preview = snippet[:140] + ("…" if len(snippet) > 140 else "")
+            body = f'"{preview}" — open Outreach to draft a response.'
+        else:
+            body = "Open Outreach to keep the thread warm with a quick response."
         try:
             await create_notification(
                 db,
                 user_id,
                 type="outreach_reply",
                 title=title,
-                body="Open Outreach to keep the thread warm with a quick response.",
+                body=body,
                 job_id=log.job_id,
             )
         except Exception:

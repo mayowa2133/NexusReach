@@ -169,6 +169,29 @@ export function CadenceSettingsPanel() {
             disabled={update.isPending}
           />
         </div>
+
+        {/* Auto-draft follow-ups toggle */}
+        <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
+          <div className="space-y-1">
+            <Label className="font-medium">Pre-draft due follow-ups</Label>
+            <p className="text-xs text-muted-foreground">
+              When the weekly digest finds follow-ups or replies that are due, draft the messages
+              for you automatically. Drafts are never sent without your review.
+            </p>
+          </div>
+          <Switch
+            checked={settings.cadence_auto_draft_enabled}
+            onCheckedChange={async (checked) => {
+              try {
+                await update.mutateAsync({ cadence_auto_draft_enabled: checked });
+                toast.success(checked ? 'Follow-up pre-drafting enabled' : 'Follow-up pre-drafting disabled');
+              } catch (err) {
+                toast.error(err instanceof Error ? err.message : 'Failed to update');
+              }
+            }}
+            disabled={update.isPending}
+          />
+        </div>
       </CardContent>
     </Card>
   );

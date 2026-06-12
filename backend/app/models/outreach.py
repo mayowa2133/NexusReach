@@ -45,6 +45,10 @@ class OutreachLog(Base):
         DateTime(timezone=True), nullable=True
     )
     response_received: Mapped[bool] = mapped_column(Boolean, default=False)
+    replied_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_reply_snippet: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Provider-side tracking for post-send reconciliation.
     # Populated when a draft is staged to Gmail/Outlook; used by the

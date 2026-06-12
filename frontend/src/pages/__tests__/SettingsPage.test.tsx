@@ -90,6 +90,7 @@ vi.mock('@/hooks/useCadence', () => ({
       applied_untouched_threshold_days: 7,
       thank_you_window_hours: 48,
       cadence_digest_enabled: true,
+      cadence_auto_draft_enabled: false,
     },
     isLoading: false,
   }),

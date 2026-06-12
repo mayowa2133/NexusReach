@@ -44,6 +44,8 @@ def _make_sent_log(**overrides):
             "sent_at", datetime.now(timezone.utc) - timedelta(days=2)
         ),
         response_received=overrides.get("response_received", False),
+        replied_at=overrides.get("replied_at", None),
+        last_reply_snippet=overrides.get("last_reply_snippet", None),
         job_id=overrides.get("job_id", None),
         person=overrides.get(
             "person", SimpleNamespace(full_name="Jane Recruiter")
@@ -68,7 +70,12 @@ async def test_reply_flips_status_and_notifies():
             outreach_reconcile_service.gmail_service,
             "check_reply_received",
             new=AsyncMock(
-                return_value={"replied": True, "reply_count": 1, "last_reply_at": None}
+                return_value={
+                    "replied": True,
+                    "reply_count": 1,
+                    "last_reply_at": "2026-06-12T10:00:00+00:00",
+                    "last_reply_snippet": "Thanks for reaching out - do you have time Friday?",
+                }
             ),
         ) as mock_check,
         patch.object(
@@ -83,6 +90,12 @@ async def test_reply_flips_status_and_notifies():
     assert stats == {"checked": 1, "replied": 1, "errors": 0}
     assert log.status == "responded"
     assert log.response_received is True
+    # reply content captured for reply-aware drafting and the UI
+    assert log.replied_at is not None
+    assert log.replied_at.isoformat() == "2026-06-12T10:00:00+00:00"
+    assert "time Friday" in log.last_reply_snippet
+    # notification body quotes the reply snippet
+    assert "time Friday" in mock_notify.await_args.kwargs["body"]
     # checker received the send time as the reply cutoff
     assert mock_check.await_args.kwargs["since"] == log.sent_at
     assert mock_check.await_args.kwargs["provider_message_id"] == "msg_123"

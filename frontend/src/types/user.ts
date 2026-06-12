@@ -75,6 +75,7 @@ export interface CadenceSettings {
   applied_untouched_threshold_days: number;
   thank_you_window_hours: number;
   cadence_digest_enabled: boolean;
+  cadence_auto_draft_enabled: boolean;
 }
 
 export type CadenceSettingsUpdate = Partial<CadenceSettings>;

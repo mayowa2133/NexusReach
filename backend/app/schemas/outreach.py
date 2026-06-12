@@ -34,6 +34,8 @@ class OutreachResponse(BaseModel):
     last_contacted_at: str | None
     next_follow_up_at: str | None
     response_received: bool
+    replied_at: str | None = None
+    last_reply_snippet: str | None = None
     person_name: str | None = None
     person_title: str | None = None
     company_name: str | None = None

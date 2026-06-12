@@ -213,3 +213,28 @@ class TestBuildJobContext:
         assert snapshot is not None
         assert snapshot["company_name"] == "Affirm"
         assert "marketplace" in snapshot["domain_keywords"]
+
+
+def test_build_reply_context_renders_snippet_and_date():
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+
+    from app.services.message_service import _build_reply_context
+
+    log = SimpleNamespace(
+        last_reply_snippet="Sure - send me your portfolio.",
+        replied_at=datetime(2026, 6, 12, 10, 0, tzinfo=timezone.utc),
+    )
+    context = _build_reply_context(log)
+    assert "THEY ALREADY REPLIED on 2026-06-12" in context
+    assert "Sure - send me your portfolio." in context
+    assert "DRAFT A RESPONSE" in context
+
+
+def test_build_reply_context_empty_without_snippet():
+    from types import SimpleNamespace
+
+    from app.services.message_service import _build_reply_context
+
+    assert _build_reply_context(None) == ""
+    assert _build_reply_context(SimpleNamespace(last_reply_snippet=None, replied_at=None)) == ""

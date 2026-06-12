@@ -406,6 +406,22 @@ def _build_history_context(prior_messages: list[Message]) -> str:
     return "\n".join(lines)
 
 
+def _build_reply_context(reply_log) -> str:
+    """Describe the contact's latest reply so the draft responds to it."""
+    if reply_log is None or not getattr(reply_log, "last_reply_snippet", None):
+        return ""
+    replied_at = getattr(reply_log, "replied_at", None)
+    when = f" on {replied_at.date().isoformat()}" if replied_at else ""
+    snippet = reply_log.last_reply_snippet.strip()
+    return (
+        "THEY ALREADY REPLIED" + when + " - DRAFT A RESPONSE, NOT A COLD INTRO:\n"
+        f'Their reply (verbatim snippet): "{snippet}"\n'
+        "Acknowledge what they said, answer any question they asked, and move "
+        "the conversation one concrete step forward. Do not re-introduce "
+        "yourself from scratch."
+    )
+
+
 def _build_warm_path_context(warm_path: dict | None) -> str:
     """Build a WARM PATH section for the drafting prompt."""
     if not warm_path:
@@ -811,6 +827,19 @@ async def draft_message(
     warm_path_context = _build_warm_path_context(warm_path)
     linkedin_signal_context = _build_linkedin_signal_context(linkedin_signal)
 
+    reply_log_result = await db.execute(
+        select(OutreachLog)
+        .where(
+            OutreachLog.user_id == user_id,
+            OutreachLog.person_id == person_id,
+            OutreachLog.response_received.is_(True),
+            OutreachLog.last_reply_snippet.isnot(None),
+        )
+        .order_by(OutreachLog.replied_at.desc().nulls_last())
+        .limit(1)
+    )
+    reply_context = _build_reply_context(reply_log_result.scalar_one_or_none())
+
     if pinned_story_ids:
         pinned_result = await db.execute(
             select(Story).where(
@@ -870,6 +899,9 @@ async def draft_message(
             "OCCUPATION PLAYBOOK (use language native to this field):",
             occupation_playbook,
         ])
+
+    if reply_context:
+        user_prompt_sections.extend(["", reply_context])
 
     if warm_path_context:
         user_prompt_sections.extend(["", warm_path_context])

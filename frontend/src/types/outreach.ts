@@ -14,6 +14,8 @@ export interface OutreachLog {
   last_contacted_at: string | null;
   next_follow_up_at: string | null;
   response_received: boolean;
+  replied_at?: string | null;
+  last_reply_snippet?: string | null;
   person_name: string | null;
   person_title: string | null;
   company_name: string | null;
