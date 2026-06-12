@@ -185,3 +185,5 @@ export interface LinkedInGraphSyncSession {
   upload_path: string;
   max_batch_size: number;
 }
+
+export type PersonFeedback = 'wrong_person' | 'not_at_company' | 'helpful';

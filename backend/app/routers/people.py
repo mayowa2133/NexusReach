@@ -1,10 +1,17 @@
+import logging
 import uuid
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.inspection import inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import NO_VALUE
+
+from app.models.person import Person
+from app.services.known_people_service import expire_known_person
 
 from app.database import get_db
 from app.dependencies import get_current_user_id
@@ -32,6 +39,8 @@ from app.services.people import (
 )
 from app.services.employment_verification_service import verify_current_company_for_person
 from app.services.job_research_snapshot_service import save_job_research_snapshot
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/people", tags=["people"])
 
@@ -313,3 +322,49 @@ async def search_history(
         )
         for log in logs
     ]
+
+
+class PersonFeedbackRequest(BaseModel):
+    feedback: Literal["wrong_person", "not_at_company", "helpful"]
+
+
+@router.post("/{person_id}/feedback")
+async def submit_person_feedback(
+    person_id: uuid.UUID,
+    body: PersonFeedbackRequest,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Record contact-quality feedback and evict bad cache rows immediately."""
+    result = await db.execute(
+        select(Person)
+        .options(selectinload(Person.company))
+        .where(Person.id == person_id, Person.user_id == user_id)
+    )
+    person = result.scalar_one_or_none()
+    if not person:
+        raise HTTPException(status_code=404, detail="Person not found")
+
+    profile_data = dict(person.profile_data or {})
+    profile_data["user_feedback"] = body.feedback
+    person.profile_data = profile_data
+
+    evicted = False
+    if body.feedback in ("wrong_person", "not_at_company"):
+        if body.feedback == "not_at_company":
+            person.current_company_verified = False
+        company_name = person.company.name if person.company else None
+        if company_name:
+            try:
+                evicted = await expire_known_person(
+                    db, company_name=company_name, full_name=person.full_name
+                )
+            except Exception:
+                logger.warning("known-people eviction failed", exc_info=True)
+    await db.commit()
+    capture_event(
+        str(user_id),
+        "contact_feedback",
+        properties={"feedback": body.feedback, "cache_evicted": evicted},
+    )
+    return {"ok": True, "cache_evicted": evicted}

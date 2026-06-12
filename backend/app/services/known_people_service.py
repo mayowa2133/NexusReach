@@ -457,3 +457,36 @@ def _to_candidate_dict(kp: KnownPerson, kpc: KnownPersonCompany) -> dict:
         "company_name": kpc.company_name,
         "company_domain": kpc.company_domain,
     }
+
+
+async def expire_known_person(
+    db: AsyncSession,
+    *,
+    company_name: str,
+    full_name: str | None,
+) -> bool:
+    """Expire a cached known-person row after negative user feedback.
+
+    Expired rows are excluded from every lookup, so a "wrong person" or
+    "not at this company" report immediately stops the bad row from
+    short-circuiting future searches. Returns True when a row was expired.
+    """
+    if not full_name:
+        return False
+    normalized_name = _normalize_name(full_name)
+    normalized_company = _normalize_company(company_name)
+    stmt = (
+        select(KnownPerson)
+        .join(KnownPersonCompany, KnownPersonCompany.known_person_id == KnownPerson.id)
+        .where(
+            KnownPersonCompany.normalized_company_name == normalized_company,
+            KnownPerson.normalized_name == normalized_name,
+        )
+        .limit(5)
+    )
+    rows = list((await db.execute(stmt)).scalars().all())
+    for row in rows:
+        row.verification_status = "expired"
+    if rows:
+        await db.commit()
+    return bool(rows)

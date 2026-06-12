@@ -16,7 +16,9 @@ from app.services.people.classify import _compute_match_metadata
 from app.services.people.identity import _contains_any_keyword, _keyword_in_text, _normalize_identity
 from app.services.people.titles import CONTROLLED_LEAD_KEYWORDS, MANAGER_TITLE_KEYWORDS, SENIORITY_ORDER, TALENT_TITLE_KEYWORDS, _candidate_seniority_level, _is_adjacent_recruiter_like, _is_manager_like, _is_recruiter_like, _is_senior_ic_fallback, _role_like_title, _is_founder_exec_title
 from app.services.people.company_match import CURRENT_TRUSTED_SOURCES, _classify_employment_status, _trusted_public_match
+from app.services.people.affinity import affinity_rank
 from app.services.people.context import _location_match_rank
+from app.services.people.outcome_priors import outcome_prior_rank
 logger = logging.getLogger(__name__)
 
 
@@ -366,6 +368,8 @@ def _candidate_sort_key(data: dict, *, bucket: str, context: JobContext | None) 
             str(profile_data.get("public_snippet") or ""),
         )
         return (
+            0 if data.get("_posting_contact") else 1,
+            0 if data.get("_posted_this_req") else 1,
             0 if data.get("_actively_hiring") else 1,
             recruiter_scope_rank,
             location_rank,
@@ -375,6 +379,8 @@ def _candidate_sort_key(data: dict, *, bucket: str, context: JobContext | None) 
             source_rank,
             seniority_rank,
             weak_title_rank,
+            affinity_rank(data),
+            outcome_prior_rank(data),
             role_title_rank,
             normalized_name,
         )
@@ -404,6 +410,8 @@ def _candidate_sort_key(data: dict, *, bucket: str, context: JobContext | None) 
             seniority_rank,
             explicit_role_rank,
             weak_title_rank,
+            affinity_rank(data),
+            outcome_prior_rank(data),
             role_title_rank,
             normalized_name,
         )
@@ -417,6 +425,8 @@ def _candidate_sort_key(data: dict, *, bucket: str, context: JobContext | None) 
         seniority_rank,
         _recency_rank(data) if bucket == "peers" else 0,
         weak_title_rank,
+        affinity_rank(data),
+        outcome_prior_rank(data),
         role_title_rank,
         normalized_name,
     )

@@ -244,6 +244,13 @@ def _prepare_candidates(
                 decision["reason"] = f"bucket_type_mismatch:{person_type}"
                 decisions.append(decision)
                 continue
+        if data.get("_posting_contact"):
+            decision["status"] = "kept"
+            decision["reason"] = "named_in_posting"
+            decisions.append(decision)
+            data["_employment_status"] = "current"
+            current_primary.append(data)
+            continue
         if bucket == "recruiters":
             if not (
                 _is_recruiter_like(title)

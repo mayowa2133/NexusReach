@@ -70,6 +70,7 @@ vi.mock('@/hooks/usePeople', () => ({
   }),
   useSearchHistory: () => ({ data: [] }),
   useVerifyCurrentCompany: () => mockVerifyCurrentCompany,
+  useSendPersonFeedback: () => mockVerifyCurrentCompany,
 }));
 
 vi.mock('@/hooks/useEmail', () => ({

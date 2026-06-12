@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { usePeopleSearch, useEnrichPerson, useSavedPeople, useVerifyCurrentCompany, useSearchHistory } from '@/hooks/usePeople';
+import { usePeopleSearch, useEnrichPerson, useSavedPeople, useSendPersonFeedback, useVerifyCurrentCompany, useSearchHistory } from '@/hooks/usePeople';
 import { useFindEmail, useVerifyEmail } from '@/hooks/useEmail';
 import { useDraftMessage } from '@/hooks/useMessages';
 import { useCompanionStatus, useLinkedInAssist } from '@/hooks/useCompanion';
@@ -808,6 +808,7 @@ function PersonCard({
   const findEmail = useFindEmail();
   const verifyEmail = useVerifyEmail();
   const verifyCurrentCompany = useVerifyCurrentCompany();
+  const sendFeedback = useSendPersonFeedback();
   const draftMessage = useDraftMessage();
   const { data: companionStatus } = useCompanionStatus();
   const linkedinAssist = useLinkedInAssist();
@@ -1081,6 +1082,23 @@ function PersonCard({
             {verifyCurrentCompany.isPending ? 'Verifying company...' : 'Verify Current Company'}
           </Button>
         )}
+
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-muted-foreground"
+          disabled={sendFeedback.isPending}
+          onClick={async () => {
+            try {
+              await sendFeedback.mutateAsync({ personId: person.id, feedback: 'wrong_person' });
+              toast.success('Thanks - we will not suggest this contact again');
+            } catch {
+              toast.error('Failed to record feedback');
+            }
+          }}
+        >
+          Not the right person?
+        </Button>
 
         <ContactProof
           rows={[

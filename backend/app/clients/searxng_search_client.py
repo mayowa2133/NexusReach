@@ -413,10 +413,11 @@ async def search_hiring_team(
     geo_terms: list[str] | None = None,
     limit: int = 5,
     debug_trace: dict[str, Any] | None = None,
+    site_scope: str = "jobs",
 ) -> list[dict]:
     team_part = f' "{team_keywords[0]}"' if team_keywords else ""
     geo_part = brave_search_client._geo_query_clause(geo_terms)
-    query = f'site:linkedin.com/jobs "{company_name}" "{job_title}"{team_part}{geo_part}'
+    query = f'site:linkedin.com/{"posts" if site_scope == "posts" else "jobs"} "{company_name}" "{job_title}"{team_part}{geo_part}'
     if debug_trace is not None:
         debug_trace["queries"] = [query]
 

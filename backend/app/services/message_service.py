@@ -900,6 +900,15 @@ async def draft_message(
             occupation_playbook,
         ])
 
+    affinity = (person.profile_data or {}).get("affinity") if isinstance(person.profile_data, dict) else None
+    if isinstance(affinity, dict) and affinity.get("name"):
+        kind = "attended" if affinity.get("type") == "school" else "worked at"
+        user_prompt_sections.extend([
+            "",
+            f"SHARED BACKGROUND: you both {kind} {affinity['name']}. "
+            "Mention it naturally in one short clause - it is a door-opener, not the message.",
+        ])
+
     if reply_context:
         user_prompt_sections.extend(["", reply_context])
 

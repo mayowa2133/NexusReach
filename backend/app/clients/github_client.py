@@ -1,10 +1,15 @@
 """GitHub API client for finding engineers and their work."""
 
+import logging
+
 import httpx
 
 from app.config import settings
 
 GITHUB_BASE_URL = "https://api.github.com"
+
+
+logger = logging.getLogger(__name__)
 
 
 def _headers() -> dict[str, str]:
@@ -121,3 +126,79 @@ async def get_user_profile(username: str) -> dict | None:
         "top_repos": repos,
         "source": "github",
     }
+
+
+async def search_team_contributors(
+    org_name: str,
+    keywords: list[str],
+    limit: int = 8,
+) -> list[dict]:
+    """Find contributors to the org repos that match the job's team keywords.
+
+    Far more precise than org-wide members: contributors to the payments
+    repos ARE the payments team. Falls back to [] on any API limitation so
+    callers can use org members instead.
+    """
+    terms = " ".join(k for k in keywords[:3] if k)
+    if not terms:
+        return []
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                f"{GITHUB_BASE_URL}/search/repositories",
+                params={
+                    "q": f"org:{org_name} {terms} in:name,description,readme",
+                    "per_page": "3",
+                    "sort": "updated",
+                },
+                headers=_headers(),
+            )
+            if resp.status_code in (403, 404, 422):
+                return []
+            resp.raise_for_status()
+            repos = resp.json().get("items") or []
+
+            logins: list[str] = []
+            seen: set[str] = set()
+            repo_names: dict[str, str] = {}
+            for repo in repos:
+                contrib_resp = await client.get(
+                    f"{GITHUB_BASE_URL}/repos/{org_name}/{repo['name']}/contributors",
+                    params={"per_page": "10"},
+                    headers=_headers(),
+                )
+                if contrib_resp.status_code != 200:
+                    continue
+                for contributor in contrib_resp.json():
+                    login = contributor.get("login")
+                    if login and login.lower() not in seen and contributor.get("type") == "User":
+                        seen.add(login.lower())
+                        logins.append(login)
+                        repo_names[login] = repo["name"]
+                    if len(logins) >= limit:
+                        break
+                if len(logins) >= limit:
+                    break
+
+            results: list[dict] = []
+            for login in logins[:limit]:
+                profile_resp = await client.get(
+                    f"{GITHUB_BASE_URL}/users/{login}", headers=_headers()
+                )
+                if profile_resp.status_code != 200:
+                    continue
+                profile = profile_resp.json()
+                results.append(
+                    {
+                        "login": login,
+                        "full_name": profile.get("name") or login,
+                        "github_url": profile.get("html_url", ""),
+                        "location": profile.get("location"),
+                        "bio": profile.get("bio"),
+                        "team_repo": repo_names.get(login),
+                    }
+                )
+            return results
+    except Exception:
+        logger.warning("team contributor search failed for org=%s", org_name, exc_info=True)
+        return []

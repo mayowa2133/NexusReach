@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { trackFirstFunnelEvent, trackFunnelEvent } from '@/lib/observability';
-import type { Person, PeopleSearchResult, PaginatedResponse, SearchLogEntry } from '@/types';
+import type { Person, PersonFeedback, PeopleSearchResult, PaginatedResponse, SearchLogEntry } from '@/types';
 
 function peopleSearchCount(result: PeopleSearchResult): number {
   return result.recruiters.length + result.hiring_managers.length + result.peers.length;
@@ -99,6 +99,21 @@ export function useVerifyCurrentCompany() {
   return useMutation({
     mutationFn: (personId: string) =>
       api.post<Person>(`/api/people/verify-current-company/${personId}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['people'] });
+    },
+  });
+}
+
+export function useSendPersonFeedback() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ personId, feedback }: { personId: string; feedback: PersonFeedback }) => {
+      return api.post<{ ok: boolean; cache_evicted: boolean }>(
+        `/api/people/${personId}/feedback`,
+        { feedback },
+      );
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['people'] });
     },

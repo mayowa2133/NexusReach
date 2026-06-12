@@ -486,6 +486,7 @@ async def search_hiring_team(
     min_results: int = 1,
     debug_traces: list[dict[str, Any]] | None = None,
     search_profile: str = "standard",
+    site_scope: str = "jobs",
 ) -> list[dict]:
     providers: dict[str, ProviderFetcher] = {
         "searxng": searxng_search_client.search_hiring_team,
@@ -508,6 +509,7 @@ async def search_hiring_team(
         params={
             "company_name": company_name,
             "job_title": job_title,
+            "site_scope": site_scope,
             "team_keywords": team_keywords,
             "geo_terms": geo_terms,
             "limit": limit,

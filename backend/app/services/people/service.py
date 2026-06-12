@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients import github_client, proxycurl_client, search_router_client, tavily_search_client
 from app.models.job import Job
+from app.models.profile import Profile
 from app.models.person import Person
 from app.services import linkedin_graph_service
 from app.services.employment_verification_service import verify_people_current_company
@@ -21,6 +22,7 @@ from app.utils.company_identity import (
     normalize_company_name,
 )
 from app.utils.job_context import (
+    JobContext,
     build_job_geo_terms,
     extract_job_context,
     normalize_job_locations,
@@ -32,6 +34,8 @@ from app.services.occupation_taxonomy import (
 from app.services.people.buckets import _append_bucket, _backfill_sparse_hiring_manager_bucket, _bucketed_linkedin_slugs, _finalize_bucketed
 from app.services.people.candidates import DEFAULT_TARGET_COUNT_PER_BUCKET, _clamp_target_count_per_bucket, _debug_candidate_summary, _dedupe_candidate_bucket_groups, _dedupe_candidates, _expand_peer_candidates, _has_recruiter_lead_candidate, _interactive_enrichment_limit_for_target, _limit_interactive_bucket, _minimum_results_for_target, _needs_more_bucket_candidates, _needs_more_bucket_size_only, _prepare_candidates, _prepare_limit_for_target, _search_candidates, _search_limit_for_target, _should_expand_with_theorg, _should_run_manager_geo_recovery, _should_run_peer_targeted_recovery, _should_run_recruiter_targeted_recovery
 from app.services.people.classify import _classify_org_level, _classify_person, _classify_person_with_confidence
+from app.services.people.affinity import annotate_affinity
+from app.services.people.outcome_priors import load_reply_priors, stamp_outcome_priors
 from app.services.people.title_llm import normalize_title_key, resolve_ambiguous_titles
 from app.services.people.company_match import _candidate_matches_company, _classify_employment_status
 from app.services.people.context import _bucket_geo_terms, _build_roles_context
@@ -82,6 +86,42 @@ def _record_timing(
             **details,
         }
     )
+
+
+
+def _posting_contact_candidates(job, context: JobContext | None) -> list[dict]:
+    """Build top-priority candidates from contacts named in the posting itself.
+
+    A person-specific contact email published in the job description is the
+    designated contact for the req - stronger evidence than anything search
+    can find. Generic inboxes (jobs@) are skipped: they are not people.
+    """
+    contacts = list(getattr(context, "posting_contacts", None) or [])
+    candidates: list[dict] = []
+    for contact in contacts:
+        if contact.get("generic"):
+            continue
+        email = contact.get("email")
+        name = contact.get("name")
+        if not email:
+            continue
+        candidates.append(
+            {
+                "full_name": name or email.split("@", 1)[0].replace(".", " ").title(),
+                "title": "Recruiter",
+                "source": "job_posting",
+                "snippet": f"Named as the contact in {job.company_name}'s own posting for {job.title}.",
+                "email": email,
+                "email_source": "job_posting",
+                "_posting_contact": True,
+                "profile_data": {
+                    "company_match_confidence": "verified",
+                    "posting_contact": True,
+                    "posting_contact_email": email,
+                },
+            }
+        )
+    return candidates
 
 
 async def _title_overrides_for(candidates: list[dict]) -> dict[str, str]:
@@ -467,10 +507,18 @@ async def search_people_at_company(
         department=roles_context.department if roles_context else None,
     )
     if github_org and github_allowed:
-        github_members = await github_client.search_org_members(
-            github_org,
-            limit=max(5, target_count_per_bucket),
-        )
+        team_keywords_for_github = list(roles_context.team_keywords) if roles_context else []
+        if team_keywords_for_github:
+            github_members = await github_client.search_team_contributors(
+                github_org,
+                team_keywords_for_github,
+                limit=max(5, target_count_per_bucket),
+            )
+        if not github_members:
+            github_members = await github_client.search_org_members(
+                github_org,
+                limit=max(5, target_count_per_bucket),
+            )
         for member in github_members:
             repos = await github_client.get_user_repos(member["login"], limit=3)
             languages = list({repo["language"] for repo in repos if repo.get("language")})
@@ -860,6 +908,36 @@ async def search_people_for_job(
                 "actively_hiring": True,
             }
         hiring_team_candidates = _dedupe_candidates(hiring_team_candidates, actively_hiring_candidates)
+
+        # Req-poster search: recruiters announce the exact req title on their
+        # LinkedIn feed ("I'm hiring a Senior Platform Engineer!"). A feed-post
+        # match against the quoted title pins the person who owns THIS req.
+        req_poster_traces: list[dict[str, Any]] | None = [] if debug is not None else None
+        req_poster_candidates = await search_router_client.search_hiring_team(
+            job.company_name,
+            job.title,
+            team_keywords=["hiring"],
+            geo_terms=None,
+            limit=3,
+            min_results=0,
+            debug_traces=req_poster_traces,
+            search_profile=interactive_search_profile,
+            site_scope="posts",
+        )
+        for candidate in req_poster_candidates:
+            candidate["_actively_hiring"] = True
+            candidate["_posted_this_req"] = True
+            candidate["profile_data"] = {
+                **(candidate.get("profile_data") or {}),
+                "actively_hiring": True,
+                "posted_this_req": True,
+            }
+        if debug is not None:
+            debug["searches"]["req_poster"] = {
+                "provider_traces": req_poster_traces or [],
+                "returned_candidates": [_debug_candidate_summary(item) for item in req_poster_candidates[:5]],
+            }
+        hiring_team_candidates = _dedupe_candidates(hiring_team_candidates, req_poster_candidates)
         if debug is not None:
             debug["searches"]["actively_hiring_hiring_team"] = {
                 "provider_traces": actively_hiring_traces or [],
@@ -914,6 +992,12 @@ async def search_people_for_job(
         logger.debug("Hiring-people supplementary search failed for %s", job.company_name, exc_info=True)
 
     hiring_team_overrides = await _title_overrides_for(hiring_team_candidates)
+    posting_contact_candidates = _posting_contact_candidates(job, context)
+    if posting_contact_candidates and debug is not None:
+        debug["searches"]["posting_contacts"] = {
+            "returned_candidates": [_debug_candidate_summary(item) for item in posting_contact_candidates],
+        }
+    recruiter_candidates = _dedupe_candidates(posting_contact_candidates, recruiter_candidates)
     recruiter_candidates = _dedupe_candidates(
         recruiter_candidates,
         [candidate for candidate in hiring_team_candidates if _bucket_with_tiebreak(candidate, hiring_team_overrides) == "recruiter"],
@@ -1024,6 +1108,29 @@ async def search_people_for_job(
         manager_candidates=len(manager_candidates),
         peer_candidates=len(peer_candidates),
     )
+    # Affinity + outcome priors: opportunistic, bounded, applied before prep
+    # so the late ranking components see the annotations.
+    try:
+        profile_row = (
+            await db.execute(select(Profile).where(Profile.user_id == user_id))
+        ).scalar_one_or_none()
+        resume_parsed = profile_row.resume_parsed if profile_row else None
+        if resume_parsed:
+            affinity_matches = 0
+            for bucket_list in (recruiter_candidates, manager_candidates, peer_candidates):
+                affinity_matches += annotate_affinity(
+                    bucket_list, resume_parsed, target_company=job.company_name
+                )
+            if debug is not None:
+                debug["affinity_matches"] = affinity_matches
+        reply_priors = await load_reply_priors(db, user_id)
+        if reply_priors:
+            stamp_outcome_priors(recruiter_candidates, reply_priors, bucket="recruiters")
+            stamp_outcome_priors(manager_candidates, reply_priors, bucket="hiring_managers")
+            stamp_outcome_priors(peer_candidates, reply_priors, bucket="peers")
+    except Exception:
+        logger.debug("affinity/outcome annotation failed; ranking stays neutral", exc_info=True)
+
     prepare_started_at = time.monotonic()
     recruiter_results = _prepare_candidates(
         recruiter_candidates,

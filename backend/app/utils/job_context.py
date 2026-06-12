@@ -165,6 +165,7 @@ class JobContext:
     early_career: bool = False
     manager_titles: list[str] = field(default_factory=list)
     startup: bool = False
+    posting_contacts: list[dict] = field(default_factory=list)
     peer_titles: list[str] = field(default_factory=list)
     recruiter_titles: list[str] = field(default_factory=list)
     apollo_departments: list[str] = field(default_factory=list)
@@ -428,6 +429,64 @@ def _extract_core_role(title: str) -> str:
 
 def _keyword_label(keyword: str) -> str:
     return keyword.replace("_", " ").title()
+
+
+_CONTACT_EMAIL_RE = re.compile(
+    r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
+)
+_CONTACT_NAME_NEAR_RE = re.compile(
+    r"(?:contact|reach out to|questions\??\s*(?:to|for)?|email|send (?:your )?(?:resume|cv) to)"
+    r"\s+(?P<name>[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})?",
+    re.IGNORECASE,
+)
+_GENERIC_EMAIL_LOCALPARTS = (
+    "jobs", "careers", "hiring", "recruiting", "talent", "hr", "info",
+    "hello", "apply", "applications", "noreply", "no-reply", "support",
+)
+
+
+def _extract_posting_contacts(description: str | None) -> list[dict]:
+    """Pull named contacts and contact emails out of a job description.
+
+    Postings sometimes publish the designated contact directly ("send your
+    resume to jane.doe@acme.com", "questions? contact Jane Doe"). A published
+    person-specific email is the highest-confidence contact a posting can
+    give; generic inboxes (jobs@, careers@) are kept but flagged so they are
+    never treated as a person.
+    """
+    if not description:
+        return []
+    contacts: list[dict] = []
+    seen_emails: set[str] = set()
+    for match in _CONTACT_EMAIL_RE.finditer(description):
+        email = match.group(0).strip().rstrip(".,;:")
+        lowered = email.lower()
+        if lowered in seen_emails:
+            continue
+        seen_emails.add(lowered)
+        local = lowered.split("@", 1)[0]
+        generic = any(local == g or local.startswith(g + "-") or local.startswith(g + "_") for g in _GENERIC_EMAIL_LOCALPARTS)
+        # look for a nearby name in the preceding ~80 chars
+        window = description[max(0, match.start() - 80):match.start()]
+        name = None
+        name_match = None
+        for name_match in _CONTACT_NAME_NEAR_RE.finditer(window):
+            pass
+        if name_match is not None:
+            name = name_match.group("name")
+        if name:
+            tokens = name.split()
+            while tokens and tokens[0].lower() in {"contact", "email", "send", "reach", "to"}:
+                tokens.pop(0)
+            name = " ".join(tokens) or None
+        contacts.append({
+            "name": name,
+            "email": email,
+            "generic": generic,
+        })
+        if len(contacts) >= 3:
+            break
+    return contacts
 
 
 _REPORTING_LINE_RE = re.compile(
@@ -1062,6 +1121,7 @@ def extract_job_context(
     return JobContext(
         department=department,
         startup=is_startup,
+        posting_contacts=_extract_posting_contacts(description),
         team_keywords=team_keywords,
         domain_keywords=domain_keywords,
         product_team_names=product_team_names,
