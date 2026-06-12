@@ -91,7 +91,7 @@ NexusReach defaults to draft-first workflows. Users can optionally enable delaye
   - they do not override ambiguous-company protections
   - they do not bypass `current_company_verified` / `company_match_confidence`
   - they do not change email trust rules
-- Dashboard `warm_paths` semantics remain outreach-based in v1. Imported LinkedIn graph data is only used in people-search ranking and explanation.
+- Dashboard `warm_paths` unifies imported LinkedIn graph paths with outreach-derived paths (`insights_service`). Imported graph data also powers people-search ranking and explanation.
 
 ### Search-provider routing
 - SearXNG is the default primary search provider (free, self-hosted, unlimited).
@@ -130,6 +130,7 @@ NexusReach defaults to draft-first workflows. Users can optionally enable delaye
   - learned same-company pattern
 - Ambiguous-company protections still block unsafe guesses.
 - Public identity trust and email-domain trust are intentionally separate.
+- Staged drafts and sent mail are reconciled against the provider on a 30-minute beat: drafts sent from the Gmail/Outlook UI flip to `sent`, and thread replies flip `sent` to `responded` (with notification + `outreach_reply_received` analytics event) for up to 45 days after send.
 - Gmail and Outlook refresh tokens are encrypted at rest with versioned app keys.
 - Legacy plaintext OAuth tokens are cleared by migration and require reconnect.
 
@@ -141,7 +142,7 @@ NexusReach defaults to draft-first workflows. Users can optionally enable delaye
   - `gemini`
   - `groq`
 - The drafting flow is draft-first by default, with optional delayed auto-send for staged email drafts when the user explicitly enables it.
-- LinkedIn graph warm-path context is not yet threaded into drafting in v1.
+- Warm-path context (type, reason, connection) is threaded into drafting and shown on draft cards.
 
 ### Frontend state and UX
 - Saved contacts are grouped by company on the People page.
@@ -429,7 +430,7 @@ VITE_ANALYTICS_ENABLED=true
 23. The local browser connector requires Playwright locally and can either attach to Chrome over CDP or use a dedicated persistent browser profile.
 24. `newgrad_jobs` now behaves like a first-class non-ATS source: enrich detail pages inline, derive `remote` from the detail-page work-mode signal, and dedupe by `source + external_id` / canonical URL instead of ATS-only assumptions.
 25. Startup state is tag-based, not schema-based. Reserved tags are `startup` and `startup_source:<source_key>`.
-26. `POST /api/jobs/discover` supports `mode: "default" | "startup"`. The startup mode is a dedicated discover flow; it does not yet change hourly saved-search refresh behavior.
+26. `POST /api/jobs/discover` supports `mode: "default" | "startup"`. Startup-mode saved searches participate in the hourly feed refresh via `run_startup_refresh_for_query`.
 27. Startup ecosystem imports must preserve the underlying `source` / `ats` from the resolved posting while merging startup provenance into `job.tags` on dedupe.
 28. Wellfound is intentionally best-effort right now. Live fetches can return `403` anti-bot pages and should fail soft to `[]` rather than breaking startup discover.
 29. `auth_mode=dev` is fail-closed unless `NEXUSREACH_DEV_AUTH_BYPASS_ENABLED=true`; the frontend has the same explicit `VITE_DEV_AUTH_BYPASS_ENABLED=true` guard.

@@ -77,6 +77,10 @@ celery_app.conf.update(
             "task": "app.tasks.auto_prospect.process_pending_sends",
             "schedule": crontab(minute="*/5"),  # every 5 minutes
         },
+        "reconcile-outreach-sends": {
+            "task": "app.tasks.outreach_reconcile.reconcile_outreach_sends",
+            "schedule": crontab(minute="*/30"),  # sends + replies, every 30 minutes
+        },
         "send-cadence-digests": {
             "task": "app.tasks.cadence_digest.send_cadence_digests",
             "schedule": crontab(minute=0, hour=9, day_of_week=1),  # Monday 09:00 UTC

@@ -7,6 +7,8 @@ import time
 import uuid
 from urllib.parse import urlencode
 
+from datetime import datetime, timezone
+
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -370,4 +372,72 @@ async def check_draft_sent(
         "sent": (not is_draft) and bool(sent_date),
         "message_id": data.get("id"),
         "is_draft": is_draft,
+    }
+
+
+async def check_reply_received(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    provider_message_id: str,
+    since: datetime,
+) -> dict:
+    """Check whether the conversation of a sent Outlook message got a reply.
+
+    Resolves the message's ``conversationId`` and looks for inbox messages
+    in the same conversation received after ``since``. Restricting to the
+    inbox folder means only messages the user received count as replies.
+    A 404 on the original message means it was deleted - report no reply.
+
+    Returns:
+        {"replied": bool, "reply_count": int, "last_reply_at": str | None}
+    """
+    result = await db.execute(
+        select(UserSettings).where(UserSettings.user_id == user_id)
+    )
+    user_settings = result.scalar_one_or_none()
+    if not user_settings or not user_settings.outlook_refresh_token:
+        raise ValueError("Outlook not connected.")
+
+    access_token = await get_access_token(db, user_id, user_settings)
+    headers = {"Authorization": f"Bearer {access_token}"}
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        msg_resp = await client.get(
+            f"{GRAPH_API_URL}/me/messages/{provider_message_id}",
+            headers=headers,
+            params={"$select": "id,conversationId"},
+        )
+        if msg_resp.status_code == 404:
+            return {"replied": False, "reply_count": 0, "last_reply_at": None}
+        msg_resp.raise_for_status()
+        conversation_id = msg_resp.json().get("conversationId")
+        if not conversation_id:
+            return {"replied": False, "reply_count": 0, "last_reply_at": None}
+
+        since_iso = since.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        escaped = conversation_id.replace("'", "''")
+        list_resp = await client.get(
+            f"{GRAPH_API_URL}/me/mailFolders/inbox/messages",
+            headers=headers,
+            params={
+                "$filter": (
+                    f"conversationId eq '{escaped}' "
+                    f"and receivedDateTime ge {since_iso}"
+                ),
+                "$select": "id,receivedDateTime",
+                "$top": "10",
+            },
+        )
+        list_resp.raise_for_status()
+
+    received = [
+        item.get("receivedDateTime")
+        for item in list_resp.json().get("value") or []
+        if item.get("receivedDateTime")
+    ]
+    return {
+        "replied": bool(received),
+        "reply_count": len(received),
+        "last_reply_at": max(received) if received else None,
     }

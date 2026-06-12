@@ -10,6 +10,8 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from urllib.parse import urlencode
 
+from datetime import datetime, timezone
+
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -384,4 +386,81 @@ async def check_draft_sent(
         "sent": "SENT" in label_ids and "DRAFT" not in label_ids,
         "message_id": data.get("id"),
         "label_ids": label_ids,
+    }
+
+
+async def check_reply_received(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    provider_message_id: str,
+    since: datetime,
+) -> dict:
+    """Check whether the thread of a sent Gmail message received a reply.
+
+    Fetches the message's thread and looks for any non-SENT, non-DRAFT
+    message that arrived after ``since`` (the time we recorded the send).
+    Received messages in the same thread are treated as replies, which
+    avoids needing to compare From headers against the user's own address.
+    A 404 on the original message means it was deleted - report no reply.
+
+    Returns:
+        {"replied": bool, "reply_count": int, "last_reply_at": str | None}
+    """
+    result = await db.execute(
+        select(UserSettings).where(UserSettings.user_id == user_id)
+    )
+    user_settings = result.scalar_one_or_none()
+    if not user_settings or not user_settings.gmail_refresh_token:
+        raise ValueError("Gmail not connected.")
+
+    access_token = await _get_access_token(db, user_id, user_settings)
+    headers = {"Authorization": f"Bearer {access_token}"}
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        msg_resp = await client.get(
+            f"{GMAIL_API_URL}/users/me/messages/{provider_message_id}",
+            headers=headers,
+            params={"format": "minimal"},
+        )
+        if msg_resp.status_code == 404:
+            return {"replied": False, "reply_count": 0, "last_reply_at": None}
+        msg_resp.raise_for_status()
+        thread_id = msg_resp.json().get("threadId")
+        if not thread_id:
+            return {"replied": False, "reply_count": 0, "last_reply_at": None}
+
+        thread_resp = await client.get(
+            f"{GMAIL_API_URL}/users/me/threads/{thread_id}",
+            headers=headers,
+            params={"format": "metadata", "metadataHeaders": "From"},
+        )
+        if thread_resp.status_code == 404:
+            return {"replied": False, "reply_count": 0, "last_reply_at": None}
+        thread_resp.raise_for_status()
+
+    since_ms = int(since.timestamp() * 1000)
+    replies = []
+    for message in thread_resp.json().get("messages") or []:
+        if message.get("id") == provider_message_id:
+            continue
+        label_ids = message.get("labelIds") or []
+        if "SENT" in label_ids or "DRAFT" in label_ids:
+            continue
+        try:
+            internal_ms = int(message.get("internalDate") or 0)
+        except (TypeError, ValueError):
+            continue
+        if internal_ms > since_ms:
+            replies.append(internal_ms)
+
+    last_reply_at = None
+    if replies:
+        last_reply_at = datetime.fromtimestamp(
+            max(replies) / 1000, tz=timezone.utc
+        ).isoformat()
+    return {
+        "replied": bool(replies),
+        "reply_count": len(replies),
+        "last_reply_at": last_reply_at,
     }
