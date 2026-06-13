@@ -133,3 +133,76 @@ def test_published_leader_ranks_above_generic_xray():
         bucket="hiring_managers", context=ctx, limit=5,
     )
     assert ranked[0]["full_name"] == "Site Leader"
+
+
+# ---------------------------------------------------------------------------
+# Company-site directory paths (legal / education / healthcare)
+# ---------------------------------------------------------------------------
+
+def test_company_site_recognizes_directory_pages():
+    # an attorneys directory page should register as a "team page"
+    attorneys = {"text": ("Our attorneys serve clients nationwide. " * 5) +
+                 "Jane Smith, Partner. John Roe, Of Counsel. Amy Lee, Managing Partner. "
+                 "Associate attorneys and principals lead each practice group."}
+    faculty = {"text": ("Faculty and staff directory. " * 5) +
+               "Dr. Pat Vance, Professor. Sam Ortiz, Dean. Lee Park, Department Chair."}
+    assert company_site._looks_like_team_page(attorneys) is True
+    assert company_site._looks_like_team_page(faculty) is True
+
+
+def test_directory_paths_present():
+    paths = company_site._COMMON_PATHS
+    for p in ("/attorneys", "/faculty", "/providers", "/our-people", "/directory"):
+        assert p in paths
+
+
+# ---------------------------------------------------------------------------
+# Public-footprint miner (speaker / podcast / byline / X bio)
+# ---------------------------------------------------------------------------
+
+async def test_public_footprint_extracts_leaders_from_serp():
+    from app.services.people import public_footprint
+
+    serp = [
+        {"title": "Acme CRO on the SaaS podcast",
+         "content": "This week Jane Carter, Chief Revenue Officer at Acme, joins to discuss scaling sales.",
+         "url": "https://podcast.example.com/ep1"},
+        {"title": "Marketing keynote",
+         "content": "Sam Lee, VP of Marketing, spoke at the Acme growth conference.",
+         "url": "https://conf.example.com/talk"},
+    ]
+    with (
+        patch.object(public_footprint.search_cache_client, "get_json", new=AsyncMock(return_value=None)),
+        patch.object(public_footprint.search_cache_client, "set_json", new=AsyncMock()),
+        patch.object(public_footprint, "_run_query", new=AsyncMock(return_value=serp)),
+    ):
+        leaders = await public_footprint.discover_public_footprint_leaders("Acme", ["Chief Revenue Officer"])
+
+    names = [c["full_name"] for c in leaders]
+    assert "Jane Carter" in names
+    jane = next(c for c in leaders if c["full_name"] == "Jane Carter")
+    assert jane["source"] == "public_footprint"
+    assert "Chief Revenue Officer" in jane["title"]
+    # noisiest source -> weak confidence so it ranks below own-domain/news
+    assert jane["profile_data"]["company_match_confidence"] == "weak_signal"
+
+
+async def test_public_footprint_fails_soft():
+    from app.services.people import public_footprint
+
+    with (
+        patch.object(public_footprint.search_cache_client, "get_json", new=AsyncMock(return_value=None)),
+        patch.object(public_footprint.search_cache_client, "set_json", new=AsyncMock()),
+        patch.object(public_footprint, "_run_query", new=AsyncMock(return_value=[])),
+    ):
+        assert await public_footprint.discover_public_footprint_leaders("Acme", []) == []
+    assert await public_footprint.discover_public_footprint_leaders("", []) == []
+
+
+async def test_news_quote_strips_trailing_punctuation():
+    results = [{"title": "Notion names CRO",
+                "content": "Notion today announced Erica Anderson, Chief Revenue Officer, will lead sales.",
+                "url": "https://news.example.com/notion"}]
+    with patch.object(tavily_search_client, "_run_tavily_query", new=AsyncMock(return_value=results)):
+        cands = await tavily_search_client.search_executive_quotes("Notion", ["Chief Revenue Officer"])
+    assert cands and cands[0]["full_name"] == "Erica Anderson"  # no trailing period

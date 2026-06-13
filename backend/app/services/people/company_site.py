@@ -18,7 +18,13 @@ import json
 import logging
 import re
 
-from app.clients import llm_client, public_page_client, search_cache_client
+from app.clients import (
+    brave_search_client,
+    llm_client,
+    public_page_client,
+    search_cache_client,
+    searxng_search_client,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,12 +47,31 @@ _COMMON_PATHS = (
     "/about",
     "/who-we-are",
     "/company",
+    # Domain-specific people directories (legal / education / healthcare /
+    # professional services) - these publish the full staff, not just C-level.
+    "/attorneys",
+    "/our-attorneys",
+    "/lawyers",
+    "/professionals",
+    "/our-people",
+    "/faculty",
+    "/faculty-staff",
+    "/directory",
+    "/staff",
+    "/providers",
+    "/our-providers",
+    "/find-a-doctor",
+    "/physicians",
+    "/our-doctors",
 )
 
 _TEAM_PAGE_SIGNALS = (
     "ceo", "chief", "founder", "co-founder", "president", "vp ", "vice president",
     "head of", "director", "leadership", "our team", "management team",
     "executive", "leadership team",
+    # directory signals (legal / education / healthcare / professional services)
+    "partner", "attorney", "counsel", "professor", "faculty", "physician",
+    "md,", "m.d.", "nurse", "dean", "principal", "manager",
 )
 
 _LEADER_TITLE_RE = re.compile(
@@ -78,17 +103,49 @@ def _cache_key(domain: str) -> str:
     return LEADERS_CACHE_PREFIX + domain.lower().strip()
 
 
-async def _fetch_team_page(domain: str) -> tuple[str, str] | None:
-    """Return (url, text) for the company's leadership/team page, or None."""
+async def _search_team_page_url(company_name: str, domain: str) -> str | None:
+    """Find the leadership/team/directory page URL via SERP, restricted to the
+    company's own domain. Catches non-standard paths (e.g. /en/people.html)
+    that fixed-path probing misses."""
+    root = domain.removeprefix("www.")
+    query = f'site:{root} (leadership OR "our team" OR "our people" OR attorneys OR faculty OR providers OR directory)'
+    try:
+        results = await searxng_search_client._run_searxng_query(query, 6)
+    except Exception:
+        results = []
+    if not results:
+        try:
+            results = await brave_search_client._run_brave_query(query, 6)
+        except Exception:
+            results = []
+    for item in results:
+        url = item.get("url") or ""
+        if root in url:
+            return url
+    return None
+
+
+async def _fetch_team_page(domain: str, company_name: str = "") -> tuple[str, str] | None:
+    """Return (url, text) for the company's leadership/team page, or None.
+
+    Tries a SERP-discovered URL first (handles non-standard paths), then falls
+    back to probing common paths on the domain. Note: pages whose people list
+    is JS-rendered yield little static text and are skipped - the SERP-based
+    news/footprint miners cover those companies instead.
+    """
     domain = domain.strip().lower().rstrip("/")
     if not domain or "." not in domain:
         return None
-    if not domain.startswith("http"):
-        base = f"https://{domain.removeprefix('www.')}"
-    else:
-        base = domain
-    for path in _COMMON_PATHS:
-        url = base + path
+    base = domain if domain.startswith("http") else f"https://{domain.removeprefix('www.')}"
+
+    candidate_urls: list[str] = []
+    if company_name:
+        serp_url = await _search_team_page_url(company_name, domain)
+        if serp_url:
+            candidate_urls.append(serp_url)
+    candidate_urls.extend(base + path for path in _COMMON_PATHS)
+
+    for url in candidate_urls:
         try:
             page = await public_page_client.fetch_page(url, timeout_seconds=FETCH_TIMEOUT_SECONDS)
         except Exception:
@@ -155,7 +212,7 @@ async def discover_company_site_leaders(
         cached = None
 
     if cached is None:
-        fetched = await _fetch_team_page(domain)
+        fetched = await _fetch_team_page(domain, company_name)
         if not fetched:
             try:
                 await search_cache_client.set_json(cache_key, [], ttl_seconds=LEADERS_CACHE_TTL_SECONDS)

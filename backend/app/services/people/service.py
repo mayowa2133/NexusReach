@@ -36,6 +36,7 @@ from app.services.people.candidates import DEFAULT_TARGET_COUNT_PER_BUCKET, _cla
 from app.services.people.classify import _classify_org_level, _classify_person, _classify_person_with_confidence
 from app.services.people.affinity import annotate_affinity
 from app.services.people.company_site import discover_company_site_leaders
+from app.services.people.public_footprint import discover_public_footprint_leaders
 from app.services.people.github_team import resolve_github_org, resolve_team_contacts
 from app.services.people.outcome_priors import load_reply_priors, stamp_outcome_priors
 from app.services.people.title_llm import normalize_title_key, resolve_ambiguous_titles
@@ -1137,6 +1138,7 @@ async def search_people_for_job(
     nontech_started_at = time.monotonic()
     site_leaders: list[dict] = []
     news_leaders: list[dict] = []
+    footprint_leaders: list[dict] = []
     is_eng_role = _occupation_is_engineering_flavored(
         context.occupation_keys if context else None,
         department=context.department if context else None,
@@ -1147,15 +1149,22 @@ async def search_people_for_job(
             site_leaders = await discover_company_site_leaders(job.company_name, site_domain)
         except Exception:
             logger.debug("company-site leadership discovery failed; skipping", exc_info=True)
+        title_hints = list(context.manager_titles[:3]) if context else []
         try:
-            title_hints = list(context.manager_titles[:3]) if context else []
             news_leaders = await tavily_search_client.search_executive_quotes(
                 job.company_name, title_hints
             )
         except Exception:
             logger.debug("news executive-quote mining failed; skipping", exc_info=True)
-        if site_leaders or news_leaders:
-            manager_candidates = _dedupe_candidates(manager_candidates, site_leaders + news_leaders)
+        try:
+            footprint_leaders = await discover_public_footprint_leaders(
+                job.company_name, title_hints
+            )
+        except Exception:
+            logger.debug("public-footprint mining failed; skipping", exc_info=True)
+        new_leaders = site_leaders + news_leaders + footprint_leaders
+        if new_leaders:
+            manager_candidates = _dedupe_candidates(manager_candidates, new_leaders)
             if debug is not None:
                 debug["searches"]["company_site_leaders"] = [
                     _debug_candidate_summary(c) for c in site_leaders
@@ -1163,12 +1172,16 @@ async def search_people_for_job(
                 debug["searches"]["news_quote_leaders"] = [
                     _debug_candidate_summary(c) for c in news_leaders
                 ]
+                debug["searches"]["public_footprint_leaders"] = [
+                    _debug_candidate_summary(c) for c in footprint_leaders
+                ]
     _record_timing(
         debug,
         stage="nontech_leadership_resolution",
         started_at=nontech_started_at,
         site_leaders=len(site_leaders),
         news_leaders=len(news_leaders),
+        footprint_leaders=len(footprint_leaders),
     )
 
     scoring_started_at = time.monotonic()

@@ -346,6 +346,8 @@ async def search_executive_quotes(
                     title, name = g1, g2
                 else:
                     name, title = g1, g2
+                name = name.strip().strip(".,;:-\u2013\u2014'\"").strip()
+                title = title.strip().strip(".,;:-\u2013\u2014").strip()
                 key = name.lower()
                 if " " not in name or key in seen or len(name) > 40:
                     continue
