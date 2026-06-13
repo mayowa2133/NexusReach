@@ -653,6 +653,46 @@
     };
   }
 
+  function captureJobPoster() {
+    // Read LinkedIn's structured "Posted by / Job poster" hirer card, which
+    // appears on many job postings independently of the "Meet the hiring team"
+    // section. Returns a single member object or null.
+    const selectors = [
+      ".job-details-jobs-unified-top-card__job-poster",
+      ".hirer-card__container",
+      ".jobs-poster__name",
+      ".jobs-details-top-card__job-poster",
+    ];
+    let container = null;
+    for (const sel of selectors) {
+      const el = document.querySelector(sel);
+      if (el) { container = el.closest("section, div") || el; break; }
+    }
+    if (!container) {
+      // fall back: an element whose text says "Posted by", scoped to its card
+      const labelled = Array.from(document.querySelectorAll("section, div, span"))
+        .find((el) => /\bposted by\b/i.test(el.textContent || "") && el.querySelector('a[href*="/in/"]'));
+      if (labelled) container = labelled;
+    }
+    if (!container) return null;
+
+    const anchor = container.querySelector('a[href*="/in/"]');
+    if (!anchor) return null;
+    const url = normalizeLinkedInUrl(anchor.getAttribute("href"));
+    if (!url) return null;
+    const name = textOf(anchor).split("\n")[0].trim()
+      || textOf(container.querySelector("span[aria-hidden='true'], strong"));
+    if (!name || name.split(" ").length < 2) return null;
+    const lines = linesOf(container).filter((l) => l && l !== name && !/\bposted by\b/i.test(l));
+    const headline = lines.find((l) => l.length > 2) || null;
+    return {
+      name,
+      profile_url: url,
+      headline: headline ? headline.slice(0, 200) : null,
+      role_label: "Job poster",
+    };
+  }
+
   function captureHiringTeam() {
     // Locate the "Meet the hiring team" card on a LinkedIn job posting and
     // extract the people LinkedIn itself attached to this req. Only visible
@@ -668,6 +708,16 @@
 
     const seen = new Set();
     const members = [];
+
+    // Capture the structured "Posted by" hirer first so its precise "Job
+    // poster" label is not overwritten by the generic card scan below. Works
+    // even when the posting has no "Meet the hiring team" card.
+    const poster = captureJobPoster();
+    if (poster) {
+      seen.add(poster.profile_url);
+      members.push(poster);
+    }
+
     const cards = Array.from(scope.querySelectorAll('a[href*="/in/"]'));
     for (const anchor of cards) {
       const url = normalizeLinkedInUrl(anchor.getAttribute("href"));
@@ -749,6 +799,7 @@
     window.__NEXUSREACH_LINKEDIN_COMPANION__ = {
       captureProfile,
       captureHiringTeam,
+      captureJobPoster,
       mountHiringTeamButton,
       cleanGraphName,
       matchesControlLabel,

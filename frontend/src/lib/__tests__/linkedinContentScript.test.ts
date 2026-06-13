@@ -7,6 +7,8 @@ type LinkedInContentHooks = {
   matchesControlLabel: (value: string, label: string) => boolean;
   runAssist: (payload: Record<string, unknown>) => Promise<Record<string, unknown>>;
   scrapeFollows: (entityType: 'person' | 'company') => Array<Record<string, unknown>>;
+  captureHiringTeam: () => { members: Array<Record<string, unknown>>; reason?: string };
+  captureJobPoster: () => Record<string, unknown> | null;
 };
 
 declare global {
@@ -153,5 +155,52 @@ describe('LinkedIn companion content script', () => {
     expect(document.querySelector('textarea')).toHaveValue('Hi Jordan, I would like to connect.');
     expect(sendClicked).toBe(false);
     expect(document.body).toHaveTextContent('Review and send manually');
+  });
+  it('captures the structured "Posted by" hirer when there is no hiring-team card', () => {
+    Object.defineProperty(window, 'location', {
+      value: new URL('https://www.linkedin.com/jobs/view/123456'),
+      writable: true,
+    });
+    document.body.innerHTML = `
+      <main>
+        <h1 class="job-details-jobs-unified-top-card__job-title">Account Executive</h1>
+        <a href="/company/acme">Acme</a>
+        <div class="job-details-jobs-unified-top-card__job-poster">
+          <span>Posted by</span>
+          <a href="/in/jamie-poster">Jamie Poster</a>
+          <span aria-hidden="true">Senior Recruiter at Acme</span>
+        </div>
+      </main>
+    `;
+    const hooks = loadContentScript();
+    const result = hooks.captureHiringTeam();
+    const names = result.members.map((m) => m.name);
+    expect(names).toContain('Jamie Poster');
+    const poster = result.members.find((m) => m.name === 'Jamie Poster');
+    expect(poster?.role_label).toBe('Job poster');
+    expect(poster?.profile_url).toContain('/in/jamie-poster');
+  });
+
+  it('does not duplicate a poster who also appears in the hiring-team card', () => {
+    Object.defineProperty(window, 'location', {
+      value: new URL('https://www.linkedin.com/jobs/view/123456'),
+      writable: true,
+    });
+    document.body.innerHTML = `
+      <main>
+        <section>
+          <h2>Meet the hiring team</h2>
+          <li><a href="/in/jamie-poster">Jamie Poster</a><span>Recruiter</span></li>
+        </section>
+        <div class="job-details-jobs-unified-top-card__job-poster">
+          <span>Posted by</span>
+          <a href="/in/jamie-poster">Jamie Poster</a>
+        </div>
+      </main>
+    `;
+    const hooks = loadContentScript();
+    const result = hooks.captureHiringTeam();
+    const jamieCount = result.members.filter((m) => m.name === 'Jamie Poster').length;
+    expect(jamieCount).toBe(1);
   });
 });
