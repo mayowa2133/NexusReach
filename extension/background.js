@@ -154,6 +154,28 @@ async function saveLinkedInPageCapture(personId, capture) {
   return true;
 }
 
+async function captureHiringTeam(tabId, context) {
+  // Ask the content script on the active job tab to read the "Meet the hiring
+  // team" panel, then ingest the captured contacts server-side.
+  const scraped = await chrome.tabs.sendMessage(tabId, { type: "CAPTURE_HIRING_TEAM" });
+  if (!scraped || scraped.status === "error") {
+    throw new Error(scraped?.message || "Could not read the hiring team panel.");
+  }
+  const members = (scraped.members || []).filter((m) => m && m.name && m.profile_url);
+  if (!members.length) {
+    return { stored: 0, recruiters: 0, hiring_managers: 0, reason: scraped.reason || "no_members" };
+  }
+  return apiRequest("/api/people/hiring-team-capture", {
+    method: "POST",
+    body: JSON.stringify({
+      company_name: context?.companyName || scraped.company_label || "",
+      job_id: context?.jobId || null,
+      job_title: context?.jobTitle || scraped.job_title || null,
+      members,
+    }),
+  });
+}
+
 async function markMessageCopied(messageId) {
   if (!messageId) return false;
   await apiRequest(`/api/messages/${messageId}/copy`, {
@@ -365,6 +387,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         fetchProfile().then((nextProfile) => sendResponse({ profile: nextProfile }));
       }
     });
+    return true;
+  }
+
+  if (message.type === "CAPTURE_HIRING_TEAM") {
+    captureHiringTeam(message.tabId, message.context || {})
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }));
     return true;
   }
 

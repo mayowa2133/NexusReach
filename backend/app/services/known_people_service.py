@@ -36,6 +36,7 @@ GLOBAL_CACHE_ELIGIBLE_SOURCES = frozenset({
     "brave_hiring_team",
     "serper_hiring_team",
     "searxng_hiring_team",
+    "linkedin_hiring_team",
     "theorg_traversal",
     "brave_search",
     "serper_search",

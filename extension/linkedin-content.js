@@ -653,9 +653,58 @@
     };
   }
 
+  function captureHiringTeam() {
+    // Locate the "Meet the hiring team" card on a LinkedIn job posting and
+    // extract the people LinkedIn itself attached to this req. Only visible
+    // page content is read - nothing is fetched or expanded beyond the panel.
+    const href = window.location.href;
+    if (!/\/jobs\//.test(href)) {
+      return { members: [], reason: "not_a_job_page" };
+    }
+
+    const section = Array.from(document.querySelectorAll("section, div"))
+      .find((el) => /meet the hiring team|meet the team|hiring team/i.test((el.querySelector("h2, h3, header")?.textContent || "")));
+    const scope = section || document;
+
+    const seen = new Set();
+    const members = [];
+    const cards = Array.from(scope.querySelectorAll('a[href*="/in/"]'));
+    for (const anchor of cards) {
+      const url = normalizeLinkedInUrl(anchor.getAttribute("href"));
+      if (!url || seen.has(url)) continue;
+      // climb to the card container to read the name/headline/role label
+      const card = anchor.closest("li, div") || anchor;
+      const name = textOf(anchor).split("\n")[0].trim()
+        || textOf(card.querySelector("span[aria-hidden='true'], strong"));
+      if (!name || name.split(" ").length < 2) continue;
+      const lines = linesOf(card).filter((l) => l && l !== name);
+      const roleLabel = lines.find((l) => /job poster|recruiter|talent|hiring manager|manager|recruit/i.test(l)) || null;
+      const headline = lines.find((l) => l !== roleLabel) || null;
+      seen.add(url);
+      members.push({
+        name,
+        profile_url: url,
+        headline: headline ? headline.slice(0, 200) : null,
+        role_label: roleLabel,
+      });
+      if (members.length >= 6) break;
+    }
+
+    // job title + company from the posting header
+    const jobTitle = textOf(queryFirst(["h1", ".job-details-jobs-unified-top-card__job-title"])) || null;
+    const companyLabel = textOf(queryFirst([
+      ".job-details-jobs-unified-top-card__company-name",
+      ".jobs-unified-top-card__company-name",
+      'a[href*="/company/"]',
+    ])) || null;
+
+    return { members, job_title: jobTitle, company_label: companyLabel };
+  }
+
   if (TEST_MODE) {
     window.__NEXUSREACH_LINKEDIN_COMPANION__ = {
       captureProfile,
+      captureHiringTeam,
       cleanGraphName,
       matchesControlLabel,
       normalizeLinkedInUrl,
@@ -679,6 +728,19 @@
             message: error instanceof Error ? error.message : "LinkedIn assist failed.",
           }),
         );
+      return true;
+    }
+
+    if (message.type === "CAPTURE_HIRING_TEAM") {
+      try {
+        sendResponse({ status: "ok", ...captureHiringTeam() });
+      } catch (error) {
+        sendResponse({
+          status: "error",
+          members: [],
+          message: error instanceof Error ? error.message : "Hiring-team capture failed.",
+        });
+      }
       return true;
     }
 

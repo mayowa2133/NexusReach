@@ -12,6 +12,7 @@ from sqlalchemy.orm.attributes import NO_VALUE
 
 from app.models.person import Person
 from app.services.known_people_service import expire_known_person
+from app.services.people.hiring_team_capture import ingest_hiring_team_capture
 
 from app.database import get_db
 from app.dependencies import get_current_user_id
@@ -368,3 +369,60 @@ async def submit_person_feedback(
         properties={"feedback": body.feedback, "cache_evicted": evicted},
     )
     return {"ok": True, "cache_evicted": evicted}
+
+
+class HiringTeamMember(BaseModel):
+    name: str
+    headline: str | None = None
+    role_label: str | None = None
+    profile_url: str | None = None
+
+
+class HiringTeamCaptureRequest(BaseModel):
+    company_name: str
+    members: list[HiringTeamMember]
+    job_id: str | None = None
+    job_title: str | None = None
+
+
+@router.post("/hiring-team-capture")
+async def hiring_team_capture(
+    body: HiringTeamCaptureRequest,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Ingest the LinkedIn 'Meet the hiring team' panel from the companion.
+
+    Stores the captured contacts as verified people in the right bucket and
+    caches them for the company. These are the literal req owners LinkedIn
+    attached to the posting.
+    """
+    job_uuid: uuid.UUID | None = None
+    if body.job_id:
+        try:
+            job_uuid = uuid.UUID(body.job_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid job_id format") from exc
+
+    result = await ingest_hiring_team_capture(
+        db,
+        user_id,
+        company_name=body.company_name,
+        members=[m.model_dump() for m in body.members],
+        job_id=job_uuid,
+        job_title=body.job_title,
+    )
+    capture_event(
+        str(user_id),
+        "hiring_team_captured",
+        properties={
+            "stored": result["stored"],
+            "recruiters": result["recruiters"],
+            "hiring_managers": result["hiring_managers"],
+        },
+    )
+    return {
+        "stored": result["stored"],
+        "recruiters": result["recruiters"],
+        "hiring_managers": result["hiring_managers"],
+    }

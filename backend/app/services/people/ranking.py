@@ -23,6 +23,11 @@ from app.services.people.outcome_priors import outcome_prior_rank
 logger = logging.getLogger(__name__)
 
 
+def _hiring_team_rank(data: dict) -> int:
+    """Literal req owner from LinkedIn's hiring-team panel — the top signal."""
+    return 0 if data.get("_hiring_team_capture") else 1
+
+
 SOURCE_PRIORITY = {
     "apollo": 0,
     "proxycurl": 1,
@@ -369,6 +374,7 @@ def _candidate_sort_key(data: dict, *, bucket: str, context: JobContext | None) 
             str(profile_data.get("public_snippet") or ""),
         )
         return (
+            _hiring_team_rank(data),
             0 if data.get("_posting_contact") else 1,
             0 if data.get("_posted_this_req") else 1,
             0 if data.get("_actively_hiring") else 1,
@@ -403,6 +409,7 @@ def _candidate_sort_key(data: dict, *, bucket: str, context: JobContext | None) 
             )
         return (
             *startup_priority,
+            _hiring_team_rank(data),
             github_team_rank(data),
             0 if data.get("_actively_hiring") else 1,
             _team_keyword_match_rank(data, bucket=bucket, context=context),
