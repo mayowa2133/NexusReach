@@ -121,3 +121,36 @@ def test_engineering_context_unchanged():
     assert "software_engineering" in ctx.occupation_keys
     # engineering roles still get engineering manager seeds
     assert any("Engineer" in t or "Engineering" in t or "Lead" in t for t in ctx.manager_titles)
+
+
+def test_all_occupations_grouped_sensibly():
+    """Every occupation maps to a sensible function group (or None), and no
+    occupation is mislabeled 'technical' via the department fallback."""
+    from app.services.occupation_taxonomy import OCCUPATIONS
+    from app.services.people.occupation_gate import job_function_group
+
+    expected_none = {"management_executive", "public_sector_government"}
+    for occ in OCCUPATIONS:
+        grp = job_function_group([occ.key], occ.department_bucket)
+        if occ.key in expected_none:
+            assert grp is None, f"{occ.key} should be ungated, got {grp}"
+        else:
+            assert grp in {"technical", "gtm", "corporate", "creative", "domain"}, \
+                f"{occ.key} got unexpected group {grp}"
+
+
+def test_cross_function_rejection_per_group():
+    """Each non-technical group rejects a clearly different function."""
+    from app.services.people.occupation_gate import occupation_conflict
+
+    cases = [
+        (["accounting_finance"], "finance", "Sales Director", True),
+        (["marketing"], "marketing", "Software Engineer", True),
+        (["healthcare"], "healthcare", "Account Executive", True),
+        (["creatives_design"], "design", "Sales Manager", True),
+        (["sales"], "sales", "Marketing Manager", False),   # both gtm
+        (["data_analyst"], "data", "Engineering Manager", False),  # both technical
+        (["management_executive"], "executive", "Engineering Manager", False),  # ungated
+    ]
+    for keys, dept, cand, expected in cases:
+        assert occupation_conflict(keys, dept, cand) is expected, f"{keys[0]} vs {cand}"

@@ -101,17 +101,23 @@ def job_function_group(occupation_keys: list[str] | None, department: str | None
     from app.services.occupation_taxonomy import occupation_by_key
 
     groups = set()
+    matched_any = False
     for key in occupation_keys or []:
         occ = occupation_by_key(key)
         if occ:
+            matched_any = True
             grp = _BUCKET_TO_GROUP.get(occ.department_bucket)
             if grp:
                 groups.add(grp)
     if len(groups) == 1:
         return next(iter(groups))
-    if groups:
-        return None  # multi-group job: do not gate
-    # fall back to the raw department label if it maps cleanly
+    if matched_any:
+        # Recognized occupation(s) but no single clear group (multi-group, or a
+        # cross-functional bucket like executive/public-sector). Do not gate -
+        # never fall through to the department default, which would mislabel
+        # these as technical.
+        return None
+    # No occupation matched at all: fall back to the raw department label.
     if department:
         dept = re.sub(r"[^a-z]", "_", department.lower())
         return _BUCKET_TO_GROUP.get(dept)
