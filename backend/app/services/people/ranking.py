@@ -17,6 +17,7 @@ from app.services.people.identity import _contains_any_keyword, _keyword_in_text
 from app.services.people.titles import CONTROLLED_LEAD_KEYWORDS, MANAGER_TITLE_KEYWORDS, SENIORITY_ORDER, TALENT_TITLE_KEYWORDS, _candidate_seniority_level, _is_adjacent_recruiter_like, _is_manager_like, _is_recruiter_like, _is_senior_ic_fallback, _role_like_title, _is_founder_exec_title
 from app.services.people.company_match import CURRENT_TRUSTED_SOURCES, _classify_employment_status, _trusted_public_match
 from app.services.people.affinity import affinity_rank
+from app.services.people.github_team_rank import github_team_rank
 from app.services.people.context import _location_match_rank
 from app.services.people.outcome_priors import outcome_prior_rank
 logger = logging.getLogger(__name__)
@@ -379,6 +380,7 @@ def _candidate_sort_key(data: dict, *, bucket: str, context: JobContext | None) 
             source_rank,
             seniority_rank,
             weak_title_rank,
+            github_team_rank(data),
             affinity_rank(data),
             outcome_prior_rank(data),
             role_title_rank,
@@ -401,6 +403,7 @@ def _candidate_sort_key(data: dict, *, bucket: str, context: JobContext | None) 
             )
         return (
             *startup_priority,
+            github_team_rank(data),
             0 if data.get("_actively_hiring") else 1,
             _team_keyword_match_rank(data, bucket=bucket, context=context),
             location_rank,
@@ -416,6 +419,7 @@ def _candidate_sort_key(data: dict, *, bucket: str, context: JobContext | None) 
             normalized_name,
         )
     return (
+        github_team_rank(data),
         org_rank,
         0 if data.get("_actively_hiring") else 1,
         _peer_title_alignment_rank(data, context=context),

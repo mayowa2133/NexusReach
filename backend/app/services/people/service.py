@@ -35,6 +35,7 @@ from app.services.people.buckets import _append_bucket, _backfill_sparse_hiring_
 from app.services.people.candidates import DEFAULT_TARGET_COUNT_PER_BUCKET, _clamp_target_count_per_bucket, _debug_candidate_summary, _dedupe_candidate_bucket_groups, _dedupe_candidates, _expand_peer_candidates, _has_recruiter_lead_candidate, _interactive_enrichment_limit_for_target, _limit_interactive_bucket, _minimum_results_for_target, _needs_more_bucket_candidates, _needs_more_bucket_size_only, _prepare_candidates, _prepare_limit_for_target, _search_candidates, _search_limit_for_target, _should_expand_with_theorg, _should_run_manager_geo_recovery, _should_run_peer_targeted_recovery, _should_run_recruiter_targeted_recovery
 from app.services.people.classify import _classify_org_level, _classify_person, _classify_person_with_confidence
 from app.services.people.affinity import annotate_affinity
+from app.services.people.github_team import resolve_github_org, resolve_team_contacts
 from app.services.people.outcome_priors import load_reply_priors, stamp_outcome_priors
 from app.services.people.title_llm import normalize_title_key, resolve_ambiguous_titles
 from app.services.people.company_match import _candidate_matches_company, _classify_employment_status
@@ -1084,6 +1085,46 @@ async def search_people_for_job(
         recruiter_candidates=len(recruiter_candidates),
         manager_candidates=len(manager_candidates),
         peer_candidates=len(peer_candidates),
+    )
+
+    # GitHub-team strategy: for engineering roles, resolve the top contributors
+    # to the company repos matching this job's team keywords into named, title-
+    # classified contacts. Lead/manager-titled contributors join the hiring-
+    # manager bucket; ICs join peers as high-confidence "they ship this code"
+    # contacts. Bounded, cached, fail-soft - never blocks the search.
+    github_team_started_at = time.monotonic()
+    github_team_contacts: list[dict] = []
+    if _occupation_is_engineering_flavored(
+        context.occupation_keys if context else None,
+        department=context.department if context else None,
+    ) and context and context.team_keywords:
+        try:
+            org = await resolve_github_org(
+                job.company_name,
+                company.identity_hints if isinstance(company.identity_hints, dict) else None,
+            )
+            if org:
+                github_team_contacts = await resolve_team_contacts(
+                    org, list(context.team_keywords), job.company_name
+                )
+        except Exception:
+            logger.debug("github-team strategy failed; skipping", exc_info=True)
+    if github_team_contacts:
+        gh_managers = [c for c in github_team_contacts if c.get("_github_bucket_hint") == "hiring_manager"]
+        gh_peers = [c for c in github_team_contacts if c.get("_github_bucket_hint") != "hiring_manager"]
+        manager_candidates = _dedupe_candidates(manager_candidates, gh_managers)
+        peer_candidates = _dedupe_candidates(peer_candidates, gh_peers)
+        if debug is not None:
+            debug["searches"]["github_team"] = {
+                "org": org,
+                "managers": [_debug_candidate_summary(c) for c in gh_managers],
+                "peers": [_debug_candidate_summary(c) for c in gh_peers],
+            }
+    _record_timing(
+        debug,
+        stage="github_team_resolution",
+        started_at=github_team_started_at,
+        contacts=len(github_team_contacts),
     )
 
     scoring_started_at = time.monotonic()

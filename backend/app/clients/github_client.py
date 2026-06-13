@@ -139,7 +139,8 @@ async def search_team_contributors(
     repos ARE the payments team. Falls back to [] on any API limitation so
     callers can use org members instead.
     """
-    terms = " ".join(k for k in keywords[:3] if k)
+    kw = [k.lower() for k in keywords[:3] if k]
+    terms = " ".join(kw)
     if not terms:
         return []
     try:
@@ -148,7 +149,7 @@ async def search_team_contributors(
                 f"{GITHUB_BASE_URL}/search/repositories",
                 params={
                     "q": f"org:{org_name} {terms} in:name,description,readme",
-                    "per_page": "3",
+                    "per_page": "8",
                     "sort": "updated",
                 },
                 headers=_headers(),
@@ -158,27 +159,43 @@ async def search_team_contributors(
             resp.raise_for_status()
             repos = resp.json().get("items") or []
 
-            logins: list[str] = []
+            # Prefer repos whose NAME matches the team keywords (an Android job
+            # should mine stripe-terminal-android before -react-native/-ios),
+            # then by recency. Limit to the top few to keep API calls bounded.
+            def _repo_score(repo: dict) -> tuple:
+                name = (repo.get("name") or "").lower()
+                name_hits = sum(1 for k in kw if k in name)
+                return (name_hits, repo.get("pushed_at") or repo.get("updated_at") or "")
+            repos = sorted(repos, key=_repo_score, reverse=True)[:3]
+
+            # Rank by RECENT commit authorship, not all-time contributions:
+            # all-time counts are dominated by long-departed heavy committers,
+            # while recent commits identify the current team.
             seen: set[str] = set()
             repo_names: dict[str, str] = {}
+            recent_counts: dict[str, int] = {}
+            logins: list[str] = []
             for repo in repos:
-                contrib_resp = await client.get(
-                    f"{GITHUB_BASE_URL}/repos/{org_name}/{repo['name']}/contributors",
-                    params={"per_page": "10"},
+                commits_resp = await client.get(
+                    f"{GITHUB_BASE_URL}/repos/{org_name}/{repo['name']}/commits",
+                    params={"per_page": "40"},
                     headers=_headers(),
                 )
-                if contrib_resp.status_code != 200:
+                if commits_resp.status_code != 200:
                     continue
-                for contributor in contrib_resp.json():
-                    login = contributor.get("login")
-                    if login and login.lower() not in seen and contributor.get("type") == "User":
+                for commit in commits_resp.json():
+                    author = commit.get("author")
+                    login = author.get("login") if isinstance(author, dict) else None
+                    if not login or (isinstance(author, dict) and author.get("type") != "User"):
+                        continue
+                    recent_counts[login] = recent_counts.get(login, 0) + 1
+                    if login.lower() not in seen:
                         seen.add(login.lower())
                         logins.append(login)
                         repo_names[login] = repo["name"]
-                    if len(logins) >= limit:
-                        break
-                if len(logins) >= limit:
-                    break
+            contrib_counts = recent_counts
+            logins.sort(key=lambda lg: recent_counts.get(lg, 0), reverse=True)
+            logins = logins[:limit]
 
             results: list[dict] = []
             for login in logins[:limit]:
@@ -191,14 +208,35 @@ async def search_team_contributors(
                 results.append(
                     {
                         "login": login,
+                        "name": profile.get("name"),
                         "full_name": profile.get("name") or login,
+                        "company": profile.get("company"),
                         "github_url": profile.get("html_url", ""),
                         "location": profile.get("location"),
                         "bio": profile.get("bio"),
                         "team_repo": repo_names.get(login),
+                        "_github_contributions": contrib_counts.get(login, 0),
                     }
                 )
             return results
     except Exception:
         logger.warning("team contributor search failed for org=%s", org_name, exc_info=True)
         return []
+
+
+async def get_org(slug: str) -> dict | None:
+    """Return the GitHub org for *slug*, or None if it does not exist.
+
+    Used to validate a guessed org slug before trusting it as the company's
+    engineering org.
+    """
+    if not slug:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(f"{GITHUB_BASE_URL}/orgs/{slug}", headers=_headers())
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception:
+        logger.debug("get_org failed for slug=%s", slug, exc_info=True)
+    return None
