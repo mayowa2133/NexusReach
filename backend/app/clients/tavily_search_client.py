@@ -291,3 +291,81 @@ async def search_employment_sources(
             }
         )
     return results[:limit]
+
+# "Name, Title at Company" / "Name, the Company's Title" patterns in news + PR.
+# Press releases and articles quote executives with their exact title, which is
+# the richest public footprint for senior non-technical leaders.
+_QUOTE_PATTERNS = [
+    re.compile(
+        r"([A-Z][a-z]+(?:\s+[A-Z][a-z.'-]+){1,2}),\s+(?:the\s+)?"
+        r"((?:Chief|Senior|VP|Vice President|Head|Director|President|Global|Regional)"
+        r"[A-Za-z &/]{2,40})",
+    ),
+    re.compile(
+        r"((?:Chief|Senior|VP|Vice President|Head of|Director of|President of)"
+        r"[A-Za-z &/]{2,40}),\s+([A-Z][a-z]+(?:\s+[A-Z][a-z.'-]+){1,2})",
+    ),
+]
+
+
+async def search_executive_quotes(
+    company_name: str,
+    title_hints: list[str] | None = None,
+    *,
+    limit: int = 6,
+) -> list[dict]:
+    """Find executives quoted in news/PR for the company, by exact title.
+
+    Returns candidate dicts (source="news_quote") with the quoted person's
+    name + title. High precision for senior non-technical leaders who appear
+    in press releases. Fails soft to [] when Tavily is unconfigured.
+    """
+    if not company_name:
+        return []
+    hint = ""
+    if title_hints:
+        hint = " " + " OR ".join(f'"{h}"' for h in title_hints[:3])
+    query = f'"{company_name}"{hint} (announced OR appointed OR "said" OR "joins")'
+    try:
+        results = await _run_tavily_query(query, max_results=limit)
+    except Exception:
+        return []
+
+    company_token = company_name.lower().split()[0] if company_name else ""
+    candidates: list[dict] = []
+    seen: set[str] = set()
+    for item in results:
+        text = f"{item.get('title', '')}. {item.get('content', '')}"
+        if company_token and company_token not in text.lower():
+            continue
+        for pattern in _QUOTE_PATTERNS:
+            for match in pattern.finditer(text):
+                g1, g2 = match.group(1).strip(), match.group(2).strip()
+                # the group that looks like a person name vs a title
+                if re.search(r"chief|director|president|vp|vice|head", g1, re.IGNORECASE):
+                    title, name = g1, g2
+                else:
+                    name, title = g1, g2
+                key = name.lower()
+                if " " not in name or key in seen or len(name) > 40:
+                    continue
+                seen.add(key)
+                candidates.append(
+                    {
+                        "full_name": name,
+                        "title": title,
+                        "source": "news_quote",
+                        "snippet": f"Quoted as {title} at {company_name}: {item.get('title', '')[:120]}",
+                        "linkedin_url": "",
+                        "_news_quote": True,
+                        "_employment_status": "current",
+                        "profile_data": {
+                            "company_match_confidence": "strong_signal",
+                            "news_quote": True,
+                            "news_quote_url": item.get("url"),
+                        },
+                    }
+                )
+                if len(candidates) >= limit:
+                    return candidates
+    return candidates

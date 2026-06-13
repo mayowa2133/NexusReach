@@ -28,6 +28,12 @@ def _hiring_team_rank(data: dict) -> int:
     return 0 if data.get("_hiring_team_capture") else 1
 
 
+def _published_leader_rank(data: dict) -> int:
+    """Company-published leader (own website) or press-quoted exec — a strong
+    company-verified signal, ranked just under team-confirmed contacts."""
+    return 0 if (data.get("_company_site_leader") or data.get("_news_quote")) else 1
+
+
 SOURCE_PRIORITY = {
     "apollo": 0,
     "proxycurl": 1,
@@ -411,6 +417,7 @@ def _candidate_sort_key(data: dict, *, bucket: str, context: JobContext | None) 
             *startup_priority,
             _hiring_team_rank(data),
             github_team_rank(data),
+            _published_leader_rank(data),
             0 if data.get("_actively_hiring") else 1,
             _team_keyword_match_rank(data, bucket=bucket, context=context),
             location_rank,

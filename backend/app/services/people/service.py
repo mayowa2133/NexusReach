@@ -35,6 +35,7 @@ from app.services.people.buckets import _append_bucket, _backfill_sparse_hiring_
 from app.services.people.candidates import DEFAULT_TARGET_COUNT_PER_BUCKET, _clamp_target_count_per_bucket, _debug_candidate_summary, _dedupe_candidate_bucket_groups, _dedupe_candidates, _expand_peer_candidates, _has_recruiter_lead_candidate, _interactive_enrichment_limit_for_target, _limit_interactive_bucket, _minimum_results_for_target, _needs_more_bucket_candidates, _needs_more_bucket_size_only, _prepare_candidates, _prepare_limit_for_target, _search_candidates, _search_limit_for_target, _should_expand_with_theorg, _should_run_manager_geo_recovery, _should_run_peer_targeted_recovery, _should_run_recruiter_targeted_recovery
 from app.services.people.classify import _classify_org_level, _classify_person, _classify_person_with_confidence
 from app.services.people.affinity import annotate_affinity
+from app.services.people.company_site import discover_company_site_leaders
 from app.services.people.github_team import resolve_github_org, resolve_team_contacts
 from app.services.people.outcome_priors import load_reply_priors, stamp_outcome_priors
 from app.services.people.title_llm import normalize_title_key, resolve_ambiguous_titles
@@ -1125,6 +1126,49 @@ async def search_people_for_job(
         stage="github_team_resolution",
         started_at=github_team_started_at,
         contacts=len(github_team_contacts),
+    )
+
+    # Non-technical leadership sources: the company's own website leadership/
+    # team page (the non-tech analog of GitHub - every company publishes its
+    # leaders) and executives quoted by exact title in news/PR. Both feed the
+    # hiring-manager bucket and are filtered by the occupation gate downstream.
+    # Especially valuable for non-engineering roles where x-ray returns only
+    # engineers; bounded, cached, fail-soft.
+    nontech_started_at = time.monotonic()
+    site_leaders: list[dict] = []
+    news_leaders: list[dict] = []
+    is_eng_role = _occupation_is_engineering_flavored(
+        context.occupation_keys if context else None,
+        department=context.department if context else None,
+    )
+    if not is_eng_role:
+        try:
+            site_domain = company.domain if getattr(company, "domain", None) else None
+            site_leaders = await discover_company_site_leaders(job.company_name, site_domain)
+        except Exception:
+            logger.debug("company-site leadership discovery failed; skipping", exc_info=True)
+        try:
+            title_hints = list(context.manager_titles[:3]) if context else []
+            news_leaders = await tavily_search_client.search_executive_quotes(
+                job.company_name, title_hints
+            )
+        except Exception:
+            logger.debug("news executive-quote mining failed; skipping", exc_info=True)
+        if site_leaders or news_leaders:
+            manager_candidates = _dedupe_candidates(manager_candidates, site_leaders + news_leaders)
+            if debug is not None:
+                debug["searches"]["company_site_leaders"] = [
+                    _debug_candidate_summary(c) for c in site_leaders
+                ]
+                debug["searches"]["news_quote_leaders"] = [
+                    _debug_candidate_summary(c) for c in news_leaders
+                ]
+    _record_timing(
+        debug,
+        stage="nontech_leadership_resolution",
+        started_at=nontech_started_at,
+        site_leaders=len(site_leaders),
+        news_leaders=len(news_leaders),
     )
 
     scoring_started_at = time.monotonic()

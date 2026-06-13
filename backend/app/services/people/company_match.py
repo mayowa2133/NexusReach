@@ -28,6 +28,10 @@ CURRENT_TRUSTED_SOURCES = {
     # SearXNG is the default primary search provider; its hiring-team results
     # must be trusted on par with the paid fallbacks (audit C1).
     "searxng_hiring_team",
+    # The company's own website leadership page and LinkedIn's hiring-team
+    # panel name people the company itself publishes -> authoritative current.
+    "company_site",
+    "linkedin_hiring_team",
 }
 
 

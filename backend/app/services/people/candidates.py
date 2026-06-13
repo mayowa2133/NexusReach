@@ -341,11 +341,17 @@ def _prepare_candidates(
             continue
 
         is_fallback = False
+        # Company-published leaders (own website) and press-quoted execs are the
+        # leaders we want for non-engineering roles - being a director is not a
+        # demotion for them, so they stay primary (still subject to the
+        # occupation gate + company match above).
+        published_leader = data.get("_company_site_leader") or data.get("_news_quote")
         if (
             bucket == "hiring_managers"
             and org_level == "director_plus"
             and not _allow_director_plus(context)
             and _location_match_rank(data, context=context) != 0
+            and not published_leader
         ):
             is_fallback = True
         if bucket == "recruiters" and org_level == "director_plus" and _location_match_rank(data, context=context) != 0:
