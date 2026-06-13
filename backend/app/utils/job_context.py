@@ -476,7 +476,7 @@ def _extract_posting_contacts(description: str | None) -> list[dict]:
             name = name_match.group("name")
         if name:
             tokens = name.split()
-            while tokens and tokens[0].lower() in {"contact", "email", "send", "reach", "to"}:
+            while tokens and tokens[0].lower() in {"contact", "email", "send", "reach", "to", "us", "out", "at"}:
                 tokens.pop(0)
             name = " ".join(tokens) or None
         contacts.append({
@@ -1087,28 +1087,64 @@ def extract_job_context(
     if early_career and seniority == "mid":
         seniority = "junior"
     apollo_departments = APOLLO_DEPARTMENT_SLUGS.get(department, ["engineering_technical"])
+
+    from app.services.occupation_taxonomy import (
+        classify_title as _classify_occupation_title,
+        is_engineering_flavored as _is_engineering_flavored,
+        manager_title_seeds_for as _manager_title_seeds_for,
+        occupation_keys_from_tags as _occupation_keys_from_tags,
+        peer_title_seeds_for as _peer_title_seeds_for,
+    )
+
+    occupation_keys = _occupation_keys_from_tags(tags)
+    if not occupation_keys:
+        occupation_keys = _classify_occupation_title(title, description)
+
+    # The keyword-driven title builders below are tuned for technical roles and
+    # leak engineering scaffolding ("Platform Lead", "Platform Engineer") into
+    # non-engineering roles whose JD merely mentions "platform". For a known
+    # non-engineering occupation, drive titles from the occupation seeds and
+    # drop engineering-flavored team keywords so we search for the right people.
+    non_eng_occupation = bool(occupation_keys) and not _is_engineering_flavored(
+        occupation_keys, department=department
+    )
+    if non_eng_occupation:
+        team_keywords = [
+            kw for kw in team_keywords if DEPARTMENT_MAP.get(kw.lower()) != "engineering"
+        ]
+
     manager_titles = _build_manager_titles(department, team_keywords, title, seniority)
+    if non_eng_occupation:
+        seeds = _manager_title_seeds_for(occupation_keys)
+        manager_titles = list(dict.fromkeys(seeds + [
+            t for t in manager_titles if "engineer" not in t.lower() and "platform" not in t.lower()
+        ]))
     reported_titles = _extract_reporting_line_titles(description)
     if reported_titles:
         manager_titles = reported_titles + [
             t for t in manager_titles if t.lower() not in {r.lower() for r in reported_titles}
         ]
     peer_titles = _build_peer_titles(title, team_keywords, seniority, department)
+    if non_eng_occupation:
+        seeds = _peer_title_seeds_for(occupation_keys)
+        core_title = _extract_core_role(title)
+        peer_titles = list(dict.fromkeys(
+            ([core_title] if core_title else []) + seeds + [
+                t for t in peer_titles if "engineer" not in t.lower() and "platform" not in t.lower()
+            ]
+        ))
     recruiter_titles = _build_recruiter_titles(
         department,
         domain_keywords,
         early_career=early_career,
     )
+    if non_eng_occupation:
+        # Lead with function-appropriate recruiter titles, not "Technical Recruiter".
+        recruiter_titles = list(dict.fromkeys(
+            ["Recruiter", "Talent Acquisition Partner", "Talent Acquisition", "Talent Partner"]
+            + [t for t in recruiter_titles if "technical" not in t.lower()]
+        ))
     product_team_names = _extract_product_team_names(description, title=title)
-
-    from app.services.occupation_taxonomy import (
-        classify_title as _classify_occupation_title,
-        occupation_keys_from_tags as _occupation_keys_from_tags,
-    )
-
-    occupation_keys = _occupation_keys_from_tags(tags)
-    if not occupation_keys:
-        occupation_keys = _classify_occupation_title(title, description)
 
     # Reserved startup provenance tags ("startup", "startup_source:<key>") -
     # checked locally to avoid importing the startup_jobs module (and its

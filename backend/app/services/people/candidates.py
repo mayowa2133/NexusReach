@@ -15,6 +15,7 @@ from app.utils.job_context import (
 )
 
 from app.services.people.classify import _classify_org_level, _classify_person
+from app.services.people.occupation_gate import occupation_conflict
 from app.services.people.company_match import PUBLIC_WEB_SOURCES, _candidate_matches_company, _classify_employment_status, _trusted_public_peer_match
 from app.services.people.context import _candidate_geo_signal_match, _location_match_rank, _candidate_location_value
 from app.services.people.identity import _normalize_identity
@@ -198,6 +199,22 @@ def _prepare_candidates(
         decision = _debug_candidate_summary(data)
         title = data.get("title", "") or ""
         snippet = data.get("snippet", "") or ""
+        if data.get("_posting_contact") or data.get("_hiring_team_capture") or data.get("_github_team_member"):
+            # Pre-validated contacts bypass every heuristic gate (company match,
+            # title/role, occupation): they are company-verified by construction
+            # - named in this company's posting, on LinkedIn's hiring-team panel
+            # for this req, or a confirmed contributor to this org's repos.
+            decision["status"] = "kept"
+            decision["reason"] = (
+                "named_in_posting" if data.get("_posting_contact")
+                else "hiring_team_capture" if data.get("_hiring_team_capture")
+                else "github_team_member"
+            )
+            decisions.append(decision)
+            if not data.get("_employment_status"):
+                data["_employment_status"] = "current"
+            current_primary.append(data)
+            continue
         weak_title = data.get("_weak_title")
         if weak_title is None:
             weak_title = _title_is_weak(title, company_name)
@@ -244,13 +261,6 @@ def _prepare_candidates(
                 decision["reason"] = f"bucket_type_mismatch:{person_type}"
                 decisions.append(decision)
                 continue
-        if data.get("_posting_contact"):
-            decision["status"] = "kept"
-            decision["reason"] = "named_in_posting"
-            decisions.append(decision)
-            data["_employment_status"] = "current"
-            current_primary.append(data)
-            continue
         if bucket == "recruiters":
             if not (
                 _is_recruiter_like(title)
@@ -268,6 +278,27 @@ def _prepare_candidates(
                 decision["reason"] = "recruiter_title_not_role_like"
                 decisions.append(decision)
                 continue
+        # Occupation gate: drop candidates whose function clearly differs from
+        # the job's (e.g. an Engineering Manager surfaced for a sales req). Only
+        # fires when both the job and the candidate function are confidently
+        # known and different - ambiguous titles and posting-confirmed contacts
+        # pass through. Recruiters are cross-functional, so their bucket is not
+        # gated here.
+        if (
+            bucket in ("hiring_managers", "peers")
+            and not data.get("_hiring_team_capture")
+            and not data.get("_github_team_member")
+            and context is not None
+            and occupation_conflict(
+                getattr(context, "occupation_keys", None),
+                getattr(context, "department", None),
+                title,
+            )
+        ):
+            decision["status"] = "excluded"
+            decision["reason"] = "occupation_conflict"
+            decisions.append(decision)
+            continue
         if bucket == "hiring_managers" and title and not (
             _is_manager_like(title)
             or _role_like_title(title)
