@@ -207,8 +207,12 @@ def test_reporting_line_ignores_non_title_phrases():
 
 def test_theorg_gate_expands_for_hm_with_team_keywords():
     gate = people_candidates._should_expand_with_theorg
+    # Engineering context: isolates the team-keyword clause from the
+    # non-engineering always-expand clause.
     context = MagicMock()
     context.team_keywords = ["payments"]
+    context.occupation_keys = ["software_engineering"]
+    context.department = "engineering"
 
     full_buckets = {"recruiters": 3, "hiring_managers": 3, "peers": 3}
     # buckets are at target, but team keywords justify HM cross-check

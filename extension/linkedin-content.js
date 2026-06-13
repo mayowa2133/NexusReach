@@ -701,10 +701,55 @@
     return { members, job_title: jobTitle, company_label: companyLabel };
   }
 
+  function mountHiringTeamButton() {
+    if (!/\/jobs\//.test(window.location.href)) return;
+    const BTN_ID = "nexusreach-capture-hiring-team";
+    if (document.getElementById(BTN_ID)) return;
+    const btn = document.createElement("button");
+    btn.id = BTN_ID;
+    btn.textContent = "Capture hiring team → NexusReach";
+    btn.style.cssText = [
+      "position:fixed", "bottom:20px", "right:20px", "z-index:2147483647",
+      "padding:10px 14px", "border-radius:999px", "border:none", "cursor:pointer",
+      "background:#0369a1", "color:#fff", "font-family:system-ui,sans-serif",
+      "font-size:13px", "font-weight:600", "box-shadow:0 8px 24px rgba(15,23,42,0.25)",
+    ].join(";");
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      const original = btn.textContent;
+      btn.textContent = "Capturing…";
+      try {
+        const scraped = captureHiringTeam();
+        const members = (scraped.members || []).filter((m) => m && m.name && m.profile_url);
+        if (!members.length) {
+          btn.textContent = "No hiring team found on this page";
+        } else {
+          const res = await chrome.runtime.sendMessage({
+            type: "SUBMIT_HIRING_TEAM",
+            payload: {
+              company_name: scraped.company_label || "",
+              job_title: scraped.job_title || null,
+              members,
+            },
+          });
+          btn.textContent = res && res.ok
+            ? `Saved ${res.stored ?? members.length} hiring contact(s)`
+            : `Capture failed: ${(res && res.error) || "unknown"}`;
+        }
+      } catch (error) {
+        btn.textContent = "Capture failed";
+      } finally {
+        setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 4000);
+      }
+    });
+    document.body.appendChild(btn);
+  }
+
   if (TEST_MODE) {
     window.__NEXUSREACH_LINKEDIN_COMPANION__ = {
       captureProfile,
       captureHiringTeam,
+      mountHiringTeamButton,
       cleanGraphName,
       matchesControlLabel,
       normalizeLinkedInUrl,
@@ -716,6 +761,18 @@
   if (typeof chrome === "undefined" || !chrome.runtime?.onMessage) {
     return;
   }
+
+  try {
+    mountHiringTeamButton();
+    // LinkedIn is a SPA; re-check on navigation so the button appears on job pages.
+    let _lastHref = window.location.href;
+    setInterval(() => {
+      if (window.location.href !== _lastHref) {
+        _lastHref = window.location.href;
+        mountHiringTeamButton();
+      }
+    }, 1500);
+  } catch (_e) { /* non-fatal */ }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.type === "RUN_LINKEDIN_ASSIST") {

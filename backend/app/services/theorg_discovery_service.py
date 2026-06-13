@@ -5,6 +5,8 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 
+import logging
+
 from app.clients import theorg_client
 from app.config import settings
 from app.models.company import Company
@@ -13,6 +15,8 @@ from app.services.occupation_taxonomy import (
 )
 from app.utils.company_identity import effective_public_identity_slugs, matches_public_company_identity
 from app.utils.job_context import JobContext
+
+logger = logging.getLogger(__name__)
 
 RECRUITER_TITLE_KEYWORDS = (
     "recruiter",
@@ -484,6 +488,36 @@ async def discover_theorg_candidates(
                 for report in parsed_person.get("reports", [])
                 if _bucket_candidate(report, bucket="peers", context=context)
             )
+
+    # Org-chart leadership + reporting-line managers. For non-engineering roles
+    # (where public-web x-ray surfaces only engineers) this is the primary
+    # source of real hiring-manager candidates: the C-level/VP roster and the
+    # named managers of positions matching the job's role. The downstream
+    # occupation gate drops off-function leaders (e.g. CTO for a sales req).
+    org_html = org_page.get("html") or ""
+    org_company_name = org_page.get("company_name") or company_name
+    org_resolved_slug = org_page.get("org_slug") or ""
+    for leader in org_page.get("leaders", []):
+        grouped["hiring_managers"].append(leader)
+    if org_html and org_resolved_slug:
+        target_role = ""
+        if context is not None:
+            if getattr(context, "peer_titles", None):
+                target_role = context.peer_titles[0]
+            elif getattr(context, "department", None):
+                target_role = context.department
+        if target_role:
+            try:
+                report_managers = theorg_client.resolve_reporting_managers(
+                    org_html,
+                    target_role,
+                    company_name=org_company_name,
+                    org_slug=org_resolved_slug,
+                    origin_url=org_page.get("org_url"),
+                )
+                grouped["hiring_managers"].extend(report_managers)
+            except Exception:
+                logger.debug("theorg reporting-manager resolution failed", exc_info=True)
 
     resolved_slug = _theorg_cache(company).get("preferred_org_slug") or org_page.get("org_slug")
     for bucket, people in grouped.items():

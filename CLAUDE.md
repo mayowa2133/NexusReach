@@ -120,6 +120,7 @@ NexusReach defaults to draft-first workflows. Users can optionally enable delaye
   - Crawl4AI
   - Firecrawl only if configured
 - Firecrawl is optional fallback infrastructure, not a hard dependency.
+- The Org parsing has an HTML fallback: when the legacy `next_data` payload is empty (current TheOrg pages), `parse_org_page` recovers the leadership roster from the JSON-LD `Organization.employee[]` array, and `resolve_reporting_managers` reads the inline `LightPosition` graph (role + `parentPositionId`) to surface a role's direct manager and same-function managers. This is the primary hiring-manager source for non-engineering roles (where public-web x-ray returns only engineers); The Org traversal now always runs for known non-engineering occupations.
 - The Org traversal is implemented and bounded:
   - org page resolution from trusted `public_identity_slugs`
   - company/team/person page parsing

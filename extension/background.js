@@ -397,6 +397,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === "SUBMIT_HIRING_TEAM") {
+    const p = message.payload || {};
+    apiRequest("/api/people/hiring-team-capture", {
+      method: "POST",
+      body: JSON.stringify({
+        company_name: p.company_name || "",
+        job_id: p.job_id || null,
+        job_title: p.job_title || null,
+        members: p.members || [],
+      }),
+    })
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+    return true;
+  }
+
   if (message.type === "REFRESH_PROFILE") {
     fetchProfile().then((profile) => sendResponse({ profile }));
     return true;

@@ -442,6 +442,13 @@ def _should_expand_with_theorg(
         and current_counts.get("hiring_managers", 0) < target_count_per_bucket + 2
     ):
         return True
+    # Non-engineering roles: public-web x-ray surfaces engineers, not the right
+    # function, so always consult The Org's authoritative org chart for the
+    # leadership roster + reporting-line managers.
+    if context is not None and getattr(context, "occupation_keys", None):
+        from app.services.occupation_taxonomy import is_engineering_flavored
+        if not is_engineering_flavored(context.occupation_keys, department=getattr(context, "department", None)):
+            return True
     return False
 
 

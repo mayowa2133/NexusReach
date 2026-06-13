@@ -153,6 +153,11 @@ def parse_org_page(page: dict) -> dict | None:
     initial_teams = page_props.get("initialTeams") or []
     initial_nodes = page_props.get("initialNodes") or []
     org_slug = (initial_company.get("slug") or (page.get("public_identity_hints") or {}).get("company_slug") or "").lower()
+    html = (page or {}).get("html") or ""
+    if not org_slug and html:
+        m = re.search(r"/org/([a-z0-9-]+)", (page or {}).get("url") or "")
+        if m:
+            org_slug = m.group(1).lower()
     if not org_slug:
         return None
 
@@ -189,12 +194,28 @@ def parse_org_page(page: dict) -> dict | None:
         if person:
             leaders.append(person)
 
+    company_name = initial_company.get("name") or ""
+    if not leaders and html:
+        # Fallback: recover the leadership roster straight from the HTML.
+        for entry in extract_org_roster(html):
+            person = _light_position_to_person(
+                entry,
+                company_name=company_name,
+                org_slug=org_slug,
+                origin_url=page.get("url"),
+                relationship="manager",
+            )
+            if person:
+                person["profile_data"]["theorg_roster"] = True
+                leaders.append(person)
+
     return {
         "org_slug": org_slug,
-        "company_name": initial_company.get("name") or "",
+        "company_name": company_name,
         "org_url": page.get("url"),
         "teams": teams,
         "leaders": leaders,
+        "html": html,
     }
 
 
@@ -288,3 +309,169 @@ def parse_person_page(page: dict) -> dict | None:
         "team_name": team_name,
         "person_url": page.get("url"),
     }
+
+# ---------------------------------------------------------------------------
+# HTML-based extraction (current TheOrg pages embed people in JSON-LD +
+# inline LightPosition objects rather than the legacy __NEXT_DATA__ initialNodes).
+# ---------------------------------------------------------------------------
+
+def _extract_json_array(html: str, key: str) -> list | None:
+    """Bracket-match the JSON array assigned to "<key>": in raw HTML."""
+    marker = f'"{key}":['
+    idx = html.find(marker)
+    if idx < 0:
+        return None
+    start = idx + len(marker) - 1  # at the '['
+    depth, i, in_str, esc = 0, start, False, False
+    while i < len(html):
+        ch = html[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+        else:
+            if ch == '"':
+                in_str = True
+            elif ch == '[':
+                depth += 1
+            elif ch == ']':
+                depth -= 1
+                if depth == 0:
+                    break
+        i += 1
+    try:
+        return json.loads(html[start:i + 1])
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+
+def extract_org_roster(html: str) -> list[dict]:
+    """Named leaders + titles from the Organization JSON-LD employee[] array.
+
+    Returns dicts with name/title/slug. This is the org's notable people
+    (C-level, VPs, heads) - the highest-value contacts for non-engineering
+    roles where public-web x-ray surfaces only engineers.
+    """
+    employees = _extract_json_array(html, "employee") or []
+    roster = []
+    for emp in employees:
+        if not isinstance(emp, dict) or emp.get("@type") != "Person":
+            continue
+        name = (emp.get("name") or "").strip()
+        title = (emp.get("jobTitle") or "").strip()
+        if not name or not title:
+            continue
+        slug = ""
+        for ref in emp.get("sameAs") or []:
+            if isinstance(ref, str) and "/org-chart/" in ref:
+                slug = ref.rstrip("/").rsplit("/", 1)[-1]
+                break
+        roster.append({"fullName": name, "role": title, "slug": slug})
+    return roster
+
+
+_LIGHT_POSITION_RE = re.compile(
+    r'"__typename":"LightPosition","id":(?P<id>\d+),"slug":"(?P<slug>[^"]*)",'
+    r'"fullName":"(?P<name>[^"]{2,60})"(?P<mid>.*?)"role":"(?P<role>[^"]{2,80})"'
+    r'(?:,"parentPositionId":(?P<parent>\d+|null))?',
+    re.DOTALL,
+)
+
+
+def extract_positions(html: str) -> dict[int, dict]:
+    """Map positionId -> {fullName, role, slug, parent} from LightPosition objects.
+
+    This is TheOrg's org chart: each position carries the person, their role,
+    and the parent position id, so a role's *direct manager* is resolvable.
+    """
+    positions: dict[int, dict] = {}
+    for m in _LIGHT_POSITION_RE.finditer(html):
+        try:
+            pid = int(m.group("id"))
+        except (TypeError, ValueError):
+            continue
+        parent = m.group("parent")
+        positions[pid] = {
+            "id": pid,
+            "fullName": m.group("name").strip(),
+            "role": m.group("role").strip(),
+            "slug": (m.group("slug") or "").strip().lower(),
+            "parent": int(parent) if parent and parent.isdigit() else None,
+        }
+    return positions
+
+
+_MANAGER_ROLE_RE = re.compile(
+    r"\b(manager|director|head|vp|vice president|chief|lead|principal|president)\b",
+    re.IGNORECASE,
+)
+
+
+def resolve_reporting_managers(
+    html: str,
+    target_role: str,
+    *,
+    company_name: str,
+    org_slug: str,
+    origin_url: str | None = None,
+    limit: int = 4,
+) -> list[dict]:
+    """Hiring-manager candidates for ``target_role`` from the org chart.
+
+    Two strategies, best first:
+      1. Parent-of-role: when a position matching the target role has its parent
+         position rendered on the page, that parent is the literal manager.
+      2. Same-function managers: manager-titled positions whose function group
+         matches the target role's (e.g. a Sales req -> Commercial Sales Manager,
+         Sales Director, CRO). Robust when the parent node is not loaded - which
+         is common, since TheOrg lazy-loads only the visible subtree.
+    """
+    from app.services.people.occupation_gate import title_function_group
+
+    positions = extract_positions(html)
+    if not positions:
+        return []
+    target_group = title_function_group(target_role)
+    target_tokens = {tok for tok in re.split(r"[^a-z0-9]+", target_role.lower()) if len(tok) > 2}
+
+    managers: list[dict] = []
+    seen: set[str] = set()
+
+    def _add(pos: dict, *, reporting_line: bool) -> None:
+        if not pos or pos["fullName"].lower() in seen:
+            return
+        person = _light_position_to_person(
+            pos, company_name=company_name, org_slug=org_slug,
+            origin_url=origin_url, relationship="manager",
+        )
+        if person:
+            seen.add(pos["fullName"].lower())
+            if reporting_line:
+                person["profile_data"]["theorg_reporting_line"] = True
+                person["_theorg_reporting_manager"] = True
+            else:
+                person["profile_data"]["theorg_function_leader"] = True
+            managers.append(person)
+
+    # 1) literal parent-of-role
+    for pos in positions.values():
+        role_tokens = {tok for tok in re.split(r"[^a-z0-9]+", pos["role"].lower()) if len(tok) > 2}
+        if target_tokens and len(target_tokens & role_tokens) >= max(1, len(target_tokens) - 1):
+            parent = positions.get(pos["parent"]) if pos["parent"] else None
+            if parent and _MANAGER_ROLE_RE.search(parent["role"]):
+                _add(parent, reporting_line=True)
+
+    # 2) same-function managers (manager-titled, matching function group)
+    if target_group is not None:
+        for pos in positions.values():
+            if len(managers) >= limit:
+                break
+            if not _MANAGER_ROLE_RE.search(pos["role"]):
+                continue
+            if title_function_group(pos["role"]) == target_group:
+                _add(pos, reporting_line=False)
+
+    return managers[:limit]
