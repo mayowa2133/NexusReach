@@ -333,6 +333,55 @@ def discover_ats_boards() -> dict:
     return {"status": "ok"}
 
 
+# ---------------------------------------------------------------------------
+# Curated board health check (Workday config drift detection)
+# ---------------------------------------------------------------------------
+
+async def _verify_curated_boards() -> dict:
+    """Probe every curated Workday config and log drift.
+
+    Workday tenants migrate tiers/sites and a drifted config silently returns
+    nothing. This surfaces the drift: WARNING-logs configs whose configured
+    tier is dead (with the working replacement when auto-repair finds one, or
+    as fully dead). Run scripts/verify_workday_boards.py to apply the fix.
+    """
+    results = await workday_client.verify_all_workday(repair=True)
+    repaired = [r for r in results if r["status"] == "repaired"]
+    dead = [r for r in results if r["status"] == "dead"]
+
+    for r in repaired:
+        logger.warning(
+            "Workday board DRIFTED: %s tier %s dead, works on %s "
+            "(update workday_client: company=%s site=%s wd=%s)",
+            r["label"], r["old_wd"], r["wd"], r["company"], r["site"], r["wd"],
+        )
+    for r in dead:
+        logger.warning(
+            "Workday board DEAD: %s (%s/%s/%s) returns no jobs on any tier "
+            "— rediscover site or remove",
+            r["label"], r["company"], r["wd"], r["site"],
+        )
+    summary = {
+        "ok": sum(1 for r in results if r["status"] == "ok"),
+        "repairable": len(repaired),
+        "dead": len(dead),
+    }
+    logger.info("Curated board health check: %s", summary)
+    return summary
+
+
+@celery_app.task(
+    name="app.tasks.jobs.verify_curated_boards",
+    autoretry_for=(Exception,),
+    retry_backoff=60,
+    retry_backoff_max=600,
+    max_retries=2,
+)
+def verify_curated_boards() -> dict:
+    """Celery task: weekly health check for curated Workday config drift."""
+    return run_async(_verify_curated_boards())
+
+
 # --- Re-scoring ---
 
 

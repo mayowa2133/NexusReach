@@ -51,6 +51,8 @@ def test_verticals_for_occupations():
     assert f(["accounting_finance"]) == {"finance"}
     assert f(["sales"]) == {"finance", "retail"}
     assert f(["supply_chain"]) == {"retail"}
+    # government routes to USAJobs (not a Workday vertical)
+    assert f(["public_sector_government"]) == {"government"}
     # engineering / unmapped occupations pull no vertical boards
     assert f(["software_engineering"]) == set()
     assert f([]) == set()
@@ -59,12 +61,17 @@ def test_verticals_for_occupations():
     assert f(["healthcare", "accounting_finance"]) == {"healthcare", "finance"}
 
 
-def test_every_mapped_vertical_has_employers():
-    """Each vertical an occupation can route to must have at least one employer."""
+def test_every_mapped_vertical_has_a_provider():
+    """Each mapped vertical is served by a Workday employer or by USAJobs (gov)."""
     available = {c["vertical"] for c in workday_client.WORKDAY_NONTECH_COMPANIES}
     for verticals in job_service.OCCUPATION_VERTICALS.values():
         for v in verticals:
+            if v == job_service.GOVERNMENT_VERTICAL:
+                continue  # served by USAJobs, not a curated Workday employer
             assert v in available, f"occupation maps to {v} but no employer exists"
+    # government is intentionally the only non-Workday vertical
+    assert job_service.GOVERNMENT_VERTICAL not in job_service.WORKDAY_VERTICALS
+    assert available == set(job_service.WORKDAY_VERTICALS)
 
 
 # ---------------------------------------------------------------------------
@@ -223,3 +230,59 @@ async def test_discover_jobs_finance_keeps_tech_and_adds_finance_vertical():
     mock_ats.assert_awaited_once()
     mock_vert.assert_awaited_once()
     assert mock_vert.await_args.args[2] == {"finance"}
+
+
+async def test_discover_jobs_routes_government_to_usajobs():
+    profile = MagicMock()
+    profile.target_occupations = ["public_sector_government"]
+    profile.target_roles = None
+    profile.target_locations = []
+
+    with (
+        patch.object(job_service, "search_jobs", new=AsyncMock(return_value=[])),
+        patch.object(job_service.newgrad_jobs_client, "search_newgrad_jobs", new=AsyncMock(return_value=[])),
+        patch.object(job_service, "_store_raw_jobs", new=AsyncMock(return_value=[])),
+        patch.object(job_service, "_discover_ats_boards", new=AsyncMock(return_value=0)) as mock_ats,
+        patch.object(job_service, "_discover_nontech_vertical_boards", new=AsyncMock(return_value=0)) as mock_vert,
+        patch.object(job_service, "_discover_government_jobs", new=AsyncMock(return_value=7)) as mock_gov,
+    ):
+        await job_service.discover_jobs(_mock_db(profile), uuid.uuid4())
+
+    # government is industry-bound non-tech: tech boards suppressed ...
+    mock_ats.assert_not_awaited()
+    # ... no Workday vertical (gov has no curated tenant) ...
+    mock_vert.assert_not_awaited()
+    # ... and USAJobs is queried
+    mock_gov.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# Government discovery helper
+# ---------------------------------------------------------------------------
+
+async def test_discover_government_jobs_stores_when_configured():
+    raw = [{"title": "Policy Analyst"}, {"title": "Program Specialist"}]
+    with (
+        patch.object(job_service.usajobs_client, "discover_usajobs",
+                     new=AsyncMock(return_value=raw)) as mock_fetch,
+        patch.object(job_service, "_store_raw_jobs", new=AsyncMock(return_value=raw)),
+    ):
+        n = await job_service._discover_government_jobs(
+            MagicMock(), uuid.uuid4(), ["Policy Analyst", "Policy Analyst", ""], None
+        )
+    assert n == 2
+    # dedupes + drops blanks before querying
+    assert mock_fetch.await_args.args[0] == ["Policy Analyst"]
+
+
+async def test_discover_government_jobs_noop_when_unconfigured():
+    with (
+        patch.object(job_service.usajobs_client, "discover_usajobs",
+                     new=AsyncMock(return_value=[])),
+        patch.object(job_service, "_store_raw_jobs", new=AsyncMock()) as mock_store,
+    ):
+        n = await job_service._discover_government_jobs(
+            MagicMock(), uuid.uuid4(), ["Policy Analyst"], None
+        )
+    assert n == 0
+    mock_store.assert_not_awaited()

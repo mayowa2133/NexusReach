@@ -85,6 +85,10 @@ celery_app.conf.update(
             "task": "app.tasks.cadence_digest.send_cadence_digests",
             "schedule": crontab(minute=0, hour=9, day_of_week=1),  # Monday 09:00 UTC
         },
+        "verify-curated-boards": {
+            "task": "app.tasks.jobs.verify_curated_boards",
+            "schedule": crontab(minute=0, hour=6, day_of_week=1),  # Monday 06:00 UTC
+        },
     },
 )
 

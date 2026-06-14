@@ -8,6 +8,7 @@ calls.  The endpoint format is:
 This client queries that API for curated companies to bulk-discover jobs.
 """
 
+import asyncio
 import logging
 import re
 from datetime import datetime, timedelta, timezone
@@ -55,31 +56,29 @@ def _parse_posted_on(raw: str) -> str | None:
 WORKDAY_COMPANIES: list[dict[str, str]] = [
     {"label": "Salesforce", "company": "salesforce", "wd": "wd12", "site": "External_Career_Site"},
     {"label": "NVIDIA", "company": "nvidia", "wd": "wd5", "site": "NVIDIAExternalCareerSite"},
-    {"label": "Visa", "company": "visa", "wd": "wd5", "site": "Visa_Careers"},
+    {"label": "Visa", "company": "visa", "wd": "wd5", "site": "Visa"},
     {"label": "Adobe", "company": "adobe", "wd": "wd5", "site": "external_experienced"},
-    {"label": "ServiceNow", "company": "servicenow", "wd": "wd1", "site": "Careers"},
-    {"label": "Qualcomm", "company": "qualcomm", "wd": "wd5", "site": "External"},
-    {"label": "VMware", "company": "broadcom", "wd": "wd1", "site": "VMwareCareers"},
+    {"label": "Broadcom", "company": "broadcom", "wd": "wd1", "site": "External_Career"},
     {"label": "Target", "company": "target", "wd": "wd5", "site": "targetcareers"},
-    {"label": "Capital One", "company": "capitalone", "wd": "wd1", "site": "Capital_One"},
-    {"label": "Deloitte", "company": "deloitteus", "wd": "wd1", "site": "deloitteus"},
-    {"label": "Netflix", "company": "netflix", "wd": "wd1", "site": "Netflix"},
+    {"label": "Capital One", "company": "capitalone", "wd": "wd12", "site": "Capital_One"},
+    {"label": "Netflix", "company": "netflix", "wd": "wd108", "site": "Netflix"},
     {"label": "Cisco", "company": "cisco", "wd": "wd5", "site": "Cisco_Careers"},
-    {"label": "Walmart", "company": "walmart", "wd": "wd5", "site": "WalmartExternal"},
+    {"label": "Walmart", "company": "walmart", "wd": "wd504", "site": "WalmartExternal"},
     {"label": "Zoom", "company": "zoom", "wd": "wd5", "site": "Zoom"},
     {"label": "Workday", "company": "workday", "wd": "wd5", "site": "Workday"},
     {"label": "Intel", "company": "intel", "wd": "wd1", "site": "External"},
-    {"label": "Dell", "company": "dell", "wd": "wd1", "site": "External"},
     {"label": "CrowdStrike", "company": "crowdstrike", "wd": "wd5", "site": "CrowdStrikeCareers"},
     {"label": "Autodesk", "company": "autodesk", "wd": "wd1", "site": "Ext"},
     {"label": "Snap", "company": "snapchat", "wd": "wd1", "site": "snap"},
     {"label": "PayPal", "company": "paypal", "wd": "wd1", "site": "jobs"},
-    {"label": "Intuit", "company": "intuit", "wd": "wd1", "site": "Intuit"},
-    {"label": "Palo Alto Networks", "company": "paloaltonetworks", "wd": "wd1", "site": "Careers"},
     {"label": "HP", "company": "hp", "wd": "wd5", "site": "ExternalCareerSite"},
-    {"label": "IBM", "company": "ibm", "wd": "wd5", "site": "External"},
-    {"label": "Accenture", "company": "accenture", "wd": "wd3", "site": "AccentureCareers"},
+    {"label": "Accenture", "company": "accenture", "wd": "wd103", "site": "AccentureCareers"},
 ]
+# Removed 2026-06: ServiceNow, Qualcomm, Dell, Intuit, IBM, Palo Alto Networks,
+# Deloitte (deloitteus). Their tenants now return total=0 / HTTP 422 to the
+# anonymous bulk cxs search (jobs still render on individual pages, but the bulk
+# facet is disabled), so they are unharvestable through this client. Re-run
+# scripts/verify_workday_boards.py to recover them if the bulk API reopens.
 
 
 # Curated NON-TECH employers, the vertical analog of the tech ATS boards. These
@@ -104,6 +103,12 @@ WORKDAY_NONTECH_COMPANIES: list[dict[str, str]] = [
     {"label": "Trinity Health", "company": "trinityhealth", "wd": "wd1", "site": "Jobs", "vertical": "healthcare"},
     {"label": "Banner Health", "company": "bannerhealth", "wd": "wd108", "site": "Careers", "vertical": "healthcare"},
     {"label": "Vanderbilt University Medical Center", "company": "vumc", "wd": "wd1", "site": "vumccareers", "vertical": "healthcare"},
+    {"label": "Mass General Brigham", "company": "massgeneralbrigham", "wd": "wd1", "site": "MGBExternal", "vertical": "healthcare"},
+    {"label": "Intermountain Health", "company": "imh", "wd": "wd108", "site": "IntermountainCareers", "vertical": "healthcare"},
+    {"label": "Advocate Health", "company": "aah", "wd": "wd5", "site": "external", "vertical": "healthcare"},
+    {"label": "Geisinger", "company": "geisinger", "wd": "wd5", "site": "GeisingerExternal", "vertical": "healthcare"},
+    {"label": "Memorial Hermann", "company": "memorialhermann", "wd": "wd5", "site": "external", "vertical": "healthcare"},
+    {"label": "UMass Memorial Health", "company": "ummh", "wd": "wd1", "site": "Careers", "vertical": "healthcare"},
     # Banks / insurers (finance, accounting, actuarial, sales, ops)
     {"label": "PNC", "company": "pnc", "wd": "wd5", "site": "External", "vertical": "finance"},
     {"label": "State Street", "company": "statestreet", "wd": "wd1", "site": "Global", "vertical": "finance"},
@@ -116,6 +121,11 @@ WORKDAY_NONTECH_COMPANIES: list[dict[str, str]] = [
     # Large retailers (store ops, supply chain, merchandising, sales, support)
     {"label": "Lowe's", "company": "lowes", "wd": "wd5", "site": "LWS_External_CS", "vertical": "retail"},
     {"label": "Nordstrom", "company": "nordstrom", "wd": "wd501", "site": "nordstrom_careers", "vertical": "retail"},
+    {"label": "Dollar Tree", "company": "dollartree", "wd": "wd5", "site": "dollartreeus", "vertical": "retail"},
+    {"label": "Advance Auto Parts", "company": "advanceauto", "wd": "wd5", "site": "AdvanceExternalCareers", "vertical": "retail"},
+    {"label": "Meijer", "company": "meijer", "wd": "wd5", "site": "Meijer_Stores_Hourly", "vertical": "retail"},
+    {"label": "Gap Inc", "company": "gapinc", "wd": "wd1", "site": "GAPINC", "vertical": "retail"},
+    {"label": "Williams-Sonoma", "company": "williams", "wd": "wd5", "site": "External", "vertical": "retail"},
 ]
 
 
@@ -238,3 +248,87 @@ async def discover_all_nontech_workday(
     return await discover_workday_companies(
         companies, search_text=search_text, limit_per_company=limit_per_company
     )
+
+
+# ---------------------------------------------------------------------------
+# Config drift verification + auto-repair
+#
+# Workday tenants migrate occasionally (the ``wd`` tier or, less often, the
+# site name changes). A drifted config returns nothing and the feed silently
+# loses that employer. These helpers make drift detectable: probe each config,
+# and when the configured tier is dead, try the other known tiers with the same
+# site name (which catches the common "tenant moved tiers" case). Used by the
+# scheduled health-check task and by scripts/verify_workday_boards.py.
+# ---------------------------------------------------------------------------
+
+# All Workday tier subdomains seen across tenants, ordered by prevalence.
+_REPAIR_WD_TIERS = (
+    "wd1", "wd5", "wd3", "wd2", "wd10", "wd12",
+    "wd103", "wd108", "wd501", "wd502", "wd503", "wd504", "wd505",
+)
+
+
+async def _probe_config(company: str, wd: str, site: str) -> int | None:
+    """Return the live job total for a config, or None if dead/erroring."""
+    url = f"https://{company}.{wd}.myworkdayjobs.com/wday/cxs/{company}/{site}/jobs"
+    body = {"limit": 1, "offset": 0, "appliedFacets": {}}
+    try:
+        async with httpx.AsyncClient(timeout=12, follow_redirects=True) as client:
+            resp = await client.post(url, json=body, headers=_HEADERS)
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        if data.get("jobPostings"):
+            return int(data.get("total", 0) or 0)
+        return None
+    except Exception:
+        return None
+
+
+async def verify_workday_config(entry: dict[str, str], *, repair: bool = True) -> dict:
+    """Verify one Workday config against the live API, optionally auto-repairing.
+
+    Returns a status dict:
+      - ``status="ok"``        config returns jobs (``total``)
+      - ``status="repaired"``  configured tier dead, an alternate tier works
+                               (``wd`` = working tier, ``old_wd`` = configured)
+      - ``status="dead"``      no tier returns jobs for this site
+    """
+    label = entry.get("label", entry.get("company", "?"))
+    company, wd, site = entry["company"], entry["wd"], entry["site"]
+    total = await _probe_config(company, wd, site)
+    if total is not None:
+        return {"label": label, "company": company, "site": site, "wd": wd,
+                "vertical": entry.get("vertical"), "status": "ok", "total": total}
+    if repair:
+        for alt in _REPAIR_WD_TIERS:
+            if alt == wd:
+                continue
+            alt_total = await _probe_config(company, alt, site)
+            if alt_total is not None:
+                return {"label": label, "company": company, "site": site,
+                        "wd": alt, "old_wd": wd, "vertical": entry.get("vertical"),
+                        "status": "repaired", "total": alt_total}
+    return {"label": label, "company": company, "site": site, "wd": wd,
+            "vertical": entry.get("vertical"), "status": "dead", "total": 0}
+
+
+async def verify_all_workday(
+    registry: list[dict[str, str]] | None = None,
+    *,
+    repair: bool = True,
+    concurrency: int = 6,
+) -> list[dict]:
+    """Verify every config in a registry (defaults to tech + non-tech)."""
+    entries = (
+        registry
+        if registry is not None
+        else [*WORKDAY_COMPANIES, *WORKDAY_NONTECH_COMPANIES]
+    )
+    sem = asyncio.Semaphore(concurrency)
+
+    async def run(entry: dict[str, str]) -> dict:
+        async with sem:
+            return await verify_workday_config(entry, repair=repair)
+
+    return await asyncio.gather(*(run(e) for e in entries))

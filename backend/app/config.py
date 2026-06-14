@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     adzuna_app_id: str = ""
     adzuna_api_key: str = ""
     dice_api_key: str = ""
+    # USAJobs (federal government jobs). Free key from developer.usajobs.gov;
+    # user_agent must be the email registered with the key. Optional/fail-soft.
+    usajobs_api_key: str = ""
+    usajobs_user_agent: str = ""
     anthropic_api_key: str = ""
     openai_api_key: str = ""
     google_api_key: str = ""

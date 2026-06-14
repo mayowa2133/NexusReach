@@ -29,6 +29,7 @@ from app.clients import (
     remote_jobs_client,
     speedrun_jobs_client,
     tesla_client,
+    usajobs_client,
     ventureloop_jobs_client,
     wellfound_jobs_client,
     workday_client,
@@ -121,12 +122,11 @@ def _suppress_tech_sources(resolved_occupations: list[str] | None) -> bool:
     return all(o in INDUSTRY_BOUND_NONTECH_OCCUPATIONS for o in occs)
 
 
-# Curated non-tech employer lists (Workday-backed health systems, universities,
-# banks/insurers, retailers) are the vertical analog of the tech ATS boards.
-# This maps an occupation to the verticals whose employers actually hire it, so
-# a nursing search pulls health systems and a finance search pulls banks. Only
-# occupations with a clear vertical home are mapped; everything else relies on
-# the broad aggregators. Cross-industry occupations (sales, support) map to
+# Curated non-tech employer lists are the vertical analog of the tech ATS
+# boards. This maps an occupation to the verticals whose employers actually hire
+# it, so a nursing search pulls health systems and a finance search pulls banks.
+# Only occupations with a clear vertical home are mapped; everything else relies
+# on the broad aggregators. Cross-industry occupations (sales, support) map to
 # multiple verticals since those employers hire heavily for them.
 OCCUPATION_VERTICALS: dict[str, frozenset[str]] = {
     "healthcare": frozenset({"healthcare"}),
@@ -135,7 +135,14 @@ OCCUPATION_VERTICALS: dict[str, frozenset[str]] = {
     "sales": frozenset({"finance", "retail"}),
     "customer_service_support": frozenset({"finance", "retail"}),
     "supply_chain": frozenset({"retail"}),
+    "public_sector_government": frozenset({"government"}),
 }
+
+# Which provider serves each vertical. Most are Workday curated employers;
+# federal government is served by USAJobs (the official federal board) instead,
+# since agencies don't post on the curated Workday tenants.
+WORKDAY_VERTICALS = frozenset({"healthcare", "education", "finance", "retail"})
+GOVERNMENT_VERTICAL = "government"
 
 
 def verticals_for_occupations(resolved_occupations: list[str] | None) -> set[str]:
@@ -1808,20 +1815,50 @@ async def _discover_nontech_vertical_boards(
     profile,
     limit_per_company: int = 20,
 ) -> int:
-    """Pull jobs from curated non-tech employers in the given verticals.
+    """Pull jobs from curated Workday employers in the given verticals.
 
     The non-tech analog of ``_discover_ats_boards``: health systems,
     universities, banks/insurers, and retailers on Workday. Occupation-routed
-    by ``verticals`` so only relevant employers are fetched. Fails soft.
+    by ``verticals`` so only relevant employers are fetched. Government is not
+    handled here (it has no curated Workday tenant — see
+    ``_discover_government_jobs``). Fails soft.
     """
-    if not verticals:
+    workday_verticals = {v for v in verticals if v in WORKDAY_VERTICALS}
+    if not workday_verticals:
         return 0
     try:
         raw_jobs = await workday_client.discover_all_nontech_workday(
-            limit_per_company=limit_per_company, verticals=verticals
+            limit_per_company=limit_per_company, verticals=workday_verticals
         )
     except Exception:
         logger.exception("non-tech vertical board discovery failed")
+        return 0
+    stored = await _store_raw_jobs(db, user_id, raw_jobs, profile)
+    return len(stored)
+
+
+async def _discover_government_jobs(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    queries: list[str],
+    profile,
+    limit_per_query: int = 25,
+) -> int:
+    """Pull federal postings from USAJobs for government seekers. Fails soft.
+
+    USAJobs is the official federal board; agencies don't post on the curated
+    Workday tenants, so the ``government`` vertical routes here instead. No-op
+    when USAJobs is unconfigured (the broad aggregators still serve gov roles).
+    """
+    seeds = [q for q in dict.fromkeys(queries) if q][:4]
+    if not seeds:
+        return 0
+    try:
+        raw_jobs = await usajobs_client.discover_usajobs(seeds, limit_per_query=limit_per_query)
+    except Exception:
+        logger.exception("USAJobs government discovery failed")
+        return 0
+    if not raw_jobs:
         return 0
     stored = await _store_raw_jobs(db, user_id, raw_jobs, profile)
     return len(stored)
@@ -2599,12 +2636,13 @@ async def discover_jobs(
             logger.exception("ATS board discovery failed")
 
     # 4. Curated non-tech vertical boards (health systems, universities,
-    #    banks/insurers, retailers). Occupation-routed and additive: fires
-    #    whenever the resolved occupations have a vertical home, independent of
-    #    the tech-source suppression decision (a finance seeker isn't suppressed
-    #    but still wants banks; a nurse is suppressed and still wants hospitals).
+    #    banks/insurers, retailers on Workday; federal government on USAJobs).
+    #    Occupation-routed and additive: fires whenever the resolved occupations
+    #    have a vertical home, independent of the tech-source suppression
+    #    decision (a finance seeker isn't suppressed but still wants banks; a
+    #    nurse is suppressed and still wants hospitals).
     target_verticals = verticals_for_occupations(resolved_occupations)
-    if target_verticals:
+    if target_verticals & WORKDAY_VERTICALS:
         try:
             nt_new = await _discover_nontech_vertical_boards(
                 db, user_id, target_verticals, profile
@@ -2612,11 +2650,22 @@ async def discover_jobs(
             total_new += nt_new
             logger.info(
                 "Discover: non-tech vertical boards (%s) -> %d new jobs",
-                sorted(target_verticals),
+                sorted(target_verticals & WORKDAY_VERTICALS),
                 nt_new,
             )
         except Exception:
             logger.exception("non-tech vertical board discovery failed")
+
+    # 5. Federal government postings via USAJobs (no-op unless configured).
+    if GOVERNMENT_VERTICAL in target_verticals:
+        try:
+            gov_queries = [s["query"] for s in search_list if s.get("query")]
+            gov_new = await _discover_government_jobs(db, user_id, gov_queries, profile)
+            total_new += gov_new
+            if gov_new:
+                logger.info("Discover: USAJobs government -> %d new jobs", gov_new)
+        except Exception:
+            logger.exception("USAJobs government discovery failed")
 
     logger.info("Discovered %d new jobs for user %s", total_new, user_id)
     return total_new
