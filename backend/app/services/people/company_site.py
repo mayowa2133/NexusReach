@@ -155,12 +155,12 @@ async def _fetch_team_page(domain: str, company_name: str = "") -> tuple[str, st
     return None
 
 
-async def _extract_leaders(text: str, company_name: str) -> list[dict]:
-    """LLM-extract {name, title} leaders from page text. Fail-soft to []."""
+async def _extract_named_people(text: str, company_name: str, system_prompt: str) -> list[dict]:
+    """LLM-extract {name, title} people from page text. Fail-soft to []."""
     snippet = text[:8000]
     try:
         result = await llm_client.generate_message(
-            system_prompt=_EXTRACTION_SYSTEM_PROMPT,
+            system_prompt=system_prompt,
             user_prompt=f"Company: {company_name}\n\nPage text:\n{snippet}",
             max_tokens=900,
         )
@@ -170,10 +170,10 @@ async def _extract_leaders(text: str, company_name: str) -> list[dict]:
             return []
         parsed = json.loads(raw[start : end + 1])
     except Exception:
-        logger.warning("company-site leader extraction failed for %s", company_name, exc_info=True)
+        logger.warning("company-site people extraction failed for %s", company_name, exc_info=True)
         return []
 
-    leaders: list[dict] = []
+    people: list[dict] = []
     seen: set[str] = set()
     for item in parsed:
         if not isinstance(item, dict):
@@ -184,10 +184,15 @@ async def _extract_leaders(text: str, company_name: str) -> list[dict]:
         if not name or " " not in name or not title or key in seen:
             continue
         seen.add(key)
-        leaders.append({"name": name, "title": title})
-        if len(leaders) >= MAX_LEADERS:
+        people.append({"name": name, "title": title})
+        if len(people) >= MAX_LEADERS:
             break
-    return leaders
+    return people
+
+
+async def _extract_leaders(text: str, company_name: str) -> list[dict]:
+    """LLM-extract {name, title} leaders from page text. Fail-soft to []."""
+    return await _extract_named_people(text, company_name, _EXTRACTION_SYSTEM_PROMPT)
 
 
 async def discover_company_site_leaders(
@@ -246,6 +251,179 @@ async def discover_company_site_leaders(
                 "profile_data": {
                     "company_match_confidence": "strong_signal",
                     "company_site_leader": True,
+                    "company_site_url": entry.get("url") or origin_url,
+                },
+            }
+        )
+    return candidates
+
+
+# ---------------------------------------------------------------------------
+# Recruiting / talent-acquisition team mining
+#
+# Leadership pages name executives; this finds the company's *recruiting* team
+# (recruiters, sourcers, talent partners, coordinators) which companies often
+# publish on a careers/"meet the team" page. It is the own-domain analog for
+# the recruiter bucket, and the only free, accurate recruiter source when the
+# companion's hiring-team capture isn't available. Recruiters are universal, so
+# this runs for every role type (not just non-engineering).
+# ---------------------------------------------------------------------------
+
+RECRUITERS_CACHE_PREFIX = "people:company_site_recruiters:v1:"
+
+_RECRUITER_PATHS = (
+    "/careers/team",
+    "/careers/meet-the-team",
+    "/about/careers",
+    "/recruiting",
+    "/our-recruiters",
+    "/recruiters",
+    "/talent",
+    "/talent-acquisition",
+    "/recruitment",
+    "/people-team",
+    "/about/people",
+    "/join-us",
+    "/work-with-us",
+)
+
+_RECRUITER_PAGE_SIGNALS = (
+    "recruiter", "recruiting", "talent acquisition", "talent partner",
+    "sourcer", "recruitment", "talent team", "people team",
+    "head of talent", "people operations", "talent advisor", "ta team",
+)
+
+_RECRUITER_TITLE_RE = re.compile(
+    r"\b(recruit\w*|talent\s+(acquisition|partner|advisor|sourc\w*|team)|sourc\w*|"
+    r"people\s+(operations|team|partner)|head\s+of\s+(talent|recruit\w*)|ta\b)\b",
+    re.IGNORECASE,
+)
+
+_RECRUITER_EXTRACTION_SYSTEM_PROMPT = (
+    "You extract a company's RECRUITING / talent-acquisition team from the text "
+    "of its own website page. Return ONLY a JSON array of objects "
+    "{\"name\": str, \"title\": str} for people whose name AND a recruiting-"
+    "related role (recruiter, sourcer, talent acquisition, talent partner, "
+    "recruiting coordinator/manager, head of talent, people operations) are "
+    "literally stated on the page. Exclude engineers, sales, and other "
+    "non-recruiting staff. Do NOT invent anyone; if none are listed, return []. "
+    "No prose, no fences."
+)
+
+
+def _looks_like_recruiting_page(page: dict | None) -> bool:
+    if not page:
+        return False
+    text = (page.get("text") or page.get("content") or "").lower()
+    if len(text) < 200:
+        return False
+    return sum(1 for sig in _RECRUITER_PAGE_SIGNALS if sig in text) >= 2
+
+
+async def _search_recruiting_page_url(domain: str) -> str | None:
+    """SERP for the recruiting/talent-team page on the company's own domain."""
+    root = domain.removeprefix("www.")
+    query = f'site:{root} (recruiters OR "talent acquisition" OR "recruiting team" OR "meet the team" OR "people team")'
+    try:
+        results = await searxng_search_client._run_searxng_query(query, 6)
+    except Exception:
+        results = []
+    if not results:
+        try:
+            results = await brave_search_client._run_brave_query(query, 6)
+        except Exception:
+            results = []
+    for item in results:
+        url = item.get("url") or ""
+        if root in url:
+            return url
+    return None
+
+
+async def _fetch_recruiting_page(domain: str, company_name: str = "") -> tuple[str, str] | None:
+    """Return (url, text) for the company's recruiting/talent-team page, or None."""
+    domain = domain.strip().lower().rstrip("/")
+    if not domain or "." not in domain:
+        return None
+    base = domain if domain.startswith("http") else f"https://{domain.removeprefix('www.')}"
+
+    candidate_urls: list[str] = []
+    serp_url = await _search_recruiting_page_url(domain)
+    if serp_url:
+        candidate_urls.append(serp_url)
+    candidate_urls.extend(base + path for path in _RECRUITER_PATHS)
+
+    for url in candidate_urls:
+        try:
+            page = await public_page_client.fetch_page(url, timeout_seconds=FETCH_TIMEOUT_SECONDS)
+        except Exception:
+            continue
+        if _looks_like_recruiting_page(page):
+            return url, (page.get("text") or page.get("content") or "")
+    return None
+
+
+async def discover_company_site_recruiters(
+    company_name: str,
+    domain: str | None,
+    *,
+    origin_url: str | None = None,
+) -> list[dict]:
+    """Return recruiter candidates from the company's own recruiting/careers page.
+
+    Own-domain evidence, so each carries strong-signal confidence and
+    ``_company_site_recruiter=True``. Titles are filtered to recruiting-related
+    roles (defensive, in case the page mixes in non-recruiting staff). Cached by
+    domain; fail-soft to [].
+    """
+    if not domain:
+        return []
+    cache_key = RECRUITERS_CACHE_PREFIX + domain.lower().strip()
+    cached = None
+    try:
+        cached = await search_cache_client.get_json(cache_key)
+    except Exception:
+        cached = None
+
+    if cached is None:
+        fetched = await _fetch_recruiting_page(domain, company_name)
+        if not fetched:
+            try:
+                await search_cache_client.set_json(cache_key, [], ttl_seconds=LEADERS_CACHE_TTL_SECONDS)
+            except Exception:
+                pass
+            return []
+        page_url, text = fetched
+        people = await _extract_named_people(text, company_name, _RECRUITER_EXTRACTION_SYSTEM_PROMPT)
+        payload = [
+            {"name": p["name"], "title": p["title"], "url": page_url}
+            for p in people
+            if _RECRUITER_TITLE_RE.search(p["title"])
+        ]
+        try:
+            await search_cache_client.set_json(cache_key, payload, ttl_seconds=LEADERS_CACHE_TTL_SECONDS)
+        except Exception:
+            pass
+        cached = payload
+
+    candidates: list[dict] = []
+    for entry in cached or []:
+        name = entry.get("name")
+        title = entry.get("title")
+        if not name or not title:
+            continue
+        candidates.append(
+            {
+                "full_name": name,
+                "title": title,
+                "source": "company_site",
+                "snippet": f"Listed on {company_name}'s recruiting/careers team page as {title}.",
+                "linkedin_url": "",
+                "_company_site_recruiter": True,
+                "_employment_status": "current",
+                "profile_data": {
+                    "company_match_confidence": "strong_signal",
+                    "company_site_recruiter": True,
                     "company_site_url": entry.get("url") or origin_url,
                 },
             }

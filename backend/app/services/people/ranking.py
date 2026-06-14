@@ -34,6 +34,18 @@ def _published_leader_rank(data: dict) -> int:
     return 0 if (data.get("_company_site_leader") or data.get("_news_quote")) else 1
 
 
+def _corroboration_rank(data: dict) -> int:
+    """Reward people named independently by 2+ discovery strategies.
+
+    ``_dedupe_candidates`` records the distinct sources that surfaced a person
+    in ``_corroborated_by``. Agreement across independent strategies (e.g. The
+    Org + the company site, or GitHub-team + x-ray) is a strong accuracy signal
+    — a corroborated candidate is far more likely to be the real contact than a
+    single-source guess, so it sorts ahead of equally-titled singletons.
+    """
+    return 0 if len(data.get("_corroborated_by") or ()) >= 2 else 1
+
+
 SOURCE_PRIORITY = {
     "apollo": 0,
     "proxycurl": 1,
@@ -383,6 +395,7 @@ def _candidate_sort_key(data: dict, *, bucket: str, context: JobContext | None) 
             _hiring_team_rank(data),
             0 if data.get("_posting_contact") else 1,
             0 if data.get("_posted_this_req") else 1,
+            _corroboration_rank(data),
             0 if data.get("_actively_hiring") else 1,
             recruiter_scope_rank,
             location_rank,
@@ -418,6 +431,7 @@ def _candidate_sort_key(data: dict, *, bucket: str, context: JobContext | None) 
             _hiring_team_rank(data),
             github_team_rank(data),
             _published_leader_rank(data),
+            _corroboration_rank(data),
             0 if data.get("_actively_hiring") else 1,
             _team_keyword_match_rank(data, bucket=bucket, context=context),
             location_rank,
@@ -434,6 +448,7 @@ def _candidate_sort_key(data: dict, *, bucket: str, context: JobContext | None) 
         )
     return (
         github_team_rank(data),
+        _corroboration_rank(data),
         org_rank,
         0 if data.get("_actively_hiring") else 1,
         _peer_title_alignment_rank(data, context=context),

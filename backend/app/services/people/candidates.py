@@ -491,14 +491,30 @@ def _dedupe_candidate_bucket_groups(
 
 
 def _dedupe_candidates(*groups: list[dict]) -> list[dict]:
+    """Dedupe candidates, recording cross-source corroboration on the survivor.
+
+    When the same person is surfaced by more than one discovery strategy the
+    duplicate is collapsed into the first occurrence, but the distinct ``source``
+    values are unioned onto ``_corroborated_by``. Agreement across independent
+    strategies is a strong accuracy signal that ranking rewards
+    (`ranking._corroboration_rank`); previously the duplicate was simply dropped
+    and the signal lost.
+    """
     deduped: list[dict] = []
-    seen: set[str] = set()
+    kept_by_key: dict[str, dict] = {}
     for group in groups:
         for candidate in group:
             key = _candidate_key(candidate)
-            if key in seen:
+            source = candidate.get("source")
+            existing = kept_by_key.get(key)
+            if existing is not None:
+                if source:
+                    corroborated = existing.setdefault("_corroborated_by", [])
+                    if source not in corroborated:
+                        corroborated.append(source)
                 continue
-            seen.add(key)
+            kept_by_key[key] = candidate
+            candidate["_corroborated_by"] = [source] if source else []
             deduped.append(candidate)
     return deduped
 

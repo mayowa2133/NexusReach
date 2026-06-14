@@ -35,7 +35,7 @@ from app.services.people.buckets import _append_bucket, _backfill_sparse_hiring_
 from app.services.people.candidates import DEFAULT_TARGET_COUNT_PER_BUCKET, _clamp_target_count_per_bucket, _debug_candidate_summary, _dedupe_candidate_bucket_groups, _dedupe_candidates, _expand_peer_candidates, _has_recruiter_lead_candidate, _interactive_enrichment_limit_for_target, _limit_interactive_bucket, _minimum_results_for_target, _needs_more_bucket_candidates, _needs_more_bucket_size_only, _prepare_candidates, _prepare_limit_for_target, _search_candidates, _search_limit_for_target, _should_expand_with_theorg, _should_run_manager_geo_recovery, _should_run_peer_targeted_recovery, _should_run_recruiter_targeted_recovery
 from app.services.people.classify import _classify_org_level, _classify_person, _classify_person_with_confidence
 from app.services.people.affinity import annotate_affinity
-from app.services.people.company_site import discover_company_site_leaders
+from app.services.people.company_site import discover_company_site_leaders, discover_company_site_recruiters
 from app.services.people.public_footprint import discover_public_footprint_leaders
 from app.services.people.github_team import resolve_github_org, resolve_team_contacts
 from app.services.people.outcome_priors import load_reply_priors, stamp_outcome_priors
@@ -194,6 +194,22 @@ async def _gather_nontech_leaders(
     return out
 
 
+async def _gather_company_site_recruiters(company_name: str, domain: str | None) -> list[dict]:
+    """Recruiters from the company's own recruiting/careers-team page.
+
+    Own-domain, free, and the best non-companion recruiter source. Runs for
+    every role type (recruiters are universal); bounded, cached, fail-soft.
+    Shared by both people flows so recruiter recall is identical.
+    """
+    if not domain:
+        return []
+    try:
+        return await discover_company_site_recruiters(company_name, domain)
+    except Exception:
+        logger.debug("company-site recruiter discovery failed; skipping", exc_info=True)
+        return []
+
+
 async def search_people_at_company(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -330,6 +346,13 @@ async def search_people_at_company(
     combined_leaders = nontech_leaders["site"] + nontech_leaders["news"] + nontech_leaders["footprint"]
     if combined_leaders:
         manager_candidates = _dedupe_candidates(manager_candidates, combined_leaders)
+
+    # Recruiting/TA-team page (own-domain recruiters). Runs for all role types.
+    site_recruiters = await _gather_company_site_recruiters(
+        company_name, company.domain if getattr(company, "domain", None) else None
+    )
+    if site_recruiters:
+        recruiter_candidates = _dedupe_candidates(recruiter_candidates, site_recruiters)
 
     # --- Write-through to global known people cache ---
     try:
@@ -1201,6 +1224,13 @@ async def search_people_for_job(
             ]
             debug["searches"]["public_footprint_leaders"] = [
                 _debug_candidate_summary(c) for c in footprint_leaders
+            ]
+    site_recruiters = await _gather_company_site_recruiters(job.company_name, site_domain)
+    if site_recruiters:
+        recruiter_candidates = _dedupe_candidates(recruiter_candidates, site_recruiters)
+        if debug is not None:
+            debug["searches"]["company_site_recruiters"] = [
+                _debug_candidate_summary(c) for c in site_recruiters
             ]
     _record_timing(
         debug,

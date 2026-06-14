@@ -265,3 +265,125 @@ async def test_gather_nontech_leaders_fails_soft_per_source():
     # one source failing doesn't sink the others
     assert out["site"] == [] and out["footprint"] == []
     assert [c["full_name"] for c in out["news"]] == ["News Exec"]
+
+
+# ---------------------------------------------------------------------------
+# #1 Cross-source corroboration (dedupe records agreement; ranking rewards it)
+# ---------------------------------------------------------------------------
+
+def test_dedupe_records_cross_source_corroboration():
+    from app.services.people.candidates import _dedupe_candidates
+
+    a = {"full_name": "Dana Fox", "title": "Director of Sales", "source": "company_site"}
+    b = {"full_name": "Dana Fox", "title": "Director of Sales", "source": "news_quote"}
+    solo = {"full_name": "Solo Person", "title": "Director of Sales", "source": "brave_search"}
+    out = _dedupe_candidates([a], [b, solo])
+    by = {c["full_name"]: c for c in out}
+    assert len(out) == 2  # Dana collapsed, not duplicated
+    assert set(by["Dana Fox"]["_corroborated_by"]) == {"company_site", "news_quote"}
+    assert by["Solo Person"]["_corroborated_by"] == ["brave_search"]
+
+
+def test_corroboration_rank_values():
+    from app.services.people.ranking import _corroboration_rank
+
+    assert _corroboration_rank({"_corroborated_by": ["a", "b"]}) == 0
+    assert _corroboration_rank({"_corroborated_by": ["a"]}) == 1
+    assert _corroboration_rank({}) == 1
+
+
+def test_corroborated_candidate_outranks_singleton():
+    from app.services.people.candidates import _prepare_candidates
+    from app.utils.job_context import JobContext
+
+    ctx = JobContext(department="sales", occupation_keys=["sales"],
+                     team_keywords=["strategic accounts"], manager_titles=["Sales Manager"], seniority="mid")
+    # two equally-titled HMs; one is named by two sources, one by one
+    corroborated = {
+        "full_name": "Two Source", "title": "Director of Sales", "source": "company_site",
+        "snippet": "Director of Sales at Acme", "_employment_status": "current",
+        "_corroborated_by": ["company_site", "theorg_traversal"],
+        "profile_data": {"company_match_confidence": "strong_signal"},
+    }
+    singleton = {
+        "full_name": "One Source", "title": "Director of Sales", "source": "company_site",
+        "snippet": "Director of Sales at Acme", "_employment_status": "current",
+        "_corroborated_by": ["company_site"],
+        "profile_data": {"company_match_confidence": "strong_signal"},
+    }
+    ranked = _prepare_candidates(
+        [singleton, corroborated], company_name="Acme", public_identity_slugs=["acme"],
+        bucket="hiring_managers", context=ctx, limit=5,
+    )
+    assert ranked[0]["full_name"] == "Two Source"
+
+
+# ---------------------------------------------------------------------------
+# #2 Recruiting/TA-team page mining
+# ---------------------------------------------------------------------------
+
+def test_looks_like_recruiting_page():
+    good = {"text": ("Meet our talent acquisition team. " * 4) +
+                    "Jane Doe, Senior Technical Recruiter. Sam Lee, Talent Partner. "
+                    "Pat Fox heads recruiting and people operations."}
+    bad = {"text": "Buy our product today. Pricing and features and more product."}
+    assert company_site._looks_like_recruiting_page(good) is True
+    assert company_site._looks_like_recruiting_page(bad) is False
+    assert company_site._looks_like_recruiting_page(None) is False
+
+
+async def test_discover_company_site_recruiters_extracts_filters_shapes():
+    page_text = (
+        "Talent team. Jane Carter is a Senior Technical Recruiter. "
+        "Sam Lee, Talent Acquisition Partner. Max Stone, VP of Engineering."
+    )
+    # LLM returns a non-recruiting title too; the regex filter must drop it.
+    llm_json = ('[{"name":"Jane Carter","title":"Senior Technical Recruiter"},'
+                '{"name":"Sam Lee","title":"Talent Acquisition Partner"},'
+                '{"name":"Max Stone","title":"VP of Engineering"}]')
+    with (
+        patch.object(company_site.search_cache_client, "get_json", new=AsyncMock(return_value=None)),
+        patch.object(company_site.search_cache_client, "set_json", new=AsyncMock()),
+        patch.object(company_site, "_fetch_recruiting_page",
+                     new=AsyncMock(return_value=("https://acme.com/careers/team", page_text))),
+        patch.object(company_site.llm_client, "generate_message",
+                     new=AsyncMock(return_value={"draft": llm_json})),
+    ):
+        recruiters = await company_site.discover_company_site_recruiters("Acme", "acme.com")
+
+    by = {c["full_name"]: c for c in recruiters}
+    assert "Jane Carter" in by and "Sam Lee" in by
+    assert "Max Stone" not in by  # non-recruiting title filtered out
+    assert by["Jane Carter"]["source"] == "company_site"
+    assert by["Jane Carter"]["_company_site_recruiter"] is True
+    assert by["Jane Carter"]["profile_data"]["company_match_confidence"] == "strong_signal"
+
+
+async def test_company_site_recruiters_uses_cache():
+    cached = [{"name": "Cached Recruiter", "title": "Recruiter", "url": "https://acme.com/careers"}]
+    with (
+        patch.object(company_site.search_cache_client, "get_json", new=AsyncMock(return_value=cached)),
+        patch.object(company_site, "_fetch_recruiting_page", new=AsyncMock()) as mock_fetch,
+    ):
+        recruiters = await company_site.discover_company_site_recruiters("Acme", "acme.com")
+    mock_fetch.assert_not_awaited()
+    assert recruiters[0]["full_name"] == "Cached Recruiter"
+
+
+async def test_company_site_recruiters_fails_soft():
+    assert await company_site.discover_company_site_recruiters("Acme", None) == []
+    with (
+        patch.object(company_site.search_cache_client, "get_json", new=AsyncMock(return_value=None)),
+        patch.object(company_site.search_cache_client, "set_json", new=AsyncMock()),
+        patch.object(company_site, "_fetch_recruiting_page", new=AsyncMock(return_value=None)),
+    ):
+        assert await company_site.discover_company_site_recruiters("Acme", "acme.com") == []
+
+
+async def test_gather_company_site_recruiters_helper_fail_soft():
+    from app.services.people import service
+
+    assert await service._gather_company_site_recruiters("Acme", None) == []
+    with patch.object(service, "discover_company_site_recruiters",
+                      new=AsyncMock(side_effect=RuntimeError("boom"))):
+        assert await service._gather_company_site_recruiters("Acme", "acme.com") == []
