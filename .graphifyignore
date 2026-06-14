@@ -1,0 +1,54 @@
+# graphify ignore — keep the knowledge graph scoped to real source + curated
+# docs. graphify reads this (gitignore syntax) before scanning; it excludes
+# scratch/generated/vendored noise that otherwise bloats extraction. The big
+# one is .claude/ (tens of thousands of bundled skill files).
+
+# Agent / tooling scratch
+.claude/
+.playwright-cli/
+.playwright-mcp/
+.pytest_cache/
+.ruff_cache/
+graphify-out/
+
+# Dependencies & build artifacts
+node_modules/
+dist/
+build/
+frontend/dist/
+**/__pycache__/
+.venv/
+venv/
+backend/.venv312/
+htmlcov/
+coverage/
+.coverage
+
+# Test / run output
+output/
+e2e/test-results/
+e2e/playwright-report/
+playwright-report/
+
+# Lockfiles (large, no semantic value)
+**/package-lock.json
+**/pnpm-lock.yaml
+**/yarn.lock
+uv.lock
+poetry.lock
+
+# Test fixtures (payload data, not logic — the test_*.py code is still indexed)
+backend/tests/fixtures/
+
+# Spike / scratch artifacts & generated reports
+scrapegraph_*.json
+posthog-setup-report.md
+
+# Binary assets / screenshots (no code semantics; avoids vision-extraction cost)
+*.png
+*.svg
+*.ico
+*.jpg
+*.jpeg
+*.gif
+*.webp
