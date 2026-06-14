@@ -350,3 +350,53 @@ def test_founder_exec_title_detector_word_boundaries():
     # "doctor" contains the letters c-t-o but must not match
     assert _is_founder_exec_title("Medical Doctor") is False
     assert _is_founder_exec_title("Director of Engineering") is False
+
+
+# ---------------------------------------------------------------------------
+# Occupation-aware job source routing (tech-source suppression for non-tech)
+# ---------------------------------------------------------------------------
+
+def test_suppress_tech_sources_helper():
+    from app.services.job_service import _suppress_tech_sources
+
+    # all industry-bound non-tech -> suppress
+    assert _suppress_tech_sources(["healthcare"]) is True
+    assert _suppress_tech_sources(["education_training", "healthcare"]) is True
+    # any cross-industry / tech occupation present -> keep tech sources
+    assert _suppress_tech_sources(["sales"]) is False
+    assert _suppress_tech_sources(["software_engineering"]) is False
+    assert _suppress_tech_sources(["healthcare", "sales"]) is False
+    # empty -> keep (default behavior)
+    assert _suppress_tech_sources([]) is False
+    assert _suppress_tech_sources(None) is False
+
+
+async def test_discover_routes_nontech_to_broad_aggregators():
+    from app.services import job_service
+
+    profile = MagicMock()
+    profile.target_occupations = ["healthcare"]
+    profile.target_roles = None
+    profile.target_locations = []
+
+    db = MagicMock()
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = profile
+    db.execute = AsyncMock(return_value=result)
+
+    with (
+        patch.object(job_service, "search_jobs", new=AsyncMock(return_value=[])) as mock_search,
+        patch.object(job_service.newgrad_jobs_client, "search_newgrad_jobs", new=AsyncMock(return_value=[])) as mock_newgrad,
+        patch.object(job_service, "_store_raw_jobs", new=AsyncMock(return_value=[])),
+        patch.object(job_service, "_discover_ats_boards", new=AsyncMock(return_value=0)) as mock_ats,
+    ):
+        await job_service.discover_jobs(db, uuid.uuid4())
+
+    # tech-only sources are gone; broad aggregators remain
+    for call in mock_search.await_args_list:
+        srcs = call.kwargs["sources"]
+        assert "dice" not in srcs and "simplify" not in srcs and "jobicy" not in srcs
+        assert "jsearch" in srcs and "adzuna" in srcs
+    # newgrad + the 100 tech ATS boards are skipped entirely for healthcare
+    mock_newgrad.assert_not_awaited()
+    mock_ats.assert_not_awaited()

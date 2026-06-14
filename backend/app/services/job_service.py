@@ -94,6 +94,32 @@ DISCOVER_LOCATION_FANOUT = 2
 STARTUP_MAX_RESOLVED_LINKS_PER_COMPANY = 3
 APPLY_URL_REPAIR_MAX_JOBS = 20
 
+# Occupations bound to non-tech industries: hospitals, schools, law firms,
+# government, studios. For these, the curated tech ATS boards + tech-leaning
+# boards (Dice, Simplify, newgrad) are pure noise, so discovery routes to the
+# broad all-industry aggregators (JSearch / Adzuna / Remotive) instead.
+INDUSTRY_BOUND_NONTECH_OCCUPATIONS = frozenset({
+    "healthcare",
+    "education_training",
+    "legal_compliance",
+    "public_sector_government",
+    "arts_entertainment",
+})
+
+
+def _suppress_tech_sources(resolved_occupations: list[str] | None) -> bool:
+    """True only when EVERY resolved occupation is industry-bound non-tech.
+
+    Conservative: a cross-industry occupation (sales, marketing, finance, ...)
+    keeps the tech sources, since those seekers may target tech companies. We
+    only suppress when the whole search is for a sector where tech employers
+    cannot be the answer (e.g. nursing, teaching, law).
+    """
+    occs = [o for o in (resolved_occupations or []) if o]
+    if not occs:
+        return False
+    return all(o in INDUSTRY_BOUND_NONTECH_OCCUPATIONS for o in occs)
+
 
 # --- Deduplication ---
 
@@ -2474,6 +2500,18 @@ async def discover_jobs(
             for loc in target_locations:
                 expanded_seeds.append({**seed, "location": loc})
 
+    suppress_tech = _suppress_tech_sources(resolved_occupations)
+    if suppress_tech:
+        # All-industry aggregators only - the curated tech employers and
+        # tech-leaning boards are noise for nursing / teaching / law / etc.
+        discover_sources = ["jsearch", "adzuna", "remotive"]
+        logger.info(
+            "Discover: routing to broad aggregators only (non-tech occupations: %s)",
+            resolved_occupations,
+        )
+    else:
+        discover_sources = ["jsearch", "adzuna", "remotive", "jobicy", "dice", "simplify"]
+
     for seed in expanded_seeds:
         try:
             stored = await search_jobs(
@@ -2482,7 +2520,7 @@ async def discover_jobs(
                 query=seed["query"],  # type: ignore[arg-type]
                 location=seed["location"],  # type: ignore[arg-type]
                 remote_only=seed["remote_only"],  # type: ignore[arg-type]
-                sources=["jsearch", "adzuna", "remotive", "jobicy", "dice", "simplify"],
+                sources=discover_sources,
                 limit=DISCOVER_LIMIT_PER_SOURCE,
                 occupation_hint=seed.get("occupation"),
             )
@@ -2490,23 +2528,24 @@ async def discover_jobs(
         except Exception:
             logger.exception("Discover failed for query: %s", seed["query"])
 
-    # 2. newgrad-jobs.com — single unfiltered scrape across all 5 categories
-    #    (~500 unique jobs).  Deduplication is handled by _store_raw_jobs.
-    try:
-        raw_newgrad = await newgrad_jobs_client.search_newgrad_jobs()
-        ng_stored = await _store_raw_jobs(db, user_id, raw_newgrad, profile)
-        if ng_stored:
-            logger.info("newgrad-jobs discover: %d new jobs", len(ng_stored))
-        total_new += len(ng_stored)
-    except Exception:
-        logger.exception("newgrad-jobs discover failed")
+    # 2. newgrad-jobs.com — tech/new-grad-leaning; skip for non-tech occupations.
+    if not suppress_tech:
+        try:
+            raw_newgrad = await newgrad_jobs_client.search_newgrad_jobs()
+            ng_stored = await _store_raw_jobs(db, user_id, raw_newgrad, profile)
+            if ng_stored:
+                logger.info("newgrad-jobs discover: %d new jobs", len(ng_stored))
+            total_new += len(ng_stored)
+        except Exception:
+            logger.exception("newgrad-jobs discover failed")
 
-    # 3. ATS board discovery (Greenhouse, Ashby, Lever, Workday)
-    try:
-        ats_new = await _discover_ats_boards(db, user_id)
-        total_new += ats_new
-    except Exception:
-        logger.exception("ATS board discovery failed")
+    # 3. Curated ATS boards are all tech companies — skip for non-tech occupations.
+    if not suppress_tech:
+        try:
+            ats_new = await _discover_ats_boards(db, user_id)
+            total_new += ats_new
+        except Exception:
+            logger.exception("ATS board discovery failed")
 
     logger.info("Discovered %d new jobs for user %s", total_new, user_id)
     return total_new

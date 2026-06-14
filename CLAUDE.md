@@ -46,6 +46,7 @@ NexusReach defaults to draft-first workflows. Users can optionally enable delaye
   - `startup`
   - `startup_source:<source_key>`
 - Job import now canonicalizes URLs and dedupes by `source + external_id` first, then canonical URL, then fingerprint.
+- Job discovery is occupation-aware. The curated ATS boards are all tech employers and Dice/Simplify/newgrad lean tech, so when a discover run resolves to occupations that are *all* industry-bound non-tech (healthcare, education/training, legal/compliance, public-sector/government, arts/entertainment), `discover_jobs` routes only to the broad all-industry aggregators (JSearch / Adzuna / Remotive) and skips the tech-only sources. Cross-industry occupations (sales, marketing, finance, ...) keep the full source set because those seekers may target tech companies (`job_service.INDUSTRY_BOUND_NONTECH_OCCUPATIONS` / `_suppress_tech_sources`).
 
 ### People discovery
 - People discovery is no longer Apollo-only.
