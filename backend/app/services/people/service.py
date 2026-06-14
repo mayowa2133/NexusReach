@@ -160,6 +160,40 @@ def _bucket_with_tiebreak(
     return bucket
 
 
+async def _gather_nontech_leaders(
+    company_name: str,
+    domain: str | None,
+    context: JobContext | None,
+) -> dict[str, list[dict]]:
+    """Non-technical leadership candidates from the three own-evidence sources.
+
+    Returns ``{"site": [...], "news": [...], "footprint": [...]}`` so callers can
+    record per-source debug. Empty for engineering-flavored contexts (GitHub
+    covers those); bounded, cached, and fail-soft per source. Shared by both the
+    job-aware and People-page company flows so non-tech recall is identical.
+    """
+    out: dict[str, list[dict]] = {"site": [], "news": [], "footprint": []}
+    if _occupation_is_engineering_flavored(
+        context.occupation_keys if context else None,
+        department=context.department if context else None,
+    ):
+        return out
+    title_hints = list(context.manager_titles[:3]) if context else []
+    try:
+        out["site"] = await discover_company_site_leaders(company_name, domain)
+    except Exception:
+        logger.debug("company-site leadership discovery failed; skipping", exc_info=True)
+    try:
+        out["news"] = await tavily_search_client.search_executive_quotes(company_name, title_hints)
+    except Exception:
+        logger.debug("news executive-quote mining failed; skipping", exc_info=True)
+    try:
+        out["footprint"] = await discover_public_footprint_leaders(company_name, title_hints)
+    except Exception:
+        logger.debug("public-footprint mining failed; skipping", exc_info=True)
+    return out
+
+
 async def search_people_at_company(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -282,6 +316,20 @@ async def search_people_at_company(
         _recover_candidate_titles(manager_candidates, company=company, company_name=company_name),
         _recover_candidate_titles(peer_candidates, company=company, company_name=company_name),
     )
+
+    # Non-technical leadership sources (company-website roster, news/PR exec
+    # quotes, speaker/byline/X-bio footprint). The job-aware flow runs these for
+    # non-engineering roles; the People-page company browse needs the same
+    # recall so a non-tech seeker exploring a company isn't left with x-ray-only
+    # results. Deduped into the manager bucket and gated by function downstream.
+    nontech_leaders = await _gather_nontech_leaders(
+        company_name,
+        company.domain if getattr(company, "domain", None) else None,
+        roles_context,
+    )
+    combined_leaders = nontech_leaders["site"] + nontech_leaders["news"] + nontech_leaders["footprint"]
+    if combined_leaders:
+        manager_candidates = _dedupe_candidates(manager_candidates, combined_leaders)
 
     # --- Write-through to global known people cache ---
     try:
@@ -1136,45 +1184,24 @@ async def search_people_for_job(
     # Especially valuable for non-engineering roles where x-ray returns only
     # engineers; bounded, cached, fail-soft.
     nontech_started_at = time.monotonic()
-    site_leaders: list[dict] = []
-    news_leaders: list[dict] = []
-    footprint_leaders: list[dict] = []
-    is_eng_role = _occupation_is_engineering_flavored(
-        context.occupation_keys if context else None,
-        department=context.department if context else None,
-    )
-    if not is_eng_role:
-        try:
-            site_domain = company.domain if getattr(company, "domain", None) else None
-            site_leaders = await discover_company_site_leaders(job.company_name, site_domain)
-        except Exception:
-            logger.debug("company-site leadership discovery failed; skipping", exc_info=True)
-        title_hints = list(context.manager_titles[:3]) if context else []
-        try:
-            news_leaders = await tavily_search_client.search_executive_quotes(
-                job.company_name, title_hints
-            )
-        except Exception:
-            logger.debug("news executive-quote mining failed; skipping", exc_info=True)
-        try:
-            footprint_leaders = await discover_public_footprint_leaders(
-                job.company_name, title_hints
-            )
-        except Exception:
-            logger.debug("public-footprint mining failed; skipping", exc_info=True)
-        new_leaders = site_leaders + news_leaders + footprint_leaders
-        if new_leaders:
-            manager_candidates = _dedupe_candidates(manager_candidates, new_leaders)
-            if debug is not None:
-                debug["searches"]["company_site_leaders"] = [
-                    _debug_candidate_summary(c) for c in site_leaders
-                ]
-                debug["searches"]["news_quote_leaders"] = [
-                    _debug_candidate_summary(c) for c in news_leaders
-                ]
-                debug["searches"]["public_footprint_leaders"] = [
-                    _debug_candidate_summary(c) for c in footprint_leaders
-                ]
+    site_domain = company.domain if getattr(company, "domain", None) else None
+    nontech = await _gather_nontech_leaders(job.company_name, site_domain, context)
+    site_leaders = nontech["site"]
+    news_leaders = nontech["news"]
+    footprint_leaders = nontech["footprint"]
+    new_leaders = site_leaders + news_leaders + footprint_leaders
+    if new_leaders:
+        manager_candidates = _dedupe_candidates(manager_candidates, new_leaders)
+        if debug is not None:
+            debug["searches"]["company_site_leaders"] = [
+                _debug_candidate_summary(c) for c in site_leaders
+            ]
+            debug["searches"]["news_quote_leaders"] = [
+                _debug_candidate_summary(c) for c in news_leaders
+            ]
+            debug["searches"]["public_footprint_leaders"] = [
+                _debug_candidate_summary(c) for c in footprint_leaders
+            ]
     _record_timing(
         debug,
         stage="nontech_leadership_resolution",

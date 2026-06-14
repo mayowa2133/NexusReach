@@ -286,3 +286,40 @@ async def test_discover_government_jobs_noop_when_unconfigured():
         )
     assert n == 0
     mock_store.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Background refresh parity: USAJobs folded into the curated fanout
+# ---------------------------------------------------------------------------
+
+def _empty_db_session():
+    db = MagicMock()
+    scalars = MagicMock()
+    scalars.all.return_value = []  # no saved preferences -> per-user loop skipped
+    result = MagicMock()
+    result.scalars.return_value = scalars
+    db.execute = AsyncMock(return_value=result)
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=db)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    return cm
+
+
+async def test_refresh_folds_in_usajobs_government_jobs():
+    from app.tasks import jobs as jobs_task
+
+    with (
+        patch.object(jobs_task, "async_session", return_value=_empty_db_session()),
+        patch.object(jobs_task, "fetch_curated_ats_source_payloads",
+                     new=AsyncMock(return_value=({}, []))),
+        patch.object(jobs_task.workday_client, "discover_all_nontech_workday",
+                     new=AsyncMock(return_value=[])),
+        patch.object(jobs_task.usajobs_client, "discover_usajobs",
+                     new=AsyncMock(return_value=[{"title": "Policy Analyst"}])) as mock_gov,
+    ):
+        await jobs_task._discover_all_boards()
+
+    # refresh queries USAJobs with the government occupation's seed queries
+    mock_gov.assert_awaited_once()
+    gov_queries = mock_gov.await_args.args[0]
+    assert "Policy Analyst" in gov_queries

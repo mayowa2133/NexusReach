@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 
 from app.tasks import celery_app, run_async
-from app.clients import workday_client
+from app.clients import usajobs_client, workday_client
 from app.database import async_session
 from app.models.notification import Notification
 from app.models.search_preference import SearchPreference
@@ -278,6 +278,22 @@ async def _discover_all_boards() -> None:
             logger.info("Refresh: +%d curated non-tech workday jobs", len(nontech_jobs))
     except Exception:
         logger.exception("non-tech workday fetch failed in refresh")
+
+    # Federal government postings (USAJobs). On-demand discover already routes
+    # government seekers here; this gives the background refresh the same
+    # coverage so a saved "Policy Analyst" search stays fresh, the way nurses get
+    # Sentara. No-op (returns []) unless USAJobs is configured.
+    try:
+        from app.services.occupation_taxonomy import occupations_for_keys  # noqa: PLC0415
+
+        gov_occ = occupations_for_keys(["public_sector_government"])
+        gov_queries = list(gov_occ[0].default_search_queries) if gov_occ else []
+        gov_jobs = await usajobs_client.discover_usajobs(gov_queries, limit_per_query=25)
+        if gov_jobs:
+            source_payloads.setdefault("usajobs", []).extend(gov_jobs)
+            logger.info("Refresh: +%d USAJobs federal jobs", len(gov_jobs))
+    except Exception:
+        logger.exception("USAJobs fetch failed in refresh")
 
     for uid in user_ids:
         try:

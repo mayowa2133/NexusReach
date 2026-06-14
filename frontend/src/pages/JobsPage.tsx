@@ -109,6 +109,7 @@ const SOURCE_LABELS: Record<string, string> = {
   yc_jobs: 'Y Combinator',
   wellfound: 'Wellfound',
   ventureloop: 'VentureLoop',
+  usajobs: 'USAJobs',
 };
 
 const LEVEL_LABELS: Record<string, string> = {

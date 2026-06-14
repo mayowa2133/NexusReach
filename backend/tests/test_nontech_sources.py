@@ -206,3 +206,62 @@ async def test_news_quote_strips_trailing_punctuation():
     with patch.object(tavily_search_client, "_run_tavily_query", new=AsyncMock(return_value=results)):
         cands = await tavily_search_client.search_executive_quotes("Notion", ["Chief Revenue Officer"])
     assert cands and cands[0]["full_name"] == "Erica Anderson"  # no trailing period
+
+
+# ---------------------------------------------------------------------------
+# Shared non-tech leader gather (used by BOTH people flows)
+# ---------------------------------------------------------------------------
+
+async def test_gather_nontech_leaders_runs_for_non_engineering():
+    from app.services.people import service
+    from app.utils.job_context import extract_job_context
+
+    ctx = extract_job_context("Account Executive", "Own the full sales cycle.")
+    with (
+        patch.object(service, "discover_company_site_leaders",
+                     new=AsyncMock(return_value=[{"full_name": "Site Exec"}])),
+        patch.object(service.tavily_search_client, "search_executive_quotes",
+                     new=AsyncMock(return_value=[{"full_name": "News Exec"}])),
+        patch.object(service, "discover_public_footprint_leaders",
+                     new=AsyncMock(return_value=[{"full_name": "Footprint Exec"}])),
+    ):
+        out = await service._gather_nontech_leaders("Acme", "acme.com", ctx)
+    assert [c["full_name"] for c in out["site"]] == ["Site Exec"]
+    assert [c["full_name"] for c in out["news"]] == ["News Exec"]
+    assert [c["full_name"] for c in out["footprint"]] == ["Footprint Exec"]
+
+
+async def test_gather_nontech_leaders_skipped_for_engineering():
+    from app.services.people import service
+    from app.utils.job_context import extract_job_context
+
+    ctx = extract_job_context("Senior Backend Engineer", "Build distributed systems on the platform team.")
+    with (
+        patch.object(service, "discover_company_site_leaders", new=AsyncMock()) as m_site,
+        patch.object(service.tavily_search_client, "search_executive_quotes", new=AsyncMock()) as m_news,
+        patch.object(service, "discover_public_footprint_leaders", new=AsyncMock()) as m_fp,
+    ):
+        out = await service._gather_nontech_leaders("Acme", "acme.com", ctx)
+    assert out == {"site": [], "news": [], "footprint": []}
+    m_site.assert_not_awaited()
+    m_news.assert_not_awaited()
+    m_fp.assert_not_awaited()
+
+
+async def test_gather_nontech_leaders_fails_soft_per_source():
+    from app.services.people import service
+    from app.utils.job_context import extract_job_context
+
+    ctx = extract_job_context("Marketing Manager", "Lead demand generation campaigns.")
+    with (
+        patch.object(service, "discover_company_site_leaders",
+                     new=AsyncMock(side_effect=RuntimeError("boom"))),
+        patch.object(service.tavily_search_client, "search_executive_quotes",
+                     new=AsyncMock(return_value=[{"full_name": "News Exec"}])),
+        patch.object(service, "discover_public_footprint_leaders",
+                     new=AsyncMock(side_effect=RuntimeError("boom"))),
+    ):
+        out = await service._gather_nontech_leaders("Acme", "acme.com", ctx)
+    # one source failing doesn't sink the others
+    assert out["site"] == [] and out["footprint"] == []
+    assert [c["full_name"] for c in out["news"]] == ["News Exec"]
