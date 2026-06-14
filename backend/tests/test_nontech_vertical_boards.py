@@ -128,8 +128,7 @@ async def test_discover_nontech_vertical_boards_fetches_and_stores():
             "discover_all_nontech_workday",
             new=AsyncMock(return_value=raw),
         ) as mock_fetch,
-        patch.object(
-            job_service, "_store_raw_jobs", new=AsyncMock(return_value=raw)
+        patch("app.services.jobs.storage._store_raw_jobs", new=AsyncMock(return_value=raw)
         ) as mock_store,
     ):
         n = await job_service._discover_nontech_vertical_boards(
@@ -148,7 +147,7 @@ async def test_discover_nontech_vertical_boards_fails_soft():
             "discover_all_nontech_workday",
             new=AsyncMock(side_effect=RuntimeError("boom")),
         ),
-        patch.object(job_service, "_store_raw_jobs", new=AsyncMock()) as mock_store,
+        patch("app.services.jobs.storage._store_raw_jobs", new=AsyncMock()) as mock_store,
     ):
         n = await job_service._discover_nontech_vertical_boards(
             MagicMock(), uuid.uuid4(), {"finance"}, None
@@ -176,11 +175,11 @@ async def test_discover_jobs_routes_healthcare_to_vertical_boards():
     profile.target_locations = []
 
     with (
-        patch.object(job_service, "search_jobs", new=AsyncMock(return_value=[])),
+        patch("app.services.jobs.search.search_jobs", new=AsyncMock(return_value=[])),
         patch.object(job_service.newgrad_jobs_client, "search_newgrad_jobs", new=AsyncMock(return_value=[])),
-        patch.object(job_service, "_store_raw_jobs", new=AsyncMock(return_value=[])),
-        patch.object(job_service, "_discover_ats_boards", new=AsyncMock(return_value=0)) as mock_ats,
-        patch.object(job_service, "_discover_nontech_vertical_boards", new=AsyncMock(return_value=5)) as mock_vert,
+        patch("app.services.jobs.storage._store_raw_jobs", new=AsyncMock(return_value=[])),
+        patch("app.services.jobs.curated_boards._discover_ats_boards", new=AsyncMock(return_value=0)) as mock_ats,
+        patch("app.services.jobs.curated_boards._discover_nontech_vertical_boards", new=AsyncMock(return_value=5)) as mock_vert,
     ):
         await job_service.discover_jobs(_mock_db(profile), uuid.uuid4())
 
@@ -198,11 +197,11 @@ async def test_discover_jobs_engineering_skips_vertical_boards():
     profile.target_locations = []
 
     with (
-        patch.object(job_service, "search_jobs", new=AsyncMock(return_value=[])),
+        patch("app.services.jobs.search.search_jobs", new=AsyncMock(return_value=[])),
         patch.object(job_service.newgrad_jobs_client, "search_newgrad_jobs", new=AsyncMock(return_value=[])),
-        patch.object(job_service, "_store_raw_jobs", new=AsyncMock(return_value=[])),
-        patch.object(job_service, "_discover_ats_boards", new=AsyncMock(return_value=0)) as mock_ats,
-        patch.object(job_service, "_discover_nontech_vertical_boards", new=AsyncMock(return_value=0)) as mock_vert,
+        patch("app.services.jobs.storage._store_raw_jobs", new=AsyncMock(return_value=[])),
+        patch("app.services.jobs.curated_boards._discover_ats_boards", new=AsyncMock(return_value=0)) as mock_ats,
+        patch("app.services.jobs.curated_boards._discover_nontech_vertical_boards", new=AsyncMock(return_value=0)) as mock_vert,
     ):
         await job_service.discover_jobs(_mock_db(profile), uuid.uuid4())
 
@@ -218,11 +217,11 @@ async def test_discover_jobs_finance_keeps_tech_and_adds_finance_vertical():
     profile.target_locations = []
 
     with (
-        patch.object(job_service, "search_jobs", new=AsyncMock(return_value=[])),
+        patch("app.services.jobs.search.search_jobs", new=AsyncMock(return_value=[])),
         patch.object(job_service.newgrad_jobs_client, "search_newgrad_jobs", new=AsyncMock(return_value=[])),
-        patch.object(job_service, "_store_raw_jobs", new=AsyncMock(return_value=[])),
-        patch.object(job_service, "_discover_ats_boards", new=AsyncMock(return_value=0)) as mock_ats,
-        patch.object(job_service, "_discover_nontech_vertical_boards", new=AsyncMock(return_value=3)) as mock_vert,
+        patch("app.services.jobs.storage._store_raw_jobs", new=AsyncMock(return_value=[])),
+        patch("app.services.jobs.curated_boards._discover_ats_boards", new=AsyncMock(return_value=0)) as mock_ats,
+        patch("app.services.jobs.curated_boards._discover_nontech_vertical_boards", new=AsyncMock(return_value=3)) as mock_vert,
     ):
         await job_service.discover_jobs(_mock_db(profile), uuid.uuid4())
 
@@ -239,12 +238,12 @@ async def test_discover_jobs_routes_government_to_usajobs():
     profile.target_locations = []
 
     with (
-        patch.object(job_service, "search_jobs", new=AsyncMock(return_value=[])),
+        patch("app.services.jobs.search.search_jobs", new=AsyncMock(return_value=[])),
         patch.object(job_service.newgrad_jobs_client, "search_newgrad_jobs", new=AsyncMock(return_value=[])),
-        patch.object(job_service, "_store_raw_jobs", new=AsyncMock(return_value=[])),
-        patch.object(job_service, "_discover_ats_boards", new=AsyncMock(return_value=0)) as mock_ats,
-        patch.object(job_service, "_discover_nontech_vertical_boards", new=AsyncMock(return_value=0)) as mock_vert,
-        patch.object(job_service, "_discover_government_jobs", new=AsyncMock(return_value=7)) as mock_gov,
+        patch("app.services.jobs.storage._store_raw_jobs", new=AsyncMock(return_value=[])),
+        patch("app.services.jobs.curated_boards._discover_ats_boards", new=AsyncMock(return_value=0)) as mock_ats,
+        patch("app.services.jobs.curated_boards._discover_nontech_vertical_boards", new=AsyncMock(return_value=0)) as mock_vert,
+        patch("app.services.jobs.curated_boards._discover_government_jobs", new=AsyncMock(return_value=7)) as mock_gov,
     ):
         await job_service.discover_jobs(_mock_db(profile), uuid.uuid4())
 
@@ -265,7 +264,7 @@ async def test_discover_government_jobs_stores_when_configured():
     with (
         patch.object(job_service.usajobs_client, "discover_usajobs",
                      new=AsyncMock(return_value=raw)) as mock_fetch,
-        patch.object(job_service, "_store_raw_jobs", new=AsyncMock(return_value=raw)),
+        patch("app.services.jobs.storage._store_raw_jobs", new=AsyncMock(return_value=raw)),
     ):
         n = await job_service._discover_government_jobs(
             MagicMock(), uuid.uuid4(), ["Policy Analyst", "Policy Analyst", ""], None
@@ -279,7 +278,7 @@ async def test_discover_government_jobs_noop_when_unconfigured():
     with (
         patch.object(job_service.usajobs_client, "discover_usajobs",
                      new=AsyncMock(return_value=[])),
-        patch.object(job_service, "_store_raw_jobs", new=AsyncMock()) as mock_store,
+        patch("app.services.jobs.storage._store_raw_jobs", new=AsyncMock()) as mock_store,
     ):
         n = await job_service._discover_government_jobs(
             MagicMock(), uuid.uuid4(), ["Policy Analyst"], None

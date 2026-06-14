@@ -1,0 +1,235 @@
+"""Job-discovery constants: source lists, occupation routing, curated board registries."""
+
+import logging
+from app.services.occupation_taxonomy import discover_queries_for_occupations
+
+logger = logging.getLogger(__name__)
+
+
+DEFAULT_SEARCH_SOURCES = [
+    "jsearch",
+    "adzuna",
+    "remotive",
+    "jobicy",
+    "dice",
+    "simplify",
+    "newgrad",
+]
+
+
+STARTUP_BOARD_SOURCES = ["yc_jobs", "wellfound", "ventureloop"]
+
+
+STARTUP_LINK_RESOLVE_CONCURRENCY = 6
+
+
+DISCOVER_LIMIT_PER_SOURCE = 50
+
+
+DISCOVER_LOCATION_FANOUT = 2
+
+
+STARTUP_MAX_RESOLVED_LINKS_PER_COMPANY = 3
+
+
+APPLY_URL_REPAIR_MAX_JOBS = 20
+
+
+# Occupations bound to non-tech industries: hospitals, schools, law firms,
+# government, studios. For these, the curated tech ATS boards + tech-leaning
+# boards (Dice, Simplify, newgrad) are pure noise, so discovery routes to the
+# broad all-industry aggregators (JSearch / Adzuna / Remotive) instead.
+INDUSTRY_BOUND_NONTECH_OCCUPATIONS = frozenset({
+    "healthcare",
+    "education_training",
+    "legal_compliance",
+    "public_sector_government",
+    "arts_entertainment",
+})
+
+
+def _suppress_tech_sources(resolved_occupations: list[str] | None) -> bool:
+    """True only when EVERY resolved occupation is industry-bound non-tech.
+
+    Conservative: a cross-industry occupation (sales, marketing, finance, ...)
+    keeps the tech sources, since those seekers may target tech companies. We
+    only suppress when the whole search is for a sector where tech employers
+    cannot be the answer (e.g. nursing, teaching, law).
+    """
+    occs = [o for o in (resolved_occupations or []) if o]
+    if not occs:
+        return False
+    return all(o in INDUSTRY_BOUND_NONTECH_OCCUPATIONS for o in occs)
+
+
+# Curated non-tech employer lists are the vertical analog of the tech ATS
+# boards. This maps an occupation to the verticals whose employers actually hire
+# it, so a nursing search pulls health systems and a finance search pulls banks.
+# Only occupations with a clear vertical home are mapped; everything else relies
+# on the broad aggregators. Cross-industry occupations (sales, support) map to
+# multiple verticals since those employers hire heavily for them.
+OCCUPATION_VERTICALS: dict[str, frozenset[str]] = {
+    "healthcare": frozenset({"healthcare"}),
+    "education_training": frozenset({"education"}),
+    "accounting_finance": frozenset({"finance"}),
+    "sales": frozenset({"finance", "retail"}),
+    "customer_service_support": frozenset({"finance", "retail"}),
+    "supply_chain": frozenset({"retail"}),
+    "public_sector_government": frozenset({"government"}),
+}
+
+
+# Which provider serves each vertical. Most are Workday curated employers;
+# federal government is served by USAJobs (the official federal board) instead,
+# since agencies don't post on the curated Workday tenants.
+WORKDAY_VERTICALS = frozenset({"healthcare", "education", "finance", "retail"})
+
+
+GOVERNMENT_VERTICAL = "government"
+
+
+def verticals_for_occupations(resolved_occupations: list[str] | None) -> set[str]:
+    """Union of curated verticals the resolved occupations should pull from."""
+    out: set[str] = set()
+    for occ in resolved_occupations or []:
+        out |= OCCUPATION_VERTICALS.get(occ, frozenset())
+    return out
+
+
+DEFAULT_SEED_SEARCHES = [
+    {"query": "Software Engineer", "location": None, "remote_only": False},
+    {"query": "New Grad Software", "location": None, "remote_only": False},
+]
+
+
+# Discovery queries spanning multiple roles. These are now derived from the
+# occupation taxonomy at runtime via `discover_queries_for_occupations()`.
+# DISCOVER_QUERIES remains as a backwards-compatible default fallback used
+# when neither user occupations nor explicit queries are supplied.
+DISCOVER_QUERIES: list[dict] = discover_queries_for_occupations(None)
+
+
+# Curated ATS boards to pull from during discovery.
+# These are popular tech companies with public Greenhouse/Ashby boards.
+ATS_DISCOVER_BOARDS: list[dict[str, str]] = [
+    # Greenhouse
+    {"slug": "stripe", "ats": "greenhouse"},
+    {"slug": "airbnb", "ats": "greenhouse"},
+    {"slug": "figma", "ats": "greenhouse"},
+    {"slug": "coinbase", "ats": "greenhouse"},
+    {"slug": "robinhood", "ats": "greenhouse"},
+    {"slug": "databricks", "ats": "greenhouse"},
+    {"slug": "discord", "ats": "greenhouse"},
+    {"slug": "brex", "ats": "greenhouse"},
+    {"slug": "doordash", "ats": "greenhouse"},
+    {"slug": "plaid", "ats": "greenhouse"},
+    {"slug": "duolingo", "ats": "greenhouse"},
+    {"slug": "squarespace", "ats": "greenhouse"},
+    {"slug": "relativityspace", "ats": "greenhouse"},
+    {"slug": "airtable", "ats": "greenhouse"},
+    {"slug": "zscaler", "ats": "greenhouse"},
+    {"slug": "instacart", "ats": "greenhouse"},
+    {"slug": "scaleai", "ats": "greenhouse"},
+    {"slug": "twitch", "ats": "greenhouse"},
+    {"slug": "affirm", "ats": "greenhouse"},
+    {"slug": "epicgames", "ats": "greenhouse"},
+    {"slug": "roblox", "ats": "greenhouse"},
+    {"slug": "postman", "ats": "greenhouse"},
+    {"slug": "vercel", "ats": "greenhouse"},
+    {"slug": "roku", "ats": "greenhouse"},
+    {"slug": "gusto", "ats": "greenhouse"},
+    {"slug": "jfrog", "ats": "greenhouse"},
+    {"slug": "block", "ats": "greenhouse"},
+    {"slug": "toast", "ats": "greenhouse"},
+    {"slug": "spacex", "ats": "greenhouse"},
+    {"slug": "marqeta", "ats": "greenhouse"},
+    {"slug": "anthropic", "ats": "greenhouse"},
+    {"slug": "asana", "ats": "greenhouse"},
+    {"slug": "stabilityai", "ats": "greenhouse"},
+    {"slug": "pinterest", "ats": "greenhouse"},
+    {"slug": "togetherai", "ats": "greenhouse"},
+    {"slug": "reddit", "ats": "greenhouse"},
+    {"slug": "lucidmotors", "ats": "greenhouse"},
+    {"slug": "dropbox", "ats": "greenhouse"},
+    {"slug": "twilio", "ats": "greenhouse"},
+    {"slug": "datadog", "ats": "greenhouse"},
+    {"slug": "cloudflare", "ats": "greenhouse"},
+    {"slug": "betterment", "ats": "greenhouse"},
+    {"slug": "webflow", "ats": "greenhouse"},
+    {"slug": "elastic", "ats": "greenhouse"},
+    {"slug": "chime", "ats": "greenhouse"},
+    {"slug": "flexport", "ats": "greenhouse"},
+    {"slug": "billcom", "ats": "greenhouse"},
+    {"slug": "gitlab", "ats": "greenhouse"},
+    {"slug": "linkedin", "ats": "greenhouse"},
+    {"slug": "mongodb", "ats": "greenhouse"},
+    {"slug": "lyft", "ats": "greenhouse"},
+    {"slug": "okta", "ats": "greenhouse"},
+    {"slug": "waymo", "ats": "greenhouse"},
+    {"slug": "andurilindustries", "ats": "greenhouse"},
+    {"slug": "samsara", "ats": "greenhouse"},
+    {"slug": "uberfreight", "ats": "greenhouse"},
+    {"slug": "grammarly", "ats": "greenhouse"},
+    {"slug": "verkada", "ats": "greenhouse"},
+    {"slug": "niantic", "ats": "greenhouse"},
+    {"slug": "nuro", "ats": "greenhouse"},
+    {"slug": "canva", "ats": "greenhouse"},
+    {"slug": "wiz", "ats": "greenhouse"},
+    {"slug": "snyk", "ats": "greenhouse"},
+    {"slug": "applovin", "ats": "greenhouse"},
+    {"slug": "coreweave", "ats": "greenhouse"},
+    # Ashby
+    {"slug": "ramp", "ats": "ashby"},
+    {"slug": "notion", "ats": "ashby"},
+    {"slug": "openai", "ats": "ashby"},
+    {"slug": "linear", "ats": "ashby"},
+    {"slug": "cursor", "ats": "ashby"},
+    {"slug": "snowflake", "ats": "ashby"},
+    {"slug": "cohere", "ats": "ashby"},
+    {"slug": "clickup", "ats": "ashby"},
+    {"slug": "zapier", "ats": "ashby"},
+    {"slug": "runway", "ats": "ashby"},
+    {"slug": "deel", "ats": "ashby"},
+    {"slug": "vanta", "ats": "ashby"},
+    # Plaid runs its board on Greenhouse (see GREENHOUSE_DISCOVER_BOARDS); the
+    # duplicate Ashby entry was removed to avoid double/stale imports (audit M5).
+    {"slug": "elevenlabs", "ats": "ashby"},
+    {"slug": "replit", "ats": "ashby"},
+    {"slug": "perplexity", "ats": "ashby"},
+    {"slug": "ashby", "ats": "ashby"},
+    {"slug": "deepgram", "ats": "ashby"},
+    {"slug": "confluent", "ats": "ashby"},
+    {"slug": "benchling", "ats": "ashby"},
+    {"slug": "supabase", "ats": "ashby"},
+    {"slug": "sentry", "ats": "ashby"},
+    {"slug": "sanity", "ats": "ashby"},
+    {"slug": "modal", "ats": "ashby"},
+    {"slug": "lambda", "ats": "ashby"},
+    {"slug": "astronomer", "ats": "ashby"},
+    {"slug": "drata", "ats": "ashby"},
+    {"slug": "livekit", "ats": "ashby"},
+    {"slug": "atlan", "ats": "ashby"},
+    {"slug": "render", "ats": "ashby"},
+    {"slug": "posthog", "ats": "ashby"},
+    {"slug": "anyscale", "ats": "ashby"},
+    {"slug": "neon", "ats": "ashby"},
+    {"slug": "resend", "ats": "ashby"},
+    {"slug": "railway", "ats": "ashby"},
+    {"slug": "airbyte", "ats": "ashby"},
+]
+
+
+# Lever companies (scraped from HTML since the API is deprecated)
+LEVER_DISCOVER_SLUGS = [
+    "spotify",
+    "matchgroup",
+    "palantir",
+    "plaid",
+    "ro",
+    "outreach",
+    "toptal",
+    "jumpcloud",
+    "greenlight",
+    "wealthfront",
+    "matillion",
+]

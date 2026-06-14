@@ -338,7 +338,7 @@ async def test_search_ats_jobs_refreshes_existing_exact_job_metadata():
             return_value=[refreshed_job],
         ),
         patch(
-            "app.services.job_service._find_existing_job",
+            "app.services.jobs.storage._find_existing_job",
             new_callable=AsyncMock,
             return_value=existing_job,
         ),

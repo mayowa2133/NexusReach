@@ -159,14 +159,14 @@ async def test_discover_fans_out_locations_and_passes_hint():
     db.execute = AsyncMock(return_value=result)
 
     with (
-        patch.object(job_service, "search_jobs", new=AsyncMock(return_value=[])) as mock_search,
+        patch("app.services.jobs.search.search_jobs", new=AsyncMock(return_value=[])) as mock_search,
         patch.object(
             job_service.newgrad_jobs_client,
             "search_newgrad_jobs",
             new=AsyncMock(return_value=[]),
         ),
-        patch.object(job_service, "_store_raw_jobs", new=AsyncMock(return_value=[])),
-        patch.object(job_service, "_discover_ats_boards", new=AsyncMock(return_value=0)),
+        patch("app.services.jobs.storage._store_raw_jobs", new=AsyncMock(return_value=[])),
+        patch("app.services.jobs.curated_boards._discover_ats_boards", new=AsyncMock(return_value=0)),
     ):
         await job_service.discover_jobs(db, uuid.uuid4())
 
@@ -385,10 +385,10 @@ async def test_discover_routes_nontech_to_broad_aggregators():
     db.execute = AsyncMock(return_value=result)
 
     with (
-        patch.object(job_service, "search_jobs", new=AsyncMock(return_value=[])) as mock_search,
+        patch("app.services.jobs.search.search_jobs", new=AsyncMock(return_value=[])) as mock_search,
         patch.object(job_service.newgrad_jobs_client, "search_newgrad_jobs", new=AsyncMock(return_value=[])) as mock_newgrad,
-        patch.object(job_service, "_store_raw_jobs", new=AsyncMock(return_value=[])),
-        patch.object(job_service, "_discover_ats_boards", new=AsyncMock(return_value=0)) as mock_ats,
+        patch("app.services.jobs.storage._store_raw_jobs", new=AsyncMock(return_value=[])),
+        patch("app.services.jobs.curated_boards._discover_ats_boards", new=AsyncMock(return_value=0)) as mock_ats,
     ):
         await job_service.discover_jobs(db, uuid.uuid4())
 

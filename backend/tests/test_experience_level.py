@@ -106,7 +106,7 @@ async def test_internship_type_filter_includes_inferred_interns() -> None:
             return_value=([], 0),
         ) as mock_paginate,
         patch(
-            "app.services.job_service._repair_missing_apply_urls",
+            "app.services.jobs.search._repair_missing_apply_urls",
             new_callable=AsyncMock,
         ),
     ):
@@ -135,7 +135,7 @@ async def test_country_filter_uses_structured_country_fields() -> None:
             return_value=([], 0),
         ) as mock_paginate,
         patch(
-            "app.services.job_service._repair_missing_apply_urls",
+            "app.services.jobs.search._repair_missing_apply_urls",
             new_callable=AsyncMock,
         ),
     ):
@@ -164,7 +164,7 @@ async def test_near_filter_uses_coordinate_radius() -> None:
             return_value=([], 0),
         ) as mock_paginate,
         patch(
-            "app.services.job_service._repair_missing_apply_urls",
+            "app.services.jobs.search._repair_missing_apply_urls",
             new_callable=AsyncMock,
         ),
     ):
@@ -196,7 +196,7 @@ async def test_near_filter_can_include_remote_jobs() -> None:
             return_value=([], 0),
         ) as mock_paginate,
         patch(
-            "app.services.job_service._repair_missing_apply_urls",
+            "app.services.jobs.search._repair_missing_apply_urls",
             new_callable=AsyncMock,
         ),
     ):

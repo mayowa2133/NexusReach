@@ -100,7 +100,7 @@ async def test_search_jobs_persists_enriched_newgrad_metadata():
             new_callable=AsyncMock,
             return_value=[_newgrad_job()],
         ),
-        patch("app.services.job_service._find_existing_job", new_callable=AsyncMock, return_value=None),
+        patch("app.services.jobs.storage._find_existing_job", new_callable=AsyncMock, return_value=None),
     ):
         jobs = await search_jobs(db, user_id, query="software engineer", sources=["newgrad"])
 
@@ -134,7 +134,7 @@ async def test_search_jobs_records_source_failure_without_aborting_other_sources
             new_callable=AsyncMock,
             return_value=[_newgrad_job(location="Toronto, ON")],
         ),
-        patch("app.services.job_service._find_existing_job", new_callable=AsyncMock, return_value=None),
+        patch("app.services.jobs.storage._find_existing_job", new_callable=AsyncMock, return_value=None),
     ):
         jobs = await search_jobs(
             db,
@@ -252,7 +252,7 @@ async def test_store_curated_ats_payloads_filters_by_saved_search_before_store()
     }]
 
     with patch(
-        "app.services.job_service._store_raw_jobs",
+        "app.services.jobs.storage._store_raw_jobs",
         new_callable=AsyncMock,
         return_value=[stored_job],
     ) as store_mock:
@@ -332,14 +332,14 @@ async def test_discover_jobs_stores_same_enriched_newgrad_fields():
     db.commit = AsyncMock()
 
     with (
-        patch("app.services.job_service.search_jobs", new_callable=AsyncMock, return_value=[]),
+        patch("app.services.jobs.search.search_jobs", new_callable=AsyncMock, return_value=[]),
         patch(
             "app.services.job_service.newgrad_jobs_client.search_newgrad_jobs",
             new_callable=AsyncMock,
             return_value=[_newgrad_job()],
         ),
-        patch("app.services.job_service._find_existing_job", new_callable=AsyncMock, return_value=None),
-        patch("app.services.job_service._discover_ats_boards", new_callable=AsyncMock, return_value=0),
+        patch("app.services.jobs.storage._find_existing_job", new_callable=AsyncMock, return_value=None),
+        patch("app.services.jobs.curated_boards._discover_ats_boards", new_callable=AsyncMock, return_value=0),
     ):
         total_new = await discover_jobs(db, user_id)
 
@@ -366,9 +366,9 @@ async def test_store_raw_jobs_commits_existing_apply_url_update():
     db.commit = AsyncMock()
 
     with (
-        patch("app.services.job_service._load_known_startup_company_names", new_callable=AsyncMock, return_value=set()),
-        patch("app.services.job_service._find_existing_job", new_callable=AsyncMock, return_value=existing_job),
-        patch("app.services.job_service._maybe_auto_prospect", new_callable=AsyncMock) as mock_auto_prospect,
+        patch("app.services.jobs.storage._load_known_startup_company_names", new_callable=AsyncMock, return_value=set()),
+        patch("app.services.jobs.storage._find_existing_job", new_callable=AsyncMock, return_value=existing_job),
+        patch("app.services.jobs.storage._maybe_auto_prospect", new_callable=AsyncMock) as mock_auto_prospect,
     ):
         stored = await _store_raw_jobs(db, user_id, [_newgrad_job()], _make_profile())
 
