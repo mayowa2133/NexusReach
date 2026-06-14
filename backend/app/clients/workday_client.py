@@ -82,6 +82,43 @@ WORKDAY_COMPANIES: list[dict[str, str]] = [
 ]
 
 
+# Curated NON-TECH employers, the vertical analog of the tech ATS boards. These
+# are large hospitals/health systems, universities, banks/insurers, and
+# retailers that run their careers site on Workday. Every config below was
+# live-verified against the Workday jobs API (returns postings); a wrong
+# wd-tier or site name silently returns nothing, so do not add unverified
+# entries. The ``vertical`` field routes each employer to the occupations that
+# actually hire there (see ``job_service.OCCUPATION_VERTICALS``).
+WORKDAY_NONTECH_COMPANIES: list[dict[str, str]] = [
+    # Higher education (universities hire across every non-tech function)
+    {"label": "Penn State University", "company": "psu", "wd": "wd1", "site": "PSU_Staff", "vertical": "education"},
+    {"label": "University of Southern California", "company": "usc", "wd": "wd5", "site": "ExternalUSCCareers", "vertical": "education"},
+    {"label": "University of Pennsylvania", "company": "upenn", "wd": "wd1", "site": "careers-at-penn", "vertical": "education"},
+    {"label": "Northeastern University", "company": "northeastern", "wd": "wd1", "site": "careers", "vertical": "education"},
+    {"label": "Carnegie Mellon University", "company": "cmu", "wd": "wd5", "site": "CMU", "vertical": "education"},
+    {"label": "Cornell University", "company": "cornell", "wd": "wd1", "site": "CornellCareerPage", "vertical": "education"},
+    {"label": "Georgetown University", "company": "georgetown", "wd": "wd1", "site": "Georgetown_Admin_Careers", "vertical": "education"},
+    {"label": "Brown University", "company": "brown", "wd": "wd5", "site": "staff-careers-brown", "vertical": "education"},
+    # Health systems (nursing + allied health + clinical operations)
+    {"label": "Sentara Health", "company": "sentara", "wd": "wd1", "site": "SCS", "vertical": "healthcare"},
+    {"label": "Trinity Health", "company": "trinityhealth", "wd": "wd1", "site": "Jobs", "vertical": "healthcare"},
+    {"label": "Banner Health", "company": "bannerhealth", "wd": "wd108", "site": "Careers", "vertical": "healthcare"},
+    {"label": "Vanderbilt University Medical Center", "company": "vumc", "wd": "wd1", "site": "vumccareers", "vertical": "healthcare"},
+    # Banks / insurers (finance, accounting, actuarial, sales, ops)
+    {"label": "PNC", "company": "pnc", "wd": "wd5", "site": "External", "vertical": "finance"},
+    {"label": "State Street", "company": "statestreet", "wd": "wd1", "site": "Global", "vertical": "finance"},
+    {"label": "Truist", "company": "truist", "wd": "wd1", "site": "Careers", "vertical": "finance"},
+    {"label": "Prudential", "company": "prudential", "wd": "wd3", "site": "prudential", "vertical": "finance"},
+    {"label": "Allstate", "company": "allstate", "wd": "wd5", "site": "allstate_careers", "vertical": "finance"},
+    {"label": "Travelers", "company": "travelers", "wd": "wd5", "site": "External", "vertical": "finance"},
+    {"label": "Nationwide", "company": "nationwide", "wd": "wd1", "site": "Nationwide_Career", "vertical": "finance"},
+    {"label": "Voya Financial", "company": "godirect", "wd": "wd5", "site": "voya_jobs", "vertical": "finance"},
+    # Large retailers (store ops, supply chain, merchandising, sales, support)
+    {"label": "Lowe's", "company": "lowes", "wd": "wd5", "site": "LWS_External_CS", "vertical": "retail"},
+    {"label": "Nordstrom", "company": "nordstrom", "wd": "wd501", "site": "nordstrom_careers", "vertical": "retail"},
+]
+
+
 async def search_workday(
     company: str,
     wd: str,
@@ -151,13 +188,14 @@ async def search_workday(
     return jobs
 
 
-async def discover_all_workday(
+async def discover_workday_companies(
+    companies: list[dict[str, str]],
     search_text: str = "",
     limit_per_company: int = 20,
 ) -> list[dict]:
-    """Query all curated Workday companies and return combined results."""
+    """Query a list of Workday company configs and return combined results."""
     all_jobs: list[dict] = []
-    for entry in WORKDAY_COMPANIES:
+    for entry in companies:
         try:
             jobs = await search_workday(
                 company=entry["company"],
@@ -171,3 +209,32 @@ async def discover_all_workday(
         except Exception:
             logger.exception("Workday fetch failed for %s", entry["label"])
     return all_jobs
+
+
+async def discover_all_workday(
+    search_text: str = "",
+    limit_per_company: int = 20,
+) -> list[dict]:
+    """Query all curated (tech) Workday companies and return combined results."""
+    return await discover_workday_companies(
+        WORKDAY_COMPANIES, search_text=search_text, limit_per_company=limit_per_company
+    )
+
+
+async def discover_all_nontech_workday(
+    search_text: str = "",
+    limit_per_company: int = 20,
+    verticals: set[str] | None = None,
+) -> list[dict]:
+    """Query curated non-tech Workday employers, optionally filtered by vertical.
+
+    ``verticals`` (e.g. ``{"healthcare", "finance"}``) restricts the fetch to
+    employers in those sectors; ``None`` fetches every non-tech employer (used
+    by the preference-matched background refresh).
+    """
+    companies = WORKDAY_NONTECH_COMPANIES
+    if verticals:
+        companies = [c for c in companies if c.get("vertical") in verticals]
+    return await discover_workday_companies(
+        companies, search_text=search_text, limit_per_company=limit_per_company
+    )

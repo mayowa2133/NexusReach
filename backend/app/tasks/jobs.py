@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 
 from app.tasks import celery_app, run_async
+from app.clients import workday_client
 from app.database import async_session
 from app.models.notification import Notification
 from app.models.search_preference import SearchPreference
@@ -261,6 +262,22 @@ async def _discover_all_boards() -> None:
 
     logger.info("Running ATS board auto-discovery for %d users", len(user_ids))
     source_payloads, source_stats = await fetch_curated_ats_source_payloads()
+
+    # Curated non-tech employers (health systems, universities, banks/insurers,
+    # retailers). Fetch every vertical here and let per-user saved-search
+    # matching decide relevance downstream — so a nurse's "registered nurse"
+    # search lands Sentara/Trinity jobs on refresh, the way a dev's search lands
+    # Stripe/OpenAI. Folded into the existing workday:curated source bucket so
+    # provenance and stats stay consistent (stored jobs map back to it).
+    try:
+        nontech_jobs = await workday_client.discover_all_nontech_workday(
+            limit_per_company=20
+        )
+        if nontech_jobs:
+            source_payloads.setdefault("workday:curated", []).extend(nontech_jobs)
+            logger.info("Refresh: +%d curated non-tech workday jobs", len(nontech_jobs))
+    except Exception:
+        logger.exception("non-tech workday fetch failed in refresh")
 
     for uid in user_ids:
         try:

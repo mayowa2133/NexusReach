@@ -121,6 +121,31 @@ def _suppress_tech_sources(resolved_occupations: list[str] | None) -> bool:
     return all(o in INDUSTRY_BOUND_NONTECH_OCCUPATIONS for o in occs)
 
 
+# Curated non-tech employer lists (Workday-backed health systems, universities,
+# banks/insurers, retailers) are the vertical analog of the tech ATS boards.
+# This maps an occupation to the verticals whose employers actually hire it, so
+# a nursing search pulls health systems and a finance search pulls banks. Only
+# occupations with a clear vertical home are mapped; everything else relies on
+# the broad aggregators. Cross-industry occupations (sales, support) map to
+# multiple verticals since those employers hire heavily for them.
+OCCUPATION_VERTICALS: dict[str, frozenset[str]] = {
+    "healthcare": frozenset({"healthcare"}),
+    "education_training": frozenset({"education"}),
+    "accounting_finance": frozenset({"finance"}),
+    "sales": frozenset({"finance", "retail"}),
+    "customer_service_support": frozenset({"finance", "retail"}),
+    "supply_chain": frozenset({"retail"}),
+}
+
+
+def verticals_for_occupations(resolved_occupations: list[str] | None) -> set[str]:
+    """Union of curated verticals the resolved occupations should pull from."""
+    out: set[str] = set()
+    for occ in resolved_occupations or []:
+        out |= OCCUPATION_VERTICALS.get(occ, frozenset())
+    return out
+
+
 # --- Deduplication ---
 
 def _fingerprint(company_name: str | None, title: str | None, location: str | None) -> str:
@@ -1776,6 +1801,32 @@ async def _discover_ats_boards(
     )
 
 
+async def _discover_nontech_vertical_boards(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    verticals: set[str],
+    profile,
+    limit_per_company: int = 20,
+) -> int:
+    """Pull jobs from curated non-tech employers in the given verticals.
+
+    The non-tech analog of ``_discover_ats_boards``: health systems,
+    universities, banks/insurers, and retailers on Workday. Occupation-routed
+    by ``verticals`` so only relevant employers are fetched. Fails soft.
+    """
+    if not verticals:
+        return 0
+    try:
+        raw_jobs = await workday_client.discover_all_nontech_workday(
+            limit_per_company=limit_per_company, verticals=verticals
+        )
+    except Exception:
+        logger.exception("non-tech vertical board discovery failed")
+        return 0
+    stored = await _store_raw_jobs(db, user_id, raw_jobs, profile)
+    return len(stored)
+
+
 async def fetch_curated_ats_source_payloads(
     limit_per_board: int = 50,
 ) -> tuple[dict[str, list[dict]], list[dict]]:
@@ -2546,6 +2597,26 @@ async def discover_jobs(
             total_new += ats_new
         except Exception:
             logger.exception("ATS board discovery failed")
+
+    # 4. Curated non-tech vertical boards (health systems, universities,
+    #    banks/insurers, retailers). Occupation-routed and additive: fires
+    #    whenever the resolved occupations have a vertical home, independent of
+    #    the tech-source suppression decision (a finance seeker isn't suppressed
+    #    but still wants banks; a nurse is suppressed and still wants hospitals).
+    target_verticals = verticals_for_occupations(resolved_occupations)
+    if target_verticals:
+        try:
+            nt_new = await _discover_nontech_vertical_boards(
+                db, user_id, target_verticals, profile
+            )
+            total_new += nt_new
+            logger.info(
+                "Discover: non-tech vertical boards (%s) -> %d new jobs",
+                sorted(target_verticals),
+                nt_new,
+            )
+        except Exception:
+            logger.exception("non-tech vertical board discovery failed")
 
     logger.info("Discovered %d new jobs for user %s", total_new, user_id)
     return total_new
