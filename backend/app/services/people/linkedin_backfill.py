@@ -4,7 +4,7 @@ import asyncio
 import logging
 
 
-from app.clients import search_router_client
+from app.clients import public_profile_client, search_router_client
 from app.utils.job_context import (
     JobContext,
 )
@@ -231,6 +231,42 @@ def _choose_linkedin_backfill_match(
     return best_match, best_score, "matched"
 
 
+async def _enrich_existing_url_title(data: dict, *, company_name: str) -> None:
+    """Recover a weak/missing title for a candidate that *already* has a
+    LinkedIn URL, by reading that exact profile's public SERP snippet.
+
+    The FIND search (``search_exact_linkedin_profile``) is name+company based
+    and can mis-match, so it only runs for candidates with no URL. Here the
+    candidate's own URL is matched exactly via ``public_profile_client`` — there
+    is no wrong-person risk — so we can safely upgrade a weak title (e.g. a peer
+    whose ``title`` is only the company name). Only fires when the existing
+    title is actually weak/missing, so a candidate with a good title costs no
+    extra search. Mutates ``data`` in place; fail-soft when nothing is found.
+    """
+    linkedin_url = data.get("linkedin_url")
+    if not linkedin_url:
+        return
+    current_title = data.get("title")
+    if not (
+        data.get("_weak_title")
+        or not current_title
+        or _title_is_weak(current_title, company_name)
+    ):
+        return
+    profile = await public_profile_client.enrich_profile(linkedin_url)
+    if not profile:
+        return
+    recovered_title = profile.get("title") or ""
+    if not recovered_title or _title_is_weak(recovered_title, company_name):
+        return
+    data["title"] = recovered_title
+    data["_weak_title"] = False
+    profile_data = _title_recovery_metadata(data, source="public_web")
+    profile_data["linkedin_backfill_status"] = "title_enriched_exact_url"
+    profile_data["linkedin_backfill_source"] = "public_web"
+    data["profile_data"] = profile_data
+
+
 async def _backfill_linkedin_profiles(
     candidates: list[dict],
     *,
@@ -259,6 +295,9 @@ async def _backfill_linkedin_profiles(
     async def _backfill_one(index: int, raw: dict) -> tuple[int, dict]:
         data = dict(raw)
         if data.get("linkedin_url"):
+            # Already have the URL, so the name+company FIND search is moot — but
+            # a weak title can still be upgraded by reading that exact profile.
+            await _enrich_existing_url_title(data, company_name=company_name)
             return index, data
 
         public_url = _public_profile_url(data)

@@ -1372,6 +1372,109 @@ class TestEmploymentAndRanking:
         assert results[0]["profile_data"]["title_recovery_source"] == "linkedin_backfill"
 
     @pytest.mark.asyncio
+    async def test_backfill_enriches_weak_title_for_existing_linkedin_url(self):
+        """A candidate that already has a LinkedIn URL but a weak title is
+        enriched via exact-URL SERP lookup, not the name+company FIND search."""
+        with patch(
+            "app.clients.public_profile_client.enrich_profile",
+            new_callable=AsyncMock,
+        ) as mock_enrich, patch(
+            "app.services.people_service.search_router_client.search_exact_linkedin_profile",
+            new_callable=AsyncMock,
+        ) as mock_find:
+            mock_enrich.return_value = {
+                "full_name": "Brandon Lee",
+                "title": "Staff Software Engineer",
+                "company": "Whatnot",
+                "linkedin_url": "https://www.linkedin.com/in/brandonlee",
+                "source": "public_web",
+                "profile_data": {"enrichment_source": "searxng_serp_snippet"},
+            }
+            results = await _backfill_linkedin_profiles(
+                [
+                    {
+                        "full_name": "Brandon Lee",
+                        "title": "Whatnot",
+                        "snippet": "Current teammate at Whatnot.",
+                        "source": "theorg_traversal",
+                        "_weak_title": True,
+                        "_employment_status": "current",
+                        "linkedin_url": "https://www.linkedin.com/in/brandonlee",
+                        "profile_data": {"public_identity_slug": "whatnot"},
+                    }
+                ],
+                company_name="Whatnot",
+                public_identity_slugs=["whatnot"],
+                bucket="peers",
+            )
+
+        assert results[0]["title"] == "Staff Software Engineer"
+        assert results[0]["_weak_title"] is False
+        assert results[0]["profile_data"]["linkedin_backfill_status"] == "title_enriched_exact_url"
+        assert results[0]["profile_data"]["title_recovery_source"] == "public_web"
+        # existing profile_data keys are preserved
+        assert results[0]["profile_data"]["public_identity_slug"] == "whatnot"
+        mock_enrich.assert_awaited_once_with("https://www.linkedin.com/in/brandonlee")
+        # already had a URL -> the fuzzy name+company FIND search must not run
+        mock_find.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_backfill_skips_exact_url_enrichment_for_strong_title(self):
+        """A candidate with a URL and an already-strong title is not re-enriched
+        (no wasted search call)."""
+        with patch(
+            "app.clients.public_profile_client.enrich_profile",
+            new_callable=AsyncMock,
+        ) as mock_enrich:
+            results = await _backfill_linkedin_profiles(
+                [
+                    {
+                        "full_name": "Dana Cruz",
+                        "title": "Senior Product Manager",
+                        "source": "searxng_search",
+                        "_employment_status": "current",
+                        "linkedin_url": "https://www.linkedin.com/in/danacruz",
+                        "profile_data": {},
+                    }
+                ],
+                company_name="Whatnot",
+                public_identity_slugs=["whatnot"],
+                bucket="hiring_managers",
+            )
+
+        assert results[0]["title"] == "Senior Product Manager"
+        mock_enrich.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_backfill_exact_url_enrichment_failsoft(self):
+        """When the SERP snippet can't be recovered, the weak title is left as-is."""
+        with patch(
+            "app.clients.public_profile_client.enrich_profile",
+            new_callable=AsyncMock,
+            return_value=None,
+        ) as mock_enrich:
+            results = await _backfill_linkedin_profiles(
+                [
+                    {
+                        "full_name": "Brandon Lee",
+                        "title": "Whatnot",
+                        "source": "theorg_traversal",
+                        "_weak_title": True,
+                        "_employment_status": "current",
+                        "linkedin_url": "https://www.linkedin.com/in/brandonlee",
+                        "profile_data": {},
+                    }
+                ],
+                company_name="Whatnot",
+                public_identity_slugs=["whatnot"],
+                bucket="peers",
+            )
+
+        assert results[0]["title"] == "Whatnot"
+        assert results[0]["_weak_title"] is True
+        mock_enrich.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_backfill_linkedin_profiles_marks_ambiguous_matches(self):
         with patch(
             "app.services.people_service.search_router_client.search_exact_linkedin_profile",
