@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.clients import github_client, search_router_client, tavily_search_client
+from app.clients import github_client, public_profile_client, search_router_client, tavily_search_client
 from app.models.job import Job
 from app.models.profile import Profile
 from app.models.person import Person
@@ -2114,11 +2114,10 @@ async def enrich_person_from_linkedin(
 ) -> Person:
     """Create/return a CRM person from a LinkedIn URL.
 
-    Historically this enriched the profile via Proxycurl, but Proxycurl shut
-    down in July 2025 after LinkedIn's lawsuit, so there is no profile provider
-    wired here anymore. The endpoint still records the contact (idempotently)
-    from the URL the user supplied; ``profile`` stays ``None`` until a
-    replacement enrichment provider is integrated.
+    Enrichment is free and self-hosted: ``public_profile_client`` recovers the
+    name/title/company from the profile's public search snippet via SearXNG
+    (the Proxycurl replacement after its 2025-07 sunset). It fails soft to
+    ``None``, in which case the contact is still recorded from the supplied URL.
     """
     from app.utils.linkedin import normalize_linkedin_url
 
@@ -2137,7 +2136,7 @@ async def enrich_person_from_linkedin(
     if existing and existing.profile_data:
         return existing
 
-    profile = None  # No LinkedIn enrichment provider wired (Proxycurl sunset 2025-07).
+    profile = await public_profile_client.enrich_profile(linkedin_url)
 
     if existing:
         existing.profile_data = profile
@@ -2156,7 +2155,7 @@ async def enrich_person_from_linkedin(
         linkedin_url=normalized,
         person_type=person_type,
         profile_data=profile,
-        source="proxycurl" if profile else "manual",
+        source="public_web" if profile else "manual",
     )
     db.add(person)
     await db.commit()
