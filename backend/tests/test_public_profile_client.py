@@ -5,12 +5,13 @@ from unittest.mock import AsyncMock, patch
 from app.clients import public_profile_client
 from app.clients.public_profile_client import (
     _name_from_slug,
-    _parse_profile_title,
     enrich_profile,
 )
 
 # asyncio_mode = auto (pytest.ini) runs async tests without a marker, so this
-# module mixes sync parser tests and async enrich tests without a module mark.
+# module mixes sync helper tests and async enrich tests without a module mark.
+# The SERP-title parser lives in app/utils/linkedin and is covered by
+# tests/test_linkedin_utils.py.
 
 
 def test_name_from_slug_drops_trailing_id_tokens():
@@ -18,30 +19,6 @@ def test_name_from_slug_drops_trailing_id_tokens():
     assert _name_from_slug("john-smith-12345") == "John Smith"
     assert _name_from_slug("maria-de-la-cruz") == "Maria De La Cruz"
     assert _name_from_slug("") == ""
-
-
-def test_parse_profile_title_name_title_company():
-    name, title, company = _parse_profile_title("Jane Doe - Staff Engineer - Stripe | LinkedIn")
-    assert (name, title, company) == ("Jane Doe", "Staff Engineer", "Stripe")
-
-
-def test_parse_profile_title_title_at_company():
-    name, title, company = _parse_profile_title("John Smith - Senior Recruiter at Figma | LinkedIn")
-    assert name == "John Smith"
-    assert title == "Senior Recruiter"
-    assert company == "Figma"
-
-
-def test_parse_profile_title_handles_en_dash_separator():
-    name, title, company = _parse_profile_title("Ana Reyes – Product Manager – Notion | LinkedIn")
-    assert (name, title, company) == ("Ana Reyes", "Product Manager", "Notion")
-
-
-def test_parse_profile_title_name_only():
-    name, title, company = _parse_profile_title("Sam Lee | LinkedIn")
-    assert name == "Sam Lee"
-    assert title == ""
-    assert company == ""
 
 
 async def test_enrich_profile_returns_parsed_snippet_for_matching_url():

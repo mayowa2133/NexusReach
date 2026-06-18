@@ -13,6 +13,7 @@ import httpx
 
 from app.clients import brave_search_client
 from app.config import settings
+from app.utils.linkedin import parse_linkedin_serp_title
 
 GOOGLE_CSE_URL = "https://www.googleapis.com/customsearch/v1"
 
@@ -39,21 +40,12 @@ def _parse_linkedin_result(item: dict, company_name: str) -> dict | None:
     linkedin_url = re.split(r"[?#]", link)[0].rstrip("/")
 
     title_raw = item.get("title", "")
-    # Remove " | LinkedIn" suffix
+    # Remove " | LinkedIn" suffix (kept for location extraction below).
     title_clean = re.sub(r"\s*\|\s*LinkedIn\s*$", "", title_raw).strip()
 
-    # Split on " - " to extract parts
-    # Common formats: "Name - Title - Company", "Name - Title at Company"
-    parts = [p.strip() for p in title_clean.split(" - ") if p.strip()]
-
-    if not parts:
-        return None
-
-    full_name = parts[0]
-    job_title = parts[1] if len(parts) > 1 else ""
-
-    # Remove "at Company" from title if present
-    job_title = re.sub(r"\s+at\s+.*$", "", job_title, flags=re.IGNORECASE).strip()
+    # Name/title come from the shared SERP-title parser (handles the
+    # "Name - Title - Company" / "Name - Title at Company" forms + en-dashes).
+    full_name, job_title, _ = parse_linkedin_serp_title(title_raw)
 
     # Skip if the "name" looks like a company page or generic result
     if not full_name or full_name.lower() == company_name.lower():

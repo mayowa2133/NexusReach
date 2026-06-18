@@ -16,6 +16,7 @@ import httpx
 
 from app.config import settings
 from app.utils.company_identity import extract_public_identity_hints
+from app.utils.linkedin import parse_linkedin_serp_title
 
 BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
 PUBLIC_RESULT_REJECTION_TERMS = (
@@ -378,21 +379,14 @@ def _parse_linkedin_result(item: dict, company_name: str) -> dict | None:
     linkedin_url = _clean_profile_url(url)
 
     title_raw = item.get("title", "")
-    # Remove " | LinkedIn" suffix
+    # Remove " | LinkedIn" suffix (kept for location + linkedin_result_title).
     title_clean = re.sub(r"\s*\|\s*LinkedIn\s*$", "", title_raw).strip()
 
-    # Split on " - " to extract parts
-    # Common formats: "Name - Title - Company", "Name - Title at Company"
-    parts = [p.strip() for p in title_clean.split(" - ") if p.strip()]
-
-    if not parts:
-        return None
-
-    full_name = parts[0]
-    job_title = parts[1] if len(parts) > 1 else ""
-
-    # Remove "at Company" from title if present
-    job_title = re.sub(r"\s+at\s+.*$", "", job_title, flags=re.IGNORECASE).strip()
+    # Name/title come from the shared SERP-title parser, which handles the
+    # "Name - Title - Company" and "Name - Title at Company" forms plus en-dash
+    # separators. The parsed company is ignored here — Brave trusts the queried
+    # company_name and derives confidence from the title/snippet below.
+    full_name, job_title, _ = parse_linkedin_serp_title(title_raw)
 
     # Skip if the "name" looks like a company page or generic result
     if not full_name or full_name.lower() == company_name.lower():

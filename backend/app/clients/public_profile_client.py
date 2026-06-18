@@ -19,12 +19,11 @@ result is found.
 import re
 
 from app.clients import searxng_search_client
-from app.utils.linkedin import normalize_linkedin_url
+from app.utils.linkedin import normalize_linkedin_url, parse_linkedin_serp_title
 
 # Opaque id tokens LinkedIn appends to slugs, e.g. "jane-doe-1a2b3c4d" or
 # "jane-doe-12345". Once we hit one, the human-name portion of the slug is done.
 _SLUG_ID_TOKEN = re.compile(r"^(?:[0-9a-f]{6,}|\d+)$", re.IGNORECASE)
-_LINKEDIN_SUFFIX = re.compile(r"\s*[|\-–—]\s*LinkedIn.*$", re.IGNORECASE)
 
 
 def _name_from_slug(slug: str) -> str:
@@ -41,32 +40,6 @@ def _name_from_slug(slug: str) -> str:
             break
         words.append(token)
     return " ".join(word.capitalize() for word in words)
-
-
-def _parse_profile_title(title_raw: str) -> tuple[str, str, str]:
-    """Parse ``"Name - Title - Company | LinkedIn"`` into (name, title, company).
-
-    Also handles the ``"Name - Senior Recruiter at Company | LinkedIn"`` form.
-    Returns empty strings for parts that aren't present.
-    """
-    clean = _LINKEDIN_SUFFIX.sub("", title_raw).strip()
-    # Normalize en/em dashes to the canonical " - " separator before splitting.
-    clean = re.sub(r"\s*[–—]\s*", " - ", clean)
-    parts = [p.strip() for p in clean.split(" - ") if p.strip()]
-    if not parts:
-        return "", "", ""
-
-    name = parts[0]
-    title = parts[1] if len(parts) > 1 else ""
-    company = parts[2] if len(parts) > 2 else ""
-
-    # "<Title> at <Company>" — pull the company out of the title segment.
-    at_match = re.search(r"\s+at\s+(.+)$", title, flags=re.IGNORECASE)
-    if at_match and not company:
-        company = at_match.group(1).strip()
-        title = re.sub(r"\s+at\s+.+$", "", title, flags=re.IGNORECASE).strip()
-
-    return name, title, company
 
 
 async def enrich_profile(linkedin_url: str) -> dict | None:
@@ -96,7 +69,7 @@ async def enrich_profile(linkedin_url: str) -> dict | None:
                 continue
 
             title_raw = item.get("title") or ""
-            name, title, company = _parse_profile_title(title_raw)
+            name, title, company = parse_linkedin_serp_title(title_raw)
             if not (name or title):
                 continue
 
