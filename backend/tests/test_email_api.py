@@ -33,7 +33,7 @@ async def test_find_email_not_found(client, mock_user_id):
             "email": None,
             "source": "not_found",
             "verified": False,
-            "tried": ["hunter", "proxycurl", "exhausted"],
+            "tried": ["hunter", "exhausted"],
         }
         person_id = str(uuid.uuid4())
         resp = await client.post(f"/api/email/find/{person_id}")

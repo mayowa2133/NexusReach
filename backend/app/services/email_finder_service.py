@@ -16,7 +16,6 @@ from app.clients import (
     github_email_client,
     gravatar_client,
     hunter_client,
-    proxycurl_client,
 )
 from app.config import settings
 from app.models.person import Person
@@ -774,39 +773,6 @@ async def find_email_for_person(
                 email_verified_at=getattr(person, "email_verified_at", None),
             )
         _append_reason(failure_reasons, "apollo_no_email")
-
-    if person.linkedin_url:
-        tried.append("proxycurl")
-        if not settings.proxycurl_api_key:
-            _append_reason(failure_reasons, "proxycurl_api_key_missing")
-        else:
-            profile = await proxycurl_client.enrich_profile(person.linkedin_url)
-            if profile and profile.get("personal_emails"):
-                email = profile["personal_emails"][0]
-                person.work_email = email
-                person.email_source = "proxycurl"
-                person.email_verified = False
-                person.profile_data = profile
-                _set_person_email_verification(
-                    person,
-                    status="unknown",
-                    method="none",
-                    evidence="Email discovered from Proxycurl profile enrichment.",
-                )
-                await db.commit()
-                return _response(
-                    email=email,
-                    source="proxycurl",
-                    verified=False,
-                    tried=tried,
-                    failure_reasons=failure_reasons,
-                    email_verification_status=getattr(person, "email_verification_status", None),
-                    email_verification_method=getattr(person, "email_verification_method", None),
-                    email_verification_label=getattr(person, "email_verification_label", None),
-                    email_verification_evidence=getattr(person, "email_verification_evidence", None),
-                    email_verified_at=getattr(person, "email_verified_at", None),
-                )
-            _append_reason(failure_reasons, "proxycurl_no_email")
 
     tried.append("exhausted")
     if mode == "best_effort" and fallback_suggestion:

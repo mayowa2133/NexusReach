@@ -23,7 +23,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.clients import apollo_client, github_client, proxycurl_client, search_router_client, tavily_search_client, theorg_client
+from app.clients import apollo_client, github_client, search_router_client, tavily_search_client, theorg_client
 from app.config import settings
 from app.models.company import Company
 from app.models.job import Job

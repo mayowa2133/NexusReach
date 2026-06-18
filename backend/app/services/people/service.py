@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.clients import github_client, proxycurl_client, search_router_client, tavily_search_client
+from app.clients import github_client, search_router_client, tavily_search_client
 from app.models.job import Job
 from app.models.profile import Profile
 from app.models.person import Person
@@ -2112,7 +2112,14 @@ async def enrich_person_from_linkedin(
     user_id: uuid.UUID,
     linkedin_url: str,
 ) -> Person:
-    """Enrich a single person from LinkedIn via Proxycurl."""
+    """Create/return a CRM person from a LinkedIn URL.
+
+    Historically this enriched the profile via Proxycurl, but Proxycurl shut
+    down in July 2025 after LinkedIn's lawsuit, so there is no profile provider
+    wired here anymore. The endpoint still records the contact (idempotently)
+    from the URL the user supplied; ``profile`` stays ``None`` until a
+    replacement enrichment provider is integrated.
+    """
     from app.utils.linkedin import normalize_linkedin_url
 
     normalized = normalize_linkedin_url(linkedin_url) or linkedin_url
@@ -2130,7 +2137,7 @@ async def enrich_person_from_linkedin(
     if existing and existing.profile_data:
         return existing
 
-    profile = await proxycurl_client.enrich_profile(linkedin_url)
+    profile = None  # No LinkedIn enrichment provider wired (Proxycurl sunset 2025-07).
 
     if existing:
         existing.profile_data = profile

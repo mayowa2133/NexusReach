@@ -219,7 +219,6 @@ NexusReach defaults to draft-first workflows. Users can optionally enable delaye
 - Brave Search: fallback search (paid)
 - Tavily: employment corroboration + fallback public discovery
 - Google CSE: optional legacy fallback (100 free/day)
-- Proxycurl: LinkedIn enrichment
 - Hunter: email finder + verifier
 - GitHub API: engineer/public profile context
 - Crawl4AI / Firecrawl: public-page retrieval fallback stack
@@ -356,7 +355,6 @@ NEXUSREACH_TOKEN_ENCRYPTION_KEYS={"v1":"..."}
 
 NEXUSREACH_APOLLO_API_KEY=...
 NEXUSREACH_APOLLO_MASTER_API_KEY=...
-NEXUSREACH_PROXYCURL_API_KEY=...
 NEXUSREACH_HUNTER_API_KEY=...
 NEXUSREACH_HUNTER_PATTERN_MONTHLY_BUDGET=25
 NEXUSREACH_GITHUB_TOKEN=...
@@ -460,6 +458,7 @@ VITE_ANALYTICS_ENABLED=true
 30. Real E2E uses `VITE_AUTH_MODE=e2e` with a Supabase-compatible JWT, boots backend/frontend on isolated ports, drops and recreates `nexusreach_e2e`, and runs Alembic from zero before the browser test.
 31. `people_service.py`, `ats_client.py`, `resume_artifact_service.py`, `linkedin_graph_service.py`, and `job_service.py` are compatibility shims. The implementations live in `app/services/people/`, `app/clients/ats/`, `app/services/resume_artifact/`, `app/services/linkedin_graph/`, and `app/services/jobs/` as layered packages (each module imports only from layers below it). New code should import from the packages, not the shims. The `jobs` package is `constants → normalize → storage → search/curated_boards/command_center → startup → discovery`; cross-module references are **module-qualified** (e.g. `storage._find_existing_job`, not a bare import) so a test patching `app.services.jobs.<defining_module>.<fn>` reaches every caller. Patch tests at the defining module, not the `job_service` shim. (`command_center` imports `search as _search_mod` because `get_jobs` has a `search` parameter.)
 32. Frontend types live in domain files under `frontend/src/types/` (`jobs.ts`, `people.ts`, `messages.ts`, ...); `types/index.ts` is a barrel re-export, so `@/types` imports keep working. Beware DOM-global name shadowing when adding types (e.g. `MessageChannel`, `Notification`): a missing cross-file type import resolves silently to the DOM type instead of erroring.
+33. **Proxycurl is gone.** LinkedIn sued Proxycurl and it shut down permanently on 2025-07-04; its host (`nubela.co/proxycurl`) is dead. The client, config key (`proxycurl_api_key`), and all call sites were removed — do not re-add them. This leaves an unfilled **LinkedIn profile-recovery / enrichment** gap: `enrich_person_from_linkedin` and the `POST /api/people/enrich` endpoint still record the contact from the supplied URL but no longer enrich (`profile=None`). A replacement provider (e.g. Crustdata, People Data Labs, Coresignal) would slot in there and in the email waterfall. The legacy `"proxycurl"` source string is intentionally **retained** in the trust/ranking/cache-eligibility lists (`people/company_match.CURRENT_TRUSTED_SOURCES`, `people/ranking.SOURCE_PRIORITY`, `known_people_service.GLOBAL_CACHE_ELIGIBLE_SOURCES`) only for backwards-compatible reads of old DB rows — same pattern as `firecrawl_public_web` (truth #11). Note: Tavily was acquired by Nebius (Feb 2026) — roadmap/pricing risk on the employment-corroboration provider; Exa is the independent alternative.
 
 ## Pre-commit checklist
 

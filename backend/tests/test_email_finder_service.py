@@ -76,7 +76,6 @@ async def test_best_effort_returns_low_confidence_suggestion(mock_db):
         patch("app.services.email_finder_service.settings") as mock_settings,
     ):
         mock_settings.hunter_api_key = ""
-        mock_settings.proxycurl_api_key = ""
         mock_settings.hunter_pattern_monthly_budget = 25
         result = await find_email_for_person(mock_db, person.user_id, person.id, mode="best_effort")
 
@@ -112,7 +111,6 @@ async def test_verified_only_suppresses_low_confidence_suggestion(mock_db):
         patch("app.services.email_finder_service.settings") as mock_settings,
     ):
         mock_settings.hunter_api_key = ""
-        mock_settings.proxycurl_api_key = ""
         mock_settings.hunter_pattern_monthly_budget = 25
         result = await find_email_for_person(mock_db, person.user_id, person.id, mode="verified_only")
 
@@ -133,9 +131,8 @@ async def test_ambiguous_untrusted_company_domain_still_suppresses_pattern_guess
         patch("app.services.email_finder_service.github_email_client.get_commit_email", new_callable=AsyncMock, return_value=None),
         patch("app.services.email_finder_service.apollo_client.enrich_person", new_callable=AsyncMock, return_value=None),
         patch("app.services.email_finder_service.email_suggestion_client.suggest_email") as mock_suggest,
-        patch("app.services.email_finder_service.settings") as mock_settings,
+        patch("app.services.email_finder_service.settings"),
     ):
-        mock_settings.proxycurl_api_key = ""
         result = await find_email_for_person(mock_db, person.user_id, person.id, mode="best_effort")
 
     assert result["result_type"] == "not_found"
@@ -163,9 +160,8 @@ async def test_official_company_site_domain_allows_best_guess_without_trusted_do
             "suggestions": [{"email": "alex.lee@x.ai", "confidence": 40}],
         }) as mock_suggest,
         patch("app.services.email_finder_service.gravatar_client.check_gravatar", new_callable=AsyncMock, return_value=False),
-        patch("app.services.email_finder_service.settings") as mock_settings,
+        patch("app.services.email_finder_service.settings"),
     ):
-        mock_settings.proxycurl_api_key = ""
         result = await find_email_for_person(mock_db, person.user_id, person.id, mode="best_effort")
 
     assert result["result_type"] == "best_guess"
@@ -191,9 +187,8 @@ async def test_untrusted_company_domain_clears_stale_pattern_email(mock_db):
         patch("app.services.email_finder_service.github_email_client.get_profile_email", new_callable=AsyncMock, return_value=None),
         patch("app.services.email_finder_service.github_email_client.get_commit_email", new_callable=AsyncMock, return_value=None),
         patch("app.services.email_finder_service.apollo_client.enrich_person", new_callable=AsyncMock, return_value=None),
-        patch("app.services.email_finder_service.settings") as mock_settings,
+        patch("app.services.email_finder_service.settings"),
     ):
-        mock_settings.proxycurl_api_key = ""
         result = await find_email_for_person(mock_db, person.user_id, person.id, mode="best_effort")
 
     assert result["email"] is None
@@ -229,7 +224,6 @@ async def test_hunter_pattern_learning_persists_company_pattern_and_improves_gue
         patch("app.services.email_finder_service.settings") as mock_settings,
     ):
         mock_settings.hunter_api_key = "hunter-key"
-        mock_settings.proxycurl_api_key = ""
         mock_settings.hunter_pattern_monthly_budget = 25
         result = await find_email_for_person(mock_db, person.user_id, person.id, mode="best_effort")
 
@@ -274,7 +268,6 @@ async def test_hunter_pattern_learning_respects_monthly_budget(mock_db):
         patch("app.services.email_finder_service.settings") as mock_settings,
     ):
         mock_settings.hunter_api_key = "hunter-key"
-        mock_settings.proxycurl_api_key = ""
         mock_settings.hunter_pattern_monthly_budget = 25
         result = await find_email_for_person(mock_db, person.user_id, person.id, mode="best_effort")
 
@@ -312,7 +305,6 @@ async def test_hunter_pattern_learning_does_not_auto_return_exact_domain_match(m
         patch("app.services.email_finder_service.settings") as mock_settings,
     ):
         mock_settings.hunter_api_key = "hunter-key"
-        mock_settings.proxycurl_api_key = ""
         mock_settings.hunter_pattern_monthly_budget = 25
         result = await find_email_for_person(mock_db, person.user_id, person.id, mode="best_effort")
 

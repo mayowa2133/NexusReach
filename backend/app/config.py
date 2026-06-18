@@ -31,7 +31,6 @@ class Settings(BaseSettings):
     # External APIs (populated later per phase)
     apollo_api_key: str = ""
     apollo_master_api_key: str = ""
-    proxycurl_api_key: str = ""
     hunter_api_key: str = ""
     github_token: str = ""
     jsearch_api_key: str = ""
