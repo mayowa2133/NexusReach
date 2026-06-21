@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from dataclasses import dataclass
 from typing import Annotated
@@ -8,6 +9,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import auth_tokens
 from app.config import settings
 from app.database import get_db
 from app.observability import capture_event, identify_user
@@ -52,12 +54,7 @@ async def get_current_auth_user(
 
     token = credentials.credentials
     try:
-        payload = jwt.decode(
-            token,
-            settings.supabase_jwt_secret,
-            algorithms=["HS256"],
-            audience="authenticated",
-        )
+        payload = await asyncio.to_thread(auth_tokens.decode_supabase_token, token)
         sub = payload.get("sub")
         if sub is None:
             raise HTTPException(

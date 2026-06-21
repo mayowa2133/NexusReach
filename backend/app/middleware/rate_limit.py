@@ -11,6 +11,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from starlette.requests import Request
 
+from app import auth_tokens
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -27,12 +28,7 @@ def _get_user_key(request: Request) -> str:
     auth = request.headers.get("Authorization", "")
     if auth.startswith("Bearer "):
         try:
-            payload = jwt.decode(
-                auth[7:],
-                settings.supabase_jwt_secret,
-                algorithms=["HS256"],
-                audience="authenticated",
-            )
+            payload = auth_tokens.decode_supabase_token(auth[7:])
             sub = payload.get("sub")
             if sub:
                 return f"user:{sub}"

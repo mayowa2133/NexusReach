@@ -14,8 +14,10 @@ from types import SimpleNamespace
 
 import jwt as pyjwt
 import pytest
+from cryptography.hazmat.primitives.asymmetric import ec
 from fastapi import HTTPException
 
+from app import auth_tokens
 from app.config import settings
 from app.dependencies import get_current_auth_user
 from app.middleware.rate_limit import _get_user_key
@@ -51,6 +53,43 @@ async def test_valid_supabase_jwt_is_accepted(monkeypatch):
 
     assert str(auth.user_id) == sub
     assert auth.email == "person@example.com"
+
+
+async def test_es256_supabase_jwt_is_accepted(monkeypatch):
+    monkeypatch.setattr(settings, "auth_mode", "supabase")
+    monkeypatch.setattr(settings, "supabase_url", "https://project.supabase.co")
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    sub = str(uuid.uuid4())
+    token = pyjwt.encode(
+        {"sub": sub, "aud": "authenticated", "email": "Person@Example.com"},
+        private_key,
+        algorithm="ES256",
+        headers={"kid": "test-key"},
+    )
+    jwks_client = SimpleNamespace(
+        get_signing_key_from_jwt=lambda _token: SimpleNamespace(
+            key=private_key.public_key()
+        )
+    )
+    monkeypatch.setattr(auth_tokens, "_get_jwks_client", lambda _url: jwks_client)
+
+    auth = await get_current_auth_user(_creds(token))
+
+    assert str(auth.user_id) == sub
+    assert auth.email == "person@example.com"
+
+
+async def test_unsupported_jwt_algorithm_is_rejected(monkeypatch):
+    monkeypatch.setattr(settings, "auth_mode", "supabase")
+    token = pyjwt.encode(
+        {"sub": str(uuid.uuid4()), "aud": "authenticated"},
+        "test-secret",
+        algorithm="HS384",
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_current_auth_user(_creds(token))
+    assert exc.value.status_code == 401
 
 
 async def test_forged_signature_jwt_is_rejected(monkeypatch):
@@ -106,6 +145,28 @@ def test_rate_limit_key_trusts_verified_sub(monkeypatch):
     token = pyjwt.encode(
         {"sub": sub, "aud": "authenticated"}, "real-secret", algorithm="HS256"
     )
+
+    key = _get_user_key(_fake_request(f"Bearer {token}"))
+
+    assert key == f"user:{sub}"
+
+
+def test_rate_limit_key_trusts_verified_es256_sub(monkeypatch):
+    monkeypatch.setattr(settings, "supabase_url", "https://project.supabase.co")
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    sub = str(uuid.uuid4())
+    token = pyjwt.encode(
+        {"sub": sub, "aud": "authenticated"},
+        private_key,
+        algorithm="ES256",
+        headers={"kid": "test-key"},
+    )
+    jwks_client = SimpleNamespace(
+        get_signing_key_from_jwt=lambda _token: SimpleNamespace(
+            key=private_key.public_key()
+        )
+    )
+    monkeypatch.setattr(auth_tokens, "_get_jwks_client", lambda _url: jwks_client)
 
     key = _get_user_key(_fake_request(f"Bearer {token}"))
 
