@@ -1,6 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { useAuthStore } from '@/stores/auth';
 import type { Profile } from '@/types';
 
 export function useProfile() {
@@ -25,25 +24,10 @@ export function useUploadResume() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (file: File) => {
+    mutationFn: (file: File) => {
       const formData = new FormData();
       formData.append('file', file);
-
-      const token = useAuthStore.getState().session?.access_token;
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-
-      const response = await fetch(`${apiUrl}/api/profile/resume`, {
-        method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({ detail: 'Upload failed' }));
-        throw new Error(err.detail || `HTTP ${response.status}`);
-      }
-
-      return response.json();
+      return api.postForm<Profile>('/api/profile/resume', formData);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['profile'] });

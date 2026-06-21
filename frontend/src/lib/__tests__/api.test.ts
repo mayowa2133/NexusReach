@@ -103,6 +103,25 @@ describe('ApiClient', () => {
     expect(options.method).toBe('PUT');
   });
 
+  it('sends multipart forms without overriding the browser content type', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ id: '1' }),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+    const formData = new FormData();
+    formData.append('file', new Blob(['resume']), 'resume.pdf');
+
+    await api.postForm('/api/profile/resume', formData);
+
+    const [, options] = mockFetch.mock.calls[0];
+    expect(options.method).toBe('POST');
+    expect(options.body).toBe(formData);
+    expect(options.headers['Content-Type']).toBeUndefined();
+    expect(options.headers['Authorization']).toBe('Bearer test-jwt-token');
+  });
+
   it('sends DELETE request', async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,

@@ -13,7 +13,7 @@ from app.middleware.rate_limit import limiter
 from app.models.profile import Profile
 from app.models.search_preference import SearchPreference
 from app.schemas.profile import AutofillProfileResponse, ProfileResponse, ProfileUpdate
-from app.services.resume_parser import extract_text, parse_resume
+from app.services.resume_parser import extract_text, parse_resume_text
 from app.utils.uploads import read_upload_capped
 
 router = APIRouter(prefix="/profile", tags=["profile"])
@@ -230,7 +230,7 @@ async def upload_resume(
     # loop so a large or complex resume can't freeze other requests (audit H1).
     try:
         raw_text = await asyncio.to_thread(extract_text, file_bytes, file.content_type)
-        parsed = await asyncio.to_thread(parse_resume, file_bytes, file.content_type)
+        parsed = await asyncio.to_thread(parse_resume_text, raw_text)
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"Failed to parse resume: {e}")
 
