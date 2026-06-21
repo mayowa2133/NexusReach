@@ -73,11 +73,12 @@ vi.mock('@/hooks/useJobs', () => ({
   }),
 }));
 
+const { mockPeopleSearch } = vi.hoisted(() => ({
+  mockPeopleSearch: { mutateAsync: vi.fn(), isPending: false },
+}));
+
 vi.mock('@/hooks/usePeople', () => ({
-  usePeopleSearch: () => ({
-    mutateAsync: vi.fn(),
-    isPending: false,
-  }),
+  usePeopleSearch: () => mockPeopleSearch,
   useSavedPeople: () => ({
     data: { items: [], total: 0, limit: null, offset: 0 },
   }),
@@ -153,6 +154,7 @@ beforeEach(() => {
   };
   mockGenerateResumeArtifact.mutateAsync.mockReset();
   mockReuseResumeArtifact.mutateAsync.mockReset();
+  mockPeopleSearch.mutateAsync.mockReset();
 });
 
 describe('JobDetailPage', () => {
@@ -314,5 +316,57 @@ describe('JobDetailPage', () => {
     renderPage();
 
     expect(screen.getByText(/job not found/i)).toBeInTheDocument();
+  });
+
+  it('shows an Updating badge for cached results and Refresh forces a live search', async () => {
+    mockUseJob.mockReturnValue({ data: sampleJob, isLoading: false });
+    mockPeopleSearch.mutateAsync.mockResolvedValue({
+      company: null,
+      your_connections: [],
+      recruiters: [
+        {
+          id: 'p1',
+          full_name: 'Jane Recruiter',
+          title: 'Technical Recruiter',
+          department: null,
+          seniority: null,
+          linkedin_url: null,
+          github_url: null,
+          work_email: null,
+          email_verified: false,
+          person_type: 'recruiter',
+          profile_data: null,
+          github_data: null,
+          source: 'public_web',
+          company: null,
+        },
+      ],
+      hiring_managers: [],
+      peers: [],
+      job_context: null,
+      errors: null,
+      served_from_snapshot: true,
+    });
+
+    renderPage();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: 'Find People' }));
+
+    // First click uses the snapshot cache (force_refresh false).
+    expect(mockPeopleSearch.mutateAsync).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ job_id: 'job-123', force_refresh: false }),
+    );
+
+    // Cached results surface the Updating badge + a Refresh affordance.
+    expect(await screen.findByText('Updating…')).toBeInTheDocument();
+    const refreshButton = screen.getByRole('button', { name: 'Refresh' });
+
+    // Refresh forces a live search.
+    await user.click(refreshButton);
+    expect(mockPeopleSearch.mutateAsync).toHaveBeenLastCalledWith(
+      expect.objectContaining({ job_id: 'job-123', force_refresh: true }),
+    );
   });
 });

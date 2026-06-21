@@ -247,7 +247,7 @@ function PeopleSection({
   job: Job;
   searchResults: PeopleSearchResult | null;
   isSearching: boolean;
-  onFindPeople: () => void;
+  onFindPeople: (forceRefresh?: boolean) => void;
   targetCount: number;
   onTargetCountChange: (v: number) => void;
 }) {
@@ -264,12 +264,24 @@ function PeopleSection({
   const managers = searchResults?.hiring_managers ?? [];
   const peers = searchResults?.peers ?? [];
   const hasResults = recruiters.length + managers.length + peers.length > 0;
+  const servedFromSnapshot = searchResults?.served_from_snapshot === true;
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h2 className="text-lg font-semibold">People at {job.company_name}</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-semibold">People at {job.company_name}</h2>
+            {servedFromSnapshot && hasResults && !isSearching && (
+              <Badge
+                variant="secondary"
+                className="text-xs font-normal text-muted-foreground animate-pulse"
+                title="Showing recent saved results — they refresh in the background. Click Refresh for a live search now."
+              >
+                Updating…
+              </Badge>
+            )}
+          </div>
           <p className="text-sm text-muted-foreground">
             Find recruiters, hiring managers, and peers to reach out to.
           </p>
@@ -287,7 +299,17 @@ function PeopleSection({
               className="h-8 w-16 text-sm"
             />
           </div>
-          <Button onClick={onFindPeople} disabled={isSearching}>
+          {hasResults && servedFromSnapshot && (
+            <Button
+              variant="outline"
+              onClick={() => onFindPeople(true)}
+              disabled={isSearching}
+              title="Run a fresh live search instead of the saved results"
+            >
+              Refresh
+            </Button>
+          )}
+          <Button onClick={() => onFindPeople()} disabled={isSearching}>
             {isSearching ? 'Searching...' : hasResults ? 'Re-run Search' : 'Find People'}
           </Button>
         </div>
@@ -1186,6 +1208,8 @@ function snapshotToSearchResult(snapshot: JobResearchSnapshot | null | undefined
     peers: snapshot.peers ?? [],
     job_context: null,
     errors: snapshot.errors ?? null,
+    // Hydrated from a persisted snapshot — surface the cached-results badge.
+    served_from_snapshot: true,
   };
 }
 
@@ -1234,13 +1258,14 @@ export function JobDetailPage() {
     }
   };
 
-  const handleFindPeople = async () => {
+  const handleFindPeople = async (forceRefresh = false) => {
     if (!job) return;
     try {
       const result = await peopleSearch.mutateAsync({
         company_name: job.company_name,
         job_id: job.id,
         target_count_per_bucket: targetCount,
+        force_refresh: forceRefresh,
       });
       setSessionSearchResults(result);
       setSnapshotCleared(false);
