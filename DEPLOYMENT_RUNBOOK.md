@@ -77,7 +77,7 @@ shown below.
 
 | Service | Config file | Start command |
 | --- | --- | --- |
-| `nexusreach-api` | `/backend/railway.web.toml` | `cd /app && python -m alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
+| `nexusreach-api` | `/backend/railway.web.toml` | `sh -c 'cd /app && python -m alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port $PORT'` |
 | `nexusreach-worker` | `/backend/railway.worker.toml` | `celery -A app.tasks worker --loglevel=info` |
 | `nexusreach-beat` | `/backend/railway.beat.toml` | `celery -A app.tasks beat --loglevel=info` |
 
@@ -257,7 +257,7 @@ Use this order for every production release:
    migrations before starting Uvicorn:
 
    ```bash
-   cd /app && python -m alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+   sh -c 'cd /app && python -m alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port $PORT'
    ```
 
 5. If the config-as-code path is disabled, set the same API start command in
