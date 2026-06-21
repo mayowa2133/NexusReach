@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-describe('auth store dev mode', () => {
+describe('auth store bootstrap', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.stubGlobal(
@@ -61,5 +61,65 @@ describe('auth store dev mode', () => {
     expect(useAuthStore.getState().devMode).toBe(true);
     expect(useAuthStore.getState().user?.email).toBe('e2e@nexusreach.local');
     expect(useAuthStore.getState().session?.access_token).toBe('e2e-token');
+  });
+
+  it('bootstraps a restored production session', async () => {
+    const user = { id: 'user-1', email: 'person@example.com' };
+    const session = { access_token: 'production-token', user };
+    vi.doMock('@/lib/supabase', () => ({
+      isDevAuthMode: false,
+      isE2EAuthMode: false,
+      devAuthUserEmail: 'dev@nexusreach.local',
+      supabase: {
+        auth: {
+          getSession: vi.fn().mockResolvedValue({ data: { session } }),
+          onAuthStateChange: vi.fn().mockReturnValue({
+            data: { subscription: { unsubscribe: vi.fn() } },
+          }),
+        },
+      },
+    }));
+
+    const { useAuthStore } = await import('@/stores/auth');
+
+    await useAuthStore.getState().initialize();
+
+    expect(fetch).toHaveBeenCalledWith('http://localhost:8000/api/auth/me', {
+      headers: { Authorization: 'Bearer production-token' },
+    });
+    expect(useAuthStore.getState().user?.email).toBe('person@example.com');
+  });
+
+  it('bootstraps the API before completing production sign-in', async () => {
+    const user = { id: 'user-1', email: 'person@example.com' };
+    const session = { access_token: 'production-token', user };
+    const signInWithPassword = vi.fn().mockResolvedValue({
+      data: { session },
+      error: null,
+    });
+    vi.doMock('@/lib/supabase', () => ({
+      isDevAuthMode: false,
+      isE2EAuthMode: false,
+      devAuthUserEmail: 'dev@nexusreach.local',
+      supabase: {
+        auth: {
+          signInWithPassword,
+        },
+      },
+    }));
+
+    const { useAuthStore } = await import('@/stores/auth');
+
+    await useAuthStore.getState().signIn('person@example.com', 'password');
+
+    expect(signInWithPassword).toHaveBeenCalledWith({
+      email: 'person@example.com',
+      password: 'password',
+    });
+    expect(fetch).toHaveBeenCalledWith('http://localhost:8000/api/auth/me', {
+      headers: { Authorization: 'Bearer production-token' },
+    });
+    expect(useAuthStore.getState().user?.email).toBe('person@example.com');
+    expect(useAuthStore.getState().loading).toBe(false);
   });
 });

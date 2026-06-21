@@ -65,12 +65,11 @@ function buildE2ESession(user: User): Session {
 }
 
 async function bootstrapAuthenticatedUser(accessToken?: string): Promise<void> {
-  try {
-    await fetch(`${API_URL}/api/auth/me`, {
-      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
-    });
-  } catch (error) {
-    console.warn('Auth bootstrap failed.', error);
+  const response = await fetch(`${API_URL}/api/auth/me`, {
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+  });
+  if (!response.ok) {
+    throw new Error(`Auth bootstrap failed with HTTP ${response.status}.`);
   }
 }
 
@@ -129,6 +128,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
 
     const { data: { session } } = await supabase.auth.getSession();
+    if (session) {
+      try {
+        await bootstrapAuthenticatedUser(session.access_token);
+      } catch (error) {
+        console.warn('Auth bootstrap failed.', error);
+      }
+    }
     set({
       session,
       user: session?.user ?? null,
@@ -141,6 +147,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         session,
         user: session?.user ?? null,
       });
+      if (session) {
+        void bootstrapAuthenticatedUser(session.access_token).catch((error) => {
+          console.warn('Auth bootstrap failed.', error);
+        });
+      }
     });
   },
 
@@ -175,9 +186,20 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
 
     set({ loading: true });
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    set({ loading: false });
-    if (error) throw error;
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      if (!data.session) {
+        throw new Error('Sign-in succeeded without an active session.');
+      }
+      await bootstrapAuthenticatedUser(data.session.access_token);
+      set({
+        session: data.session,
+        user: data.session.user,
+      });
+    } finally {
+      set({ loading: false });
+    }
   },
 
   signInWithGoogle: async () => {
