@@ -4,6 +4,7 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy.exc import PendingRollbackError
 
 from app.models.job import Job
 from app.models.search_preference import SearchPreference
@@ -329,6 +330,70 @@ async def test_refresh_task_routes_startup_prefs_to_startup_refresh():
     assert search_mock.await_args.kwargs["query"] == "software engineer"
     startup_mock.assert_awaited_once()
     assert startup_mock.await_args.kwargs["query"] == "founding engineer"
+
+
+async def test_refresh_user_feeds_rolls_back_before_persisting_failure_metadata():
+    from app.tasks import jobs as jobs_task
+
+    user_id = uuid.uuid4()
+
+    default_pref = MagicMock()
+    default_pref.id = uuid.uuid4()
+    default_pref.query = "software engineer"
+    default_pref.location = None
+    default_pref.remote_only = False
+    default_pref.mode = "default"
+    default_pref.last_error = None
+    default_pref.last_attempted_at = None
+    default_pref.last_duration_seconds = None
+
+    prefs_result = MagicMock()
+    prefs_result.scalars = MagicMock(
+        return_value=MagicMock(all=MagicMock(return_value=[default_pref]))
+    )
+    starred_result = MagicMock()
+    starred_result.scalars = MagicMock(
+        return_value=MagicMock(all=MagicMock(return_value=[]))
+    )
+
+    class _PoisonedSession:
+        def __init__(self):
+            self.needs_rollback = False
+            self.rollback_called = False
+            self.execute = AsyncMock(side_effect=[prefs_result, starred_result])
+            self.flush = AsyncMock()
+            self.add = MagicMock()
+            self.commit = AsyncMock(side_effect=self._commit)
+            self.rollback = AsyncMock(side_effect=self._rollback)
+
+        async def _commit(self):
+            if self.needs_rollback and not self.rollback_called:
+                raise PendingRollbackError("rollback required")
+            self.needs_rollback = False
+
+        async def _rollback(self):
+            self.rollback_called = True
+            self.needs_rollback = False
+
+    db = _PoisonedSession()
+    session_cm = MagicMock()
+    session_cm.__aenter__ = AsyncMock(return_value=db)
+    session_cm.__aexit__ = AsyncMock(return_value=None)
+
+    async def _poisoned_search_jobs(**kwargs):
+        db.needs_rollback = True
+        raise RuntimeError("statement timeout during refresh")
+
+    with (
+        patch.object(jobs_task, "async_session", return_value=session_cm),
+        patch.object(jobs_task, "search_jobs", new=_poisoned_search_jobs),
+        patch.object(jobs_task, "mark_stale_jobs_for_user", new=AsyncMock()),
+    ):
+        await jobs_task._refresh_user_feeds(user_id)
+
+    db.rollback.assert_awaited_once()
+    assert db.commit.await_count == 1
+    assert default_pref.last_error == "Refresh failed; see worker logs for traceback."
 
 
 def test_infer_startup_tags_for_job_tags_known_startup_company():

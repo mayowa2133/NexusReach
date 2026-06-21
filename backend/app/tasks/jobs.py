@@ -176,13 +176,20 @@ async def _refresh_user_feeds(user_id: uuid.UUID) -> int:
                             )
 
             except Exception:
+                # search_jobs / startup refresh can leave the transaction in a
+                # failed state (for example on statement timeout during flush).
+                # Roll back before writing failure metadata or the follow-up
+                # commit itself raises PendingRollbackError.
+                await db.rollback()
                 finished_at = datetime.now(timezone.utc)
+                db.add(refresh_run)
                 refresh_run.finished_at = finished_at
                 refresh_run.duration_seconds = round(
                     (finished_at - started_at).total_seconds(), 3
                 )
                 refresh_run.status = "failed"
                 refresh_run.error = "Refresh failed; see worker logs for traceback."
+                pref.last_attempted_at = started_at
                 pref.last_duration_seconds = refresh_run.duration_seconds
                 pref.last_error = refresh_run.error
                 await db.commit()
