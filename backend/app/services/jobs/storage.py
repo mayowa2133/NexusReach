@@ -25,6 +25,12 @@ from app.services.jobs import normalize
 
 logger = logging.getLogger(__name__)
 
+# Cap on distinct companies pre-warmed per discovery batch. Pre-warm is
+# company-scoped (one warm covers every job at that company), so warming the
+# top-ranked companies covers what users actually open without spending API
+# quota on the long tail.
+PREWARM_MAX_COMPANIES = 10
+
 
 def _refresh_existing_job(
     job: Job,
@@ -411,6 +417,12 @@ async def _store_raw_jobs(
             await _maybe_auto_prospect(db, user_id, stored)
         except Exception:
             logger.debug("Auto-prospect trigger check failed", exc_info=True)
+        # Pre-warm the contact cache for the top companies so "Find People"
+        # feels instant on the jobs the user is most likely to open (default on).
+        try:
+            await _maybe_prewarm_people(db, user_id, stored)
+        except Exception:
+            logger.debug("People pre-warm trigger check failed", exc_info=True)
 
     return stored
 
@@ -476,3 +488,50 @@ async def _maybe_auto_prospect(
             )
         except Exception:
             logger.debug("Failed to queue auto-prospect task", exc_info=True)
+
+
+async def _maybe_prewarm_people(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    jobs: list,
+) -> None:
+    """Queue discovery-only people pre-warm for the top companies in a batch.
+
+    On by default (opt-out via settings). Dedupes the newly stored jobs to
+    distinct companies, ranks them by their best job match score, and warms at
+    most ``PREWARM_MAX_COMPANIES``. Company-scoped so one warm covers every job
+    at that company. Never finds emails, drafts, or sends — speed only.
+    """
+    from app.services.settings_service import is_people_prewarm_enabled  # noqa: PLC0415
+
+    if not await is_people_prewarm_enabled(db, user_id):
+        return
+
+    # Distinct companies, keyed to the best (highest) match score we saw.
+    best_score_by_company: dict[str, float] = {}
+    for job in jobs:
+        company = (getattr(job, "company_name", None) or "").strip()
+        if not company:
+            continue
+        score = getattr(job, "match_score", None) or 0.0
+        if company not in best_score_by_company or score > best_score_by_company[company]:
+            best_score_by_company[company] = score
+
+    if not best_score_by_company:
+        return
+
+    top_companies = sorted(
+        best_score_by_company,
+        key=lambda c: best_score_by_company[c],
+        reverse=True,
+    )[:PREWARM_MAX_COMPANIES]
+
+    for company in top_companies:
+        try:
+            from app.tasks.auto_prospect import prewarm_company_people  # noqa: PLC0415
+            prewarm_company_people.delay(str(user_id), company)
+            logger.info(
+                "People pre-warm queued: user=%s company=%s", user_id, company,
+            )
+        except Exception:
+            logger.debug("Failed to queue people pre-warm task", exc_info=True)

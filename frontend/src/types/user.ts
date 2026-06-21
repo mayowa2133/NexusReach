@@ -97,6 +97,7 @@ export interface AutoProspectSettings {
   auto_stage_on_apply: boolean;
   auto_send_enabled: boolean;
   auto_send_delay_minutes: number;
+  people_prewarm_enabled: boolean;
 }
 
 export interface ResumeReuseSettings {

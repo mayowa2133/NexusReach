@@ -217,6 +217,7 @@ async def search_people_at_company(
     roles: list[str] | None = None,
     github_org: str | None = None,
     target_count_per_bucket: int = DEFAULT_TARGET_COUNT_PER_BUCKET,
+    persist: bool = True,
 ) -> dict:
     """Find people at a company using company-level search."""
     import time as _time
@@ -355,9 +356,9 @@ async def search_people_at_company(
         recruiter_candidates = _dedupe_candidates(recruiter_candidates, site_recruiters)
 
     # --- Write-through to global known people cache ---
+    all_candidates = recruiter_candidates + manager_candidates + peer_candidates
     try:
         from app.services.known_people_service import write_candidates_to_cache
-        all_candidates = recruiter_candidates + manager_candidates + peer_candidates
         await write_candidates_to_cache(
             db,
             all_candidates,
@@ -366,6 +367,21 @@ async def search_people_at_company(
         )
     except Exception:
         logger.warning("Known people cache write-through failed for %s", company_name, exc_info=True)
+
+    if not persist:
+        # Discovery-only pre-warm: the global known-people cache is now populated,
+        # which is what makes a later live "Find People" fast. Stop here — do NOT
+        # persist Person CRM rows, annotate warm paths, or log a user search, so a
+        # background warm never silently fills the user's saved contacts.
+        return {
+            "company": company,
+            "cache_warmed": True,
+            "candidate_count": len(all_candidates),
+            "recruiters": [],
+            "hiring_managers": [],
+            "peers": [],
+            "your_connections": [],
+        }
 
     recruiter_results = _prepare_candidates(
         recruiter_candidates,

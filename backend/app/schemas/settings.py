@@ -76,6 +76,13 @@ class AutoProspectResponse(BaseModel):
         default=30,
         description="Delay in minutes before auto-sending staged emails",
     )
+    people_prewarm_enabled: bool = Field(
+        default=True,
+        description=(
+            "Pre-load contacts for new jobs' top companies in the background so "
+            "Find People is instant. Discovery only — no emails are found or sent."
+        ),
+    )
 
     model_config = {"from_attributes": True}
 
@@ -91,6 +98,7 @@ class AutoProspectUpdate(BaseModel):
     auto_send_delay_minutes: Optional[int] = Field(
         default=None, ge=5, le=1440, description="Delay in minutes (5–1440)"
     )
+    people_prewarm_enabled: Optional[bool] = None
 
 
 class CadenceSettingsResponse(BaseModel):

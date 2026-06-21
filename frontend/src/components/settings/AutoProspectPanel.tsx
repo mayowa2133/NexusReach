@@ -93,6 +93,27 @@ export function AutoProspectPanel() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        {/* People pre-warm toggle — speed only, on by default */}
+        <div className="flex items-center justify-between rounded-lg border p-4">
+          <div className="space-y-1 flex-1">
+            <Label htmlFor="people-prewarm-toggle" className="font-medium">
+              Faster Find People
+            </Label>
+            <p className="text-sm text-muted-foreground">
+              When new jobs are discovered, quietly pre-load likely contacts for the top
+              companies in the background, so opening “Find People” is instant. Discovery
+              only — no emails are found, drafted, or sent. On by default.
+            </p>
+          </div>
+          <Switch
+            id="people-prewarm-toggle"
+            checked={settings.people_prewarm_enabled}
+            onCheckedChange={(checked: boolean) =>
+              handleToggle('people_prewarm_enabled', checked)
+            }
+          />
+        </div>
+
         {/* Auto-prospect toggle */}
         <div className="flex items-center justify-between rounded-lg border p-4">
           <div className="space-y-1 flex-1">

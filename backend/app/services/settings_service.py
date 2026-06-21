@@ -30,6 +30,7 @@ AUTO_PROSPECT_FIELDS = (
     "auto_stage_on_apply",
     "auto_send_enabled",
     "auto_send_delay_minutes",
+    "people_prewarm_enabled",
 )
 
 CADENCE_FIELDS = (
@@ -93,6 +94,7 @@ async def get_auto_prospect(db: AsyncSession, user_id: uuid.UUID) -> dict:
             "auto_stage_on_apply": False,
             "auto_send_enabled": False,
             "auto_send_delay_minutes": 30,
+            "people_prewarm_enabled": True,
         }
 
     return {field: getattr(settings, field) for field in AUTO_PROSPECT_FIELDS}
@@ -146,6 +148,22 @@ async def is_auto_prospect_enabled(
         name.lower().strip() == company_lower
         for name in settings.auto_prospect_company_names
     )
+
+
+async def is_people_prewarm_enabled(db: AsyncSession, user_id: uuid.UUID) -> bool:
+    """Check if discovery-only people pre-warm is enabled (default on).
+
+    Distinct from auto-prospect: pre-warm only populates the contact cache so
+    "Find People" is fast — it never finds emails, drafts, or sends. Defaults
+    to enabled when no settings row exists yet.
+    """
+    result = await db.execute(
+        select(UserSettings).where(UserSettings.user_id == user_id)
+    )
+    settings = result.scalar_one_or_none()
+    if not settings:
+        return True
+    return settings.people_prewarm_enabled
 
 
 async def complete_onboarding(db: AsyncSession, user_id: uuid.UUID) -> None:

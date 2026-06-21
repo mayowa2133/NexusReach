@@ -9,6 +9,11 @@ from app.database import async_session
 
 logger = logging.getLogger(__name__)
 
+# If a company already has at least this many cached contacts, skip the
+# pre-warm search — the cache is already warm enough for "Find People" to
+# short-circuit, so there's no reason to spend external API calls again.
+PREWARM_SKIP_THRESHOLD = 8
+
 
 def _is_missing_messages_table_error(exc: Exception) -> bool:
     message = str(exc).lower()
@@ -110,6 +115,73 @@ def auto_prospect_job(user_id: str, job_id: str) -> dict:
     """Celery task: auto-prospect a single job (people search + email finding)."""
     return run_async(
         _auto_prospect_job(uuid.UUID(user_id), uuid.UUID(job_id))
+    )
+
+
+async def _prewarm_company_people(user_id: uuid.UUID, company_name: str) -> dict:
+    """Discovery-only pre-warm of the contact cache for a single company.
+
+    Runs the company people search so the global known-people cache (and the
+    user's saved contacts) are populated before the user clicks "Find People".
+    Deliberately does NOT find emails, draft, stage, or send anything — it only
+    pre-loads contacts for speed. Skips work when the company is already warm.
+    """
+    from app.services.people import search_people_at_company  # noqa: PLC0415
+    from app.services.known_people_service import get_known_people_count  # noqa: PLC0415
+
+    stats = {
+        "company": company_name,
+        "warmed": False,
+        "skipped": False,
+        "people_found": 0,
+    }
+
+    async with async_session() as db:
+        # Skip if the global cache already has a healthy roster for this company.
+        try:
+            existing = await get_known_people_count(db, company_name=company_name)
+        except Exception:
+            existing = 0
+        if existing >= PREWARM_SKIP_THRESHOLD:
+            stats["skipped"] = True
+            return stats
+
+        try:
+            # persist=False: warm the global contact cache only — never persist
+            # Person CRM rows for a company the user hasn't actively searched.
+            result = await search_people_at_company(
+                db=db,
+                user_id=user_id,
+                company_name=company_name,
+                target_count_per_bucket=5,
+                persist=False,
+            )
+        except Exception:
+            logger.exception(
+                "People pre-warm failed: user=%s company=%s",
+                user_id, company_name,
+            )
+            return stats
+
+        stats["people_found"] = int(result.get("candidate_count", 0) or 0)
+        stats["warmed"] = True
+
+    return stats
+
+
+@celery_app.task(
+    name="app.tasks.auto_prospect.prewarm_company_people",
+    autoretry_for=(Exception,),
+    retry_backoff=60,
+    retry_backoff_max=300,
+    max_retries=1,
+    soft_time_limit=240,
+    time_limit=300,
+)
+def prewarm_company_people(user_id: str, company_name: str) -> dict:
+    """Celery task: discovery-only pre-warm of the contact cache for a company."""
+    return run_async(
+        _prewarm_company_people(uuid.UUID(user_id), company_name)
     )
 
 

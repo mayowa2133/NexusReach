@@ -40,6 +40,10 @@ class UserSettings(Base):
     auto_stage_on_apply: Mapped[bool] = mapped_column(Boolean, default=False)
     auto_send_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     auto_send_delay_minutes: Mapped[int] = mapped_column(Integer, default=30)
+    # Discovery-only background pre-warm of the people cache for newly discovered
+    # jobs' top companies, so "Find People" is near-instant. On by default
+    # (no emails/drafts/sends); opt-out via settings.
+    people_prewarm_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     draft_unsent_threshold_hours: Mapped[int] = mapped_column(Integer, default=24)
     awaiting_reply_threshold_days: Mapped[int] = mapped_column(Integer, default=5)
     applied_untouched_threshold_days: Mapped[int] = mapped_column(Integer, default=7)
