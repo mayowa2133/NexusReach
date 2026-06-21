@@ -8,13 +8,54 @@ One snapshot per (user, job) — replaced on every fresh search.
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from datetime import datetime, timedelta, timezone
+from typing import Any, Literal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.job import Job
 from app.models.job_research_snapshot import JobResearchSnapshot
+
+# Stale-while-revalidate windows for serving a saved snapshot on a Find People
+# click. Within FRESH_TTL we serve and do nothing. Between FRESH_TTL and
+# MAX_SERVE_AGE we serve instantly but trigger a background refresh. Beyond
+# MAX_SERVE_AGE the data is too old to trust (people change companies) — run a
+# live search instead.
+SNAPSHOT_FRESH_TTL = timedelta(hours=24)
+SNAPSHOT_MAX_SERVE_AGE = timedelta(days=14)
+
+SnapshotServeDecision = Literal["fresh", "stale", "miss"]
+
+
+def snapshot_serve_decision(
+    snapshot: JobResearchSnapshot | None,
+    *,
+    now: datetime | None = None,
+) -> SnapshotServeDecision:
+    """Decide how to use a snapshot for a Find People click.
+
+    - ``"fresh"``: serve it, no refresh needed.
+    - ``"stale"``: serve it instantly, but kick off a background refresh.
+    - ``"miss"``: do not serve — run a live search (no snapshot, empty result,
+      or too old to trust).
+    """
+    if snapshot is None:
+        return "miss"
+    # Never serve an empty snapshot — a user clicking Find People on a blank
+    # result would assume it's broken. Run live to actually find people.
+    if not snapshot.total_candidates:
+        return "miss"
+    ts = snapshot.updated_at or snapshot.created_at
+    if ts is None:
+        return "miss"
+    now = now or datetime.now(timezone.utc)
+    age = now - ts
+    if age > SNAPSHOT_MAX_SERVE_AGE:
+        return "miss"
+    if age > SNAPSHOT_FRESH_TTL:
+        return "stale"
+    return "fresh"
 
 
 def _person_warm_path(person: dict) -> bool:

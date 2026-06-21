@@ -75,6 +75,8 @@ class PeopleSearchRequest(BaseModel):
     min_relevance_score: int = 1
     target_count_per_bucket: int = 3
     include_debug: bool = False
+    # Bypass the stale-while-revalidate snapshot cache and run a live search.
+    force_refresh: bool = False
 
     @field_validator("target_count_per_bucket", mode="before")
     @classmethod
@@ -124,6 +126,9 @@ class PeopleSearchResponse(BaseModel):
     job_context: JobContextResponse | None = None
     errors: list[SearchErrorDetail] | None = None
     debug: dict | None = None
+    # True when served instantly from a saved snapshot (a background refresh may
+    # be in flight). False/absent for live search results.
+    served_from_snapshot: bool = False
 
 
 class SearchLogResponse(BaseModel):

@@ -111,6 +111,9 @@ export interface PeopleSearchResult {
   job_context: JobContext | null;
   errors?: SearchErrorDetail[] | null;
   debug?: Record<string, unknown> | null;
+  // True when served instantly from a saved snapshot (a background refresh may
+  // be in flight). False/absent for live search results.
+  served_from_snapshot?: boolean;
 }
 
 export interface WarmPathPerson {

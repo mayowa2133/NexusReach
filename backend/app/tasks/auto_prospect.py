@@ -185,6 +185,94 @@ def prewarm_company_people(user_id: str, company_name: str) -> dict:
     )
 
 
+# A snapshot refreshed within this window is treated as already up to date, so
+# a burst of clicks on a stale snapshot doesn't fan out into repeated searches.
+SNAPSHOT_REFRESH_DEBOUNCE = timedelta(minutes=2)
+
+
+async def _refresh_job_research_snapshot(
+    user_id: uuid.UUID, job_id: uuid.UUID, target_count_per_bucket: int = 3,
+) -> dict:
+    """Re-run the job-aware people search and re-save the snapshot.
+
+    Backs the stale-while-revalidate path: the request served the old snapshot
+    instantly, this refreshes it so the next visit is fresh. Debounced so
+    concurrent stale clicks don't trigger redundant searches.
+    """
+    from app.services.people import search_people_for_job  # noqa: PLC0415
+    from app.services.people.serialize import _serialize_people_search_result  # noqa: PLC0415
+    from app.services.job_research_snapshot_service import (  # noqa: PLC0415
+        get_job_research_snapshot,
+        save_job_research_snapshot,
+    )
+
+    stats = {"job_id": str(job_id), "refreshed": False, "skipped": False}
+
+    async with async_session() as db:
+        # Debounce: if someone just refreshed this snapshot, don't search again.
+        existing = await get_job_research_snapshot(db, user_id=user_id, job_id=job_id)
+        if existing and existing.updated_at:
+            age = datetime.now(timezone.utc) - existing.updated_at
+            if age < SNAPSHOT_REFRESH_DEBOUNCE:
+                stats["skipped"] = True
+                return stats
+
+        try:
+            result = await search_people_for_job(
+                db=db,
+                user_id=user_id,
+                job_id=job_id,
+                target_count_per_bucket=target_count_per_bucket,
+            )
+        except Exception:
+            logger.exception(
+                "Snapshot refresh search failed: user=%s job=%s", user_id, job_id,
+            )
+            return stats
+
+        response = _serialize_people_search_result(result)
+        try:
+            await save_job_research_snapshot(
+                db,
+                user_id=user_id,
+                job_id=job_id,
+                company_name=getattr(result.get("company"), "name", None),
+                target_count_per_bucket=target_count_per_bucket,
+                recruiters=[r.model_dump(mode="json") for r in response.recruiters],
+                hiring_managers=[m.model_dump(mode="json") for m in response.hiring_managers],
+                peers=[p.model_dump(mode="json") for p in response.peers],
+                your_connections=[c.model_dump(mode="json") for c in response.your_connections],
+                errors=[e.model_dump(mode="json") for e in (response.errors or [])] or None,
+            )
+            stats["refreshed"] = True
+        except Exception:
+            logger.exception(
+                "Snapshot refresh save failed: user=%s job=%s", user_id, job_id,
+            )
+
+    return stats
+
+
+@celery_app.task(
+    name="app.tasks.auto_prospect.refresh_job_research_snapshot",
+    autoretry_for=(Exception,),
+    retry_backoff=60,
+    retry_backoff_max=300,
+    max_retries=1,
+    soft_time_limit=300,
+    time_limit=360,
+)
+def refresh_job_research_snapshot(
+    user_id: str, job_id: str, target_count_per_bucket: int = 3,
+) -> dict:
+    """Celery task: background refresh of a job's people-search snapshot."""
+    return run_async(
+        _refresh_job_research_snapshot(
+            uuid.UUID(user_id), uuid.UUID(job_id), target_count_per_bucket,
+        )
+    )
+
+
 async def _auto_draft_for_job(user_id: uuid.UUID, job_id: uuid.UUID) -> dict:
     """Draft outreach emails for all contacts found for a job.
 

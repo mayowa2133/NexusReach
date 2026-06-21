@@ -5,10 +5,8 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select
-from sqlalchemy.inspection import inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from sqlalchemy.orm.attributes import NO_VALUE
 
 from app.models.person import Person
 from app.services.known_people_service import expire_known_person
@@ -20,16 +18,13 @@ from app.middleware.rate_limit import limiter
 from app.observability import capture_event
 from app.utils.discovery_rate_limit import check_discovery_rate_limit
 from app.schemas.people import (
-    CompanyResponse,
     LinkedInPageCaptureRequest,
     PeopleSearchRequest,
     PeopleSearchResponse,
     ManualPersonRequest,
     PersonResponse,
-    SearchErrorDetail,
     SearchLogResponse,
 )
-from app.schemas.linkedin_graph import LinkedInGraphConnectionResponse
 from app.services.people import (
     search_people_at_company,
     search_people_for_job,
@@ -38,100 +33,21 @@ from app.services.people import (
     get_search_history,
     persist_linkedin_page_capture,
 )
+from app.services.people.serialize import (
+    _serialize_people_search_result,
+    _serialize_person,
+    snapshot_to_search_response,
+)
 from app.services.employment_verification_service import verify_current_company_for_person
-from app.services.job_research_snapshot_service import save_job_research_snapshot
+from app.services.job_research_snapshot_service import (
+    get_job_research_snapshot,
+    save_job_research_snapshot,
+    snapshot_serve_decision,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/people", tags=["people"])
-
-
-def _is_mock_value(value: object) -> bool:
-    return value.__class__.__module__.startswith("unittest.mock")
-
-
-def _loaded_company(person) -> object | None:
-    try:
-        state = sa_inspect(person)
-        loaded_value = state.attrs.company.loaded_value
-        if loaded_value is not NO_VALUE and not _is_mock_value(loaded_value):
-            return loaded_value
-        explicit_company = getattr(person, "__dict__", {}).get("company")
-        return explicit_company
-    except Exception:
-        return getattr(person, "__dict__", {}).get("company", getattr(person, "company", None))
-
-
-def _serialize_company(company) -> CompanyResponse | None:
-    if not company:
-        return None
-    payload = {field: getattr(company, field, None) for field in CompanyResponse.model_fields}
-    return CompanyResponse(**payload)
-
-
-def _safe_value(value):
-    return None if _is_mock_value(value) else value
-
-
-def _serialize_linkedin_graph_connection(connection) -> LinkedInGraphConnectionResponse | None:
-    if not connection:
-        return None
-    if isinstance(connection, dict):
-        return LinkedInGraphConnectionResponse(**connection)
-
-    payload = {
-        "id": str(_safe_value(getattr(connection, "id", "")) or ""),
-        "display_name": _safe_value(getattr(connection, "display_name", None)),
-        "headline": _safe_value(getattr(connection, "headline", None)),
-        "current_company_name": _safe_value(getattr(connection, "current_company_name", None)),
-        "linkedin_url": _safe_value(getattr(connection, "linkedin_url", None)),
-        "company_linkedin_url": _safe_value(getattr(connection, "company_linkedin_url", None)),
-        "source": _safe_value(getattr(connection, "source", "manual_import")) or "manual_import",
-        "last_synced_at": _safe_value(getattr(connection, "last_synced_at", None)),
-    }
-    if not payload["display_name"]:
-        return None
-    return LinkedInGraphConnectionResponse(**payload)
-
-
-def _serialize_person(person) -> PersonResponse:
-    payload = {}
-    for field, field_info in PersonResponse.model_fields.items():
-        if field in {"company", "warm_path_connection"}:
-            continue
-        value = _safe_value(getattr(person, field, None))
-        if value is None and not field_info.is_required():
-            continue
-        payload[field] = value
-    payload["company"] = _serialize_company(_loaded_company(person))
-    warm_path_connection = _serialize_linkedin_graph_connection(
-        getattr(person, "warm_path_connection", None)
-    )
-    if warm_path_connection is not None:
-        payload["warm_path_connection"] = warm_path_connection
-    return PersonResponse(**payload)
-
-
-def _serialize_people_search_result(result: dict) -> PeopleSearchResponse:
-    raw_errors = result.get("errors")
-    errors = (
-        [SearchErrorDetail(**e) for e in raw_errors]
-        if raw_errors
-        else None
-    )
-    return PeopleSearchResponse(
-        company=_serialize_company(result.get("company")),
-        your_connections=[
-            LinkedInGraphConnectionResponse(**connection)
-            for connection in result.get("your_connections", [])
-        ],
-        recruiters=[_serialize_person(person) for person in result.get("recruiters", [])],
-        hiring_managers=[_serialize_person(person) for person in result.get("hiring_managers", [])],
-        peers=[_serialize_person(person) for person in result.get("peers", [])],
-        job_context=result.get("job_context"),
-        errors=errors,
-        debug=result.get("debug"),
-    )
 
 
 @router.post("/search", response_model=PeopleSearchResponse)
@@ -153,6 +69,40 @@ async def search_people(
             job_uuid = uuid.UUID(body.job_id)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail="Invalid job_id format") from exc
+
+        # Stale-while-revalidate: serve a saved snapshot instantly when one is
+        # usable, refreshing in the background if it's aging. force_refresh skips
+        # the cache and runs live.
+        if not body.force_refresh:
+            try:
+                snapshot = await get_job_research_snapshot(db, user_id=user_id, job_id=job_uuid)
+            except Exception:
+                # Snapshot lookup is best-effort — never block Find People on it;
+                # fall through to a live search.
+                logger.debug("Snapshot lookup failed; running live search", exc_info=True)
+                snapshot = None
+            decision = snapshot_serve_decision(snapshot)
+            if decision != "miss":
+                if decision == "stale":
+                    try:
+                        from app.tasks.auto_prospect import refresh_job_research_snapshot
+                        refresh_job_research_snapshot.delay(
+                            str(user_id), str(job_uuid), body.target_count_per_bucket,
+                        )
+                    except Exception:
+                        logger.debug("Failed to queue snapshot refresh", exc_info=True)
+                response = snapshot_to_search_response(snapshot)
+                capture_event(str(user_id), "people_searched", properties={
+                    "recruiters_found": len(response.recruiters),
+                    "hiring_managers_found": len(response.hiring_managers),
+                    "peers_found": len(response.peers),
+                    "your_connections_found": len(response.your_connections),
+                    "has_job_context": True,
+                    "served_from_snapshot": True,
+                    "snapshot_freshness": decision,
+                })
+                return response
+
         try:
             result = await search_people_for_job(
                 db=db,
@@ -188,6 +138,7 @@ async def search_people(
             "peers_found": len(response.peers),
             "your_connections_found": len(response.your_connections),
             "has_job_context": True,
+            "served_from_snapshot": False,
         })
         return response
 

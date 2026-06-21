@@ -209,3 +209,75 @@ async def test_search_nonexistent_job_id(client, mock_user_id):
         )
 
     assert resp.status_code == 404
+
+
+async def test_search_serves_fresh_snapshot_without_live_search(client, mock_user_id):
+    """A fresh snapshot is served instantly; no live search runs."""
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+    from app.schemas.people import CompanyResponse, PersonResponse
+
+    company = CompanyResponse(
+        id=uuid.uuid4(), name="Stripe", domain="stripe.com",
+        size=None, industry=None, description=None, careers_url=None,
+    )
+    person = PersonResponse(
+        id=uuid.uuid4(), full_name="Jane", title="Recruiter",
+        department=None, seniority=None, linkedin_url=None, github_url=None,
+        work_email=None, email_verified=False, person_type="recruiter",
+        profile_data=None, github_data=None, source="public_web", company=company,
+    ).model_dump(mode="json")
+
+    now = datetime.now(timezone.utc)
+    fake_snapshot = SimpleNamespace(
+        total_candidates=1, updated_at=now, created_at=now,
+        recruiters=[person], hiring_managers=[], peers=[], your_connections=[], errors=None,
+    )
+
+    with (
+        patch("app.routers.people.get_job_research_snapshot", new_callable=AsyncMock) as mock_get,
+        patch("app.routers.people.search_people_for_job", new_callable=AsyncMock) as mock_search,
+    ):
+        mock_get.return_value = fake_snapshot
+        resp = await client.post(
+            "/api/people/search",
+            json={"company_name": "Stripe", "job_id": str(uuid.uuid4())},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["served_from_snapshot"] is True
+    assert len(data["recruiters"]) == 1
+    assert data["company"]["name"] == "Stripe"
+    mock_search.assert_not_awaited()
+
+
+async def test_search_force_refresh_bypasses_snapshot(client, mock_user_id):
+    """force_refresh skips the snapshot cache entirely and runs a live search."""
+    company = _mock_company(mock_user_id)
+    mock_result = {
+        "company": company,
+        "recruiters": [],
+        "hiring_managers": [],
+        "peers": [],
+        "job_context": {"department": "engineering", "team_keywords": [], "seniority": "mid"},
+    }
+
+    with (
+        patch("app.routers.people.get_job_research_snapshot", new_callable=AsyncMock) as mock_get,
+        patch("app.routers.people.search_people_for_job", new_callable=AsyncMock) as mock_search,
+    ):
+        mock_search.return_value = mock_result
+        resp = await client.post(
+            "/api/people/search",
+            json={
+                "company_name": "Stripe",
+                "job_id": str(uuid.uuid4()),
+                "force_refresh": True,
+            },
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["served_from_snapshot"] is False
+    mock_get.assert_not_called()
+    mock_search.assert_awaited_once()

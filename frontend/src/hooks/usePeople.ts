@@ -19,6 +19,8 @@ export function usePeopleSearch() {
       search_depth?: 'fast' | 'deep';
       target_count_per_bucket?: number;
       include_debug?: boolean;
+      // Bypass the snapshot cache and force a live search.
+      force_refresh?: boolean;
     }) => api.post<PeopleSearchResult>('/api/people/search', params),
     onSuccess: (data, variables) => {
       const resultCount = peopleSearchCount(data);
