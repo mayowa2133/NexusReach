@@ -20,6 +20,13 @@ def test_job_refresh_cadence_is_every_fifteen_minutes():
     assert schedule._orig_minute == "*/15"
 
 
+def test_worker_runtime_defaults_limit_prefetch_and_child_reuse():
+    from app.tasks import celery_app
+
+    assert celery_app.conf.worker_prefetch_multiplier == 1
+    assert celery_app.conf.worker_max_tasks_per_child == 20
+
+
 def test_linkedin_cleanup_uses_shared_async_runner(monkeypatch):
     from app.tasks import linkedin_graph
 

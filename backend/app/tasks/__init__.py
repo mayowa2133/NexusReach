@@ -79,6 +79,8 @@ celery_app.conf.update(
     enable_utc=True,
     task_acks_late=True,
     task_reject_on_worker_lost=True,
+    worker_prefetch_multiplier=1,
+    worker_max_tasks_per_child=20,
     beat_schedule={
         "refresh-job-feeds": {
             "task": "app.tasks.jobs.refresh_all_job_feeds",
