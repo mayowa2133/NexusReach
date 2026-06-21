@@ -30,6 +30,12 @@ _LOCATION_RE = re.compile(
 )
 
 
+def _is_missing_playwright_browser(exc: Exception) -> bool:
+    """Return True when Crawl4AI failed only because the Playwright browser is absent."""
+    message = str(exc)
+    return "Executable doesn't exist" in message and "playwright install" in message
+
+
 def _extract_job_id(path: str) -> str:
     """Extract a job ID from a Tesla careers path like /careers/search/job/software-123456."""
     parts = path.rstrip("/").split("-")
@@ -99,7 +105,12 @@ async def search_tesla_jobs(
     except asyncio.TimeoutError:
         logger.warning("Tesla careers page timed out")
         return []
-    except Exception:
+    except Exception as exc:
+        if _is_missing_playwright_browser(exc):
+            logger.warning(
+                "Tesla client: Playwright browser not installed in runtime, skipping Tesla jobs"
+            )
+            return []
         logger.exception("Tesla careers headless fetch failed")
         return []
 
