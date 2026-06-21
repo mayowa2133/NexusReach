@@ -1,8 +1,9 @@
 """Celery application and task registration."""
 
 import asyncio
+import os
+import threading
 from collections.abc import Coroutine
-from concurrent.futures import ThreadPoolExecutor
 from importlib import import_module
 from typing import Any, TypeVar
 
@@ -13,24 +14,54 @@ from app.config import settings
 from app.observability import init_sentry
 
 _T = TypeVar("_T")
+_async_runner: "_AsyncLoopRunner | None" = None
+_async_runner_lock = threading.Lock()
+
+
+class _AsyncLoopRunner:
+    """Own one persistent asyncio loop for a Celery worker child process."""
+
+    def __init__(self) -> None:
+        self.pid = os.getpid()
+        self.loop = asyncio.new_event_loop()
+        self.thread = threading.Thread(
+            target=self._run,
+            name="celery-asyncio-loop",
+            daemon=True,
+        )
+        self.thread.start()
+
+    def _run(self) -> None:
+        asyncio.set_event_loop(self.loop)
+        self.loop.run_forever()
+
+    def run(self, coro: Coroutine[Any, Any, _T]) -> _T:
+        future = asyncio.run_coroutine_threadsafe(coro, self.loop)
+        return future.result()
+
+
+def _get_async_runner() -> _AsyncLoopRunner:
+    global _async_runner
+    pid = os.getpid()
+    with _async_runner_lock:
+        if (
+            _async_runner is None
+            or _async_runner.pid != pid
+            or not _async_runner.thread.is_alive()
+        ):
+            _async_runner = _AsyncLoopRunner()
+        return _async_runner
 
 
 def run_async(coro: Coroutine[Any, Any, _T]) -> _T:
-    """Run an async coroutine from a synchronous Celery task safely (audit H12).
+    """Run async Celery work on a persistent per-process event loop.
 
-    The default prefork pool has no running event loop, so ``asyncio.run`` works.
-    Under gevent/eventlet pools a loop may already be running, which makes
-    ``asyncio.run`` raise "asyncio.run() cannot be called from a running event
-    loop". In that case we execute the coroutine in a fresh loop on a worker
-    thread so the task still completes regardless of the configured pool.
+    SQLAlchemy's asyncpg pool binds connections to the event loop that created
+    them. Reusing one loop per prefork child prevents pooled connections from
+    being reused by a different loop on the next Celery task.
     """
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro)
+    return _get_async_runner().run(coro)
 
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(asyncio.run, coro).result()
 
 init_sentry("worker")
 

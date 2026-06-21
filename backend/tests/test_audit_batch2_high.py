@@ -254,3 +254,14 @@ async def test_h12_run_async_inside_running_loop():
 
     # Called from within a running event loop (gevent/eventlet scenario).
     assert run_async(_coro()) == 7
+
+
+def test_h12_run_async_reuses_worker_event_loop():
+    from app.tasks import run_async
+
+    async def _loop_id():
+        import asyncio
+
+        return id(asyncio.get_running_loop())
+
+    assert run_async(_loop_id()) == run_async(_loop_id())
