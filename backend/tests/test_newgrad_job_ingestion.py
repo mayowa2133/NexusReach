@@ -296,6 +296,44 @@ async def test_find_existing_job_prefers_source_and_external_id():
     assert "jobs.external_id" in compiled
 
 
+async def test_find_existing_job_uses_no_autoflush_for_lookup_queries():
+    user_id = uuid.uuid4()
+    existing_job = MagicMock()
+
+    class _NoAutoflush:
+        def __init__(self):
+            self.active = False
+
+        def __enter__(self):
+            self.active = True
+
+        def __exit__(self, exc_type, exc, tb):
+            self.active = False
+
+    no_autoflush = _NoAutoflush()
+    db = MagicMock()
+    db.no_autoflush = no_autoflush
+
+    async def _execute(stmt):
+        assert no_autoflush.active is True
+        return _ScalarResult(existing_job)
+
+    db.execute = AsyncMock(side_effect=_execute)
+
+    found = await _find_existing_job(
+        db,
+        user_id=user_id,
+        source="simplify_github",
+        ats=None,
+        external_id="simplify_123",
+        url="https://stripe.com/jobs/search?gh_jid=123",
+        fingerprint="fp",
+    )
+
+    assert found is existing_job
+    assert no_autoflush.active is False
+
+
 async def test_find_existing_job_reuses_canonical_url_for_non_ats_sources():
     """Audit H7: URL dedup is an indexed canonical_url match (query stripped)."""
     user_id = uuid.uuid4()

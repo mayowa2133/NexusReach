@@ -176,60 +176,61 @@ async def _find_existing_job(
 ) -> Job | None:
     source_key = normalize._job_source_key(source=source, ats=ats)
 
-    if source_key and external_id:
-        result = await db.execute(
-            select(Job)
-            .where(Job.user_id == user_id, Job.source == source_key, Job.external_id == external_id)
-            .order_by(Job.created_at.asc(), Job.id.asc())
-        )
-        existing = normalize._result_first(result)
-        if existing:
-            return existing
-
-    normalized_url = normalize._canonical_job_url(url)
-    if normalized_url:
-        # Indexed exact match on the stored canonical URL (audit H7) — replaces
-        # the previous unbounded scan that loaded every job for the user+source
-        # and recomputed canonical URLs in Python.
-        result = await db.execute(
-            select(Job)
-            .where(Job.user_id == user_id, Job.canonical_url == normalized_url)
-            .order_by(Job.created_at.asc(), Job.id.asc())
-        )
-        existing = normalize._result_first(result)
-        if existing:
-            return existing
-
-        # Fallback for legacy rows ingested before canonical_url existed: scan
-        # only rows that still lack it, narrowed by host, and backfill on match.
-        host = urlparse(normalized_url).netloc
-        legacy_filters = [
-            Job.user_id == user_id,
-            Job.url.is_not(None),
-            Job.canonical_url.is_(None),
-        ]
-        if host:
-            # Escape LIKE metacharacters so a host containing % or _ can't widen
-            # the scan (audit pass-2 P14).
-            safe_host = host.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-            legacy_filters.append(Job.url.ilike(f"%{safe_host}%", escape="\\"))
-        legacy_result = await db.execute(
-            select(Job).where(*legacy_filters).order_by(Job.created_at.asc(), Job.id.asc())
-        )
-        for existing in legacy_result.scalars().all():
-            if normalize._canonical_job_url(existing.url) == normalized_url:
-                existing.canonical_url = normalized_url
+    with db.no_autoflush:
+        if source_key and external_id:
+            result = await db.execute(
+                select(Job)
+                .where(Job.user_id == user_id, Job.source == source_key, Job.external_id == external_id)
+                .order_by(Job.created_at.asc(), Job.id.asc())
+            )
+            existing = normalize._result_first(result)
+            if existing:
                 return existing
 
-    if fingerprint:
-        result = await db.execute(
-            select(Job)
-            .where(Job.user_id == user_id, Job.fingerprint == fingerprint)
-            .order_by(Job.created_at.asc(), Job.id.asc())
-        )
-        existing = normalize._result_first(result)
-        if existing:
-            return existing
+        normalized_url = normalize._canonical_job_url(url)
+        if normalized_url:
+            # Indexed exact match on the stored canonical URL (audit H7) — replaces
+            # the previous unbounded scan that loaded every job for the user+source
+            # and recomputed canonical URLs in Python.
+            result = await db.execute(
+                select(Job)
+                .where(Job.user_id == user_id, Job.canonical_url == normalized_url)
+                .order_by(Job.created_at.asc(), Job.id.asc())
+            )
+            existing = normalize._result_first(result)
+            if existing:
+                return existing
+
+            # Fallback for legacy rows ingested before canonical_url existed: scan
+            # only rows that still lack it, narrowed by host, and backfill on match.
+            host = urlparse(normalized_url).netloc
+            legacy_filters = [
+                Job.user_id == user_id,
+                Job.url.is_not(None),
+                Job.canonical_url.is_(None),
+            ]
+            if host:
+                # Escape LIKE metacharacters so a host containing % or _ can't widen
+                # the scan (audit pass-2 P14).
+                safe_host = host.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                legacy_filters.append(Job.url.ilike(f"%{safe_host}%", escape="\\"))
+            legacy_result = await db.execute(
+                select(Job).where(*legacy_filters).order_by(Job.created_at.asc(), Job.id.asc())
+            )
+            for existing in legacy_result.scalars().all():
+                if normalize._canonical_job_url(existing.url) == normalized_url:
+                    existing.canonical_url = normalized_url
+                    return existing
+
+        if fingerprint:
+            result = await db.execute(
+                select(Job)
+                .where(Job.user_id == user_id, Job.fingerprint == fingerprint)
+                .order_by(Job.created_at.asc(), Job.id.asc())
+            )
+            existing = normalize._result_first(result)
+            if existing:
+                return existing
 
     return None
 

@@ -159,6 +159,7 @@ async def discover_jobs(
             )
             total_new += len(stored)
         except Exception:
+            await db.rollback()
             logger.exception("Discover failed for query: %s", seed["query"])
 
     # 2. newgrad-jobs.com — tech/new-grad-leaning; skip for non-tech occupations.
@@ -170,6 +171,7 @@ async def discover_jobs(
                 logger.info("newgrad-jobs discover: %d new jobs", len(ng_stored))
             total_new += len(ng_stored)
         except Exception:
+            await db.rollback()
             logger.exception("newgrad-jobs discover failed")
 
     # 3. Curated ATS boards are all tech companies — skip for non-tech occupations.
@@ -178,6 +180,7 @@ async def discover_jobs(
             ats_new = await curated_boards._discover_ats_boards(db, user_id)
             total_new += ats_new
         except Exception:
+            await db.rollback()
             logger.exception("ATS board discovery failed")
 
     # 4. Curated non-tech vertical boards (health systems, universities,
@@ -199,6 +202,7 @@ async def discover_jobs(
                 nt_new,
             )
         except Exception:
+            await db.rollback()
             logger.exception("non-tech vertical board discovery failed")
 
     # 5. Federal government postings via USAJobs (no-op unless configured).
@@ -210,6 +214,7 @@ async def discover_jobs(
             if gov_new:
                 logger.info("Discover: USAJobs government -> %d new jobs", gov_new)
         except Exception:
+            await db.rollback()
             logger.exception("USAJobs government discovery failed")
 
     logger.info("Discovered %d new jobs for user %s", total_new, user_id)

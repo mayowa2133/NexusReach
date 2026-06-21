@@ -396,6 +396,32 @@ async def test_refresh_user_feeds_rolls_back_before_persisting_failure_metadata(
     assert default_pref.last_error == "Refresh failed; see worker logs for traceback."
 
 
+async def test_discover_jobs_rolls_back_after_failed_query_and_continues():
+    user_id = uuid.uuid4()
+    profile = _make_profile("Software Engineer")
+    profile.target_locations = []
+
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=_ScalarResult(profile))
+    db.rollback = AsyncMock()
+
+    search_mock = AsyncMock(side_effect=[RuntimeError("statement timeout"), []])
+
+    with (
+        patch("app.services.jobs.search.search_jobs", new=search_mock),
+        patch("app.services.job_service.newgrad_jobs_client.search_newgrad_jobs", new=AsyncMock(return_value=[])),
+        patch("app.services.jobs.storage._store_raw_jobs", new=AsyncMock(return_value=[])),
+        patch("app.services.jobs.curated_boards._discover_ats_boards", new=AsyncMock(return_value=0)),
+        patch("app.services.jobs.curated_boards._discover_nontech_vertical_boards", new=AsyncMock(return_value=0)),
+        patch("app.services.jobs.curated_boards._discover_government_jobs", new=AsyncMock(return_value=0)),
+    ):
+        total_new = await discover_jobs(db, user_id, queries=["first", "second"])
+
+    assert total_new == 0
+    assert search_mock.await_count == 2
+    db.rollback.assert_awaited_once()
+
+
 def test_infer_startup_tags_for_job_tags_known_startup_company():
     """A Greenhouse posting at a known-startup company should gain inferred tags."""
     from app.services.job_service import _infer_startup_tags_for_job
