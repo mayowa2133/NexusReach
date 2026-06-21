@@ -94,6 +94,7 @@ async def test_upload_resume_rejects_html(client):
 async def test_upload_resume_json_success(client, mock_user_id):
     """POST /api/profile/resume-json accepts base64 payloads and updates the profile."""
     profile = _mock_profile(mock_user_id)
+    profile.id = uuid.uuid4()
 
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = profile
@@ -127,6 +128,7 @@ async def test_upload_resume_json_success(client, mock_user_id):
 
     assert resp.status_code == 200
     data = resp.json()
+    assert data["id"] == str(profile.id)
     assert data["full_name"] == "Test User"
     assert data["resume_parsed"]["skills"] == ["Python"]
     mock_db.commit.assert_awaited_once()

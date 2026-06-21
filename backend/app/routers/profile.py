@@ -26,6 +26,26 @@ from app.utils.uploads import read_upload_capped
 router = APIRouter(prefix="/profile", tags=["profile"])
 
 
+def _serialize_profile(profile: Profile) -> ProfileResponse:
+    return ProfileResponse(
+        id=str(profile.id),
+        full_name=profile.full_name,
+        bio=profile.bio,
+        goals=profile.goals,
+        tone=profile.tone,
+        target_industries=profile.target_industries,
+        target_company_sizes=profile.target_company_sizes,
+        target_roles=profile.target_roles,
+        target_occupations=profile.target_occupations,
+        target_locations=profile.target_locations,
+        linkedin_url=profile.linkedin_url,
+        github_url=profile.github_url,
+        portfolio_url=profile.portfolio_url,
+        resume_parsed=profile.resume_parsed,
+        resume_auto_accept_inferred=profile.resume_auto_accept_inferred,
+    )
+
+
 async def _seed_saved_searches(
     db: AsyncSession, user_id: uuid.UUID, profile: Profile,
 ) -> None:
@@ -146,23 +166,7 @@ async def get_profile(
     profile = result.scalar_one_or_none()
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
-    return ProfileResponse(
-        id=str(profile.id),
-        full_name=profile.full_name,
-        bio=profile.bio,
-        goals=profile.goals,
-        tone=profile.tone,
-        target_industries=profile.target_industries,
-        target_company_sizes=profile.target_company_sizes,
-        target_roles=profile.target_roles,
-        target_occupations=profile.target_occupations,
-        target_locations=profile.target_locations,
-        linkedin_url=profile.linkedin_url,
-        github_url=profile.github_url,
-        portfolio_url=profile.portfolio_url,
-        resume_parsed=profile.resume_parsed,
-        resume_auto_accept_inferred=profile.resume_auto_accept_inferred,
-    )
+    return _serialize_profile(profile)
 
 
 @router.get("/autofill", response_model=AutofillProfileResponse)
@@ -266,23 +270,7 @@ async def update_profile(
         from app.tasks.jobs import rescore_user_jobs  # noqa: PLC0415
         rescore_user_jobs.delay(str(user_id))
 
-    return ProfileResponse(
-        id=str(profile.id),
-        full_name=profile.full_name,
-        bio=profile.bio,
-        goals=profile.goals,
-        tone=profile.tone,
-        target_industries=profile.target_industries,
-        target_company_sizes=profile.target_company_sizes,
-        target_roles=profile.target_roles,
-        target_occupations=profile.target_occupations,
-        target_locations=profile.target_locations,
-        linkedin_url=profile.linkedin_url,
-        github_url=profile.github_url,
-        portfolio_url=profile.portfolio_url,
-        resume_parsed=profile.resume_parsed,
-        resume_auto_accept_inferred=profile.resume_auto_accept_inferred,
-    )
+    return _serialize_profile(profile)
 
 
 @router.post("/resume", response_model=ProfileResponse)
@@ -298,12 +286,13 @@ async def upload_resume(
     profile = await _get_profile_or_404(db, user_id)
 
     file_bytes = await read_upload_capped(file, settings.max_resume_upload_bytes)
-    return await _parse_and_store_resume(
+    profile = await _parse_and_store_resume(
         db=db,
         profile=profile,
         file_bytes=file_bytes,
         content_type=content_type,
     )
+    return _serialize_profile(profile)
 
 
 @router.post("/resume-json", response_model=ProfileResponse)
@@ -333,9 +322,10 @@ async def upload_resume_json(
             detail=f"Upload exceeds the maximum size of {limit_mb} MB.",
         )
 
-    return await _parse_and_store_resume(
+    profile = await _parse_and_store_resume(
         db=db,
         profile=profile,
         file_bytes=file_bytes,
         content_type=content_type,
     )
+    return _serialize_profile(profile)
