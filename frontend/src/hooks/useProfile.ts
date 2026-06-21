@@ -24,10 +24,28 @@ export function useUploadResume() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (file: File) => {
-      const formData = new FormData();
-      formData.append('file', file);
-      return api.postForm<Profile>('/api/profile/resume', formData);
+    mutationFn: async (file: File) => {
+      const arrayBuffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer);
+      let binary = '';
+      const chunkSize = 0x8000;
+      for (let index = 0; index < bytes.length; index += chunkSize) {
+        const chunk = bytes.subarray(index, index + chunkSize);
+        binary += String.fromCharCode(...chunk);
+      }
+      const fileBase64 = btoa(binary);
+
+      const inferredType =
+        file.type ||
+        (file.name.toLowerCase().endsWith('.docx')
+          ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+          : 'application/pdf');
+
+      return api.post<Profile>('/api/profile/resume-json', {
+        filename: file.name,
+        content_type: inferredType,
+        file_base64: fileBase64,
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['profile'] });

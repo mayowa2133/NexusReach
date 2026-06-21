@@ -54,3 +54,9 @@ class ProfileUpdate(BaseModel):
     github_url: str | None = None
     portfolio_url: str | None = None
     resume_auto_accept_inferred: bool | None = None
+
+
+class ResumeUploadJsonRequest(BaseModel):
+    filename: str
+    content_type: str
+    file_base64: str

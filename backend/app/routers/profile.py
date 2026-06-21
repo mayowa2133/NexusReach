@@ -1,4 +1,6 @@
 import asyncio
+import base64
+import binascii
 import uuid
 from typing import Annotated
 
@@ -12,7 +14,12 @@ from app.dependencies import get_current_user_id
 from app.middleware.rate_limit import limiter
 from app.models.profile import Profile
 from app.models.search_preference import SearchPreference
-from app.schemas.profile import AutofillProfileResponse, ProfileResponse, ProfileUpdate
+from app.schemas.profile import (
+    AutofillProfileResponse,
+    ProfileResponse,
+    ProfileUpdate,
+    ResumeUploadJsonRequest,
+)
 from app.services.resume_parser import extract_text, parse_resume_text
 from app.utils.uploads import read_upload_capped
 
@@ -54,6 +61,80 @@ ALLOWED_CONTENT_TYPES = {
     "application/pdf",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
+
+ALLOWED_EXTENSIONS = {
+    ".pdf": "application/pdf",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+
+
+def _normalize_resume_content_type(content_type: str | None, filename: str | None) -> str:
+    normalized = (content_type or "").strip().lower()
+    if normalized in ALLOWED_CONTENT_TYPES:
+        return normalized
+
+    lowered_name = (filename or "").lower()
+    for extension, inferred_type in ALLOWED_EXTENSIONS.items():
+        if lowered_name.endswith(extension):
+            return inferred_type
+
+    allowed = ", ".join(sorted(ALLOWED_EXTENSIONS))
+    raise HTTPException(
+        status_code=400,
+        detail=f"Unsupported file type: {content_type}. Upload a {allowed} resume.",
+    )
+
+
+async def _get_profile_or_404(db: AsyncSession, user_id: uuid.UUID) -> Profile:
+    result = await db.execute(select(Profile).where(Profile.user_id == user_id))
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return profile
+
+
+async def _parse_and_store_resume(
+    *,
+    db: AsyncSession,
+    profile: Profile,
+    file_bytes: bytes,
+    content_type: str,
+) -> Profile:
+    # pypdf / python-docx parsing is synchronous CPU work; run it off the event
+    # loop so a large or complex resume can't freeze other requests (audit H1).
+    try:
+        raw_text = await asyncio.to_thread(extract_text, file_bytes, content_type)
+        parsed = await asyncio.to_thread(parse_resume_text, raw_text)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Failed to parse resume: {e}")
+
+    profile.resume_raw = raw_text
+    profile.resume_parsed = parsed
+
+    contact = parsed.get("contact") or {}
+    contact_urls = contact.get("urls") or []
+    if not profile.full_name and contact.get("name"):
+        profile.full_name = contact["name"]
+    if not profile.linkedin_url:
+        for url in contact_urls:
+            if "linkedin.com/in/" in url.lower():
+                profile.linkedin_url = url
+                break
+    if not profile.github_url:
+        for url in contact_urls:
+            lowered = url.lower()
+            if "github.com/" in lowered and "/in/" not in lowered:
+                profile.github_url = url
+                break
+
+    await db.commit()
+    await db.refresh(profile)
+
+    # Trigger background re-scoring of all jobs against the new resume
+    from app.tasks.jobs import rescore_user_jobs  # noqa: PLC0415
+    rescore_user_jobs.delay(str(profile.user_id))
+
+    return profile
 
 
 @router.get("", response_model=ProfileResponse)
@@ -213,51 +294,48 @@ async def upload_resume(
     file: UploadFile = File(...),
 ):
     """Upload and parse a resume (PDF or DOCX)."""
-    if file.content_type not in ALLOWED_CONTENT_TYPES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported file type: {file.content_type}. Upload a PDF or DOCX.",
-        )
-
-    result = await db.execute(select(Profile).where(Profile.user_id == user_id))
-    profile = result.scalar_one_or_none()
-    if not profile:
-        raise HTTPException(status_code=404, detail="Profile not found")
+    content_type = _normalize_resume_content_type(file.content_type, file.filename)
+    profile = await _get_profile_or_404(db, user_id)
 
     file_bytes = await read_upload_capped(file, settings.max_resume_upload_bytes)
+    return await _parse_and_store_resume(
+        db=db,
+        profile=profile,
+        file_bytes=file_bytes,
+        content_type=content_type,
+    )
 
-    # pypdf / python-docx parsing is synchronous CPU work; run it off the event
-    # loop so a large or complex resume can't freeze other requests (audit H1).
+
+@router.post("/resume-json", response_model=ProfileResponse)
+@limiter.limit("5/minute")
+async def upload_resume_json(
+    request: Request,
+    payload: ResumeUploadJsonRequest,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Upload and parse a resume through JSON/base64.
+
+    This avoids multipart transport issues in some production browser paths.
+    """
+    content_type = _normalize_resume_content_type(payload.content_type, payload.filename)
+    profile = await _get_profile_or_404(db, user_id)
+
     try:
-        raw_text = await asyncio.to_thread(extract_text, file_bytes, file.content_type)
-        parsed = await asyncio.to_thread(parse_resume_text, raw_text)
-    except Exception as e:
-        raise HTTPException(status_code=422, detail=f"Failed to parse resume: {e}")
+        file_bytes = base64.b64decode(payload.file_base64, validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid base64 resume payload.")
 
-    profile.resume_raw = raw_text
-    profile.resume_parsed = parsed
+    if len(file_bytes) > settings.max_resume_upload_bytes:
+        limit_mb = max(1, settings.max_resume_upload_bytes // (1024 * 1024))
+        raise HTTPException(
+            status_code=413,
+            detail=f"Upload exceeds the maximum size of {limit_mb} MB.",
+        )
 
-    contact = parsed.get("contact") or {}
-    contact_urls = contact.get("urls") or []
-    if not profile.full_name and contact.get("name"):
-        profile.full_name = contact["name"]
-    if not profile.linkedin_url:
-        for url in contact_urls:
-            if "linkedin.com/in/" in url.lower():
-                profile.linkedin_url = url
-                break
-    if not profile.github_url:
-        for url in contact_urls:
-            lowered = url.lower()
-            if "github.com/" in lowered and "/in/" not in lowered:
-                profile.github_url = url
-                break
-
-    await db.commit()
-    await db.refresh(profile)
-
-    # Trigger background re-scoring of all jobs against the new resume
-    from app.tasks.jobs import rescore_user_jobs  # noqa: PLC0415
-    rescore_user_jobs.delay(str(user_id))
-
-    return profile
+    return await _parse_and_store_resume(
+        db=db,
+        profile=profile,
+        file_bytes=file_bytes,
+        content_type=content_type,
+    )

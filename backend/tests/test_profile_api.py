@@ -1,8 +1,9 @@
 """API tests for profile endpoints — Phase 2."""
 
+import base64
 import uuid
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 pytestmark = pytest.mark.asyncio
 
@@ -88,6 +89,49 @@ async def test_upload_resume_rejects_html(client):
 
     assert resp.status_code == 400
     assert "Unsupported file type" in resp.json()["error"]["message"]
+
+
+async def test_upload_resume_json_success(client, mock_user_id):
+    """POST /api/profile/resume-json accepts base64 payloads and updates the profile."""
+    profile = _mock_profile(mock_user_id)
+
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = profile
+
+    mock_db = AsyncMock()
+    mock_db.execute.return_value = mock_result
+
+    from app.database import get_db
+    from app.main import app
+
+    app.dependency_overrides[get_db] = lambda: mock_db
+
+    payload = {
+        "filename": "resume.pdf",
+        "content_type": "application/pdf",
+        "file_base64": base64.b64encode(b"%PDF-sample").decode("ascii"),
+    }
+
+    with patch("app.routers.profile.extract_text", return_value="Jane Doe\nSkills\nPython"), \
+         patch("app.routers.profile.parse_resume_text", return_value={
+             "contact": {
+                 "name": "Jane Doe",
+                 "urls": ["https://linkedin.com/in/janedoe", "https://github.com/janedoe"],
+             },
+             "skills": ["Python"],
+         }), \
+         patch("app.tasks.jobs.rescore_user_jobs.delay") as mock_delay:
+        resp = await client.post("/api/profile/resume-json", json=payload)
+
+    app.dependency_overrides.pop(get_db, None)
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["full_name"] == "Test User"
+    assert data["resume_parsed"]["skills"] == ["Python"]
+    mock_db.commit.assert_awaited_once()
+    mock_db.refresh.assert_awaited_once_with(profile)
+    mock_delay.assert_called_once_with(str(mock_user_id))
 
 
 async def test_update_profile(client, mock_user_id):
