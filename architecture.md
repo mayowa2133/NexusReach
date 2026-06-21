@@ -481,10 +481,10 @@ The launch stack is explicitly Vercel + Railway + Supabase + Redis:
 - SearXNG runs on Railway or another private reachable host.
 
 The production backend is built from `backend/Dockerfile`, which installs TeX
-Live so `pdflatex` is available for resume PDF generation. Migrations are run
-once per release by the Railway API service pre-deploy command before worker and
-beat are restarted. The production health check is `GET /api/health`, which
-validates Postgres and Redis.
+Live so `pdflatex` is available for resume PDF generation. The Railway API start
+command runs migrations before Uvicorn accepts traffic; worker and beat are
+restarted only after the migrated API is healthy. The production health check
+is `GET /api/health`, which validates Postgres and Redis.
 
 Local development commonly runs with:
 

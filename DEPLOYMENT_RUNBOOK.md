@@ -77,15 +77,15 @@ shown below.
 
 | Service | Config file | Start command |
 | --- | --- | --- |
-| `nexusreach-api` | `/backend/railway.web.toml` | `uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
+| `nexusreach-api` | `/backend/railway.web.toml` | `cd /app && python -m alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
 | `nexusreach-worker` | `/backend/railway.worker.toml` | `celery -A app.tasks worker --loglevel=info` |
 | `nexusreach-beat` | `/backend/railway.beat.toml` | `celery -A app.tasks beat --loglevel=info` |
 
-The API config runs `alembic upgrade head` as a pre-deploy command. Worker and
-beat do not run migrations. If the config path is not enabled in Railway, keep
-the root directory as `backend`, use the shared `Dockerfile`, set the start
-command in each service's deploy settings exactly as above, and set
-`alembic upgrade head` as the API service's pre-deploy command.
+The API start command runs `python -m alembic upgrade head` before Uvicorn, so a
+failed migration prevents the new API container from becoming healthy. Worker
+and beat do not run migrations. If the config path is not enabled in Railway,
+keep the root directory as `backend`, use the shared `Dockerfile`, and set each
+service's start command exactly as above.
 
 The API service health check is:
 
@@ -253,17 +253,18 @@ Use this order for every production release:
    ```
 
 3. Back up Supabase Postgres.
-4. Deploy the Railway API service with the new image. The API service pre-deploy
-   command runs:
+4. Deploy the Railway API service with the new image. Its start command runs
+   migrations before starting Uvicorn:
 
    ```bash
-   alembic upgrade head
+   cd /app && python -m alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
    ```
 
-5. If pre-deploy commands are disabled, run migrations manually once:
+5. If the config-as-code path is disabled, set the same API start command in
+   Railway's service settings. To run migrations manually for recovery:
 
    ```bash
-   railway run --service nexusreach-api alembic upgrade head
+   railway run --service nexusreach-api python -m alembic upgrade head
    ```
 
 6. Verify API health:
