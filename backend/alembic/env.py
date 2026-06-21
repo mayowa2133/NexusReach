@@ -10,7 +10,8 @@ from app.database import Base
 from app import models  # noqa: F401 — registers all SQLAlchemy models
 
 config = context.config
-config.set_main_option("sqlalchemy.url", settings.database_url)
+# ConfigParser treats percent signs in URL-encoded passwords as interpolation.
+config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
