@@ -10,6 +10,11 @@ from app.database import async_session
 logger = logging.getLogger(__name__)
 
 
+def _is_missing_messages_table_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return 'relation "messages" does not exist' in message
+
+
 async def _auto_prospect_job(user_id: uuid.UUID, job_id: uuid.UUID) -> dict:
     """Run people search + email finding for a single job in the background.
 
@@ -280,6 +285,7 @@ async def _process_pending_sends() -> dict:
     Rate-limited to 10 sends per user per cycle.
     """
     from sqlalchemy import select, distinct, update  # noqa: PLC0415
+    from sqlalchemy.exc import ProgrammingError  # noqa: PLC0415
     from app.models.message import Message  # noqa: PLC0415
     from app.models.settings import UserSettings  # noqa: PLC0415
     from app.services.draft_staging_service import (  # noqa: PLC0415
@@ -307,13 +313,23 @@ async def _process_pending_sends() -> dict:
 
     # Discover affected users in a short-lived session.
     async with async_session() as db:
-        user_ids_result = await db.execute(
-            select(distinct(Message.user_id)).where(
-                Message.status == "staged",
-                Message.scheduled_send_at.isnot(None),
-                Message.scheduled_send_at <= now,
+        try:
+            user_ids_result = await db.execute(
+                select(distinct(Message.user_id)).where(
+                    Message.status == "staged",
+                    Message.scheduled_send_at.isnot(None),
+                    Message.scheduled_send_at <= now,
+                )
             )
-        )
+        except ProgrammingError as exc:
+            if not _is_missing_messages_table_error(exc):
+                raise
+            await db.rollback()
+            logger.warning(
+                "Skipping process_pending_sends because the messages table is unavailable. "
+                "Database migrations may not be applied yet."
+            )
+            return stats
         user_ids = [row[0] for row in user_ids_result.all()]
 
     # Process each user in its OWN session so a failure for one user can't poison
