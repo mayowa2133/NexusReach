@@ -1,6 +1,7 @@
 """Curated board discovery: tech ATS boards, non-tech Workday verticals, USAJobs government."""
 
 import logging
+import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.job import Job
 from app.models.profile import Profile
@@ -120,6 +121,18 @@ async def fetch_curated_ats_source_payloads(
             stat["raw_count"] = len(raw_jobs)
             normalize._finish_source_stat(stat, status="success")
             return source_key, raw_jobs, stat
+        except (httpx.TimeoutException, httpx.RequestError) as exc:
+            logger.warning(
+                "Curated job source transient failure: %s (%s)",
+                source_key,
+                exc.__class__.__name__,
+            )
+            normalize._finish_source_stat(
+                stat,
+                status="failed",
+                error=f"{exc.__class__.__name__}: {exc}",
+            )
+            return source_key, [], stat
         except Exception as exc:
             logger.exception("Curated job source failed: %s", source_key)
             normalize._finish_source_stat(stat, status="failed", error=str(exc))
