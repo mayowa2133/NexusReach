@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -110,7 +111,28 @@ async def get_or_create_company(
         enriched_at=datetime.now(timezone.utc) if company_data and use_apollo_enrichment else None,
     )
     db.add(company)
-    await db.flush()
+    try:
+        # SAVEPOINT so a concurrent get_or_create_company for the same
+        # (user_id, normalized_name) — pre-warm / snapshot refresh / live search
+        # can run at once — doesn't poison the outer transaction. After a
+        # UniqueViolationError asyncpg marks the transaction unusable, so
+        # ROLLBACK TO SAVEPOINT is what lets the request continue.
+        async with db.begin_nested():
+            await db.flush()
+    except IntegrityError:
+        # Lost the race: another transaction inserted this company first.
+        # Drop our pending row and use the existing one.
+        if company in db:
+            db.expunge(company)
+        existing = await db.execute(
+            select(Company).where(
+                Company.user_id == user_id,
+                Company.normalized_name == normalized_name,
+            )
+        )
+        company = existing.scalars().first()
+        if company is None:
+            raise  # a different integrity error — don't swallow it
     return company
 
 
