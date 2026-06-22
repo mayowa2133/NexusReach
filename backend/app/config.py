@@ -14,6 +14,10 @@ class Settings(BaseSettings):
 
     # Database
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/nexusreach"
+    db_pool_size: int = 3
+    db_max_overflow: int = 0
+    db_pool_timeout_seconds: int = 30
+    db_pool_recycle_seconds: int = 1800
 
     # Redis
     redis_url: str = "redis://localhost:6379/0"
