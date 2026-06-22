@@ -42,7 +42,7 @@ from app.services.people.outcome_priors import load_reply_priors, stamp_outcome_
 from app.services.people.title_llm import normalize_title_key, resolve_ambiguous_titles
 from app.services.people.company_match import _candidate_matches_company, _classify_employment_status
 from app.services.people.context import _bucket_geo_terms, _build_roles_context
-from app.services.people.linkedin_backfill import _backfill_linkedin_profiles, _mark_linkedin_backfill_deferred
+from app.services.people.linkedin_backfill import _backfill_linkedin_profiles, _backfill_top_candidates, _mark_linkedin_backfill_deferred
 from app.services.people.persistence import _store_person, get_or_create_company
 from app.services.people.ranking import _score_contextual_candidates_fast
 from app.services.people.theorg_recovery import _candidate_theorg_slug_candidates, _merge_company_public_identity_slugs, _recover_candidate_titles, _saved_theorg_slug_candidates
@@ -1945,6 +1945,53 @@ async def search_people_for_job(
     peer_results = _limit_interactive_bucket(
         peer_results,
         target_count_per_bucket=target_count_per_bucket,
+    )
+
+    # Resolve LinkedIn URLs for the final top candidates before persisting them.
+    # Candidates from non-LinkedIn sources (Apollo, The Org, company-site, news)
+    # arrive without a profile URL; this matches them by name+company+title via
+    # the search-provider chain so the UI can show a LinkedIn link. Bounded to
+    # the small interactive bucket; the URL is set on `data["linkedin_url"]`, so
+    # `_store_person` below persists it and it flows into the snapshot too.
+    top_backfill_started_at = time.monotonic()
+    recruiter_results = await _backfill_top_candidates(
+        recruiter_results,
+        top_n=interactive_backfill_limit,
+        company_name=job.company_name,
+        public_identity_slugs=public_identity_terms,
+        bucket="recruiters",
+        context=context,
+        geo_terms=recruiter_geo_terms,
+        search_profile=interactive_search_profile,
+    )
+    manager_results = await _backfill_top_candidates(
+        manager_results,
+        top_n=interactive_backfill_limit,
+        company_name=job.company_name,
+        public_identity_slugs=public_identity_terms,
+        bucket="hiring_managers",
+        context=context,
+        geo_terms=manager_geo_terms,
+        search_profile=interactive_search_profile,
+    )
+    peer_results = await _backfill_top_candidates(
+        peer_results,
+        top_n=interactive_backfill_limit,
+        company_name=job.company_name,
+        public_identity_slugs=public_identity_terms,
+        bucket="peers",
+        context=context,
+        geo_terms=peer_geo_terms,
+        search_profile=interactive_search_profile,
+    )
+    _record_timing(
+        debug,
+        stage="linkedin_backfill_top",
+        started_at=top_backfill_started_at,
+        interactive_backfill_limit=interactive_backfill_limit,
+        recruiter_results=len(recruiter_results),
+        manager_results=len(manager_results),
+        peer_results=len(peer_results),
     )
 
     bucketed = {"recruiters": [], "hiring_managers": [], "peers": []}

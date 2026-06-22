@@ -88,6 +88,13 @@ function PersonCard({
 
   const email = person.work_email;
   const linkedinUrl = person.linkedin_url;
+  // Fallback: discovery sometimes captures a public profile URL in profile_data
+  // without promoting it to linkedin_url. Surface it so the contact is never
+  // link-less when we actually have a URL.
+  const publicProfileUrl =
+    !linkedinUrl && person.profile_data && typeof person.profile_data.public_url === 'string'
+      ? person.profile_data.public_url
+      : null;
 
   const handleOpenInLinkedIn = async () => {
     if (!linkedinUrl) {
@@ -182,6 +189,11 @@ function PersonCard({
         {linkedinUrl && (
           <a href={linkedinUrl} target="_blank" rel="noopener noreferrer">
             <Button variant="outline" size="sm" className="h-7 text-xs">LinkedIn</Button>
+          </a>
+        )}
+        {publicProfileUrl && (
+          <a href={publicProfileUrl} target="_blank" rel="noopener noreferrer">
+            <Button variant="outline" size="sm" className="h-7 text-xs">Profile</Button>
           </a>
         )}
         {linkedinUrl && (

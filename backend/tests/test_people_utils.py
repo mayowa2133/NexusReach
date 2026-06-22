@@ -2025,3 +2025,46 @@ class TestEmploymentAndRanking:
         assert existing.linkedin_url == "https://www.linkedin.com/in/brandonlee"
         assert existing.title == "Software Engineer"
         assert existing.profile_data["linkedin_backfill_status"] == "matched"
+
+
+class TestBackfillTopCandidates:
+    """Fix A: the job-aware search resolves LinkedIn URLs for the top candidates
+    (instead of deferring forever) so the UI can show a LinkedIn link."""
+
+    @pytest.mark.asyncio
+    async def test_top_n_zero_or_empty_returns_unchanged(self):
+        candidates = [{"full_name": "A", "linkedin_url": ""}]
+        assert await _backfill_top_candidates(candidates, top_n=0, company_name="X", public_identity_slugs=None, bucket="peers") == candidates
+        assert await _backfill_top_candidates([], top_n=3, company_name="X", public_identity_slugs=None, bucket="peers") == []
+
+    @pytest.mark.asyncio
+    async def test_backfills_head_and_preserves_tail(self):
+        head = [{"full_name": "Head", "linkedin_url": ""}]
+        tail = [{"full_name": "Tail", "linkedin_url": ""}]
+        candidates = head + tail
+        backfilled_head = [{"full_name": "Head", "linkedin_url": "https://www.linkedin.com/in/head"}]
+        with patch(
+            "app.services.people.linkedin_backfill._backfill_linkedin_profiles",
+            new_callable=AsyncMock,
+        ) as mock_backfill:
+            mock_backfill.return_value = backfilled_head
+            result = await _backfill_top_candidates(
+                candidates, top_n=1, company_name="X", public_identity_slugs=None, bucket="peers"
+            )
+        # Only the head slice is sent to the (expensive) URL backfill.
+        assert mock_backfill.await_args.args[0] == head
+        # Result is the backfilled head + untouched tail, in order.
+        assert result == backfilled_head + tail
+        assert result[0]["linkedin_url"] == "https://www.linkedin.com/in/head"
+
+
+def test_search_people_for_job_runs_top_linkedin_backfill():
+    """Wiring guard: the job-aware search must call _backfill_top_candidates so
+    url-less contacts get a LinkedIn URL resolved (regression guard for the
+    'no LinkedIn links' bug where backfill was only ever deferred)."""
+    import inspect
+
+    from app.services.people import service
+
+    src = inspect.getsource(service.search_people_for_job)
+    assert "_backfill_top_candidates(" in src
