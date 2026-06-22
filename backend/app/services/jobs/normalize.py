@@ -6,6 +6,7 @@ from app.clients import ats
 from app.utils.job_metadata import country_code_for_name
 from datetime import date
 from datetime import datetime
+from datetime import timedelta
 from app.utils.job_metadata import geocode_location_query
 import hashlib
 from app.utils.startup_jobs import merge_tags
@@ -149,25 +150,159 @@ def _coerce_posted_at(value: str | None) -> str | None:
 
 
 _POSTED_DATE_RE = re.compile(r"^\s*(\d{4})-(\d{2})-(\d{2})")
+# A time component anywhere in an ISO-shaped string => the source gave us
+# sub-day precision (e.g. "2026-05-21T14:30:00Z"), so we can show "14 hours ago".
+_ISO_HAS_TIME_RE = re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}")
+# Trailing epoch (seconds=10 digits / millis=13 digits) some feeds emit.
+_EPOCH_RE = re.compile(r"^\s*(\d{10}|\d{13})\s*$")
+# "5 minutes ago", "2 hours ago", "3 days ago", "1 week ago", ...
+_REL_AGO_RE = re.compile(
+    r"\b(\d+)\s*(sec(?:ond)?|min(?:ute)?|hour|hr|day|week|month|year)s?\s+ago\b",
+    re.IGNORECASE,
+)
+# "an hour ago", "a day ago", "one minute ago"
+_REL_AN_RE = re.compile(
+    r"\b(?:an?|one)\s+(sec(?:ond)?|min(?:ute)?|hour|hr|day|week|month|year)\s+ago\b",
+    re.IGNORECASE,
+)
+
+
+def _relative_posting_time(
+    low: str, now: datetime
+) -> tuple[datetime | None, date | None] | None:
+    """Resolve a relative phrase ("3 days ago", "today") to (precise_ts, day).
+
+    ``precise_ts`` is only returned when the phrase carries sub-day precision
+    (seconds/minutes/hours/"just now"); coarser phrases (days/weeks/months,
+    "today", "yesterday") return ``(None, day)`` so we never invent a fake
+    posting time. Returns ``None`` when the text is not a relative phrase.
+    """
+    if low in {"just posted", "just now", "posted just now", "moments ago", "a moment ago"}:
+        return (now, now.date())
+    if low in {"today", "posted today"}:
+        return (None, now.date())
+    if low in {"yesterday", "posted yesterday"}:
+        return (None, (now - timedelta(days=1)).date())
+
+    match = _REL_AGO_RE.search(low)
+    if match:
+        count, unit = int(match.group(1)), match.group(2).lower()
+    else:
+        match = _REL_AN_RE.search(low)
+        if not match:
+            return None
+        count, unit = 1, match.group(1).lower()
+
+    if unit.startswith("sec"):
+        ts = now - timedelta(seconds=count)
+        return (ts, ts.date())
+    if unit.startswith("min"):
+        ts = now - timedelta(minutes=count)
+        return (ts, ts.date())
+    if unit in ("hour", "hr"):
+        ts = now - timedelta(hours=count)
+        return (ts, ts.date())
+    if unit == "day":
+        return (None, (now - timedelta(days=count)).date())
+    if unit == "week":
+        return (None, (now - timedelta(weeks=count)).date())
+    if unit == "month":
+        return (None, (now - timedelta(days=30 * count)).date())
+    if unit == "year":
+        return (None, (now - timedelta(days=365 * count)).date())
+    return None
+
+
+def _parse_iso_datetime(text: str) -> datetime | None:
+    """Parse an ISO-8601 datetime (with 'Z'/offset, optional trailing junk) to UTC."""
+    candidate = text.strip()
+    if candidate.endswith("Z"):
+        candidate = candidate[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(candidate)
+    except ValueError:
+        # Recover the leading datetime if there's trailing content.
+        m = re.match(
+            r"^\s*(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)"
+            r"(Z|[+-]\d{2}:?\d{2})?",
+            text,
+        )
+        if not m:
+            return None
+        base, offset = m.group(1), m.group(2) or ""
+        if offset == "Z":
+            offset = "+00:00"
+        elif offset and ":" not in offset:  # "+0000" -> "+00:00"
+            offset = offset[:3] + ":" + offset[3:]
+        try:
+            dt = datetime.fromisoformat(base + offset)
+        except ValueError:
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _parse_posting_time(
+    value: str | None, *, now: datetime | None = None
+) -> tuple[datetime | None, date | None]:
+    """Parse a source ``posted_at`` string into ``(precise_ts, posted_date)``.
+
+    - ``precise_ts`` (tz-aware UTC) is set ONLY when the source gives genuine
+      sub-day precision — an ISO datetime, an epoch, or a fine relative phrase
+      ("30 minutes ago") — so "15 minutes ago" in the UI is never fabricated.
+    - ``posted_date`` (calendar-validated day) is set whenever a posting day is
+      resolvable, including coarse relative phrases ("3 days ago"). It feeds the
+      indexed ``posted_date`` column, so date ordering never casts a bad string
+      at query time (audit pass-2 P3) and invalid dates still resolve to None.
+
+    Both are ``None`` for missing or unrecognized values.
+    """
+    if not isinstance(value, str):
+        return (None, None)
+    text = value.strip()
+    if not text:
+        return (None, None)
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    relative = _relative_posting_time(text.lower(), now)
+    if relative is not None:
+        return relative
+
+    epoch = _EPOCH_RE.match(text)
+    if epoch:
+        raw = int(epoch.group(1))
+        seconds = raw / 1000.0 if len(epoch.group(1)) == 13 else float(raw)
+        try:
+            ts = datetime.fromtimestamp(seconds, tz=timezone.utc)
+        except (ValueError, OverflowError, OSError):
+            return (None, None)
+        return (ts, ts.date())
+
+    if _ISO_HAS_TIME_RE.search(text):
+        ts = _parse_iso_datetime(text)
+        if ts is not None:
+            return (ts, ts.date())
+
+    match = _POSTED_DATE_RE.match(text)
+    if match:
+        try:
+            return (None, date(int(match.group(1)), int(match.group(2)), int(match.group(3))))
+        except ValueError:
+            return (None, None)
+
+    return (None, None)
 
 
 def _parse_posted_date(value: str | None) -> date | None:
-    """Parse a calendar-valid leading ISO date (YYYY-MM-DD) from posted_at.
+    """Calendar-validated posting day parsed from a source ``posted_at`` string.
 
-    Returns None for missing, non-date-shaped, or date-shaped-but-invalid values
-    (e.g. "2026-02-30", "2026-13-01"). This validated value feeds the indexed
-    ``posted_date`` column so date ordering never casts a bad string at query
-    time (audit pass-2 P3).
+    Thin wrapper over :func:`_parse_posting_time` (the day component). Resolves
+    ISO dates/datetimes, epochs, and relative phrases ("3 days ago"); returns
+    None for missing or date-shaped-but-invalid values (e.g. "2026-02-30").
     """
-    if not isinstance(value, str):
-        return None
-    match = _POSTED_DATE_RE.match(value)
-    if not match:
-        return None
-    try:
-        return date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
-    except ValueError:
-        return None
+    return _parse_posting_time(value)[1]
 
 
 def _experience_level_for_job(job_data: dict) -> str:

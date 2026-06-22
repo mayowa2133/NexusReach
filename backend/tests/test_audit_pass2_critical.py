@@ -21,7 +21,9 @@ import pytest
         ("2026-02-30", None),  # date-shaped but invalid -> None (was the crash trigger)
         ("2026-13-01", None),
         ("0000-00-00", None),
-        ("3 days ago", None),
+        # Relative phrases now resolve to a real day (see test_posting_time.py);
+        # only genuinely unparseable / invalid values must still return None.
+        ("not a date", None),
         ("", None),
         (None, None),
     ],

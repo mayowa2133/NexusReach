@@ -96,6 +96,11 @@ class JobResponse(BaseModel):
     source: str
     ats: str | None
     posted_at: str | None
+    # Precise posting time (ISO, set only when the source gives sub-day precision)
+    # and the day-granularity posting date. The UI shows granular relative time
+    # ("15 minutes ago") from posted_ts, falling back to posted_date ("Today").
+    posted_ts: str | None = None
+    posted_date: str | None = None
     source_status: str = "active"
     last_seen_at: str | None = None
     closed_at: str | None = None

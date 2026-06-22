@@ -9,11 +9,6 @@ from app.database import async_session
 
 logger = logging.getLogger(__name__)
 
-# If a company already has at least this many cached contacts, skip the
-# pre-warm search — the cache is already warm enough for "Find People" to
-# short-circuit, so there's no reason to spend external API calls again.
-PREWARM_SKIP_THRESHOLD = 8
-
 
 def _is_missing_messages_table_error(exc: Exception) -> bool:
     message = str(exc).lower()
@@ -118,70 +113,94 @@ def auto_prospect_job(user_id: str, job_id: str) -> dict:
     )
 
 
-async def _prewarm_company_people(user_id: uuid.UUID, company_name: str) -> dict:
-    """Discovery-only pre-warm of the contact cache for a single company.
+async def _prewarm_job_people(
+    user_id: uuid.UUID, job_id: uuid.UUID, target_count_per_bucket: int = 1,
+) -> dict:
+    """Pre-warm the top contacts for a single job and reveal it in the feed.
 
-    Runs the company people search so the global known-people cache (and the
-    user's saved contacts) are populated before the user clicks "Find People".
-    Deliberately does NOT find emails, draft, stage, or send anything — it only
-    pre-loads contacts for speed. Skips work when the company is already warm.
+    Runs the job-aware people search (1 recruiter + 1 hiring manager + 1 next
+    best by default), persists those contacts, and saves the research snapshot
+    so opening the job shows people instantly. ALWAYS flips the job's
+    people_prewarm_status to "ready" when done — even on failure or zero
+    results — so a discovered job is never permanently hidden.
     """
-    from app.services.people import search_people_at_company  # noqa: PLC0415
-    from app.services.known_people_service import get_known_people_count  # noqa: PLC0415
+    from sqlalchemy import update  # noqa: PLC0415
+    from app.models.job import Job  # noqa: PLC0415
+    from app.services.people import search_people_for_job  # noqa: PLC0415
+    from app.services.people.serialize import _serialize_people_search_result  # noqa: PLC0415
+    from app.services.job_research_snapshot_service import save_job_research_snapshot  # noqa: PLC0415
 
-    stats = {
-        "company": company_name,
-        "warmed": False,
-        "skipped": False,
-        "people_found": 0,
-    }
+    stats = {"job_id": str(job_id), "people_found": 0, "snapshot_saved": False}
 
     async with async_session() as db:
-        # Skip if the global cache already has a healthy roster for this company.
         try:
-            existing = await get_known_people_count(db, company_name=company_name)
-        except Exception:
-            existing = 0
-        if existing >= PREWARM_SKIP_THRESHOLD:
-            stats["skipped"] = True
-            return stats
-
-        try:
-            # persist=False: warm the global contact cache only — never persist
-            # Person CRM rows for a company the user hasn't actively searched.
-            result = await search_people_at_company(
+            result = await search_people_for_job(
                 db=db,
                 user_id=user_id,
-                company_name=company_name,
-                target_count_per_bucket=5,
-                persist=False,
+                job_id=job_id,
+                target_count_per_bucket=target_count_per_bucket,
             )
+            response = _serialize_people_search_result(result)
+            stats["people_found"] = (
+                len(response.recruiters)
+                + len(response.hiring_managers)
+                + len(response.peers)
+            )
+            await save_job_research_snapshot(
+                db,
+                user_id=user_id,
+                job_id=job_id,
+                company_name=getattr(result.get("company"), "name", None),
+                target_count_per_bucket=target_count_per_bucket,
+                recruiters=[r.model_dump(mode="json") for r in response.recruiters],
+                hiring_managers=[m.model_dump(mode="json") for m in response.hiring_managers],
+                peers=[p.model_dump(mode="json") for p in response.peers],
+                your_connections=[c.model_dump(mode="json") for c in response.your_connections],
+                errors=[e.model_dump(mode="json") for e in (response.errors or [])] or None,
+            )
+            stats["snapshot_saved"] = True
         except Exception:
             logger.exception(
-                "People pre-warm failed: user=%s company=%s",
-                user_id, company_name,
+                "Job people pre-warm failed: user=%s job=%s", user_id, job_id,
             )
-            return stats
+            await db.rollback()
 
-        stats["people_found"] = int(result.get("candidate_count", 0) or 0)
-        stats["warmed"] = True
+        # Always reveal the job — even on failure / zero results — so it is never
+        # permanently hidden. Separate statement so it survives a rolled-back
+        # search transaction.
+        try:
+            await db.execute(
+                update(Job)
+                .where(Job.id == job_id, Job.user_id == user_id)
+                .values(people_prewarm_status="ready")
+            )
+            await db.commit()
+        except Exception:
+            logger.exception(
+                "Failed to mark job ready after pre-warm: user=%s job=%s",
+                user_id, job_id,
+            )
 
     return stats
 
 
 @celery_app.task(
-    name="app.tasks.auto_prospect.prewarm_company_people",
+    name="app.tasks.auto_prospect.prewarm_job_people",
     autoretry_for=(Exception,),
     retry_backoff=60,
     retry_backoff_max=300,
     max_retries=1,
-    soft_time_limit=240,
-    time_limit=300,
+    soft_time_limit=300,
+    time_limit=360,
 )
-def prewarm_company_people(user_id: str, company_name: str) -> dict:
-    """Celery task: discovery-only pre-warm of the contact cache for a company."""
+def prewarm_job_people(
+    user_id: str, job_id: str, target_count_per_bucket: int = 1,
+) -> dict:
+    """Celery task: pre-warm a single job's top contacts and reveal it."""
     return run_async(
-        _prewarm_company_people(uuid.UUID(user_id), company_name)
+        _prewarm_job_people(
+            uuid.UUID(user_id), uuid.UUID(job_id), target_count_per_bucket,
+        )
     )
 
 

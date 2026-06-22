@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, memo, type FormEvent } from 'react';
+import { Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -27,7 +28,7 @@ import {
 } from '@/lib/peopleSearchCount';
 import { toast } from 'sonner';
 import { sanitizeHTML } from '@/lib/sanitize';
-import { formatRelativeDate } from '@/lib/dateUtils';
+import { formatJobPostedAt } from '@/lib/dateUtils';
 import { getJobCountryOptions } from '@/lib/jobCountry';
 import { getOccupationLabels } from '@/lib/jobOccupation';
 import { getStartupSourceLabels, isStartupJob } from '@/lib/jobStartup';
@@ -469,7 +470,9 @@ export function JobsPage() {
                     },
                     {
                       onSuccess: (data) => {
-                        toast.success(`Discovered ${data.new_jobs_found} new jobs`);
+                        toast.success(
+                          `Discovered ${data.new_jobs_found} new jobs — finding the best people for each`,
+                        );
                       },
                       onError: (err) => {
                         toast.error(err instanceof Error ? err.message : 'Discovery failed');
@@ -493,7 +496,9 @@ export function JobsPage() {
                     },
                     {
                       onSuccess: (data) => {
-                        toast.success(`Discovered ${data.new_jobs_found} startup jobs`);
+                        toast.success(
+                          `Discovered ${data.new_jobs_found} startup jobs — finding the best people for each`,
+                        );
                       },
                       onError: (err) => {
                         toast.error(err instanceof Error ? err.message : 'Startup discovery failed');
@@ -840,6 +845,19 @@ export function JobsPage() {
         </>
       )}
 
+      {/* People pre-warm in progress: new jobs stay hidden until their top
+          contacts are ready, then appear here automatically (feed polls). */}
+      {(savedJobsData?.warming_count ?? 0) > 0 && (
+        <div className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-300">
+          <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+          <span>
+            Finding the best people for {savedJobsData?.warming_count} new{' '}
+            {savedJobsData?.warming_count === 1 ? 'job' : 'jobs'}… they'll appear
+            here the moment their contacts are ready.
+          </span>
+        </div>
+      )}
+
       {/* Job list + detail */}
       <div className="grid gap-4 lg:grid-cols-5">
         {/* Job list */}
@@ -959,8 +977,8 @@ const JobListCard = memo(function JobListCard({
             </div>
             <div className="text-xs text-muted-foreground">
               {job.company_name}
-              {formatRelativeDate(job.posted_at) && (
-                <span className="opacity-70"> · {formatRelativeDate(job.posted_at)}</span>
+              {formatJobPostedAt(job) && (
+                <span className="opacity-70"> · {formatJobPostedAt(job)}</span>
               )}
             </div>
           </div>
@@ -1077,8 +1095,8 @@ function JobDetail({
             <Badge variant="secondary">{LEVEL_LABELS[job.experience_level] || job.experience_level}</Badge>
           )}
           {job.department && <Badge variant="outline">{job.department}</Badge>}
-          {formatRelativeDate(job.posted_at) && (
-            <Badge variant="outline">Posted {formatRelativeDate(job.posted_at)!.toLowerCase()}</Badge>
+          {formatJobPostedAt(job) && (
+            <Badge variant="outline">Posted {formatJobPostedAt(job)!.toLowerCase()}</Badge>
           )}
           {job.source_status === 'stale' && <Badge variant="outline">Stale source</Badge>}
           {job.source_status === 'closed' && <Badge variant="destructive">Closed upstream</Badge>}

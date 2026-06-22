@@ -140,6 +140,11 @@ export function useJobs(filters: JobFilters = {}) {
       search,
     ],
     queryFn: () => api.get<PaginatedResponse<Job>>(`/api/jobs${qs ? `?${qs}` : ''}`),
+    // While jobs are still warming people in the background, poll so they
+    // surface as soon as their contacts are ready. Stops once warming_count
+    // returns to 0 (or the reveal timeout has flushed them all).
+    refetchInterval: (query) =>
+      (query.state.data?.warming_count ?? 0) > 0 ? 4000 : false,
   });
 }
 

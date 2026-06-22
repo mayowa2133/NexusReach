@@ -10,7 +10,7 @@ import { useOutreachLogs } from '@/hooks/useOutreach';
 import { useJobs, useRefreshJobs, useResumeLibrary, useSavedSearches, useSeedDefaultJobs } from '@/hooks/useJobs';
 import { useOccupations } from '@/hooks/useOccupations';
 import { useGuardrails } from '@/hooks/useSettings';
-import { formatRelativeDate } from '@/lib/dateUtils';
+import { formatRelativeDate, formatJobPostedAt } from '@/lib/dateUtils';
 import { getOccupationLabels } from '@/lib/jobOccupation';
 import { getStartupSourceLabels, isStartupJob } from '@/lib/jobStartup';
 import { rebalanceTopJobs } from '@/lib/rebalanceTopJobs';
@@ -216,8 +216,8 @@ export function DashboardPage() {
                       <div className="text-xs text-muted-foreground">
                         {job.company_name}
                         {job.location && ` — ${job.location}`}
-                        {formatRelativeDate(job.posted_at) && (
-                          <span className="opacity-70"> · {formatRelativeDate(job.posted_at)}</span>
+                        {formatJobPostedAt(job) && (
+                          <span className="opacity-70"> · {formatJobPostedAt(job)}</span>
                         )}
                       </div>
                       {(isStartupJob(job) || startupSourceLabels.length > 0) && (
@@ -362,8 +362,8 @@ export function DashboardPage() {
                         <div className="text-xs text-muted-foreground">
                           {job.company_name}
                           {job.location && ` — ${job.location}`}
-                          {formatRelativeDate(job.posted_at) && (
-                            <span className="opacity-70"> · {formatRelativeDate(job.posted_at)}</span>
+                          {formatJobPostedAt(job) && (
+                            <span className="opacity-70"> · {formatJobPostedAt(job)}</span>
                           )}
                         </div>
                         {hasBadgeRow && (

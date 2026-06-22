@@ -54,6 +54,10 @@ export interface Job {
   source: string;
   ats: string | null;
   posted_at: string | null;
+  /** Exact posting time (set only when the source gave sub-day precision). */
+  posted_ts?: string | null;
+  /** Calendar day the job was posted (day granularity). */
+  posted_date?: string | null;
   source_status?: 'active' | 'stale' | 'closed' | string;
   last_seen_at?: string | null;
   closed_at?: string | null;

@@ -41,6 +41,7 @@ from app.services.job_service import (
     search_jobs,
     search_ats_jobs,
     get_jobs,
+    count_warming_jobs,
     get_job,
     get_job_command_center,
     update_job_stage,
@@ -200,6 +201,8 @@ def _to_response(job) -> JobResponse:
         source=job.source,
         ats=job.ats,
         posted_at=job.posted_at if job.posted_at and job.posted_at.strip() else None,
+        posted_ts=job.posted_ts.isoformat() if getattr(job, "posted_ts", None) else None,
+        posted_date=job.posted_date.isoformat() if getattr(job, "posted_date", None) else None,
         source_status=source_status or "active",
         last_seen_at=last_seen_at.isoformat() if last_seen_at else None,
         closed_at=closed_at.isoformat() if closed_at else None,
@@ -315,6 +318,9 @@ async def list_jobs(
         "total": total,
         "limit": limit,
         "offset": offset,
+        # Jobs still hidden by an in-flight people pre-warm. While > 0 the feed
+        # polls so newly warmed jobs appear as their contacts become ready.
+        "warming_count": await count_warming_jobs(db, user_id),
     }
 
 

@@ -36,6 +36,8 @@ def _mock_job(user_id, **overrides):
     j.source = overrides.get("source", "jsearch")
     j.ats = overrides.get("ats", None)
     j.posted_at = overrides.get("posted_at", "2024-01-15")
+    j.posted_date = overrides.get("posted_date", datetime(2024, 1, 15, tzinfo=timezone.utc).date())
+    j.posted_ts = overrides.get("posted_ts", None)
     j.match_score = overrides.get("match_score", 75.0)
     j.score_breakdown = overrides.get("score_breakdown", {"role_match": 30, "skills_match": 20})
     j.stage = overrides.get("stage", "discovered")
@@ -206,7 +208,10 @@ async def test_list_jobs(client, mock_user_id):
     job1 = _mock_job(mock_user_id, match_score=80.0)
     job2 = _mock_job(mock_user_id, match_score=60.0, title="Frontend Dev")
 
-    with patch("app.routers.jobs.get_jobs", new_callable=AsyncMock) as mock_get:
+    with (
+        patch("app.routers.jobs.get_jobs", new_callable=AsyncMock) as mock_get,
+        patch("app.routers.jobs.count_warming_jobs", new=AsyncMock(return_value=0)),
+    ):
         mock_get.return_value = ([job1, job2], 2)
         resp = await client.get("/api/jobs")
 
@@ -220,7 +225,10 @@ async def test_list_jobs_with_stage_filter(client, mock_user_id):
     """GET /api/jobs?stage=applied filters by stage."""
     job = _mock_job(mock_user_id, stage="applied")
 
-    with patch("app.routers.jobs.get_jobs", new_callable=AsyncMock) as mock_get:
+    with (
+        patch("app.routers.jobs.get_jobs", new_callable=AsyncMock) as mock_get,
+        patch("app.routers.jobs.count_warming_jobs", new=AsyncMock(return_value=0)),
+    ):
         mock_get.return_value = ([job], 1)
         resp = await client.get("/api/jobs", params={"stage": "applied"})
 
@@ -235,7 +243,10 @@ async def test_list_jobs_with_startup_filter(client, mock_user_id):
     """GET /api/jobs?startup=true filters startup-tagged jobs."""
     job = _mock_job(mock_user_id, tags=["startup", "startup_source:yc_jobs"])
 
-    with patch("app.routers.jobs.get_jobs", new_callable=AsyncMock) as mock_get:
+    with (
+        patch("app.routers.jobs.get_jobs", new_callable=AsyncMock) as mock_get,
+        patch("app.routers.jobs.count_warming_jobs", new=AsyncMock(return_value=0)),
+    ):
         mock_get.return_value = ([job], 1)
         resp = await client.get("/api/jobs", params={"startup": "true"})
 
@@ -249,7 +260,10 @@ async def test_list_jobs_with_country_filter(client, mock_user_id):
     """GET /api/jobs?country=Canada passes server-side country filter."""
     job = _mock_job(mock_user_id, location="Toronto, ON", countries=["Canada"], country_codes=["CA"])
 
-    with patch("app.routers.jobs.get_jobs", new_callable=AsyncMock) as mock_get:
+    with (
+        patch("app.routers.jobs.get_jobs", new_callable=AsyncMock) as mock_get,
+        patch("app.routers.jobs.count_warming_jobs", new=AsyncMock(return_value=0)),
+    ):
         mock_get.return_value = ([job], 1)
         resp = await client.get("/api/jobs", params={"country": "Canada"})
 
@@ -268,7 +282,10 @@ async def test_list_jobs_with_nearby_filter(client, mock_user_id):
         location_lng=-79.3832,
     )
 
-    with patch("app.routers.jobs.get_jobs", new_callable=AsyncMock) as mock_get:
+    with (
+        patch("app.routers.jobs.get_jobs", new_callable=AsyncMock) as mock_get,
+        patch("app.routers.jobs.count_warming_jobs", new=AsyncMock(return_value=0)),
+    ):
         mock_get.return_value = ([job], 1)
         resp = await client.get(
             "/api/jobs",

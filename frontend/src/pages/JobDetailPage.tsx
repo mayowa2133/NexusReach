@@ -14,7 +14,7 @@ import { useDraftMessage } from '@/hooks/useMessages';
 import { useCompanionStatus, useLinkedInAssist } from '@/hooks/useCompanion';
 import { useLinkedInGraphStatus } from '@/hooks/useLinkedInGraph';
 import { sanitizeHTML } from '@/lib/sanitize';
-import { formatRelativeDate } from '@/lib/dateUtils';
+import { formatRelativeDate, formatJobPostedAt } from '@/lib/dateUtils';
 import { getStartupSourceLabels, isStartupJob } from '@/lib/jobStartup';
 import { formatSalaryRange } from '@/lib/jobSalary';
 import {
@@ -1419,8 +1419,8 @@ export function JobDetailPage() {
           <Badge variant="secondary">{LEVEL_LABELS[job.experience_level] || job.experience_level}</Badge>
         )}
         <Badge variant="outline">{SOURCE_LABELS[job.source] || job.source}</Badge>
-        {formatRelativeDate(job.posted_at) && (
-          <Badge variant="outline">Posted {formatRelativeDate(job.posted_at)!.toLowerCase()}</Badge>
+        {formatJobPostedAt(job) && (
+          <Badge variant="outline">Posted {formatJobPostedAt(job)!.toLowerCase()}</Badge>
         )}
         {job.department && <Badge variant="outline">{job.department}</Badge>}
       </div>

@@ -25,11 +25,11 @@ from app.services.jobs import normalize
 
 logger = logging.getLogger(__name__)
 
-# Cap on distinct companies pre-warmed per discovery batch. Pre-warm is
-# company-scoped (one warm covers every job at that company), so warming the
-# top-ranked companies covers what users actually open without spending API
-# quota on the long tail.
-PREWARM_MAX_COMPANIES = 10
+# Safety cap on per-job people pre-warm tasks queued from one discovery batch.
+# Every new job gets people pre-warmed, but a runaway run shouldn't queue
+# thousands of tasks at once. Highest-scored jobs warm first; any tail beyond
+# the cap stays visible without a pre-warm (Find People still works live).
+PREWARM_MAX_JOBS_PER_BATCH = 300
 
 
 def _refresh_existing_job(
@@ -79,10 +79,14 @@ def _refresh_existing_job(
     normalize._apply_if_present(job, "ats", data.get("ats"))
     normalize._apply_if_present(job, "ats_slug", data.get("ats_slug"))
     normalize._apply_if_present(job, "posted_at", data.get("posted_at"))
-    # Keep the validated posted_date in sync when a new posted_at is provided.
-    new_posted_date = normalize._parse_posted_date(data.get("posted_at"))
+    # Keep the validated posting time in sync when a new posted_at is provided.
+    # Relative phrases ("3 days ago") re-resolve against now on every refresh, so
+    # a still-relative posting stays correctly aged.
+    new_posted_ts, new_posted_date = normalize._parse_posting_time(data.get("posted_at"))
     if new_posted_date is not None:
         job.posted_date = new_posted_date
+    if new_posted_ts is not None:
+        job.posted_ts = new_posted_ts
     job.match_score = score
     job.score_breakdown = breakdown
     job.scored_at = datetime.now(timezone.utc) if score is not None else None
@@ -125,6 +129,7 @@ def _build_job(
     fingerprint: str,
 ) -> Job:
     experience_level = data.get("experience_level") or normalize._experience_level_for_job(data)
+    posted_ts, posted_date = normalize._parse_posting_time(data.get("posted_at"))
     return Job(
         user_id=user_id,
         external_id=data.get("external_id"),
@@ -156,7 +161,8 @@ def _build_job(
         ats=data.get("ats"),
         ats_slug=data.get("ats_slug"),
         posted_at=normalize._coerce_posted_at(data.get("posted_at")),
-        posted_date=normalize._parse_posted_date(data.get("posted_at")),
+        posted_date=posted_date,
+        posted_ts=posted_ts,
         match_score=score,
         score_breakdown=breakdown,
         scored_at=datetime.now(timezone.utc) if score is not None else None,
@@ -495,43 +501,47 @@ async def _maybe_prewarm_people(
     user_id: uuid.UUID,
     jobs: list,
 ) -> None:
-    """Queue discovery-only people pre-warm for the top companies in a batch.
+    """Mark newly stored jobs ``pending`` and queue a per-job people pre-warm.
 
-    On by default (opt-out via settings). Dedupes the newly stored jobs to
-    distinct companies, ranks them by their best job match score, and warms at
-    most ``PREWARM_MAX_COMPANIES``. Company-scoped so one warm covers every job
-    at that company. Never finds emails, drafts, or sends — speed only.
+    On by default (opt-out via settings). Every new job is held out of the feed
+    (``people_prewarm_status="pending"``) until its background search finds the
+    top recruiter / hiring manager / next-best contact and saves a snapshot, so
+    opening the job is instant. Highest-scored jobs warm first; a runaway batch
+    is capped at ``PREWARM_MAX_JOBS_PER_BATCH`` (the tail stays visible without a
+    pre-warm). Never finds emails, drafts, or sends — discovery only.
     """
+    from app.tasks.auto_prospect import prewarm_job_people  # noqa: PLC0415
     from app.services.settings_service import is_people_prewarm_enabled  # noqa: PLC0415
 
     if not await is_people_prewarm_enabled(db, user_id):
+        return  # leave jobs "ready" so they show immediately
+
+    candidates = [job for job in jobs if getattr(job, "id", None) is not None]
+    if not candidates:
         return
 
-    # Distinct companies, keyed to the best (highest) match score we saw.
-    best_score_by_company: dict[str, float] = {}
-    for job in jobs:
-        company = (getattr(job, "company_name", None) or "").strip()
-        if not company:
-            continue
-        score = getattr(job, "match_score", None) or 0.0
-        if company not in best_score_by_company or score > best_score_by_company[company]:
-            best_score_by_company[company] = score
+    candidates.sort(
+        key=lambda j: getattr(j, "match_score", None) or 0.0, reverse=True
+    )
+    selected = candidates[:PREWARM_MAX_JOBS_PER_BATCH]
+    if len(candidates) > len(selected):
+        logger.warning(
+            "People pre-warm batch capped: user=%s queued=%d skipped=%d",
+            user_id, len(selected), len(candidates) - len(selected),
+        )
 
-    if not best_score_by_company:
-        return
+    # Mark pending and COMMIT before enqueuing: otherwise a fast worker could
+    # complete and set the job back to "ready" before this write lands, leaving
+    # it stuck pending until the reveal timeout.
+    for job in selected:
+        job.people_prewarm_status = "pending"
+    await db.commit()
 
-    top_companies = sorted(
-        best_score_by_company,
-        key=lambda c: best_score_by_company[c],
-        reverse=True,
-    )[:PREWARM_MAX_COMPANIES]
-
-    for company in top_companies:
+    for job in selected:
         try:
-            from app.tasks.auto_prospect import prewarm_company_people  # noqa: PLC0415
-            prewarm_company_people.delay(str(user_id), company)
-            logger.info(
-                "People pre-warm queued: user=%s company=%s", user_id, company,
-            )
+            prewarm_job_people.delay(str(user_id), str(job.id))
         except Exception:
-            logger.debug("Failed to queue people pre-warm task", exc_info=True)
+            logger.debug("Failed to queue job people pre-warm", exc_info=True)
+            # Don't strand the job in "pending" forever if enqueue failed.
+            job.people_prewarm_status = "ready"
+    await db.commit()

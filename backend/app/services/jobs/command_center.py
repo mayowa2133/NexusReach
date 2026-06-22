@@ -3,7 +3,7 @@
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.company import Company
-from sqlalchemy import Date
+from sqlalchemy import DateTime
 from app.models.job import Job
 from app.models.message import Message
 from app.models.outreach import OutreachLog
@@ -25,12 +25,19 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from app.services.job_research_snapshot_service import serialize_snapshot
 from datetime import timezone
+from datetime import timedelta
 import uuid
 from app.services.jobs import normalize
 from app.services.jobs import search as _search_mod
 
 
 logger = logging.getLogger(__name__)
+
+# A newly discovered job is held out of the feed (people_prewarm_status =
+# "pending") until its people pre-warm finishes. This is the safety valve: once
+# a job is older than this, it surfaces even if its pre-warm hasn't completed,
+# so a stuck/slow warm can never hide a job indefinitely.
+PEOPLE_PREWARM_REVEAL_TIMEOUT = timedelta(minutes=3)
 
 
 async def toggle_job_starred(
@@ -83,6 +90,17 @@ async def get_jobs(
     from app.utils.pagination import paginate
 
     query = select(Job).where(Job.user_id == user_id)
+    # Hide jobs whose people pre-warm is still running, so the user never sees a
+    # job before its top contacts are ready. A job surfaces once it is warmed
+    # (status flipped to "ready") OR once it is older than the reveal timeout —
+    # whichever comes first, so a slow/failed warm can't hide it forever.
+    reveal_cutoff = datetime.now(timezone.utc) - PEOPLE_PREWARM_REVEAL_TIMEOUT
+    query = query.where(
+        or_(
+            Job.people_prewarm_status != "pending",
+            Job.created_at <= reveal_cutoff,
+        )
+    )
     distance_expr = None
     if stage:
         query = query.where(Job.stage == stage)
@@ -162,18 +180,44 @@ async def get_jobs(
     elif sort_by == "distance" and distance_expr is not None:
         query = query.order_by(distance_expr.asc().nullslast())
     else:
-        # Date sort (and default). Order by the pre-parsed, calendar-validated
-        # `posted_date` column (populated at ingest), falling back to the ingest
-        # timestamp. The previous approach cast a substring of the free-form
-        # `posted_at` string to ::date at query time, which raised and aborted
-        # the whole query on a date-shaped-but-invalid value like "2026-02-30"
-        # (audit pass-2 P3). Using a real Date column is crash-proof and indexed.
-        recency = sa_func.coalesce(Job.posted_date, sa_func.cast(Job.created_at, Date))
+        # Date sort (and default). Order by the most precise real posting time we
+        # have: the exact `posted_ts` when the source gave sub-day precision, else
+        # the calendar-validated `posted_date` (day granularity), and only as a
+        # last resort our ingest time. Ordering by real posting time (not ingest
+        # time) is what keeps freshly-discovered-but-old postings off the top.
+        # Both columns are pre-parsed at ingest, so the query never casts the
+        # free-form `posted_at` string at runtime (audit pass-2 P3): no crash on
+        # values like "2026-02-30", and both columns are indexed.
+        recency = sa_func.coalesce(
+            Job.posted_ts,
+            sa_func.cast(Job.posted_date, DateTime(timezone=True)),
+            Job.created_at,
+        )
         query = query.order_by(recency.desc().nullslast(), Job.created_at.desc())
 
     jobs, total = await paginate(db, query, limit=limit, offset=offset)
     await _search_mod._repair_missing_apply_urls(db, jobs)
     return jobs, total
+
+
+async def count_warming_jobs(db: AsyncSession, user_id: uuid.UUID) -> int:
+    """Count jobs still hidden by an in-flight people pre-warm.
+
+    These are jobs whose pre-warm hasn't finished AND haven't yet aged past the
+    reveal timeout, i.e. the ones the feed is currently withholding. The feed
+    polls while this is non-zero so newly warmed jobs surface as they're ready.
+    """
+    reveal_cutoff = datetime.now(timezone.utc) - PEOPLE_PREWARM_REVEAL_TIMEOUT
+    result = await db.execute(
+        select(sa_func.count())
+        .select_from(Job)
+        .where(
+            Job.user_id == user_id,
+            Job.people_prewarm_status == "pending",
+            Job.created_at > reveal_cutoff,
+        )
+    )
+    return int(result.scalar_one() or 0)
 
 
 async def update_job_stage(

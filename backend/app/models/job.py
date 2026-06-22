@@ -55,12 +55,27 @@ class Job(Base):
     # Calendar-validated parse of posted_at (NULL when unparseable/invalid).
     # Used for crash-proof, indexed date ordering (audit pass-2 P3).
     posted_date: Mapped[date | None] = mapped_column(Date, index=True)
+    # Precise posting timestamp — set ONLY when the source gives genuine sub-day
+    # precision (ISO datetime, epoch, "30 minutes ago"), so the UI can show
+    # "15 minutes ago" honestly. NULL for date-only / coarse sources, which fall
+    # back to posted_date (day granularity). Primary key for recency ordering.
+    posted_ts: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True
+    )
     source_status: Mapped[str] = mapped_column(
         String(32), default="active", server_default="active"
     )
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     not_seen_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
+    # People pre-warm gate: newly discovered jobs are queued for a background
+    # people search and held out of the feed until that finishes (or a reveal
+    # timeout elapses). "ready" = visible; "pending" = warming. Defaults to
+    # "ready" so existing rows and non-discovery inserts are never hidden.
+    people_prewarm_status: Mapped[str] = mapped_column(
+        String(16), default="ready", server_default="ready", nullable=False
+    )
 
     # Scoring
     match_score: Mapped[float | None] = mapped_column(Float)
