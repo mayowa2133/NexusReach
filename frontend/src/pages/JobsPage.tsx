@@ -26,6 +26,7 @@ import {
   getStoredPeopleSearchTargetCount,
   setStoredPeopleSearchTargetCount,
 } from '@/lib/peopleSearchCount';
+import { getStoredJobsFilters, setStoredJobsFilters } from '@/lib/jobsFilters';
 import { toast } from 'sonner';
 import { sanitizeHTML } from '@/lib/sanitize';
 import { formatJobPostedAt } from '@/lib/dateUtils';
@@ -148,27 +149,31 @@ export function JobsPage() {
   const [remoteOnly, setRemoteOnly] = useState(false);
   const [atsInput, setAtsInput] = useState('');
   const [atsType, setAtsType] = useState('greenhouse');
-  const [stageFilter, setStageFilter] = useState<string>('');
-  const [starredFilter, setStarredFilter] = useState(false);
-  const [sortBy, setSortBy] = useState('date');
+  // Persisted filter selections — initialized from localStorage so the user's
+  // last choices (Level, Stage, Type, toggles, sort, ...) stick across tab
+  // switches and reloads until they change them. Read once on mount.
+  const [storedFilters] = useState(getStoredJobsFilters);
+  const [stageFilter, setStageFilter] = useState<string>(storedFilters.stageFilter);
+  const [starredFilter, setStarredFilter] = useState(storedFilters.starredFilter);
+  const [sortBy, setSortBy] = useState(storedFilters.sortBy);
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [targetCountPerBucket, setTargetCountPerBucket] = useState(() =>
     getStoredPeopleSearchTargetCount()
   );
 
-  // Advanced filters
-  const [searchFilter, setSearchFilter] = useState('');
-  const [employmentTypeFilter, setEmploymentTypeFilter] = useState('');
-  const [experienceLevelFilter, setExperienceLevelFilter] = useState('');
-  const [countryFilter, setCountryFilter] = useState('');
-  const [nearLocationFilter, setNearLocationFilter] = useState('');
-  const [radiusKmFilter, setRadiusKmFilter] = useState('50');
+  // Advanced filters (persisted)
+  const [searchFilter, setSearchFilter] = useState(storedFilters.searchFilter);
+  const [employmentTypeFilter, setEmploymentTypeFilter] = useState(storedFilters.employmentTypeFilter);
+  const [experienceLevelFilter, setExperienceLevelFilter] = useState(storedFilters.experienceLevelFilter);
+  const [countryFilter, setCountryFilter] = useState(storedFilters.countryFilter);
+  const [nearLocationFilter, setNearLocationFilter] = useState(storedFilters.nearLocationFilter);
+  const [radiusKmFilter, setRadiusKmFilter] = useState(storedFilters.radiusKmFilter);
   const [nearCoordinates, setNearCoordinates] = useState<BrowserCoordinates | null>(null);
-  const [includeRemoteInRadius, setIncludeRemoteInRadius] = useState(false);
+  const [includeRemoteInRadius, setIncludeRemoteInRadius] = useState(storedFilters.includeRemoteInRadius);
   const [nearMeStatus, setNearMeStatus] = useState<string | null>(null);
-  const [remoteFilter, setRemoteFilter] = useState(false);
-  const [startupFilter, setStartupFilter] = useState(false);
-  const [salaryMinFilter, setSalaryMinFilter] = useState('');
+  const [remoteFilter, setRemoteFilter] = useState(storedFilters.remoteFilter);
+  const [startupFilter, setStartupFilter] = useState(storedFilters.startupFilter);
+  const [salaryMinFilter, setSalaryMinFilter] = useState(storedFilters.salaryMinFilter);
   const [discoverMode, setDiscoverMode] = useState<'default' | 'startup' | null>(null);
 
   // Occupation filter — initialize from profile.target_occupations on first load.
@@ -188,6 +193,39 @@ export function JobsPage() {
   useEffect(() => {
     setJobsLastVisited();
   }, []);
+
+  // Persist filter selections so they survive tab switches / reloads.
+  useEffect(() => {
+    setStoredJobsFilters({
+      searchFilter,
+      stageFilter,
+      employmentTypeFilter,
+      experienceLevelFilter,
+      countryFilter,
+      nearLocationFilter,
+      radiusKmFilter,
+      includeRemoteInRadius,
+      starredFilter,
+      remoteFilter,
+      startupFilter,
+      salaryMinFilter,
+      sortBy,
+    });
+  }, [
+    searchFilter,
+    stageFilter,
+    employmentTypeFilter,
+    experienceLevelFilter,
+    countryFilter,
+    nearLocationFilter,
+    radiusKmFilter,
+    includeRemoteInRadius,
+    starredFilter,
+    remoteFilter,
+    startupFilter,
+    salaryMinFilter,
+    sortBy,
+  ]);
 
   const navigate = useNavigate();
   const search = useJobSearch();
