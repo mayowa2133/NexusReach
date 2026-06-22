@@ -130,15 +130,50 @@ NEXUSREACH_DATABASE_URL=postgresql+asyncpg://...
 
 ### SearXNG
 
-Run SearXNG as a private Railway service or on another private host reachable by
-the backend:
+SearXNG is the primary (free, unlimited) search provider. It is **not** bundled
+in the app — it runs as its own service that the backend reaches over HTTP. The
+repo ships a ready-to-deploy build under `deploy/searxng/` (a `Dockerfile` that
+bakes in `deploy/searxng/settings.yml`, plus `railway.toml`). Local development
+uses `docker-compose.yml` instead; production deploys the `deploy/searxng/` image.
+
+Deploy it as a private Railway service:
+
+1. **New service → Deploy from repo.** Set the service root directory to
+   `deploy/searxng` and its config file path to `/deploy/searxng/railway.toml`.
+   Railway builds the Dockerfile (which contains the JSON-API-enabled settings),
+   so no volume mount is needed.
+2. **Set the secret.** Add a `SEARXNG_SECRET` service variable to a long random
+   string (`python -c "import secrets; print(secrets.token_hex(32))"`). The image
+   substitutes it into the `ultrasecretkey` placeholder at boot.
+3. **Keep it private.** Do not assign a public domain; the backend reaches it on
+   the Railway private network. The image listens on port `8080`.
+4. **Wire the backend.** Set this on all three backend services (`api`, `worker`,
+   `beat`) to the service's private URL **including the `:8080` port**:
 
 ```env
-NEXUSREACH_SEARXNG_BASE_URL=https://<searxng-service>
+NEXUSREACH_SEARXNG_BASE_URL=http://nexusreach-searxng.railway.internal:8080
 ```
 
-Keep Serper, Brave, Tavily, and Google CSE as fallbacks only when funded and
-configured.
+Verify after deploy (from a backend shell or any reachable host):
+
+```bash
+curl -s "$NEXUSREACH_SEARXNG_BASE_URL/search?q=site:linkedin.com/in+engineer&format=json" | head -c 200
+```
+
+It must return JSON with a `results` array. If it returns HTML or an error, the
+`json` format is not enabled (check the mounted `settings.yml`) or the URL/port
+is wrong.
+
+**Limiter / 429s:** `settings.yml` enables the abuse limiter. If the backend
+shares an egress IP and starts getting throttled (SearXNG returns `429` and the
+router falls through to paid providers), set `limiter: false` in
+`deploy/searxng/settings.yml` (safe for a private-only instance) or allowlist the
+backend — see the note at the bottom of that file.
+
+Keep Serper, Brave, Tavily, and Google CSE configured as fallbacks: the router
+(`searxng → serper → brave → google_cse`) automatically uses them when SearXNG is
+unreachable or returns nothing, so search degrades gracefully (to paid quota)
+rather than breaking if SearXNG is down.
 
 ## Backend Secrets
 
@@ -180,7 +215,7 @@ NEXUSREACH_ADZUNA_APP_ID=<key>
 NEXUSREACH_ADZUNA_API_KEY=<key>
 NEXUSREACH_DICE_API_KEY=<rotated-key>   # optional; old committed key must be rotated
 
-NEXUSREACH_SEARXNG_BASE_URL=https://<searxng-service>
+NEXUSREACH_SEARXNG_BASE_URL=http://nexusreach-searxng.railway.internal:8080  # see SearXNG section
 NEXUSREACH_SERPER_API_KEY=<optional-key>
 NEXUSREACH_BRAVE_API_KEY=<optional-key>
 NEXUSREACH_TAVILY_API_KEY=<key>

@@ -5,12 +5,15 @@
 # JSON API, so the `json` format MUST be enabled (it is off by default).
 #
 # REQUIRED before first boot:
-#   - Set a real `server.secret_key` (a long random string). With the official
-#     searxng-docker image you can instead set the env var SEARXNG_SECRET and the
-#     entrypoint substitutes it; if you do that, leave the placeholder below.
+#   - Set the SEARXNG_SECRET env var on the service to a long random string. The
+#     official image's entrypoint substitutes it into the `ultrasecretkey`
+#     placeholder below at boot — so leave that placeholder as-is and DO NOT
+#     commit a real secret here.
 #       python -c "import secrets; print(secrets.token_hex(32))"
+#     (Our use is the JSON API with no user sessions, so even an image-generated
+#     per-boot secret is fine; setting SEARXNG_SECRET just makes it stable.)
 #
-# Then set NEXUSREACH_SEARXNG_BASE_URL on the backend to this service's URL.
+# Then set NEXUSREACH_SEARXNG_BASE_URL on the backend to this service's private URL.
 
 use_default_settings: true
 
@@ -21,8 +24,9 @@ general:
   enable_metrics: false
 
 server:
-  # CHANGE THIS (or provide via SEARXNG_SECRET env var on the official image).
-  secret_key: "CHANGE_ME_TO_A_LONG_RANDOM_STRING"
+  # Leave as the literal `ultrasecretkey` placeholder — the image entrypoint
+  # replaces it with the SEARXNG_SECRET env var at boot. Never commit a real key.
+  secret_key: "ultrasecretkey"
   # Abuse limiter. Recommended by the deploy runbook. If the backend starts
   # getting throttled (HTTP 429) because it shares an egress IP, either set this
   # to false on a private-network-only instance, or allowlist the backend in a

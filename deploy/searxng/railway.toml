@@ -1,0 +1,17 @@
+# Railway service config for the SearXNG metasearch engine.
+#
+# Create a new Railway service in the NexusReach project, set its root directory
+# to `deploy/searxng`, and point its config file path at `/deploy/searxng/railway.toml`.
+# Railway builds the Dockerfile in this directory (which bakes in settings.yml),
+# so no volume mount is needed. See DEPLOYMENT_RUNBOOK.md > SearXNG for the full
+# recipe (SEARXNG_SECRET, private URL wiring, limiter/429 note).
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# SearXNG exposes /healthz (returns 200 "OK") on current images.
+healthcheckPath = "/healthz"
+healthcheckTimeout = 120
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
