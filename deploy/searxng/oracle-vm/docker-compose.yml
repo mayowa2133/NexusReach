@@ -1,0 +1,48 @@
+# SearXNG + Caddy for an Oracle Cloud "Always Free" VM.
+#
+# Caddy terminates HTTPS (free Let's Encrypt cert for your domain) and enforces
+# HTTP Basic Auth; SearXNG itself is never published to the host — only Caddy
+# reaches it on the internal Docker network. The NexusReach backend then calls
+#   https://<user>:<password>@<domain>/search?...&format=json
+# and httpx sends the Basic Auth from the URL (no app code change needed).
+#
+# Setup: copy .env.example -> .env, fill it in, then `docker compose up -d`.
+# Full walkthrough: ../ORACLE_FREE_VM.md
+services:
+  searxng:
+    image: searxng/searxng:latest   # multi-arch — runs on Ampere ARM
+    container_name: searxng
+    restart: unless-stopped
+    environment:
+      - SEARXNG_SECRET=${SEARXNG_SECRET}
+    volumes:
+      # The shared production settings (JSON API enabled, GET method).
+      - ../settings.yml:/etc/searxng/settings.yml:ro
+    expose:
+      - "8080"            # internal only; NOT published to the host
+    networks: [internal]
+
+  caddy:
+    image: caddy:2
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"           # needed for the Let's Encrypt HTTP challenge
+      - "443:443"
+    environment:
+      - SEARXNG_DOMAIN=${SEARXNG_DOMAIN}
+      - SEARXNG_BASICAUTH_USER=${SEARXNG_BASICAUTH_USER}
+      - SEARXNG_BASICAUTH_HASH=${SEARXNG_BASICAUTH_HASH}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data       # persists the TLS cert across restarts
+      - caddy_config:/config
+    depends_on: [searxng]
+    networks: [internal]
+
+networks:
+  internal:
+
+volumes:
+  caddy_data:
+  caddy_config:

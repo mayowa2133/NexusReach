@@ -136,6 +136,13 @@ repo ships a ready-to-deploy build under `deploy/searxng/` (a `Dockerfile` that
 bakes in `deploy/searxng/settings.yml`, plus `railway.toml`). Local development
 uses `docker-compose.yml` instead; production deploys the `deploy/searxng/` image.
 
+> **Free, always-on alternative (no Railway Hobby plan needed):** host SearXNG on
+> an Oracle Cloud "Always Free" VM instead — see
+> [`deploy/searxng/ORACLE_FREE_VM.md`](deploy/searxng/ORACLE_FREE_VM.md). It uses
+> the same `settings.yml`, fronted by Caddy for HTTPS + Basic Auth, and the
+> backend connects via `https://<user>:<pass>@<domain>` (no code change). The
+> Railway recipe below is the paid-plan path.
+
 Deploy it as a private Railway service:
 
 1. **New service → Deploy from repo.** Set the service root directory to

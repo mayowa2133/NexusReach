@@ -33,9 +33,10 @@ server:
   # mounted limiter.toml. See the note at the bottom.
   limiter: true
   image_proxy: false
-  # The backend talks to SearXNG over the private network; no public method
-  # restriction is needed, but keep POST allowed for the JSON API.
-  method: "POST"
+  # The NexusReach backend calls the JSON API with GET, so GET must be allowed
+  # (the SearXNG default of "POST" returns 405 to a GET /search and silently
+  # breaks discovery). Do not change this back to POST.
+  method: "GET"
 
 search:
   safe_search: 0
