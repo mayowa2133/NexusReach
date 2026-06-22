@@ -519,3 +519,67 @@ class TestFetchExactJob:
             mock_fetch_page_candidates.return_value = [page]
             with pytest.raises(ExactJobFetchError):
                 await fetch_exact_job(parsed)
+
+
+class TestExtractPostedAt:
+    """The HTML-fallback paths (when JSON-LD parsing failed) recover a posting
+    date instead of emitting None and ordering by ingest time."""
+
+    def test_inline_json_date_posted(self):
+        from app.clients.ats.html import _extract_posted_at
+
+        html = '<script>window.__NEXT_DATA__={"job":{"datePosted":"2026-04-01T09:00:00Z"}}</script>'
+        assert _extract_posted_at(html) == "2026-04-01T09:00:00Z"
+
+    def test_double_encoded_json_date_posted(self):
+        from app.clients.ats.html import _extract_posted_at
+
+        html = '<script>{"body":"{\\"datePosted\\":\\"2026-04-01\\"}"}</script>'
+        assert _extract_posted_at(html) == "2026-04-01"
+
+    def test_microdata_meta_itemprop(self):
+        from app.clients.ats.html import _extract_posted_at
+
+        html = '<meta itemprop="datePosted" content="2026-03-15">'
+        assert _extract_posted_at(html) == "2026-03-15"
+
+    def test_microdata_time_datetime(self):
+        from app.clients.ats.html import _extract_posted_at
+
+        html = '<time itemprop="datePosted" datetime="2026-03-15T12:00:00Z">2 days ago</time>'
+        assert _extract_posted_at(html) == "2026-03-15T12:00:00Z"
+
+    def test_article_published_time_meta(self):
+        from app.clients.ats.html import _extract_posted_at
+
+        html = '<meta property="article:published_time" content="2026-02-10T08:00:00Z">'
+        assert _extract_posted_at(html) == "2026-02-10T08:00:00Z"
+
+    def test_returns_none_without_date_signal(self):
+        from app.clients.ats.html import _extract_posted_at
+
+        assert _extract_posted_at("<html><body>No date here</body></html>") is None
+        assert _extract_posted_at("") is None
+
+    def test_generic_exact_fallback_populates_posted_at(self):
+        """No JSON-LD JobPosting, but the page carries an inline datePosted."""
+        from app.clients.ats.normalize import _normalize_generic_exact_job
+
+        parsed = parse_ats_job_url("https://careers.example.com/jobs/platform-engineer")
+        assert parsed is not None
+
+        page = {
+            "url": parsed.canonical_url,
+            "title": "Platform Engineer - Example",
+            "html": (
+                '<html><head><meta property="og:title" content="Platform Engineer">'
+                '<script>window.__NEXT_DATA__={"props":{"job":'
+                '{"datePosted":"2026-04-01T09:00:00Z"}}}</script>'
+                "</head><body><h1>Platform Engineer</h1></body></html>"
+            ),
+            "content": "",
+        }
+
+        job = _normalize_generic_exact_job(page, parsed)
+        assert job is not None
+        assert job["posted_at"] == "2026-04-01T09:00:00Z"

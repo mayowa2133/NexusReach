@@ -34,6 +34,20 @@ CANONICAL_LINK_RE = re.compile(
 )
 
 
+# A "datePosted" value embedded in any inline JSON blob (__NEXT_DATA__, Apollo
+# state, partial JSON-LD the strict parser rejected). Tolerates a leading
+# backslash so it also matches inside double-encoded JSON strings.
+DATE_POSTED_JSON_RE = re.compile(r'\\?"datePosted\\?"\s*:\s*\\?"([^"\\]+)\\?"', re.IGNORECASE)
+
+
+# A microdata <meta itemprop="datePosted" content="..."> or
+# <time itemprop="datePosted" datetime="..."> tag.
+ITEMPROP_DATEPOSTED_RE = re.compile(
+    r"<(?:meta|time)\b[^>]*\bitemprop\s*=\s*[\"']datePosted[\"'][^>]*>",
+    flags=re.IGNORECASE,
+)
+
+
 TAG_RE = re.compile(r"<[^>]+>")
 
 
@@ -97,6 +111,37 @@ def _extract_meta_content(html: str, key: str) -> str:
         if content:
             return content
     return ""
+
+
+def _extract_posted_at(html: str) -> str | None:
+    """Best-effort posting date from an HTML page when JSON-LD parsing failed.
+
+    Mines, in priority order: an inline ``"datePosted"`` JSON value (covers
+    ``__NEXT_DATA__`` / Apollo state / JSON-LD the strict parser rejected), a
+    microdata ``itemprop="datePosted"`` meta/time tag, then the
+    ``article:published_time`` meta tag. Returns the raw date string (an ISO
+    datetime or date, which the ingest parser resolves) or None. The HTML
+    fallbacks otherwise emit no date and the job would order by ingest time.
+    """
+    if not html:
+        return None
+
+    json_match = DATE_POSTED_JSON_RE.search(html)
+    if json_match and json_match.group(1).strip():
+        return json_match.group(1).strip()
+
+    tag_match = ITEMPROP_DATEPOSTED_RE.search(html)
+    if tag_match:
+        tag = tag_match.group(0)
+        value = _find_attr(tag, "content") or _find_attr(tag, "datetime")
+        if value:
+            return value
+
+    published = _extract_meta_content(html, "article:published_time")
+    if published.strip():
+        return published.strip()
+
+    return None
 
 
 def _extract_canonical_link(html: str) -> str | None:

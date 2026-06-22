@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 
 
 from app.utils.job_metadata import parse_json_ld_base_salary
-from app.clients.ats.html import _coerce_posted_at, _display_company_slug, _domain_root, _extract_canonical_link, _extract_heading, _extract_json_ld_job, _extract_meta_content, _extract_static_router_payload, _host_ats_label, _json_ld_company, _json_ld_location, _normalize_text, _string_list, _strip_tags, _workday_company_slug
+from app.clients.ats.html import _coerce_posted_at, _display_company_slug, _domain_root, _extract_canonical_link, _extract_heading, _extract_json_ld_job, _extract_meta_content, _extract_posted_at, _extract_static_router_payload, _host_ats_label, _json_ld_company, _json_ld_location, _normalize_text, _string_list, _strip_tags, _workday_company_slug
 from app.clients.ats.urls import ParsedATSJobURL
 
 
@@ -202,7 +202,7 @@ def _normalize_generic_exact_job(page: dict, parsed: ParsedATSJobURL) -> dict | 
         "apply_url": parsed.canonical_url,
         "description": description or None,
         "employment_type": None,
-        "posted_at": None,
+        "posted_at": _extract_posted_at(html),
         "source": ats_label,
         "ats": ats_label,
         "ats_slug": parsed.company_slug or _domain_root(parsed.host),
@@ -435,7 +435,7 @@ def _normalize_workday_job(parsed: ParsedATSJobURL, page: dict) -> dict | None:
         "apply_url": canonical_url,
         "description": description or None,
         "employment_type": None,
-        "posted_at": None,
+        "posted_at": _extract_posted_at(html),
         "source": "workday",
         "ats": "workday",
         "ats_slug": parsed.company_slug or _workday_company_slug(parsed.host),
@@ -515,7 +515,7 @@ def _normalize_icims_job(parsed: ParsedATSJobURL, page: dict) -> dict | None:
         "apply_url": parsed.canonical_url,
         "description": description or None,
         "employment_type": None,
-        "posted_at": None,
+        "posted_at": _extract_posted_at(html),
         "source": "icims",
         "ats": "icims",
         "ats_slug": parsed.company_slug or _domain_root(parsed.host),
