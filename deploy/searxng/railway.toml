@@ -10,8 +10,11 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-# SearXNG exposes /healthz (returns 200 "OK") on current images.
-healthcheckPath = "/healthz"
-healthcheckTimeout = 120
+# No HTTP healthcheck: this is a private (unexposed) service and the SearXNG
+# image binds a fixed port 8080 (it ignores Railway's $PORT), so Railway's
+# $PORT-based healthcheck probes the wrong port and never passes. The backend
+# reaches it directly over the private network at
+# `nexusreach-searxng.railway.internal:8080`, which does not depend on a
+# healthcheck. Railway marks the deploy healthy once the container starts.
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
