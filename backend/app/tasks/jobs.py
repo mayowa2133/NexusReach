@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import select
+from sqlalchemy.exc import ProgrammingError
 
 from app.tasks import celery_app, run_async
 from app.clients import usajobs_client, workday_client
@@ -25,6 +26,11 @@ from app.services.job_service import (
 from app.services.notification_service import create_notification
 
 logger = logging.getLogger(__name__)
+
+
+def _is_missing_search_preferences_table_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return 'relation "search_preferences" does not exist' in message
 
 
 async def _notification_exists(
@@ -213,13 +219,23 @@ async def refresh_user_feeds(user_id: uuid.UUID) -> int:
 async def _refresh_all() -> None:
     """Refresh job feeds for all users with enabled search preferences."""
     async with async_session() as db:
-        stmt = (
-            select(SearchPreference.user_id)
-            .where(SearchPreference.enabled == True)  # noqa: E712
-            .distinct()
-        )
-        result = await db.execute(stmt)
-        user_ids = [row[0] for row in result.all()]
+        try:
+            stmt = (
+                select(SearchPreference.user_id)
+                .where(SearchPreference.enabled == True)  # noqa: E712
+                .distinct()
+            )
+            result = await db.execute(stmt)
+            user_ids = [row[0] for row in result.all()]
+        except ProgrammingError as exc:
+            if not _is_missing_search_preferences_table_error(exc):
+                raise
+            await db.rollback()
+            logger.warning(
+                "Skipping refresh_all_job_feeds because the search_preferences table is unavailable. "
+                "Database migrations may not be applied yet."
+            )
+            return
 
     logger.info("Refreshing job feeds for %d users", len(user_ids))
 
@@ -255,12 +271,22 @@ def refresh_all_job_feeds() -> dict:
 async def _discover_all_boards() -> None:
     """Run ATS board discovery for every user with at least one saved search."""
     async with async_session() as db:
-        prefs_stmt = (
-            select(SearchPreference)
-            .where(SearchPreference.enabled == True)  # noqa: E712
-        )
-        result = await db.execute(prefs_stmt)
-        preferences = list(result.scalars().all())
+        try:
+            prefs_stmt = (
+                select(SearchPreference)
+                .where(SearchPreference.enabled == True)  # noqa: E712
+            )
+            result = await db.execute(prefs_stmt)
+            preferences = list(result.scalars().all())
+        except ProgrammingError as exc:
+            if not _is_missing_search_preferences_table_error(exc):
+                raise
+            await db.rollback()
+            logger.warning(
+                "Skipping discover_ats_boards because the search_preferences table is unavailable. "
+                "Database migrations may not be applied yet."
+            )
+            return
 
     prefs_by_user: dict[uuid.UUID, list[SearchPreference]] = {}
     for pref in preferences:
