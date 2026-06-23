@@ -134,6 +134,11 @@ async def test_search_jobs_records_source_failure_without_aborting_other_sources
             new_callable=AsyncMock,
             return_value=[_newgrad_job(location="Toronto, ON")],
         ),
+        patch(
+            "app.services.jobs.search.jobbank_client.search_jobbank",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
         patch("app.services.jobs.storage._find_existing_job", new_callable=AsyncMock, return_value=None),
     ):
         jobs = await search_jobs(
@@ -149,6 +154,7 @@ async def test_search_jobs_records_source_failure_without_aborting_other_sources
     assert {stat["source"]: stat["status"] for stat in source_stats} == {
         "jsearch": "failed",
         "newgrad": "success",
+        "jobbank": "success",
     }
     added_prefs = [
         call.args[0]

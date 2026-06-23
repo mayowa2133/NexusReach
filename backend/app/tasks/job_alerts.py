@@ -3,6 +3,7 @@
 import logging
 
 from sqlalchemy import select
+from sqlalchemy.exc import ProgrammingError
 
 from app.database import async_session
 from app.models.job_alert import JobAlertPreference
@@ -12,14 +13,35 @@ from app.tasks import celery_app, run_async
 logger = logging.getLogger(__name__)
 
 
+def _is_missing_job_alert_preferences_table_error(exc: ProgrammingError) -> bool:
+    statement = str(getattr(exc, "statement", "") or "")
+    message = str(getattr(exc, "orig", "") or exc)
+    combined = f"{statement}\n{message}".lower()
+    return (
+        "job_alert_preferences" in combined
+        and "does not exist" in combined
+    )
+
+
 async def _send_all_digests() -> dict:
     """Send pending digests for all users with enabled job alerts."""
     async with async_session() as db:
-        stmt = select(JobAlertPreference.user_id).where(
-            JobAlertPreference.enabled == True,  # noqa: E712
-        )
-        result = await db.execute(stmt)
-        user_ids = [row[0] for row in result.all()]
+        try:
+            stmt = select(JobAlertPreference.user_id).where(
+                JobAlertPreference.enabled == True,  # noqa: E712
+            )
+            result = await db.execute(stmt)
+            user_ids = [row[0] for row in result.all()]
+        except ProgrammingError as exc:
+            if not _is_missing_job_alert_preferences_table_error(exc):
+                raise
+            await db.rollback()
+            logger.warning(
+                "Skipping job alert digest task because job_alert_preferences "
+                "table is unavailable",
+                exc_info=exc,
+            )
+            return {"users_checked": 0, "digests_sent": 0, "failures": 0}
 
     logger.info("Job alert digest: checking %d users with enabled alerts", len(user_ids))
 
