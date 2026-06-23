@@ -5,6 +5,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
+from sqlalchemy.exc import ProgrammingError
 
 from app.database import async_session
 from app.models.outreach import OutreachLog
@@ -16,6 +17,11 @@ from app.services.outreach_reconcile_service import (
 from app.tasks import celery_app, run_async
 
 logger = logging.getLogger(__name__)
+
+
+def _is_missing_outreach_logs_table_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return 'relation "outreach_logs" does not exist' in message
 
 
 async def _reconcile_all_users() -> dict:
@@ -53,8 +59,18 @@ async def _reconcile_all_users() -> dict:
             )
             .distinct()
         )
-        draft_users = {row[0] for row in (await db.execute(draft_stmt)).all()}
-        reply_users = {row[0] for row in (await db.execute(reply_stmt)).all()}
+        try:
+            draft_users = {row[0] for row in (await db.execute(draft_stmt)).all()}
+            reply_users = {row[0] for row in (await db.execute(reply_stmt)).all()}
+        except ProgrammingError as exc:
+            if not _is_missing_outreach_logs_table_error(exc):
+                raise
+            await db.rollback()
+            logger.warning(
+                "Skipping reconcile_outreach_sends because the outreach_logs table is unavailable. "
+                "Database migrations may not be applied yet."
+            )
+            return totals
 
     for uid in draft_users | reply_users:
         totals["users"] += 1
