@@ -46,32 +46,60 @@ def _serialize_profile(profile: Profile) -> ProfileResponse:
     )
 
 
+def _seed_queries_from_profile(profile: Profile) -> list[str]:
+    """Derive saved-search query strings from a profile.
+
+    Prefers explicit free-text ``target_roles``; otherwise falls back to the
+    occupation taxonomy's representative query per ``target_occupations``. The
+    fallback is essential: the product is occupation-aware, so a user who
+    onboards by picking occupations (and no free-text roles) must still get
+    seeded — without it their feed never enters the background-refresh pipeline
+    (which is gated on having an enabled saved search) and silently freezes.
+    """
+    roles = [r for r in (profile.target_roles or []) if r and r.strip()]
+    if roles:
+        return roles[:3]
+
+    from app.services.occupation_taxonomy import occupations_for_keys  # noqa: PLC0415
+
+    queries: list[str] = []
+    for occ in occupations_for_keys(profile.target_occupations or [])[:3]:
+        query = occ.default_search_queries[0] if occ.default_search_queries else occ.label
+        if query:
+            queries.append(query)
+    return queries
+
+
 async def _seed_saved_searches(
     db: AsyncSession, user_id: uuid.UUID, profile: Profile,
 ) -> None:
-    """Create saved searches from profile target_roles x target_locations if none exist."""
+    """Create saved searches from the profile if the user has none yet.
+
+    Idempotent: skips entirely when any saved search already exists, so it never
+    overwrites user-curated searches. Seeds from target_roles when present, else
+    from target_occupations (see ``_seed_queries_from_profile``).
+    """
     result = await db.execute(
         select(SearchPreference).where(SearchPreference.user_id == user_id).limit(1)
     )
     if result.scalar_one_or_none() is not None:
         return  # User already has saved searches — don't overwrite
 
-    roles = profile.target_roles or []
-    locations = profile.target_locations or []
-
-    if not roles:
+    queries = _seed_queries_from_profile(profile)
+    if not queries:
         return
 
+    locations = profile.target_locations or []
     if locations:
-        for role in roles[:3]:
+        for query in queries[:3]:
             for loc in locations[:2]:
                 db.add(SearchPreference(
-                    user_id=user_id, query=role, location=loc, remote_only=False,
+                    user_id=user_id, query=query, location=loc, remote_only=False,
                 ))
     else:
-        for role in roles[:5]:
+        for query in queries[:5]:
             db.add(SearchPreference(
-                user_id=user_id, query=role, remote_only=False,
+                user_id=user_id, query=query, remote_only=False,
             ))
 
     await db.commit()
@@ -260,12 +288,18 @@ async def update_profile(
     await db.commit()
     await db.refresh(profile)
 
-    # Auto-seed saved searches if profile now has target roles
-    if "target_roles" in update_data or "target_locations" in update_data:
+    # Auto-seed saved searches when the user sets what/where they're targeting.
+    # target_occupations is included because it is now the primary targeting field
+    # (occupation-aware discovery); without it an occupation-only profile would
+    # never seed a saved search and its feed would never auto-refresh.
+    seed_trigger_fields = {"target_roles", "target_locations", "target_occupations"}
+    if seed_trigger_fields & set(update_data.keys()):
         await _seed_saved_searches(db, user_id, profile)
 
     # Re-score jobs if scoring-relevant fields changed
-    scoring_fields = {"target_roles", "target_locations", "target_industries"}
+    scoring_fields = {
+        "target_roles", "target_locations", "target_industries", "target_occupations",
+    }
     if scoring_fields & set(update_data.keys()):
         from app.tasks.jobs import rescore_user_jobs  # noqa: PLC0415
         rescore_user_jobs.delay(str(user_id))

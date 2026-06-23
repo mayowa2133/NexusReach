@@ -159,3 +159,46 @@ async def test_update_profile(client, mock_user_id):
     app.dependency_overrides.pop(get_db, None)
 
     assert resp.status_code == 200
+
+
+from types import SimpleNamespace  # noqa: E402
+
+from app.routers.profile import _seed_queries_from_profile  # noqa: E402
+
+
+def _seed_profile(**kw):
+    return SimpleNamespace(
+        target_roles=kw.get("target_roles"),
+        target_occupations=kw.get("target_occupations"),
+        target_locations=kw.get("target_locations"),
+    )
+
+
+def test_seed_queries_prefers_explicit_target_roles():
+    profile = _seed_profile(
+        target_roles=["Backend Engineer", "Platform Engineer", "SRE", "Extra"],
+        target_occupations=["software_engineering"],
+    )
+    # First 3 roles, occupations ignored when roles are present.
+    assert _seed_queries_from_profile(profile) == [
+        "Backend Engineer", "Platform Engineer", "SRE",
+    ]
+
+
+def test_seed_queries_falls_back_to_occupations_when_no_roles():
+    """The core fix: an occupation-only profile must still seed queries."""
+    profile = _seed_profile(target_roles=[], target_occupations=["software_engineering"])
+    queries = _seed_queries_from_profile(profile)
+    assert queries == ["Software Engineer"]  # occupation's representative query
+
+
+def test_seed_queries_filters_blank_roles_then_uses_occupations():
+    profile = _seed_profile(
+        target_roles=["", "   "], target_occupations=["data_analyst"],
+    )
+    queries = _seed_queries_from_profile(profile)
+    assert queries and all(q.strip() for q in queries)
+
+
+def test_seed_queries_empty_when_nothing_targeted():
+    assert _seed_queries_from_profile(_seed_profile()) == []
