@@ -216,6 +216,32 @@ ATS_DISCOVER_BOARDS: list[dict[str, str]] = [
     {"slug": "resend", "ats": "ashby"},
     {"slug": "railway", "ats": "ashby"},
     {"slug": "airbyte", "ats": "ashby"},
+    # Canadian-HQ employers. The curated boards above skew US tech, which left
+    # Canadian coverage thin (Canada was only reached when a US employer happened
+    # to post a Canadian role). Each slug+ats below was verified live against the
+    # ATS API and confirmed to carry real Canadian postings on 2026-06-22
+    # (scripts/verify_canadian_ats_boards.py). Cohere is intentionally absent —
+    # it is already listed above. A wrong slug silently returns nothing, so do
+    # not add unverified employers here.
+    {"slug": "lightspeedhq", "ats": "ashby"},  # Montréal
+    {"slug": "neofinancial", "ats": "ashby"},  # Calgary
+    {"slug": "hopper", "ats": "ashby"},  # Montréal
+    {"slug": "1password", "ats": "ashby"},  # Toronto
+    {"slug": "jobber", "ats": "ashby"},  # Edmonton
+    {"slug": "wealthsimple", "ats": "ashby"},  # Toronto
+    {"slug": "trulioo", "ats": "ashby"},  # Vancouver
+    {"slug": "relayfi", "ats": "ashby"},  # Toronto
+    {"slug": "benevity", "ats": "ashby"},  # Calgary
+    {"slug": "float", "ats": "ashby"},  # Toronto
+    {"slug": "koho", "ats": "ashby"},  # Toronto
+    {"slug": "clearco", "ats": "ashby"},  # Toronto
+    {"slug": "loopio", "ats": "ashby"},  # Toronto
+    {"slug": "thinkific", "ats": "ashby"},  # Vancouver
+    {"slug": "tenstorrent", "ats": "greenhouse"},  # Toronto
+    {"slug": "mejuri", "ats": "greenhouse"},  # Toronto
+    {"slug": "hootsuite", "ats": "greenhouse"},  # Vancouver
+    {"slug": "later", "ats": "greenhouse"},  # Vancouver
+    {"slug": "faire", "ats": "greenhouse"},  # Kitchener-Waterloo eng hub
 ]
 
 
@@ -232,4 +258,10 @@ LEVER_DISCOVER_SLUGS = [
     "greenlight",
     "wealthfront",
     "matillion",
+    # Canadian-HQ employers on Lever, verified live on 2026-06-22
+    # (scripts/verify_canadian_ats_boards.py).
+    "waabi",  # Toronto — autonomous driving
+    "knix",  # Toronto
+    "waveapps",  # Toronto — Wave
+    "wattpad",  # Toronto
 ]

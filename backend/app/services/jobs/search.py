@@ -10,6 +10,7 @@ import asyncio
 from app.clients import ats
 from app.utils.job_metadata import country_code_for_name
 from app.utils.job_metadata import geocode_location_query
+from app.clients import jobbank_client
 from app.clients import jsearch_client
 from app.clients import newgrad_jobs_client
 from app.utils.job_metadata import normalize_job_metadata
@@ -65,6 +66,10 @@ async def _fetch_jobs_for_source(
             )
         elif source == "simplify":
             jobs = await remote_jobs_client.fetch_simplify_jobs(limit=limit)
+        elif source == "jobbank":
+            jobs = await jobbank_client.search_jobbank(
+                query, location=location, limit=limit
+            )
         elif source == "newgrad":
             jobs = await newgrad_jobs_client.search_newgrad_jobs(query=query)
         elif source == "yc_jobs":
@@ -110,9 +115,20 @@ async def search_jobs(
     Args:
         sources: List of sources to search. None = all.
                  Options: jsearch, adzuna, remotive, jobicy, dice, simplify, newgrad,
-                 yc_jobs, wellfound, ventureloop
+                 yc_jobs, wellfound, ventureloop, jobbank. ``jobbank`` (Canada's
+                 national board) is auto-added for Canadian locations.
     """
     all_sources = sources or constants.DEFAULT_SEARCH_SOURCES
+    # Job Bank is Canada's national board (all occupations, incl. non-tech) but
+    # Canada-only. Add it whenever the search location is Canadian so every path
+    # — discover, saved-search refresh, ad-hoc — gains it without per-call wiring,
+    # and it never wastes calls on US/other locations. Fails soft to [].
+    if (
+        location
+        and "jobbank" not in all_sources
+        and normalize._adzuna_country_for_location(location) == "ca"
+    ):
+        all_sources = [*all_sources, "jobbank"]
 
     # Load user profile for scoring
     result = await db.execute(
