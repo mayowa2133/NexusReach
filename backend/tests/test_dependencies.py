@@ -7,7 +7,12 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.config import settings
-from app.dependencies import AuthenticatedUser, get_current_auth_user, get_or_create_user
+from app.dependencies import (
+    AuthenticatedUser,
+    get_current_auth_user,
+    get_current_user_id,
+    get_or_create_user,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -74,3 +79,12 @@ async def test_get_current_auth_user_fails_closed_when_dev_bypass_not_enabled(mo
 
     with pytest.raises(Exception, match="Dev auth bypass requires"):
         await get_current_auth_user(None)
+
+
+async def test_get_current_user_id_uses_bootstrapped_user_row():
+    user_id = uuid.uuid4()
+    user = SimpleNamespace(id=user_id)
+
+    result = await get_current_user_id(user)
+
+    assert result == user_id

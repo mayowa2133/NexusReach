@@ -77,13 +77,6 @@ async def get_current_auth_user(
         )
 
 
-async def get_current_user_id(
-    auth_user: Annotated[AuthenticatedUser, Depends(get_current_auth_user)],
-) -> uuid.UUID:
-    """Compatibility dependency that returns just the current user ID."""
-    return auth_user.user_id
-
-
 async def get_or_create_user(
     auth_user: Annotated[AuthenticatedUser, Depends(get_current_auth_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -129,3 +122,10 @@ async def get_or_create_user(
         await db.refresh(user)
 
     return user
+
+
+async def get_current_user_id(
+    user: Annotated[User, Depends(get_or_create_user)],
+) -> uuid.UUID:
+    """Compatibility dependency that returns the current bootstrapped user ID."""
+    return user.id

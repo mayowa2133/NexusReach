@@ -60,6 +60,9 @@ class _ScalarResult:
     def __init__(self, rows):
         self._rows = rows
 
+    def scalar_one_or_none(self):
+        return self._rows
+
     def scalars(self):
         rows = self._rows
 
@@ -177,6 +180,10 @@ async def test_search_ats_accepts_dev_mode_without_token(unauthed_client, monkey
     from app.config import settings
 
     fake_db = MagicMock()
+    fake_db.execute = AsyncMock(return_value=_ScalarResult(None))
+    fake_db.add = MagicMock()
+    fake_db.commit = AsyncMock()
+    fake_db.refresh = AsyncMock()
 
     async def _override_db():
         yield fake_db
