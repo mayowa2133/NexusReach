@@ -27,11 +27,11 @@ server:
   # Leave as the literal `ultrasecretkey` placeholder — the image entrypoint
   # replaces it with the SEARXNG_SECRET env var at boot. Never commit a real key.
   secret_key: "ultrasecretkey"
-  # Abuse limiter. Recommended by the deploy runbook. If the backend starts
-  # getting throttled (HTTP 429) because it shares an egress IP, either set this
-  # to false on a private-network-only instance, or allowlist the backend in a
-  # mounted limiter.toml. See the note at the bottom.
-  limiter: true
+  # Abuse limiter OFF: this is a private-network-only instance reachable solely
+  # by our backend, and the limiter requires Valkey/Redis (which we don't run
+  # for it) — with it on, SearXNG logs "limiter requires Valkey" on every boot.
+  # Off is both correct here and avoids any chance of throttling our backend.
+  limiter: false
   image_proxy: false
   # The NexusReach backend calls the JSON API with GET, so GET must be allowed
   # (the SearXNG default of "POST" returns 405 to a GET /search and silently
@@ -46,11 +46,20 @@ search:
     - html
     - json
 
-# Keep the default engine set from use_default_settings. To trim noise/latency
-# you can disable engines you don't want here, e.g.:
-# engines:
-#   - name: wikidata
-#     disabled: true
+# We use SearXNG purely as a general web-search backend for `site:linkedin.com`
+# style x-ray queries, so disable engines that can't handle long boolean queries
+# and just throw errors / add latency. wikipedia & wikidata hit a page-title REST
+# API and return 400/500 for our queries; the onion engines can't load without
+# Tor. The general web engines (google, bing, duckduckgo, brave, ...) stay on.
+engines:
+  - name: wikipedia
+    disabled: true
+  - name: wikidata
+    disabled: true
+  - name: ahmia
+    disabled: true
+  - name: torch
+    disabled: true
 
 ui:
   static_use_hash: true
