@@ -130,20 +130,24 @@ NEXUSREACH_DATABASE_URL=postgresql+asyncpg://...
 
 ### SearXNG
 
-SearXNG is the primary (free, unlimited) search provider. It is **not** bundled
-in the app — it runs as its own service that the backend reaches over HTTP. The
-repo ships a ready-to-deploy build under `deploy/searxng/` (a `Dockerfile` that
-bakes in `deploy/searxng/settings.yml`, plus `railway.toml`). Local development
-uses `docker-compose.yml` instead; production deploys the `deploy/searxng/` image.
+SearXNG is a free metasearch engine the backend can use as a search provider. It
+is **not** bundled in the app — it runs as its own service reached over HTTP.
 
-> **Free, always-on alternative (no Railway Hobby plan needed):** host SearXNG on
-> an Oracle Cloud "Always Free" VM instead — see
-> [`deploy/searxng/ORACLE_FREE_VM.md`](deploy/searxng/ORACLE_FREE_VM.md). It uses
-> the same `settings.yml`, fronted by Caddy for HTTPS + Basic Auth, and the
-> backend connects via `https://<user>:<pass>@<domain>` (no code change). The
-> Railway recipe below is the paid-plan path.
+> ⚠️ **Known limitation — self-hosted SearXNG does not work on cloud IPs.**
+> Verified on Railway (2026-06-23): when SearXNG runs on a datacenter IP, its
+> scraping engines (Google, Bing, DuckDuckGo, Brave, Startpage) get CAPTCHA'd /
+> rate-limited and it returns **0 results**, so the router falls through to the
+> API providers on every query — SearXNG saves nothing. This is inherent to any
+> cloud host (Oracle, Fly, Render, …), not Railway-specific. The **authenticated
+> API providers are the practical primary**: Brave Search API, Google CSE,
+> Serper, and Tavily use keys (not scraping) and are not IP-blocked. Either run
+> SearXNG behind a residential/rotating proxy, or skip it and rely on the API
+> free tiers — set the provider orders without searxng, e.g.
+> `NEXUSREACH_SEARCH_LINKEDIN_PROVIDER_ORDER=brave,google_cse,serper`.
 
-Deploy it as a private Railway service:
+The `deploy/searxng/` build (`Dockerfile` + `railway.toml` + `settings.yml`)
+remains for the proxied/residential case. To deploy it as a private Railway
+service:
 
 1. **New service → Deploy from repo.** Set the service root directory to
    `deploy/searxng` and its config file path to `/deploy/searxng/railway.toml`.
