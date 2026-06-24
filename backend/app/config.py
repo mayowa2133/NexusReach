@@ -135,7 +135,10 @@ class Settings(BaseSettings):
 
     # Stale contact re-verification
     reverify_stale_days: int = 14
-    reverify_batch_size: int = 20
+    # Employment verification can invoke multiple search providers per contact.
+    # Keep scheduled batches small enough for the 1 GB Railway worker while the
+    # six-hour cadence still drains stale contacts steadily.
+    reverify_batch_size: int = 5
 
     # Upload size limits (audit H2). Bound in-memory upload reads so a single
     # request can't OOM the worker; the ZIP cap bounds decompressed size.

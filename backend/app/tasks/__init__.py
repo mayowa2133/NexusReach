@@ -80,7 +80,11 @@ celery_app.conf.update(
     task_acks_late=True,
     task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,
-    worker_max_tasks_per_child=20,
+    # Search/browser integrations retain native-library memory between tasks.
+    # Recycle prefork children before that growth reaches Railway's 1 GB service
+    # limit, and force a recycle after any task leaves a child above 400 MB RSS.
+    worker_max_tasks_per_child=5,
+    worker_max_memory_per_child=400_000,
     beat_schedule={
         "refresh-job-feeds": {
             "task": "app.tasks.jobs.refresh_all_job_feeds",

@@ -21,10 +21,13 @@ def test_job_refresh_cadence_is_every_fifteen_minutes():
 
 
 def test_worker_runtime_defaults_limit_prefetch_and_child_reuse():
+    from app.config import Settings
     from app.tasks import celery_app
 
     assert celery_app.conf.worker_prefetch_multiplier == 1
-    assert celery_app.conf.worker_max_tasks_per_child == 20
+    assert celery_app.conf.worker_max_tasks_per_child == 5
+    assert celery_app.conf.worker_max_memory_per_child == 400_000
+    assert Settings.model_fields["reverify_batch_size"].default == 5
 
 
 def test_linkedin_cleanup_uses_shared_async_runner(monkeypatch):
