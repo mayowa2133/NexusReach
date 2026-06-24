@@ -134,6 +134,8 @@ async def _build_artifact_response(
     )
     reused_from_artifact_id = getattr(artifact, "reused_from_artifact_id", None)
     reuse_score = getattr(artifact, "reuse_score", None)
+    quality_score = getattr(artifact, "quality_score", None)
+    quality_evaluation = getattr(artifact, "quality_evaluation", None)
 
     return ResumeArtifactResponse(
         id=str(artifact.id),
@@ -155,6 +157,14 @@ async def _build_artifact_response(
         rewrite_previews=previews,
         auto_accept_inferred=auto_accept,
         body_ats_score=body_ats_score,
+        quality_score=(
+            float(quality_score)
+            if isinstance(quality_score, (int, float))
+            else None
+        ),
+        quality_evaluation=(
+            quality_evaluation if isinstance(quality_evaluation, dict) else None
+        ),
     )
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -819,7 +829,17 @@ def _reuse_candidate_to_response(candidate: dict) -> ResumeReuseCandidate:
         source_company_name=source_job.company_name,
         filename=artifact.filename,
         score=float(candidate["score"]),
+        quality_score=(
+            float(candidate["quality_score"])
+            if isinstance(candidate.get("quality_score"), (int, float))
+            else None
+        ),
         threshold=float(candidate["threshold"]),
+        quality_threshold=(
+            float(candidate["quality_threshold"])
+            if isinstance(candidate.get("quality_threshold"), (int, float))
+            else None
+        ),
         job_family=str(candidate["job_family"]),
         generated_at=artifact.generated_at.isoformat(),
         updated_at=artifact.updated_at.isoformat(),

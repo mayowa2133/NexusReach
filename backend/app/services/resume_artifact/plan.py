@@ -335,7 +335,12 @@ def _expand_plan_to_fill_page(parsed: dict[str, Any], job: Job, plan: dict[str, 
     return plan
 
 
-def _build_artifact_plan_prompt(parsed: dict[str, Any], job: Job, tailored: TailoredResume) -> str:
+def _build_artifact_plan_prompt(
+    parsed: dict[str, Any],
+    job: Job,
+    tailored: TailoredResume,
+    quality_guidance: str = "",
+) -> str:
     parts = [
         f"TARGET ROLE: {job.title} at {job.company_name}",
         f"JOB DESCRIPTION:\n{job.description or ''}",
@@ -365,6 +370,12 @@ def _build_artifact_plan_prompt(parsed: dict[str, Any], job: Job, tailored: Tail
         f"TAILORED KEYWORDS TO ADD: {', '.join(tailored.keywords_to_add or [])}",
         f"PREFERRED RELEVANT SKILLS LINE: {', '.join(_preferred_skills_focus(parsed, job, tailored))}",
     ])
+    if quality_guidance:
+        parts.extend([
+            "",
+            "SUPPORTED-EVIDENCE QUALITY GATE:",
+            quality_guidance,
+        ])
     return "\n".join(parts)
 
 
@@ -373,6 +384,7 @@ async def _build_resume_artifact_plan(
     parsed: dict[str, Any],
     job: Job,
     tailored: TailoredResume,
+    quality_guidance: str = "",
 ) -> dict[str, Any]:
     fallback = _expand_plan_to_fill_page(parsed, job, _default_artifact_plan(parsed, job, tailored))
     if not job.description:
@@ -381,7 +393,12 @@ async def _build_resume_artifact_plan(
     try:
         result = await generate_message(
             system_prompt=ARTIFACT_PLAN_SYSTEM_PROMPT,
-            user_prompt=_build_artifact_plan_prompt(parsed, job, tailored),
+            user_prompt=_build_artifact_plan_prompt(
+                parsed,
+                job,
+                tailored,
+                quality_guidance,
+            ),
             max_tokens=1400,
         )
         raw = result.get("draft", "")

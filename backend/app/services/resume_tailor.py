@@ -194,7 +194,9 @@ _METHOD_HINTS: tuple[str, ...] = (
     "CI/CD", "pair programming", "A/B testing", "experimentation",
     "accessibility", "WCAG", "internationalization",
     "customer empathy", "customer-facing", "cross-functional",
-    "web applications",
+    "web applications", "observability", "logging", "tracing", "metrics",
+    "authentication", "documentation", "configuration", "developer experience",
+    "platform engineering", "shared libraries", "SDKs", "inner-source",
 )
 
 

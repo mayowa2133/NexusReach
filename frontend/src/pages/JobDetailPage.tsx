@@ -531,6 +531,11 @@ function ResumeTailorSection({ job }: { job: Job }) {
                   <Badge className="bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200">
                     {topReuseCandidate.score.toFixed(0)}% match
                   </Badge>
+                  {topReuseCandidate.quality_score != null && (
+                    <Badge variant="outline" className="text-[11px]">
+                      {topReuseCandidate.quality_score.toFixed(0)}% quality
+                    </Badge>
+                  )}
                   {reuseData?.auto_reuse_enabled && (
                     <Badge variant="outline" className="text-[11px]">
                       Auto-reuse enabled

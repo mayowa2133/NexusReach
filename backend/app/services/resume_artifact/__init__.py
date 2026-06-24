@@ -19,7 +19,14 @@ from app.services.resume_artifact.redline import (
     render_resume_artifact_redline_pdf,
     render_resume_artifact_redline_pdf_async,
 )
+from app.services.resume_artifact.quality import (
+    evaluate_resume_quality,
+    quality_planner_guidance,
+    select_quality_profile,
+    validate_quality_evaluation,
+)
 from app.services.resume_artifact.service import (
+    RESUME_REUSE_QUALITY_THRESHOLD,
     RESUME_REUSE_SCORE_THRESHOLD,
     generate_resume_artifact_for_job,
     get_resume_artifact_for_job,
@@ -31,6 +38,8 @@ from app.services.resume_artifact.service import (
 
 __all__ = [
     "RESUME_REUSE_SCORE_THRESHOLD",
+    "RESUME_REUSE_QUALITY_THRESHOLD",
+    "evaluate_resume_quality",
     "generate_resume_artifact_for_job",
     "get_resume_artifact_for_job",
     "get_resume_auto_reuse_enabled",
@@ -40,6 +49,9 @@ __all__ = [
     "render_resume_artifact_pdf_async",
     "render_resume_artifact_redline_pdf",
     "render_resume_artifact_redline_pdf_async",
+    "quality_planner_guidance",
     "reuse_resume_artifact_for_job",
+    "select_quality_profile",
     "score_resume_content_against_job",
+    "validate_quality_evaluation",
 ]

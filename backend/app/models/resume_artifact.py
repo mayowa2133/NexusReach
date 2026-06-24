@@ -34,6 +34,8 @@ class ResumeArtifact(Base):
         nullable=True,
     )
     reuse_score: Mapped[float | None] = mapped_column(Float)
+    quality_score: Mapped[float | None] = mapped_column(Float)
+    quality_evaluation: Mapped[dict | None] = mapped_column(JSONB)
 
     format: Mapped[str] = mapped_column(String(50), default="markdown", nullable=False)
     filename: Mapped[str] = mapped_column(String(255), nullable=False)

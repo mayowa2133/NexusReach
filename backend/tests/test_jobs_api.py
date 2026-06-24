@@ -662,6 +662,103 @@ async def test_get_resume_artifact(client, mock_user_id):
     assert resp.json()["job_id"] == str(job_id)
 
 
+async def test_get_resume_artifact_exposes_typed_quality_evaluation(client, mock_user_id):
+    """The artifact API returns the persisted explainable quality-gate payload."""
+    job_id = uuid.uuid4()
+    artifact = MagicMock()
+    artifact.id = uuid.uuid4()
+
+    from app.schemas.jobs import ResumeArtifactResponse
+
+    quality_evaluation = {
+        "schema_version": 1,
+        "rubric_version": "nexusreach_resume_quality_v1",
+        "status": "ready",
+        "evaluation_mode": "deterministic_supported_evidence",
+        "source_attribution": {
+            "name": "HackerRank Hiring Agent",
+            "url": "https://github.com/interviewstreet/hiring-agent",
+            "license": "MIT",
+            "adaptation": "Occupation-aware NexusReach quality gate.",
+        },
+        "evaluated_at": "2026-06-23T12:00:00+00:00",
+        "profile": "early_career_technical_v1",
+        "profile_label": "Early-career technical",
+        "overall_score": 81.5,
+        "readiness": "competitive",
+        "axes": {
+            "job_fit": {
+                "score": 80,
+                "max": 100,
+                "evidence": ["Surfaced 8/10 evaluated job terms."],
+                "improvements": [],
+            },
+            "evidence_quality": {
+                "score": 75,
+                "max": 100,
+                "evidence": ["Category evidence is supported."],
+                "improvements": [],
+            },
+            "parseability": {
+                "score": 100,
+                "max": 100,
+                "evidence": ["All expected sections recognized."],
+                "improvements": [],
+            },
+        },
+        "categories": [
+            {
+                "key": "open_source",
+                "label": "Open-source contribution",
+                "score": 20,
+                "max": 35,
+                "evidence": ["Two contributions are visible."],
+                "improvements": [],
+            }
+        ],
+        "strengths": ["Projects"],
+        "improvements": ["Add verified contribution evidence."],
+        "truthfulness": {
+            "unverified_inferred_additions_excluded": 1,
+            "excluded_phrases": ["Kubernetes"],
+        },
+        "disclaimer": "This is a screening simulation.",
+    }
+
+    async def _fake_build(_db, *, user_id, job_id, artifact):
+        return ResumeArtifactResponse(
+            id=str(artifact.id),
+            job_id=job_id,
+            format="latex",
+            filename="resume-acme.tex",
+            content="\\documentclass{article}",
+            generated_at="2026-06-23T12:00:00+00:00",
+            created_at="2026-06-23T12:00:00+00:00",
+            updated_at="2026-06-23T12:00:00+00:00",
+            quality_score=81.5,
+            quality_evaluation=quality_evaluation,
+        )
+
+    with patch(
+        "app.routers.jobs.get_resume_artifact_for_job",
+        new_callable=AsyncMock,
+    ) as mock_get, patch(
+        "app.routers.jobs._build_artifact_response",
+        side_effect=_fake_build,
+    ):
+        mock_get.return_value = artifact
+        resp = await client.get(f"/api/jobs/{job_id}/resume-artifact")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["quality_score"] == 81.5
+    assert data["quality_evaluation"]["profile"] == "early_career_technical_v1"
+    assert data["quality_evaluation"]["categories"][0]["max"] == 35
+    assert data["quality_evaluation"]["truthfulness"][
+        "unverified_inferred_additions_excluded"
+    ] == 1
+
+
 async def test_download_resume_artifact_pdf(client, mock_user_id):
     """GET /api/jobs/{id}/resume-artifact/pdf returns a PDF download."""
     job_id = uuid.uuid4()

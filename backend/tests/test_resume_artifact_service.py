@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from app.services.resume_artifact_service import (
     _build_resume_reuse_candidate,
@@ -658,3 +659,64 @@ def test_build_resume_reuse_candidate_requires_high_body_match():
     assert candidate is not None
     assert candidate["score"] >= 80.0
     assert candidate["job_family"] == "frontend_fullstack"
+
+
+def test_build_resume_reuse_candidate_requires_quality_gate_when_requested():
+    artifact = SimpleNamespace(
+        content="\n".join([
+            r"\documentclass{article}",
+            r"\begin{document}",
+            r"\section*{Experience}",
+            r"\item Built full-stack React and TypeScript products with Node.js and REST.",
+            r"\subsection*{Technical Skills}",
+            "React, TypeScript, Node.js, REST",
+            r"\end{document}",
+        ])
+    )
+    source_job = SimpleNamespace(
+        title="Full-Stack Software Engineer",
+        description="Build full-stack product experiences.",
+    )
+    target_job = SimpleNamespace(
+        title="Full-Stack Software Engineer",
+        description="Build full-stack apps with React, TypeScript, Node.js, and REST.",
+    )
+
+    with patch(
+        "app.services.resume_artifact.service.evaluate_resume_quality",
+        return_value={
+            "status": "ready",
+            "overall_score": 92.0,
+            "axes": {"evidence_quality": {"score": 62.0}},
+        },
+    ):
+        rejected = _build_resume_reuse_candidate(
+            artifact=artifact,
+            source_job=source_job,
+            target_job=target_job,
+            threshold=80.0,
+            parsed_resume={"skills": ["React"]},
+            quality_threshold=70.0,
+        )
+
+    with patch(
+        "app.services.resume_artifact.service.evaluate_resume_quality",
+        return_value={
+            "status": "ready",
+            "overall_score": 72.0,
+            "axes": {"evidence_quality": {"score": 78.0}},
+        },
+    ):
+        accepted = _build_resume_reuse_candidate(
+            artifact=artifact,
+            source_job=source_job,
+            target_job=target_job,
+            threshold=80.0,
+            parsed_resume={"skills": ["React"]},
+            quality_threshold=70.0,
+        )
+
+    assert rejected is None
+    assert accepted is not None
+    assert accepted["quality_score"] == 78.0
+    assert accepted["quality_threshold"] == 70.0

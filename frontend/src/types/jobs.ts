@@ -130,6 +130,48 @@ export interface ResumeBulletRewritePreview {
   decision: ResumeRewriteDecision;
 }
 
+export interface ResumeQualitySourceAttribution {
+  name: string;
+  url: string;
+  license: string;
+  adaptation: string;
+}
+
+export interface ResumeQualityDimension {
+  score: number;
+  max: number;
+  evidence: string[];
+  improvements: string[];
+}
+
+export interface ResumeQualityCategory extends ResumeQualityDimension {
+  key: string;
+  label: string;
+}
+
+export interface ResumeQualityEvaluation {
+  schema_version: number;
+  rubric_version: string;
+  status: 'ready' | 'unavailable';
+  evaluation_mode: string;
+  source_attribution: ResumeQualitySourceAttribution;
+  evaluated_at: string;
+  profile: string | null;
+  profile_label: string | null;
+  overall_score: number | null;
+  readiness: 'strong' | 'competitive' | 'developing' | 'needs_work' | null;
+  axes: Record<string, ResumeQualityDimension>;
+  categories: ResumeQualityCategory[];
+  strengths: string[];
+  improvements: string[];
+  truthfulness: {
+    unverified_inferred_additions_excluded: number;
+    excluded_phrases: string[];
+  } | null;
+  disclaimer: string;
+  reason: string | null;
+}
+
 export interface ResumeArtifact {
   id: string;
   job_id: string;
@@ -146,6 +188,8 @@ export interface ResumeArtifact {
   rewrite_previews?: ResumeBulletRewritePreview[];
   auto_accept_inferred?: boolean;
   body_ats_score?: number | null;
+  quality_score?: number | null;
+  quality_evaluation?: ResumeQualityEvaluation | null;
 }
 
 export interface ResumeReuseCandidate {
@@ -155,7 +199,9 @@ export interface ResumeReuseCandidate {
   source_company_name: string | null;
   filename: string;
   score: number;
+  quality_score?: number | null;
   threshold: number;
+  quality_threshold?: number | null;
   job_family: string;
   generated_at: string;
   updated_at: string;

@@ -9,6 +9,7 @@ import { toast } from 'sonner';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { ResumeQualityPanel } from '@/components/ResumeQualityPanel';
 import {
   useUpdateResumeArtifactDecisions,
   useDownloadResumeArtifactPdf,
@@ -431,18 +432,23 @@ export function ResumeArtifactReview({ jobId, artifact }: Props) {
 
   if (previews.length === 0) {
     return (
-      <Card>
-        <CardContent className="pt-4 text-xs text-muted-foreground">
-          No AI rewrite proposals on this artifact yet. Regenerate the tailored
-          resume to produce per-bullet proposals you can review.
-        </CardContent>
-      </Card>
+      <div className="space-y-4">
+        <ResumeQualityPanel evaluation={artifact.quality_evaluation} />
+        <Card>
+          <CardContent className="pt-4 text-xs text-muted-foreground">
+            No AI rewrite proposals on this artifact yet. Regenerate the tailored
+            resume to produce per-bullet proposals you can review.
+          </CardContent>
+        </Card>
+      </div>
     );
   }
 
   return (
-    <Card>
-      <CardContent className="pt-4 space-y-4">
+    <div className="space-y-4">
+      <ResumeQualityPanel evaluation={artifact.quality_evaluation} />
+      <Card>
+        <CardContent className="pt-4 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
@@ -757,7 +763,8 @@ export function ResumeArtifactReview({ jobId, artifact }: Props) {
             </div>
           ))}
         </div>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

@@ -136,7 +136,19 @@ from app.services.resume_artifact.redline import (
     render_resume_artifact_redline_pdf,
     render_resume_artifact_redline_pdf_async,
 )
+from app.services.resume_artifact.quality import (
+    EARLY_CAREER_TECHNICAL,
+    EXPERIENCED_TECHNICAL,
+    GENERAL_PROFESSIONAL,
+    RUBRIC_VERSION,
+    evaluate_resume_quality,
+    quality_planner_guidance,
+    select_quality_profile,
+    unavailable_quality_evaluation,
+    validate_quality_evaluation,
+)
 from app.services.resume_artifact.service import (
+    RESUME_REUSE_QUALITY_THRESHOLD,
     RESUME_REUSE_SCORE_THRESHOLD,
     _build_resume_reuse_candidate,
     _load_or_generate_tailoring,
@@ -326,8 +338,6 @@ logger = logging.getLogger(__name__)
 # pdflatex is a blocking subprocess and CPU/IO heavy. Run it off the event loop
 # (audit H1) and bound concurrency so a burst of PDF requests can't spawn an
 # unbounded number of pdflatex processes and exhaust the host.
-
-
 
 
 

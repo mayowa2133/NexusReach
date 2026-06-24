@@ -188,7 +188,9 @@ describe('JobDetailPage', () => {
             source_company_name: 'Acme',
             filename: 'resume-acme-2026-04-18.tex',
             score: 91.2,
+            quality_score: 84.0,
             threshold: 80,
+            quality_threshold: 70,
             job_family: 'frontend_fullstack',
             generated_at: '2026-04-18T00:00:00Z',
             updated_at: '2026-04-19T00:00:00Z',
@@ -202,6 +204,7 @@ describe('JobDetailPage', () => {
     renderPage();
 
     expect(screen.getByText('Strong existing resume available')).toBeInTheDocument();
+    expect(screen.getByText('84% quality')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /use existing resume/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /generate new anyway/i })).toBeInTheDocument();
   });

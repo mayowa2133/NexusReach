@@ -24,12 +24,18 @@ from app.services.resume_tailor import (
 from app.services.resume_artifact.latex import _render_resume_latex
 from app.services.resume_artifact.parsed import _extract_resume_data
 from app.services.resume_artifact.plan import _build_resume_artifact_plan, _job_family, score_resume_content_against_job
+from app.services.resume_artifact.quality import (
+    evaluate_resume_quality,
+    quality_planner_guidance,
+    unavailable_quality_evaluation,
+)
 from app.services.resume_artifact.textnorm import _slugify_label
 
 logger = logging.getLogger(__name__)
 
 
 RESUME_REUSE_SCORE_THRESHOLD = 80.0
+RESUME_REUSE_QUALITY_THRESHOLD = 70.0
 
 
 def _build_resume_reuse_candidate(
@@ -38,6 +44,8 @@ def _build_resume_reuse_candidate(
     source_job: Job,
     target_job: Job,
     threshold: float,
+    parsed_resume: dict[str, Any] | None = None,
+    quality_threshold: float | None = None,
 ) -> dict[str, Any] | None:
     source_family = _job_family(source_job)
     target_family = _job_family(target_job)
@@ -48,15 +56,44 @@ def _build_resume_reuse_candidate(
     if score is None or score < threshold:
         return None
 
+    quality_score: float | None = None
+    if parsed_resume is not None:
+        try:
+            evaluation = evaluate_resume_quality(
+                parsed=parsed_resume,
+                content=artifact.content,
+                job=target_job,
+            )
+            evidence_axis = (evaluation.get("axes") or {}).get("evidence_quality")
+            if (
+                evaluation.get("status") == "ready"
+                and isinstance(evidence_axis, dict)
+                and isinstance(evidence_axis.get("score"), (int, float))
+            ):
+                quality_score = float(evidence_axis["score"])
+        except Exception as exc:
+            logger.warning("Resume reuse quality evaluation failed: %s", exc)
+        if quality_threshold is not None and (
+            quality_score is None or quality_score < quality_threshold
+        ):
+            return None
+
     return {
         "artifact": artifact,
         "source_job": source_job,
         "score": score,
+        "quality_score": quality_score,
         "threshold": threshold,
+        "quality_threshold": quality_threshold,
         "job_family": target_family,
         "reason": (
             f"This saved resume scores {score:.1f}% against the new posting "
             f"and matches the {target_family.replace('_', '/')} job family."
+            + (
+                f" Its evidence-quality gate is {quality_score:.1f}%."
+                if quality_score is not None
+                else ""
+            )
         ),
     }
 
@@ -78,6 +115,11 @@ async def get_resume_reuse_candidates_for_job(
         raise ValueError("Job not found.")
 
     rows = await list_resume_artifacts_for_user(db=db, user_id=user_id)
+    profile_result = await db.execute(
+        select(Profile).where(Profile.user_id == user_id)
+    )
+    profile = profile_result.scalar_one_or_none()
+    parsed_resume = (profile.resume_parsed or {}) if profile else {}
     candidates: list[dict[str, Any]] = []
     for artifact, source_job in rows:
         if artifact.job_id == job_id:
@@ -87,6 +129,8 @@ async def get_resume_reuse_candidates_for_job(
             source_job=source_job,
             target_job=target_job,
             threshold=threshold,
+            parsed_resume=parsed_resume,
+            quality_threshold=RESUME_REUSE_QUALITY_THRESHOLD,
         )
         if candidate is not None:
             candidates.append(candidate)
@@ -145,11 +189,17 @@ async def reuse_resume_artifact_for_job(
     if source_artifact.job_id == job_id:
         raise ValueError("Cannot reuse a resume artifact for the same job.")
 
+    profile_result = await db.execute(
+        select(Profile).where(Profile.user_id == user_id)
+    )
+    profile = profile_result.scalar_one_or_none()
     candidate = _build_resume_reuse_candidate(
         artifact=source_artifact,
         source_job=source_job,
         target_job=target_job,
         threshold=threshold,
+        parsed_resume=(profile.resume_parsed or {}) if profile else {},
+        quality_threshold=RESUME_REUSE_QUALITY_THRESHOLD,
     )
     if candidate is None:
         raise ValueError("Saved resume does not meet the reuse threshold for this job.")
@@ -175,6 +225,21 @@ async def reuse_resume_artifact_for_job(
     )
     artifact.content = source_artifact.content
     artifact.rewrite_decisions = {}
+    try:
+        evaluation = evaluate_resume_quality(
+            parsed=(profile.resume_parsed or {}) if profile else {},
+            content=artifact.content,
+            job=target_job,
+        )
+    except Exception as exc:
+        logger.warning("Resume quality evaluation failed during reuse: %s", exc)
+        evaluation = unavailable_quality_evaluation(str(exc))
+    artifact.quality_evaluation = evaluation
+    artifact.quality_score = (
+        float(evaluation["overall_score"])
+        if evaluation.get("status") == "ready"
+        else None
+    )
     artifact.generated_at = datetime.now(timezone.utc)
 
     await db.commit()
@@ -303,10 +368,23 @@ async def generate_resume_artifact_for_job(
         profile=profile,
         prefer_existing=False,
     )
+    try:
+        source_evaluation = evaluate_resume_quality(
+            parsed=enriched_resume,
+            content=profile.resume_raw or "",
+            job=job,
+            rewrites=tailored.bullet_rewrites or [],
+            rewrite_decisions=rewrite_decisions or {},
+        )
+        quality_guidance = quality_planner_guidance(source_evaluation)
+    except Exception as exc:
+        logger.warning("Source resume quality evaluation failed: %s", exc)
+        quality_guidance = ""
     artifact_plan = await _build_resume_artifact_plan(
         parsed=enriched_resume,
         job=job,
         tailored=tailored,
+        quality_guidance=quality_guidance,
     )
 
     filename = f"resume-{_slugify_label(job.company_name, 'company')}-{datetime.now(timezone.utc).date().isoformat()}.tex"
@@ -343,6 +421,23 @@ async def generate_resume_artifact_for_job(
     artifact.filename = filename
     artifact.content = content
     artifact.rewrite_decisions = decisions
+    try:
+        evaluation = evaluate_resume_quality(
+            parsed=enriched_resume,
+            content=content,
+            job=job,
+            rewrites=tailored.bullet_rewrites or [],
+            rewrite_decisions=decisions,
+        )
+    except Exception as exc:
+        logger.warning("Final resume quality evaluation failed: %s", exc)
+        evaluation = unavailable_quality_evaluation(str(exc))
+    artifact.quality_evaluation = evaluation
+    artifact.quality_score = (
+        float(evaluation["overall_score"])
+        if evaluation.get("status") == "ready"
+        else None
+    )
     artifact.generated_at = datetime.now(timezone.utc)
 
     await db.commit()

@@ -103,6 +103,11 @@ NexusReach already has a working end-to-end loop:
 - [x] Jobs country filter derived from `location`
 - [x] Jobs startup filter and separate `Discover Startup Jobs` action
 - [x] startup badges/source badges on Jobs, Job Detail, and Dashboard
+- [x] versioned, occupation-aware resume quality gate inspired by HackerRank's public rubric
+- [x] persisted resume job-fit, evidence-quality, and parseability breakdowns
+- [x] truthfulness-aware scoring that excludes unconfirmed inferred claims
+- [x] dual-threshold saved-resume reuse (job fit + evidence quality)
+- [x] transparent resume quality evidence, improvements, attribution, and disclaimer UI
 
 ## Current priorities
 

@@ -329,6 +329,50 @@ class ResumeBulletRewritePreview(BaseModel):
     decision: str = "pending"
 
 
+class ResumeQualitySourceAttribution(BaseModel):
+    name: str
+    url: str
+    license: str
+    adaptation: str
+
+
+class ResumeQualityDimension(BaseModel):
+    score: float
+    max: float = 100
+    evidence: list[str] = Field(default_factory=list)
+    improvements: list[str] = Field(default_factory=list)
+
+
+class ResumeQualityCategory(ResumeQualityDimension):
+    key: str
+    label: str
+
+
+class ResumeQualityTruthfulness(BaseModel):
+    unverified_inferred_additions_excluded: int = 0
+    excluded_phrases: list[str] = Field(default_factory=list)
+
+
+class ResumeQualityEvaluation(BaseModel):
+    schema_version: int = 1
+    rubric_version: str
+    status: Literal["ready", "unavailable"]
+    evaluation_mode: str
+    source_attribution: ResumeQualitySourceAttribution
+    evaluated_at: str
+    profile: str | None = None
+    profile_label: str | None = None
+    overall_score: float | None = None
+    readiness: str | None = None
+    axes: dict[str, ResumeQualityDimension] = Field(default_factory=dict)
+    categories: list[ResumeQualityCategory] = Field(default_factory=list)
+    strengths: list[str] = Field(default_factory=list)
+    improvements: list[str] = Field(default_factory=list)
+    truthfulness: ResumeQualityTruthfulness | None = None
+    disclaimer: str
+    reason: str | None = None
+
+
 class ResumeArtifactResponse(BaseModel):
     id: str
     job_id: str
@@ -345,6 +389,8 @@ class ResumeArtifactResponse(BaseModel):
     rewrite_previews: list[ResumeBulletRewritePreview] = []
     auto_accept_inferred: bool = False
     body_ats_score: float | None = None
+    quality_score: float | None = None
+    quality_evaluation: ResumeQualityEvaluation | None = None
 
 
 class ResumeArtifactDecisionsUpdate(BaseModel):
@@ -358,7 +404,9 @@ class ResumeReuseCandidate(BaseModel):
     source_company_name: str | None = None
     filename: str
     score: float
+    quality_score: float | None = None
     threshold: float
+    quality_threshold: float | None = None
     job_family: str
     generated_at: str
     updated_at: str
