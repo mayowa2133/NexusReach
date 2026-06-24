@@ -58,11 +58,19 @@ class Settings(BaseSettings):
     scrapegraph_api_key: str = ""
     searxng_base_url: str = "http://localhost:8888"
     search_cache_ttl_seconds: int = 86_400
-    search_linkedin_provider_order: str = "searxng,serper,brave,google_cse"
-    search_exact_linkedin_provider_order: str = "searxng,brave,serper,google_cse"
-    search_hiring_team_provider_order: str = "searxng,serper,brave"
-    search_public_provider_order: str = "searxng,serper,brave,tavily"
-    search_employment_provider_order: str = "tavily,searxng,serper,brave"
+    # Provider order defaults. SearXNG is intentionally NOT in the defaults:
+    # self-hosted SearXNG on a cloud/datacenter IP gets its scraping engines
+    # CAPTCHA'd/blocked and returns 0 results (verified on Railway 2026-06-23), so
+    # the authenticated APIs are primary. For LinkedIn x-ray, Google-backed
+    # sources have by far the best `site:linkedin.com/in` recall, so lead with
+    # Google CSE (free 100/day) then Serper (Google SERPs) then Brave (independent
+    # index, weaker LinkedIn). Local dev with a residential-IP SearXNG can re-add
+    # it via the NEXUSREACH_SEARCH_*_PROVIDER_ORDER env vars.
+    search_linkedin_provider_order: str = "google_cse,serper,brave"
+    search_exact_linkedin_provider_order: str = "google_cse,serper,brave"
+    search_hiring_team_provider_order: str = "serper,brave"
+    search_public_provider_order: str = "brave,serper,tavily"
+    search_employment_provider_order: str = "tavily,brave,serper"
     theorg_traversal_enabled: bool = True
     theorg_cache_ttl_hours: int = 24
     theorg_max_team_pages: int = 3

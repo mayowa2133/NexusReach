@@ -1,6 +1,6 @@
 # NexusReach — Claude Context
 
-Last updated: 2026-06-21
+Last updated: 2026-06-23
 
 This file mirrors `AGENTS.md` so Claude and Codex see the same project state. If these files ever drift, update both together.
 
@@ -112,15 +112,16 @@ NexusReach defaults to draft-first workflows. Users can optionally enable delaye
 - Dashboard `warm_paths` unifies imported LinkedIn graph paths with outreach-derived paths (`insights_service`). Imported graph data also powers people-search ranking and explanation.
 
 ### Search-provider routing
-- SearXNG is the default primary search provider (free, self-hosted, unlimited).
-- Brave and Serper are retained as paid fallbacks if re-funded.
-- Current router behavior:
-  - bulk LinkedIn people discovery: `SearXNG -> Serper -> Brave -> Google CSE`
-  - exact LinkedIn backfill: `SearXNG -> Brave -> Serper -> Google CSE`
-  - hiring-team search: `SearXNG -> Serper -> Brave`
-  - public-web people discovery: `SearXNG -> Serper -> Brave -> Tavily`
-  - employment corroboration: `Tavily -> SearXNG -> Serper -> Brave`
-- Raw provider results are cached in Redis for 24 hours by normalized query family.
+- **Self-hosted SearXNG is NOT viable on a cloud/datacenter IP** and is no longer used in production. Its scraping engines (Google/Bing/DuckDuckGo/Brave-web/Startpage) get CAPTCHA'd or rate-limited from a datacenter IP and return **0 results** (verified on Railway 2026-06-23 — every engine `Suspended: CAPTCHA/too many requests`). Same for any cloud host (Oracle/Fly/Render) and for residential-proxy salvage (more expensive + fragile than paying a SERP API). The authenticated **APIs are primary** — they call vendor endpoints (not scraping), so a datacenter IP is fine. SearXNG stays a supported provider for local dev on a residential IP (opt in via the order env vars).
+- **For LinkedIn x-ray, Google-backed sources have by far the best `site:linkedin.com/in` recall**; independent indexes (Brave, Mojeek, Marginalia, …) are weak for LinkedIn, so lead with Google.
+- Current router order (env-overridable via `NEXUSREACH_SEARCH_*_PROVIDER_ORDER`):
+  - bulk LinkedIn people discovery: `Google CSE -> Serper -> Brave`
+  - exact LinkedIn backfill: `Google CSE -> Serper -> Brave`
+  - hiring-team search: `Serper -> Brave`
+  - public-web people discovery: `Brave -> Serper -> Tavily`
+  - employment corroboration: `Tavily -> Brave -> Serper`
+- Free-tier economics: Google CSE 100/day free (best LinkedIn recall, but whole-web mode **sunsets 2027-01-01** — a `linkedin.com`-restricted CSE survives and stays free); Serper 2,500 one-time then ~$0.30–1/1k (real Google SERPs); Brave ~free monthly credit (general web). There is **no truly free + unlimited + datacenter-safe Google-quality LinkedIn source** — the strategy is stacked free tiers + routing + caching, graduating to a low-cost SERP API at volume.
+- Raw provider results are cached in Redis for 24 hours by normalized query family (kept at 24h, not longer — partly for Google's ToS on caching SERP payloads).
 - Provider/debug metadata is stored in `profile_data` or result metadata:
   - `search_provider`
   - `search_query_family`
@@ -164,6 +165,18 @@ NexusReach defaults to draft-first workflows. Users can optionally enable delaye
 - The drafting flow is draft-first by default, with optional delayed auto-send for staged email drafts when the user explicitly enables it.
 - The weekly cadence digest can pre-draft due follow-ups (`cadence_auto_draft_enabled`, opt-in, capped at 3 LLM drafts per digest); drafts are attached to next actions and never sent automatically.
 - Warm-path context (type, reason, connection) is threaded into drafting and shown on draft cards.
+
+### Resume quality gate
+- Every newly generated or regenerated resume artifact is evaluated after LaTeX rendering by a deterministic, explainable quality gate (`app/services/resume_artifact/quality.py`).
+- The gate keeps three independent axes separate:
+  - job-fit term coverage
+  - occupation-aware evidence quality
+  - artifact parseability
+- The early-career technical profile adapts HackerRank Hiring Agent's MIT-licensed public category balance (open source 35, projects 30, production 25, technical skills 10). Experienced technical and general professional profiles use different weights; non-technical candidates are never penalized for lacking GitHub/open-source work.
+- Scores use only user-scoped parsed resume evidence and final artifact content. Unconfirmed `inferred_claim` additions are stripped before scoring, and school prestige, grades, demographics, and geography do not affect results.
+- The source evaluation feeds bounded, supported-evidence guidance into artifact planning. Final results persist on `resume_artifacts.quality_evaluation` / `quality_score` with rubric version, profile, evidence, improvements, attribution, and a screening-simulation disclaimer.
+- Cross-job resume reuse now requires both the existing 80% body ATS threshold and a 70% quality threshold before it is offered for automatic reuse. Explicit reuse is re-evaluated against the target job and never inherits a stale source-job score.
+- The Job Detail review shows the overall score, independent axes, category evidence, improvements, attribution, excluded inferred-claim count, and the explicit statement that the simulation is not an employer decision or rejection reason.
 
 ### Frontend state and UX
 - Saved contacts are grouped by company on the People page.
@@ -384,11 +397,11 @@ NEXUSREACH_BRAVE_API_KEY=...
 NEXUSREACH_SERPER_API_KEY=...
 NEXUSREACH_TAVILY_API_KEY=...
 NEXUSREACH_SEARCH_CACHE_TTL_SECONDS=86400
-NEXUSREACH_SEARCH_LINKEDIN_PROVIDER_ORDER=searxng,serper,brave,google_cse
-NEXUSREACH_SEARCH_EXACT_LINKEDIN_PROVIDER_ORDER=searxng,brave,serper,google_cse
-NEXUSREACH_SEARCH_HIRING_TEAM_PROVIDER_ORDER=searxng,serper,brave
-NEXUSREACH_SEARCH_PUBLIC_PROVIDER_ORDER=searxng,serper,brave,tavily
-NEXUSREACH_SEARCH_EMPLOYMENT_PROVIDER_ORDER=tavily,searxng,serper,brave
+NEXUSREACH_SEARCH_LINKEDIN_PROVIDER_ORDER=google_cse,serper,brave
+NEXUSREACH_SEARCH_EXACT_LINKEDIN_PROVIDER_ORDER=google_cse,serper,brave
+NEXUSREACH_SEARCH_HIRING_TEAM_PROVIDER_ORDER=serper,brave
+NEXUSREACH_SEARCH_PUBLIC_PROVIDER_ORDER=brave,serper,tavily
+NEXUSREACH_SEARCH_EMPLOYMENT_PROVIDER_ORDER=tavily,brave,serper
 
 NEXUSREACH_FIRECRAWL_BASE_URL=
 NEXUSREACH_FIRECRAWL_API_KEY=
@@ -434,8 +447,8 @@ VITE_ANALYTICS_ENABLED=true
 
 1. `backend/.env` is loaded relative to the current working directory. Running scripts from the repo root can miss backend config.
 2. Apollo free-tier company endpoints are useful; person search is still not something to depend on blindly.
-3. SearXNG is the default primary search provider (free, self-hosted). It queries a local SearXNG instance via JSON API.
-4. Brave and Serper are retained as paid fallbacks but are no longer the default primary providers.
+3. SearXNG is no longer a production search provider — self-hosted SearXNG on a cloud/datacenter IP returns 0 results (engines block the IP; verified 2026-06-23). Authenticated APIs are primary; SearXNG is local-dev-only (residential IP). See the Search-provider routing section.
+4. For LinkedIn x-ray the order is Google CSE → Serper → Brave (Google-backed sources have the best `site:linkedin.com/in` recall; Brave's independent index is weak for LinkedIn). Brave leads only the general-web chains.
 5. Tavily is primarily for employment corroboration and fallback public-web discovery, not main LinkedIn x-ray.
 6. Firecrawl is optional and should be treated as a last-resort page-fetch provider.
 7. The Org slug resolution must validate real org pages. Do not assume the first slug candidate is correct.
