@@ -53,9 +53,19 @@ class Settings(BaseSettings):
     brave_api_key: str = ""
     serper_api_key: str = ""
     tavily_api_key: str = ""
+    # Additional datacenter-safe search APIs (off until a key is set). You.com is
+    # a Google-style SERP API (site:/boolean) used as a LinkedIn x-ray fallback;
+    # Exa is a neural "people" search used as a semantic people-discovery fallback.
+    youcom_api_key: str = ""
+    exa_api_key: str = ""
     firecrawl_base_url: str = ""
     firecrawl_api_key: str = ""
     scrapegraph_api_key: str = ""
+    # Optional dedicated Google CSE restricted to linkedin.com, used only for the
+    # LinkedIn x-ray queries. A site-restricted CSE keeps working free after
+    # Google sunsets whole-web CSE search (2027-01-01) and has the best
+    # `site:linkedin.com/in` recall. Falls back to google_cse_id when unset.
+    google_linkedin_cse_id: str = ""
     searxng_base_url: str = "http://localhost:8888"
     search_cache_ttl_seconds: int = 86_400
     # Provider order defaults. SearXNG is intentionally NOT in the defaults:
@@ -66,8 +76,8 @@ class Settings(BaseSettings):
     # Google CSE (free 100/day) then Serper (Google SERPs) then Brave (independent
     # index, weaker LinkedIn). Local dev with a residential-IP SearXNG can re-add
     # it via the NEXUSREACH_SEARCH_*_PROVIDER_ORDER env vars.
-    search_linkedin_provider_order: str = "google_cse,serper,brave"
-    search_exact_linkedin_provider_order: str = "google_cse,serper,brave"
+    search_linkedin_provider_order: str = "google_cse,serper,brave,youcom,exa"
+    search_exact_linkedin_provider_order: str = "google_cse,serper,brave,youcom"
     search_hiring_team_provider_order: str = "serper,brave"
     search_public_provider_order: str = "brave,serper,tavily"
     search_employment_provider_order: str = "tavily,brave,serper"

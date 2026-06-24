@@ -11,11 +11,13 @@ from typing import Any
 
 from app.clients import (
     brave_search_client,
+    exa_search_client,
     searxng_search_client,
     google_search_client,
     search_cache_client,
     serper_search_client,
     tavily_search_client,
+    youcom_search_client,
 )
 from app.config import settings
 
@@ -300,11 +302,13 @@ async def search_people(
         "serper": serper_search_client.search_people,
         "brave": brave_search_client.search_people,
         "google_cse": google_search_client.search_people,
+        "youcom": youcom_search_client.search_people,
+        "exa": exa_search_client.search_people,
     }
     order = _provider_order(
         settings.search_linkedin_provider_order,
         allowed=set(providers),
-        default=["searxng", "serper", "brave", "google_cse"],
+        default=["google_cse", "serper", "brave", "youcom", "exa"],
     )
     return await _run_family(
         "search_people",
@@ -341,11 +345,12 @@ async def search_exact_linkedin_profile(
         "brave": brave_search_client.search_exact_linkedin_profile,
         "serper": serper_search_client.search_exact_linkedin_profile,
         "google_cse": google_search_client.search_exact_linkedin_profile,
+        "youcom": youcom_search_client.search_exact_linkedin_profile,
     }
     order = _provider_order(
         settings.search_exact_linkedin_provider_order,
         allowed=set(providers),
-        default=["searxng", "brave", "serper", "google_cse"],
+        default=["google_cse", "serper", "brave", "youcom"],
     )
     return await _run_family(
         "search_exact_linkedin_profile",

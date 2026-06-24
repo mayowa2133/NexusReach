@@ -104,6 +104,7 @@ class TestSearchPeople:
         ):
             s.google_api_key = "goog-key"
             s.google_cse_id = "cse-id"
+            s.google_linkedin_cse_id = ""
             results = await search_people("Google", titles=["software engineer"])
 
         assert len(results) == 2
@@ -121,6 +122,7 @@ class TestSearchPeople:
         with patch("app.clients.google_search_client.settings") as s:
             s.google_api_key = ""
             s.google_cse_id = "cse-id"
+            s.google_linkedin_cse_id = ""
             results = await search_people("Google")
         assert results == []
 
@@ -128,6 +130,7 @@ class TestSearchPeople:
         with patch("app.clients.google_search_client.settings") as s:
             s.google_api_key = "key"
             s.google_cse_id = ""
+            s.google_linkedin_cse_id = ""
             results = await search_people("Google")
         assert results == []
 
@@ -140,6 +143,7 @@ class TestSearchPeople:
         ):
             s.google_api_key = "key"
             s.google_cse_id = "cse-id"
+            s.google_linkedin_cse_id = ""
             results = await search_people("Google")
 
         assert results == []
@@ -153,6 +157,7 @@ class TestSearchPeople:
         ):
             s.google_api_key = "key"
             s.google_cse_id = "cse-id"
+            s.google_linkedin_cse_id = ""
             results = await search_people("Google")
 
         assert results == []
@@ -178,6 +183,7 @@ class TestSearchPeople:
         ):
             s.google_api_key = "key"
             s.google_cse_id = "cse-id"
+            s.google_linkedin_cse_id = ""
             results = await search_people("Google")
 
         assert len(results) == 1
@@ -193,6 +199,7 @@ class TestSearchPeople:
         ):
             s.google_api_key = "key"
             s.google_cse_id = "cse-id"
+            s.google_linkedin_cse_id = ""
             await search_people("Google", titles=["a", "b", "c", "d"])
 
         queries = [call[1]["params"]["q"] for call in mock_client.get.call_args_list]

@@ -18,6 +18,13 @@ from app.utils.linkedin import parse_linkedin_serp_title
 GOOGLE_CSE_URL = "https://www.googleapis.com/customsearch/v1"
 
 
+def _linkedin_cse_id() -> str:
+    """CSE id for LinkedIn x-ray queries: a dedicated linkedin.com-restricted CSE
+    when configured (survives the 2027 whole-web sunset, best LinkedIn recall),
+    else the general CSE."""
+    return settings.google_linkedin_cse_id or settings.google_cse_id
+
+
 def _parse_linkedin_result(item: dict, company_name: str) -> dict | None:
     """Parse a Google CSE result item into a person data dict.
 
@@ -97,7 +104,7 @@ async def search_people(
         List of person dicts compatible with _store_person().
         Returns [] if API key or CSE ID is not configured.
     """
-    if not settings.google_api_key or not settings.google_cse_id:
+    if not settings.google_api_key or not _linkedin_cse_id():
         return []
 
     from app.clients.serper_search_client import _title_batches
@@ -138,7 +145,7 @@ async def search_people(
                     params={
                         "q": query,
                         "key": settings.google_api_key,
-                        "cx": settings.google_cse_id,
+                        "cx": _linkedin_cse_id(),
                         "num": min(limit, 10),
                     },
                 )
@@ -181,7 +188,7 @@ async def search_exact_linkedin_profile(
     limit: int = 3,
 ) -> list[dict]:
     """Search Google CSE for one exact LinkedIn profile."""
-    if not settings.google_api_key or not settings.google_cse_id or not full_name or not company_name:
+    if not settings.google_api_key or not _linkedin_cse_id() or not full_name or not company_name:
         return []
 
     ordered_names: list[str] = []
@@ -220,7 +227,7 @@ async def search_exact_linkedin_profile(
                     params={
                         "q": query,
                         "key": settings.google_api_key,
-                        "cx": settings.google_cse_id,
+                        "cx": _linkedin_cse_id(),
                         "num": min(max(limit, 1), 10),
                     },
                 )
