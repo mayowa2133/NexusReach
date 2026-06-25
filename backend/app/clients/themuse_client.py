@@ -201,6 +201,9 @@ def _normalize_muse_job(job: dict) -> dict | None:
         # posted_ts (sub-day precision) per the posting-time precision contract.
         "posted_at": job.get("publication_date") or None,
         "salary": "",
+        # The Muse's own level ("Internship"/"Entry Level"/"Mid Level"/...) is an
+        # authoritative label, so feed it to the experience-level classifier.
+        "level_label": level_tags[0] if level_tags else None,
         "tags": [*category_tags, *(t.lower() for t in level_tags)],
         "source": "themuse",
     }
@@ -211,11 +214,14 @@ async def _fetch_category_page(
     *,
     category: str | None,
     page: int,
+    level: str | None = None,
 ) -> tuple[list[dict], int]:
     """Return (results, page_count) for one Muse page. Fails soft to ([], 0)."""
     params: dict[str, str | int] = {"page": page}
     if category:
         params["category"] = category
+    if level:
+        params["level"] = level
     if settings.themuse_api_key:
         params["api_key"] = settings.themuse_api_key
     try:
@@ -242,8 +248,10 @@ async def _fetch_category(
     category: str | None,
     max_results: int,
     keep: Callable[[dict], bool],
+    level: str | None = None,
 ) -> list[dict]:
-    """Fetch + normalize one category, paging until ``max_results`` jobs pass.
+    """Fetch + normalize one category (optionally one level), paging until
+    ``max_results`` jobs pass.
 
     ``keep`` is applied per normalized job so we page deeper when a relevance
     gate is filtering hard, instead of returning a thin under-filled batch.
@@ -251,7 +259,7 @@ async def _fetch_category(
     collected: list[dict] = []
     for page in range(1, _MAX_PAGES_PER_CATEGORY + 1):
         results, page_count = await _fetch_category_page(
-            client, category=category, page=page
+            client, category=category, page=page, level=level
         )
         for raw in results:
             job = _normalize_muse_job(raw)
@@ -265,6 +273,12 @@ async def _fetch_category(
     return collected[:max_results]
 
 
+# The Muse level values for early-career roles. Querying these adds entry-level
+# and internship volume across every occupation (the non-tech counterpart to the
+# tech-only SimplifyJobs lists).
+EARLY_CAREER_LEVELS: tuple[str, ...] = ("Entry Level", "Internship")
+
+
 async def search_themuse(
     query: str | None = None,
     *,
@@ -273,6 +287,7 @@ async def search_themuse(
     location: str | None = None,
     remote_only: bool = False,
     limit: int = 50,
+    boost_early_career: bool = False,
 ) -> list[dict]:
     """Search The Muse, returning normalized raw-job dicts. Fails soft to ``[]``.
 
@@ -284,6 +299,10 @@ async def search_themuse(
       occupation (so off-target category noise isn't mislabeled).
     - free-text query path: keep titles sharing a token with the query (so a
       specific saved search stays on-topic).
+
+    When ``boost_early_career`` is set, dedicated Entry-Level + Internship pulls
+    are added on top of the all-levels pull (with their own budget), so the feed
+    gains early-career volume instead of it being crowded out by senior roles.
     """
     resolved_categories: list[str]
     if categories:
@@ -302,15 +321,23 @@ async def search_themuse(
 
     # No category resolved → one broad page so the source is never a hard zero.
     fetch_targets: list[str | None] = resolved_categories or [None]
-    per_category = max(_PER_PAGE, (limit + len(fetch_targets) - 1) // len(fetch_targets))
+    # (category, level) specs. Early-career levels come first so they're never
+    # crowded out of the result cap by the all-levels pull.
+    specs: list[tuple[str | None, str | None]] = []
+    budget = limit
+    if boost_early_career:
+        specs.extend((cat, lvl) for lvl in EARLY_CAREER_LEVELS for cat in fetch_targets)
+        budget = limit * 2  # additive headroom for the early-career roles
+    specs.extend((cat, None) for cat in fetch_targets)
+    per_spec = max(_PER_PAGE, (budget + len(specs) - 1) // len(specs))
 
     async with httpx.AsyncClient(timeout=20) as client:
         batches = await asyncio.gather(
             *(
                 _fetch_category(
-                    client, category=cat, max_results=per_category, keep=keep
+                    client, category=cat, level=lvl, max_results=per_spec, keep=keep
                 )
-                for cat in fetch_targets
+                for cat, lvl in specs
             )
         )
 
@@ -322,6 +349,6 @@ async def search_themuse(
                 continue
             seen_ids.add(job["external_id"])
             normalized.append(job)
-            if len(normalized) >= limit:
+            if len(normalized) >= budget:
                 return normalized
     return normalized

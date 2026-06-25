@@ -9,6 +9,7 @@ from app.clients.remote_jobs_client import (
     _extract_dice_configured_url,
     _parse_simplify_html_jobs,
     _search_dice_with_client,
+    _strip_simplify_marker,
 )
 
 
@@ -131,3 +132,35 @@ def test_parse_simplify_html_jobs_uses_direct_apply_link():
     assert jobs[0]["title"] == "Software Engineer 1"
     assert jobs[0]["url"] == "https://job-boards.greenhouse.io/captivation/jobs/5230024008"
     assert jobs[0]["apply_url"] == "https://job-boards.greenhouse.io/captivation/jobs/5230024008"
+
+
+# --- SimplifyJobs early-career parsing --------------------------------------
+
+
+def test_strip_simplify_marker_removes_hot_emoji():
+    assert _strip_simplify_marker("🔥 Amazon") == "Amazon"
+    assert _strip_simplify_marker("⭐ Palantir") == "Palantir"
+    assert _strip_simplify_marker("Stripe") == "Stripe"
+    # The "↳" repeat marker is left for the carry-forward logic, not stripped.
+    assert _strip_simplify_marker("↳") == "↳"
+
+
+def test_parse_simplify_html_stamps_level_strips_marker_and_carries_company():
+    html = (
+        "<table><tbody>"
+        '<tr><td>🔥 Amazon</td><td>SWE Intern</td><td>New York</td>'
+        '<td><a href="https://amazon.jobs/1">Apply</a></td><td>Jun 25</td></tr>'
+        '<tr><td>↳</td><td>Data Intern</td><td>Remote</td>'
+        '<td><a href="https://amazon.jobs/2">Apply</a></td><td>Jun 25</td></tr>'
+        "</tbody></table>"
+    )
+    jobs = _parse_simplify_html_jobs(html, limit=10, level_label="Internship")
+    assert len(jobs) == 2
+    assert jobs[0]["company_name"] == "Amazon"  # 🔥 stripped
+    assert jobs[0]["level_label"] == "Internship"
+    assert jobs[0]["source"] == "simplify_github"
+    # "↳" row carries the previous company forward and stays an internship.
+    assert jobs[1]["company_name"] == "Amazon"
+    assert jobs[1]["title"] == "Data Intern"
+    assert jobs[1]["remote"] is True
+    assert jobs[1]["level_label"] == "Internship"

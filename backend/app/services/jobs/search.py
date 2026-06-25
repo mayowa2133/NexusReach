@@ -67,7 +67,11 @@ async def _fetch_jobs_for_source(
                 limit=limit,
             )
         elif source == "simplify":
-            jobs = await remote_jobs_client.fetch_simplify_jobs(limit=limit)
+            # New-grad + internship curated lists (level-stamped). Capped well
+            # above `limit` because the goal here is early-career *volume*.
+            jobs = await remote_jobs_client.fetch_simplify_early_career_jobs(
+                limit_per_repo=max(limit, 400)
+            )
         elif source == "jobbank":
             jobs = await jobbank_client.search_jobbank(
                 query, location=location, limit=limit
@@ -79,6 +83,9 @@ async def _fetch_jobs_for_source(
                 location=location,
                 remote_only=remote_only,
                 limit=limit,
+                # Pull dedicated entry-level + internship roles on top of the
+                # all-levels results so early-career volume isn't crowded out.
+                boost_early_career=True,
             )
         elif source == "newgrad":
             jobs = await newgrad_jobs_client.search_newgrad_jobs(query=query)

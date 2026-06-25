@@ -327,6 +327,19 @@ async def search_jobicy(query: str, limit: int = 10) -> list[dict]:
     ]
 
 
+# SimplifyJobs prefixes "hot" companies with a 🔥 (and uses ⭐/✅ markers). Strip
+# any leading emoji/symbol run so the company name matches real employers (needed
+# for dedup + people discovery's company lookup). Excludes the arrow block so the
+# "↳" repeat-company marker is left for the carry-forward logic to handle.
+_SIMPLIFY_MARKER_RE = re.compile(
+    r"^[\s☀-➿⬀-⯿\U0001F000-\U0001FAFF️‍]+"
+)
+
+
+def _strip_simplify_marker(company: str) -> str:
+    return _SIMPLIFY_MARKER_RE.sub("", company or "").strip()
+
+
 def _simplify_external_id(company: str, title: str, url: str) -> str:
     raw = f"{company.lower().strip()}|{title.lower().strip()}|{url.strip()}"
     return f"simplify_{hashlib.sha1(raw.encode()).hexdigest()[:16]}"
@@ -350,9 +363,12 @@ def _simplify_apply_url(cell: Tag) -> str:
     return ""
 
 
-def _parse_simplify_html_jobs(content: str, limit: int) -> list[dict]:
+def _parse_simplify_html_jobs(
+    content: str, limit: int, *, level_label: str | None = None
+) -> list[dict]:
     soup = BeautifulSoup(content, "html.parser")
     jobs: list[dict] = []
+    last_company = ""
     for row in soup.select("tbody tr"):
         cells = row.find_all("td", recursive=False)
         if len(cells) < 4:
@@ -362,7 +378,12 @@ def _parse_simplify_html_jobs(content: str, limit: int) -> list[dict]:
         if "🔒" in row_text or "closed" in row_text.lower():
             continue
 
-        company = cells[0].get_text(" ", strip=True)
+        company = _strip_simplify_marker(cells[0].get_text(" ", strip=True))
+        # SimplifyJobs repeats a company across roles with "↳"; carry it forward.
+        if company in ("↳", "") or company.strip("* ") == "↳":
+            company = last_company
+        elif company:
+            last_company = company
         title = cells[1].get_text(" ", strip=True)
         location = cells[2].get_text(", ", strip=True)
         url = _simplify_apply_url(cells[3])
@@ -381,6 +402,7 @@ def _parse_simplify_html_jobs(content: str, limit: int) -> list[dict]:
             "apply_url": url,
             "description": f"{title} at {company} — {location}",
             "posted_at": date_posted or None,
+            "level_label": level_label,
             "source": "simplify_github",
         })
 
@@ -390,12 +412,21 @@ def _parse_simplify_html_jobs(content: str, limit: int) -> list[dict]:
     return jobs
 
 
-async def fetch_simplify_jobs(repo: str = "SimplifyJobs/New-Grad-Positions", limit: int = 50) -> list[dict]:
+async def fetch_simplify_jobs(
+    repo: str = "SimplifyJobs/New-Grad-Positions",
+    limit: int = 50,
+    *,
+    level_label: str | None = None,
+) -> list[dict]:
     """Parse job listings from SimplifyJobs GitHub markdown tables.
 
     Args:
-        repo: GitHub repo path (SimplifyJobs/New-Grad-Positions or Summer2025-Internships).
+        repo: GitHub repo path (SimplifyJobs/New-Grad-Positions or Summer2026-Internships).
         limit: Max results.
+        level_label: Optional experience-level label stamped on every row. These
+            repos are level-specific (a new-grad list, an internship list), so
+            passing the level makes downstream classification exact instead of
+            inferring it from the title.
     """
     # Fetch raw README
     url = f"https://raw.githubusercontent.com/{repo}/dev/README.md"
@@ -413,16 +444,23 @@ async def fetch_simplify_jobs(repo: str = "SimplifyJobs/New-Grad-Positions", lim
     # Pattern: lines starting with | that have multiple | separators
     rows = re.findall(r'^\|(.+)\|$', content, re.MULTILINE)
     if len(rows) < 2:
-        return _parse_simplify_html_jobs(content, limit)
+        return _parse_simplify_html_jobs(content, limit, level_label=level_label)
 
     # Skip header and separator rows
     jobs: list[dict] = []
+    last_company = ""
     for row in rows[2:]:  # skip header + separator
         cols = [c.strip() for c in row.split("|")]
         if len(cols) < 4:
             continue
 
-        company = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', cols[0]).strip()
+        company = _strip_simplify_marker(re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', cols[0]))
+        # SimplifyJobs repeats a company across multiple roles with a "↳" marker;
+        # carry the previous company forward so those rows aren't dropped/mislabeled.
+        if company in ("↳", "") or company.strip("* ") == "↳":
+            company = last_company
+        else:
+            last_company = company
         title = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', cols[1]).strip()
         location = cols[2].strip() if len(cols) > 2 else ""
 
@@ -449,6 +487,7 @@ async def fetch_simplify_jobs(repo: str = "SimplifyJobs/New-Grad-Positions", lim
             "apply_url": url or None,
             "description": f"{title} at {company} — {location}",
             "posted_at": date_posted or None,
+            "level_label": level_label,
             "source": "simplify_github",
         })
 
@@ -456,3 +495,42 @@ async def fetch_simplify_jobs(repo: str = "SimplifyJobs/New-Grad-Positions", lim
             break
 
     return jobs
+
+
+# Canonical, free, keyless GitHub lists of early-career tech roles. The new-grad
+# repo was already used; the internships repo closes the biggest gap (internship
+# volume was ~0). Each is level-specific, so we stamp the level on ingest.
+_SIMPLIFY_EARLY_CAREER_REPOS: tuple[tuple[str, str], ...] = (
+    ("SimplifyJobs/New-Grad-Positions", "New Grad"),
+    ("SimplifyJobs/Summer2026-Internships", "Internship"),
+    ("vanshb03/Summer2026-Internships", "Internship"),
+)
+
+
+async def fetch_simplify_early_career_jobs(limit_per_repo: int = 400) -> list[dict]:
+    """Pull new-grad + internship roles from the curated SimplifyJobs lists.
+
+    Aggregates every early-career repo (new-grad and internship), de-dupes by
+    external id, and stamps each row's level from its source list. Free, keyless,
+    fail-soft — a dead repo just contributes nothing.
+    """
+    batches = await asyncio.gather(
+        *(
+            fetch_simplify_jobs(repo, limit=limit_per_repo, level_label=label)
+            for repo, label in _SIMPLIFY_EARLY_CAREER_REPOS
+        ),
+        return_exceptions=True,
+    )
+    seen: set[str] = set()
+    out: list[dict] = []
+    for batch in batches:
+        if isinstance(batch, BaseException):
+            logger.warning("Simplify early-career repo failed: %s", batch)
+            continue
+        for job in batch:
+            key = job.get("external_id") or job.get("url") or job.get("title")
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(job)
+    return out

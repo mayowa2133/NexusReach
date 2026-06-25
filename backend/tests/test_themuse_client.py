@@ -105,7 +105,7 @@ async def test_search_themuse_filters_dedupes_and_limits(monkeypatch):
         2: ([_muse_job(3, "Nurse Practitioner", category="Healthcare")], 2),
     }
 
-    async def fake_page(client, *, category, page):
+    async def fake_page(client, *, category, page, level=None):
         return pages.get(page, ([], 0))
 
     monkeypatch.setattr(themuse_client, "_fetch_category_page", fake_page)
@@ -120,7 +120,7 @@ async def test_search_themuse_filters_dedupes_and_limits(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_search_themuse_query_path_token_filters(monkeypatch):
-    async def fake_page(client, *, category, page):
+    async def fake_page(client, *, category, page, level=None):
         if page != 1:
             return ([], 1)
         return (
@@ -175,3 +175,39 @@ async def test_fetch_category_page_fails_soft_on_rate_limit():
         _FakeClient(lambda: _FakeResp(429)), category="Healthcare", page=1
     )
     assert results == [] and page_count == 0
+
+
+@pytest.mark.asyncio
+async def test_boost_early_career_requests_entry_and_internship_levels(monkeypatch):
+    """boost_early_career adds dedicated Entry Level + Internship pulls."""
+    seen_levels: list = []
+
+    async def fake_page(client, *, category, page, level=None):
+        seen_levels.append(level)
+        if page != 1:
+            return ([], 1)
+        return ([_muse_job(page * 100 + len(seen_levels), "Registered Nurse",
+                           category="Healthcare")], 1)
+
+    monkeypatch.setattr(themuse_client, "_fetch_category_page", fake_page)
+
+    # Without the boost: only the all-levels pull (level is None).
+    seen_levels.clear()
+    await themuse_client.search_themuse(occupation="healthcare", limit=10)
+    assert set(seen_levels) == {None}
+
+    # With the boost: Entry Level + Internship are queried too.
+    seen_levels.clear()
+    await themuse_client.search_themuse(
+        occupation="healthcare", limit=10, boost_early_career=True
+    )
+    assert "Entry Level" in seen_levels
+    assert "Internship" in seen_levels
+    assert None in seen_levels
+
+
+def test_muse_normalize_stamps_level_label():
+    job = _muse_job(5, "Registered Nurse")
+    job["levels"] = [{"name": "Entry Level", "short_name": "entry"}]
+    normalized = themuse_client._normalize_muse_job(job)
+    assert normalized["level_label"] == "Entry Level"
