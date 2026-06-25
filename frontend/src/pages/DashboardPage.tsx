@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { useProfile, getProfileCompletion } from '@/hooks/useProfile';
 import { useInsightsDashboard } from '@/hooks/useInsights';
 import { useOutreachLogs } from '@/hooks/useOutreach';
-import { useJobs, useRefreshJobs, useResumeLibrary, useSavedSearches, useSeedDefaultJobs } from '@/hooks/useJobs';
+import { useJobs, useResumeLibrary, useSavedSearches, useSeedDefaultJobs } from '@/hooks/useJobs';
 import { useOccupations } from '@/hooks/useOccupations';
 import { useGuardrails } from '@/hooks/useSettings';
 import { formatRelativeDate, formatJobPostedAt } from '@/lib/dateUtils';
@@ -47,7 +47,6 @@ export function DashboardPage() {
   const { data: allJobsData } = useJobs({ sortBy: 'score' });
   const { data: latestJobsData } = useJobs({ sortBy: 'date' });
   const { data: savedSearches } = useSavedSearches();
-  const refreshJobs = useRefreshJobs();
   const seedDefaults = useSeedDefaultJobs();
   const { data: guardrails } = useGuardrails();
   const { shouldShow: showOnboarding } = useOnboarding();
@@ -80,7 +79,6 @@ export function DashboardPage() {
     5,
   );
   const latestJobs = latestJobsData?.items?.slice(0, 5) ?? [];
-  const enabledSearchCount = savedSearches?.filter(s => s.enabled).length ?? 0;
   const guardrailsModified = guardrails && (
     !guardrails.min_message_gap_enabled ||
     !guardrails.follow_up_suggestion_enabled ||
@@ -176,21 +174,11 @@ export function DashboardPage() {
             <div>
               <CardTitle>Latest Jobs</CardTitle>
               <p className="text-sm text-muted-foreground mt-0.5">
-                {enabledSearchCount > 0
-                  ? `${enabledSearchCount} saved search${enabledSearchCount === 1 ? '' : 'es'} auto-refreshing every 15 minutes`
+                {latestJobs.length > 0
+                  ? 'Refreshed automatically in the background'
                   : 'Set up your profile to auto-discover jobs'}
               </p>
             </div>
-            {enabledSearchCount > 0 && (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={refreshJobs.isPending}
-                onClick={() => refreshJobs.mutate()}
-              >
-                {refreshJobs.isPending ? 'Refreshing...' : 'Refresh Now'}
-              </Button>
-            )}
           </div>
         </CardHeader>
         <CardContent>
@@ -259,24 +247,11 @@ export function DashboardPage() {
                 Loading your first batch of jobs...
               </p>
             </div>
-          ) : enabledSearchCount > 0 ? (
-            <div className="text-center py-4">
-              <p className="text-sm text-muted-foreground mb-3">
-                No jobs found yet. Click Refresh Now to run your saved searches.
-              </p>
-              <Button
-                size="sm"
-                disabled={refreshJobs.isPending}
-                onClick={() => refreshJobs.mutate()}
-              >
-                {refreshJobs.isPending ? 'Refreshing...' : 'Refresh Now'}
-              </Button>
-            </div>
           ) : (
             <div className="text-sm text-muted-foreground">
               <p>
                 <Link to="/profile" className="text-primary hover:underline">Complete your profile</Link> with target roles
-                and locations to auto-discover matching jobs.
+                and locations and jobs will populate here automatically.
               </p>
             </div>
           )}

@@ -42,7 +42,6 @@ vi.mock('@/stores/auth', () => ({
 }));
 
 let mockSavedJobs: { items: Array<Record<string, unknown>>; total: number; limit: null; offset: 0 } | undefined;
-let mockSavedSearches: Array<Record<string, unknown>> = [];
 const mockUseJobs = vi.fn((filters: unknown) => {
   void filters;
   return {
@@ -54,8 +53,6 @@ const mockEnsureFresh = {
   mutateAsync: vi.fn().mockResolvedValue({ triggered: false, mode: null }),
   isPending: false,
 };
-const mockToggleSavedSearch = { mutate: vi.fn() };
-const mockDeleteSavedSearch = { mutate: vi.fn() };
 
 vi.mock('@/hooks/useJobs', () => ({
   useJobSearch: () => ({
@@ -73,13 +70,6 @@ vi.mock('@/hooks/useJobs', () => ({
   useToggleJobStar: () => ({
     mutateAsync: vi.fn(),
   }),
-  useSavedSearches: () => ({
-    data: mockSavedSearches,
-  }),
-  useJobRefreshRuns: () => ({ data: [] }),
-  useToggleSavedSearch: () => mockToggleSavedSearch,
-  useDeleteSavedSearch: () => mockDeleteSavedSearch,
-  useRefreshJobs: () => ({ mutate: vi.fn(), isPending: false }),
   useEnsureFreshJobs: () => mockEnsureFresh,
 }));
 
@@ -145,11 +135,8 @@ beforeEach(() => {
   window.localStorage.clear();
   mockNavigate.mockReset();
   mockSavedJobs = undefined;
-  mockSavedSearches = [];
   mockUseJobs.mockClear();
   mockEnsureFresh.mutateAsync.mockClear();
-  mockToggleSavedSearch.mutate.mockReset();
-  mockDeleteSavedSearch.mutate.mockReset();
 });
 
 describe('JobsPage', () => {
@@ -220,68 +207,12 @@ describe('JobsPage', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/jobs/job-1');
   });
 
-  // --- Saved Searches ---
-
-  it('renders saved searches when present', () => {
-    mockSavedSearches = [
-      {
-        id: 'pref-1',
-        query: 'Frontend Developer',
-        location: 'New York',
-        remote_only: false,
-        enabled: true,
-        created_at: '2026-03-20T12:00:00Z',
-        updated_at: '2026-03-20T12:00:00Z',
-      },
-    ];
-
+  it('no longer renders the saved-searches management UI', () => {
     renderJobs();
-
-    expect(screen.getByText('Saved Searches')).toBeInTheDocument();
-    expect(screen.getByText('Frontend Developer')).toBeInTheDocument();
-    expect(screen.getByText('New York')).toBeInTheDocument();
-  });
-
-  it('toggles a saved search on/off', async () => {
-    mockSavedSearches = [
-      {
-        id: 'pref-1',
-        query: 'React Engineer',
-        location: null,
-        remote_only: true,
-        enabled: true,
-        created_at: '2026-03-20T12:00:00Z',
-        updated_at: '2026-03-20T12:00:00Z',
-      },
-    ];
-
-    renderJobs();
-
-    const toggle = screen.getByRole('switch', { name: /toggle react engineer auto-refresh/i });
-    await userEvent.click(toggle);
-
-    expect(mockToggleSavedSearch.mutate).toHaveBeenCalledWith({ id: 'pref-1', enabled: false });
-  });
-
-  it('deletes a saved search', async () => {
-    mockSavedSearches = [
-      {
-        id: 'pref-1',
-        query: 'ML Engineer',
-        location: null,
-        remote_only: false,
-        enabled: true,
-        created_at: '2026-03-20T12:00:00Z',
-        updated_at: '2026-03-20T12:00:00Z',
-      },
-    ];
-
-    renderJobs();
-
-    const deleteBtn = screen.getByRole('button', { name: /delete saved search ml engineer/i });
-    await userEvent.click(deleteBtn);
-
-    expect(mockDeleteSavedSearch.mutate).toHaveBeenCalledWith('pref-1');
+    expect(screen.queryByText('Saved Searches')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /refresh now/i }),
+    ).not.toBeInTheDocument();
   });
 
   // --- NEW badge ---

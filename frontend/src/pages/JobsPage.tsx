@@ -14,11 +14,6 @@ import {
   useJobs,
   useUpdateJobStage,
   useToggleJobStar,
-  useSavedSearches,
-  useJobRefreshRuns,
-  useToggleSavedSearch,
-  useDeleteSavedSearch,
-  useRefreshJobs,
   useEnsureFreshJobs,
 } from '@/hooks/useJobs';
 import { useQueryClient } from '@tanstack/react-query';
@@ -281,12 +276,6 @@ export function JobsPage() {
   const updateStage = useUpdateJobStage();
   const toggleStar = useToggleJobStar();
 
-  // Saved searches
-  const { data: savedSearches } = useSavedSearches();
-  const { data: refreshRuns } = useJobRefreshRuns();
-  const toggleSavedSearch = useToggleSavedSearch();
-  const deleteSavedSearch = useDeleteSavedSearch();
-  const refreshJobs = useRefreshJobs();
   const ensureFresh = useEnsureFreshJobs();
   const queryClient = useQueryClient();
 
@@ -315,7 +304,6 @@ export function JobsPage() {
     () => lastVisited ? savedJobs.filter((j) => j.created_at > lastVisited).length : 0,
     [savedJobs, lastVisited],
   );
-  const latestRefreshRuns = refreshRuns?.slice(0, 3) ?? [];
 
   // While a cold-start fill is running on an empty feed, poll the jobs query so
   // the first results appear on their own. Stops as soon as jobs land or after a
@@ -554,162 +542,6 @@ export function JobsPage() {
           />
         </CardContent>
       </Card>
-
-      {/* Saved Searches */}
-      {savedSearches && savedSearches.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="text-base">Saved Searches</CardTitle>
-                <CardDescription>
-                  Enabled searches auto-refresh every 15 minutes and create notifications for new matches.
-                </CardDescription>
-              </div>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={refreshJobs.isPending}
-                onClick={() => {
-                  refreshJobs.mutate(undefined, {
-                    onSuccess: (data) => {
-                      toast.success(`Refresh complete: ${data.new_jobs_found} new job${data.new_jobs_found === 1 ? '' : 's'} found`);
-                    },
-                    onError: () => toast.error('Refresh failed — try again later'),
-                  });
-                }}
-              >
-                {refreshJobs.isPending ? 'Refreshing...' : 'Refresh Now'}
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {savedSearches.map((pref) => (
-                <div
-                  key={pref.id}
-                  className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 ${
-                    pref.enabled ? 'bg-background' : 'bg-muted/30 opacity-60'
-                  }`}
-                >
-                  <div className="flex flex-col gap-0.5 min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium truncate">{pref.query}</span>
-                      {pref.location && (
-                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">
-                          {pref.location}
-                        </Badge>
-                      )}
-                      {pref.remote_only && (
-                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0 shrink-0">
-                          Remote
-                        </Badge>
-                      )}
-                      {pref.mode === 'startup' && (
-                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">
-                          Startup
-                        </Badge>
-                      )}
-                    </div>
-                    {(pref.last_success_at || pref.last_refreshed_at || pref.last_attempted_at) && (
-                      <span className="text-[11px] text-muted-foreground">
-                        Last refreshed {new Date(pref.last_success_at || pref.last_refreshed_at || pref.last_attempted_at || '').toLocaleString()}
-                        {pref.new_jobs_found > 0 && ` — ${pref.new_jobs_found} new`}
-                        {pref.last_duration_seconds != null && ` — ${pref.last_duration_seconds.toFixed(1)}s`}
-                      </span>
-                    )}
-                    {pref.last_error && (
-                      <span className="text-[11px] text-destructive truncate">
-                        {pref.last_error}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <label className="flex items-center gap-1.5 cursor-pointer" aria-label={`Toggle ${pref.query} auto-refresh`}>
-                      <span className="text-xs text-muted-foreground">{pref.enabled ? 'On' : 'Off'}</span>
-                      <button
-                        type="button"
-                        role="switch"
-                        aria-checked={pref.enabled}
-                        aria-label={`Toggle ${pref.query} auto-refresh`}
-                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
-                          pref.enabled ? 'bg-primary' : 'bg-muted-foreground/30'
-                        }`}
-                        onClick={() => toggleSavedSearch.mutate({ id: pref.id, enabled: !pref.enabled })}
-                      >
-                        <span
-                          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-background shadow-sm ring-0 transition-transform ${
-                            pref.enabled ? 'translate-x-4' : 'translate-x-0'
-                          }`}
-                        />
-                      </button>
-                    </label>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
-                      aria-label={`Delete saved search ${pref.query}`}
-                      onClick={() => deleteSavedSearch.mutate(pref.id)}
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-                        <path fillRule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 10.23 1.482l.149-.022.841 10.518A2.75 2.75 0 007.596 19h4.807a2.75 2.75 0 002.742-2.53l.841-10.519.149.023a.75.75 0 00.23-1.482A41.03 41.03 0 0014 4.193V3.75A2.75 2.75 0 0011.25 1h-2.5zM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4zM8.58 7.72a.75.75 0 00-1.5.06l.3 7.5a.75.75 0 101.5-.06l-.3-7.5zm4.34.06a.75.75 0 10-1.5-.06l-.3 7.5a.75.75 0 101.5.06l.3-7.5z" clipRule="evenodd" />
-                      </svg>
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-            {latestRefreshRuns.length > 0 && (
-              <div className="mt-4 border-t pt-3">
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <span className="text-xs font-medium uppercase text-muted-foreground">
-                    Refresh Health
-                  </span>
-                  <span className="text-[11px] text-muted-foreground">
-                    Latest {latestRefreshRuns.length}
-                  </span>
-                </div>
-                <div className="space-y-2">
-                  {latestRefreshRuns.map((run) => {
-                    const failedSources = run.source_runs.filter((source) => source.status === 'failed');
-                    return (
-                      <div key={run.id} className="rounded-md border px-3 py-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge
-                            variant={run.status === 'success' ? 'secondary' : 'destructive'}
-                            className="text-[10px] px-1.5 py-0"
-                          >
-                            {run.status.replace('_', ' ')}
-                          </Badge>
-                          <span className="text-xs font-medium truncate">
-                            {run.mode === 'ats_discovery' ? 'ATS discovery' : run.query || 'Saved search'}
-                          </span>
-                          <span className="text-[11px] text-muted-foreground">
-                            {new Date(run.started_at).toLocaleString()}
-                          </span>
-                          <span className="text-[11px] text-muted-foreground">
-                            {run.total_new} new / {run.total_seen} seen
-                          </span>
-                          {run.duration_seconds != null && (
-                            <span className="text-[11px] text-muted-foreground">
-                              {run.duration_seconds.toFixed(1)}s
-                            </span>
-                          )}
-                        </div>
-                        {failedSources.length > 0 && (
-                          <p className="mt-1 text-[11px] text-destructive truncate">
-                            Failed: {failedSources.map((source) => source.source).join(', ')}
-                          </p>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
 
       {/* Filters and sort */}
       {savedJobs && savedJobs.length > 0 && (
