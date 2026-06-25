@@ -46,19 +46,26 @@ def test_nontech_registry_covers_each_vertical():
 
 def test_verticals_for_occupations():
     f = job_service.verticals_for_occupations
+    all_nontech = {"healthcare", "education", "finance", "retail"}
+    # Industry-anchored occupations have a single vertical home.
     assert f(["healthcare"]) == {"healthcare"}
     assert f(["education_training"]) == {"education"}
-    assert f(["accounting_finance"]) == {"finance"}
+    # General-professional back-office functions exist at every large employer,
+    # so they pull all four curated verticals (a hospital posts accountants too).
+    assert f(["accounting_finance"]) == all_nontech
+    assert f(["human_resources"]) == all_nontech
+    assert f(["marketing"]) == all_nontech
+    # Cross-industry roles concentrated in specific verticals.
     assert f(["sales"]) == {"finance", "retail"}
-    assert f(["supply_chain"]) == {"retail"}
+    assert f(["supply_chain"]) == {"retail", "healthcare"}
     # government routes to USAJobs (not a Workday vertical)
     assert f(["public_sector_government"]) == {"government"}
-    # engineering / unmapped occupations pull no vertical boards
+    # pure-tech engineering occupations pull no vertical boards
     assert f(["software_engineering"]) == set()
     assert f([]) == set()
     assert f(None) == set()
     # union across multiple occupations
-    assert f(["healthcare", "accounting_finance"]) == {"healthcare", "finance"}
+    assert f(["healthcare", "sales"]) == {"healthcare", "finance", "retail"}
 
 
 def test_every_mapped_vertical_has_a_provider():
@@ -225,10 +232,12 @@ async def test_discover_jobs_finance_keeps_tech_and_adds_finance_vertical():
     ):
         await job_service.discover_jobs(_mock_db(profile), uuid.uuid4())
 
-    # finance is cross-industry: tech boards stay AND finance vertical added
+    # finance is cross-industry: tech boards stay AND the curated verticals are
+    # added. Accounting/finance staff exist at every large employer, so it pulls
+    # all four non-tech verticals (the third positional arg is the vertical set).
     mock_ats.assert_awaited_once()
     mock_vert.assert_awaited_once()
-    assert mock_vert.await_args.args[2] == {"finance"}
+    assert mock_vert.await_args.args[2] == {"finance", "healthcare", "education", "retail"}
 
 
 async def test_discover_jobs_routes_government_to_usajobs():
