@@ -26,6 +26,7 @@ from app.schemas.jobs import (
     DiscoverRequest,
     RefreshResponse,
     EnsureFreshResponse,
+    DiscoverOccupationsRequest,
     MatchAnalysisResponse,
     TailoredResumeResponse,
     ResumeArtifactResponse,
@@ -451,6 +452,38 @@ async def ensure_fresh(
     else:
         refresh_single_user_feeds.delay(str(user_id))
     return EnsureFreshResponse(triggered=True, mode=mode)
+
+
+@router.post("/discover-occupations", response_model=EnsureFreshResponse)
+@limiter.limit("20/minute")
+async def discover_occupations(
+    request: Request,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    body: DiscoverOccupationsRequest,
+):
+    """Chip-driven discovery: fetch roles for the occupations the user selected.
+
+    The Jobs-page occupation chips used to only *filter* the feed; this makes
+    selecting one (e.g. Marketing) actually *discover* that category — so a
+    seeker interested in marketing gets marketing roles (early-career boost
+    included) instead of just filtering the SWE-heavy feed to nothing. Runs in
+    the background, debounced per occupation-set so chip toggling can't hammer
+    the sources.
+    """
+    from app.services.occupation_taxonomy import occupation_keys  # noqa: PLC0415
+    from app.tasks.jobs import discover_occupations_for_user  # noqa: PLC0415
+
+    valid = set(occupation_keys())
+    occs = [o for o in dict.fromkeys(body.occupations or []) if o in valid][:10]
+    if not occs:
+        return EnsureFreshResponse(triggered=False)
+
+    debounce_key = f"jobs:discover-occ:{user_id}:" + ",".join(sorted(occs))
+    if not await search_cache_client.acquire_debounce(debounce_key, ttl_seconds=600):
+        return EnsureFreshResponse(triggered=False)
+
+    discover_occupations_for_user.delay(str(user_id), occs)
+    return EnsureFreshResponse(triggered=True, mode="discover")
 
 
 # --- Saved Searches ---

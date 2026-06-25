@@ -106,3 +106,48 @@ async def test_debounce_suppresses_repeat_nudge(client):
     assert resp.json() == {"triggered": False, "mode": None}
     disc.delay.assert_not_called()
     refr.delay.assert_not_called()
+
+
+# --- POST /api/jobs/discover-occupations (chip-driven discovery) -------------
+
+
+async def test_discover_occupations_triggers_for_valid_occupations(client, mock_user_id):
+    with (
+        patch("app.clients.search_cache_client.acquire_debounce", new=AsyncMock(return_value=True)),
+        patch("app.tasks.jobs.discover_occupations_for_user") as task,
+    ):
+        resp = await client.post(
+            "/api/jobs/discover-occupations",
+            json={"occupations": ["marketing", "not_a_real_occ"]},
+        )
+    assert resp.status_code == 200
+    assert resp.json() == {"triggered": True, "mode": "discover"}
+    task.delay.assert_called_once()
+    args = task.delay.call_args.args
+    assert args[0] == str(mock_user_id)
+    assert args[1] == ["marketing"]  # unknown occupation filtered out
+
+
+async def test_discover_occupations_noop_when_none_valid(client):
+    with (
+        patch("app.clients.search_cache_client.acquire_debounce", new=AsyncMock(return_value=True)) as deb,
+        patch("app.tasks.jobs.discover_occupations_for_user") as task,
+    ):
+        resp = await client.post(
+            "/api/jobs/discover-occupations", json={"occupations": ["nonsense"]}
+        )
+    assert resp.json() == {"triggered": False, "mode": None}
+    deb.assert_not_called()
+    task.delay.assert_not_called()
+
+
+async def test_discover_occupations_debounced(client):
+    with (
+        patch("app.clients.search_cache_client.acquire_debounce", new=AsyncMock(return_value=False)),
+        patch("app.tasks.jobs.discover_occupations_for_user") as task,
+    ):
+        resp = await client.post(
+            "/api/jobs/discover-occupations", json={"occupations": ["marketing"]}
+        )
+    assert resp.json() == {"triggered": False, "mode": None}
+    task.delay.assert_not_called()

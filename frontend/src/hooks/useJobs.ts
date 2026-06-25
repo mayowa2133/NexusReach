@@ -288,6 +288,19 @@ export function useEnsureFreshJobs() {
   });
 }
 
+/**
+ * Chip-driven discovery: selecting occupation chips should *fetch* those
+ * categories (early-career boost included), not just filter the feed. Debounced
+ * server-side per occupation-set; the work runs in the background and surfaces
+ * via the jobs query's polling.
+ */
+export function useDiscoverOccupations() {
+  return useMutation({
+    mutationFn: (occupations: string[]) =>
+      api.post<EnsureFreshResult>('/api/jobs/discover-occupations', { occupations }),
+  });
+}
+
 // --- Saved Searches ---
 
 export function useSavedSearches() {

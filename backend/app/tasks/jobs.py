@@ -276,6 +276,42 @@ def discover_for_user(user_id: str) -> dict:
     return {"status": "ok", "new_jobs": count}
 
 
+async def _discover_occupations_for_user(
+    user_id: uuid.UUID, occupations: list[str]
+) -> int:
+    """Run discovery for an explicit set of occupations (chip-driven).
+
+    Powers the Jobs-page occupation chips: selecting "Marketing" should *fetch*
+    marketing roles (early-career boost included via the themuse source), not
+    just filter the existing SWE-heavy feed. Occupation-routed discovery covers
+    every category, so this works for tech and non-tech alike.
+    """
+    from app.services.jobs import discovery  # noqa: PLC0415
+
+    async with async_session() as db:
+        try:
+            return await discovery.discover_jobs(db, user_id, occupations=occupations)
+        except Exception:
+            await db.rollback()
+            logger.exception(
+                "occupation discover failed for user %s (%s)", user_id, occupations
+            )
+            return 0
+
+
+@celery_app.task(
+    name="app.tasks.jobs.discover_occupations_for_user",
+    autoretry_for=(Exception,),
+    retry_backoff=30,
+    retry_backoff_max=300,
+    max_retries=2,
+)
+def discover_occupations_for_user(user_id: str, occupations: list[str]) -> dict:
+    """Celery task: discover an explicit occupation set for one user."""
+    count = run_async(_discover_occupations_for_user(uuid.UUID(user_id), occupations))
+    return {"status": "ok", "new_jobs": count}
+
+
 async def _refresh_all() -> None:
     """Refresh job feeds for all users with enabled search preferences."""
     async with async_session() as db:

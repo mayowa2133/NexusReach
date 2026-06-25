@@ -71,6 +71,10 @@ vi.mock('@/hooks/useJobs', () => ({
     mutateAsync: vi.fn(),
   }),
   useEnsureFreshJobs: () => mockEnsureFresh,
+  useDiscoverOccupations: () => ({
+    mutateAsync: vi.fn().mockResolvedValue({ triggered: false, mode: null }),
+    isPending: false,
+  }),
 }));
 
 vi.mock('sonner', () => ({

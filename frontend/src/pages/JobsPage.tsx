@@ -15,6 +15,7 @@ import {
   useUpdateJobStage,
   useToggleJobStar,
   useEnsureFreshJobs,
+  useDiscoverOccupations,
 } from '@/hooks/useJobs';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -277,6 +278,7 @@ export function JobsPage() {
   const toggleStar = useToggleJobStar();
 
   const ensureFresh = useEnsureFreshJobs();
+  const discoverOccupations = useDiscoverOccupations();
   const queryClient = useQueryClient();
 
   // Button-free population: opening Jobs nudges the backend to keep the feed
@@ -300,31 +302,49 @@ export function JobsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Selecting occupation chips doesn't just filter — it discovers. When the user
+  // picks categories (e.g. Marketing), fetch those categories for them (the
+  // backend debounces per set), so a non-SWE interest fills in instead of
+  // filtering the SWE-heavy feed to nothing. Re-fires when the chip set changes.
+  const selectedOccupationsKey = selectedOccupations.join(',');
+  useEffect(() => {
+    if (!selectedOccupationsKey) return;
+    let cancelled = false;
+    discoverOccupations
+      .mutateAsync(selectedOccupationsKey.split(','))
+      .then((res) => {
+        if (!cancelled && res.triggered) setColdStartFilling(true);
+      })
+      .catch(() => {
+        /* non-blocking — chips still filter even if discovery can't run */
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedOccupationsKey]);
+
   const newJobCount = useMemo(
     () => lastVisited ? savedJobs.filter((j) => j.created_at > lastVisited).length : 0,
     [savedJobs, lastVisited],
   );
 
-  // While a cold-start fill is running on an empty feed, poll the jobs query so
-  // the first results appear on their own. Stops as soon as jobs land or after a
-  // bounded window (the per-job people pre-warm then keeps the feed updating via
-  // its own `warming_count` poll).
+  // While a background fill is running (cold-start, or a chip-driven occupation
+  // discovery), poll the jobs query so freshly-discovered roles appear on their
+  // own. Time-boxed rather than "stop when any job exists", because chip-driven
+  // discovery streams in over a window even when the filtered feed isn't empty.
   useEffect(() => {
     if (!coldStartFilling) return;
-    if (savedJobs.length > 0) {
-      setColdStartFilling(false);
-      return;
-    }
     const startedAt = Date.now();
     const interval = setInterval(() => {
-      if (Date.now() - startedAt > 120000) {
+      if (Date.now() - startedAt > 90000) {
         setColdStartFilling(false);
         return;
       }
       queryClient.invalidateQueries({ queryKey: ['jobs'] });
     }, 5000);
     return () => clearInterval(interval);
-  }, [coldStartFilling, savedJobs.length, queryClient]);
+  }, [coldStartFilling, queryClient]);
 
   const handleUseCurrentLocation = () => {
     if (!navigator.geolocation) {
@@ -525,8 +545,8 @@ export function JobsPage() {
               <div className="font-medium">Your job feed</div>
               <p className="text-sm text-muted-foreground">
                 {selectedOccupations.length > 0
-                  ? `Auto-updating for ${selectedOccupations.length} occupation${selectedOccupations.length === 1 ? '' : 's'} — new jobs appear on their own. Toggle chips to widen or narrow.`
-                  : 'New jobs populate automatically from your profile. Toggle chips to focus the feed.'}
+                  ? `Fetching roles for ${selectedOccupations.length} occupation${selectedOccupations.length === 1 ? '' : 's'} — pick a category and we go find those jobs (new-grad, internships and all). Toggle chips to widen or narrow.`
+                  : 'New jobs populate automatically from your profile. Pick occupation chips to pull in those categories too.'}
               </p>
             </div>
             {coldStartFilling && (

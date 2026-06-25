@@ -168,6 +168,12 @@ class EnsureFreshResponse(BaseModel):
     mode: str | None = None
 
 
+class DiscoverOccupationsRequest(BaseModel):
+    """Chip-driven discovery: the occupations the user has selected on Jobs."""
+
+    occupations: list[str] = []
+
+
 class JobSourceRunResponse(BaseModel):
     id: str
     refresh_run_id: str
