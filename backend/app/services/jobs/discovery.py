@@ -135,15 +135,17 @@ async def discover_jobs(
 
     suppress_tech = constants._suppress_tech_sources(resolved_occupations)
     if suppress_tech:
-        # All-industry aggregators only - the curated tech employers and
-        # tech-leaning boards are noise for nursing / teaching / law / etc.
-        discover_sources = ["jsearch", "adzuna", "remotive"]
+        # All-industry sources only — the curated tech employers and tech-leaning
+        # boards (Dice/Simplify/Jobicy) are noise for nursing / teaching / law.
+        # The Muse is the cross-industry curated-breadth source here and is what
+        # gives these occupations real depth independent of the paid aggregators.
+        discover_sources = ["jsearch", "adzuna", "themuse", "remotive"]
         logger.info(
             "Discover: routing to broad aggregators only (non-tech occupations: %s)",
             resolved_occupations,
         )
     else:
-        discover_sources = ["jsearch", "adzuna", "remotive", "jobicy", "dice", "simplify"]
+        discover_sources = ["jsearch", "adzuna", "themuse", "remotive", "jobicy", "dice", "simplify"]
 
     for seed in expanded_seeds:
         try:

@@ -304,7 +304,7 @@ async def _discover_all_boards() -> None:
     # provenance and stats stay consistent (stored jobs map back to it).
     try:
         nontech_jobs = await workday_client.discover_all_nontech_workday(
-            limit_per_company=20
+            limit_per_company=40
         )
         if nontech_jobs:
             source_payloads.setdefault("workday:curated", []).extend(nontech_jobs)

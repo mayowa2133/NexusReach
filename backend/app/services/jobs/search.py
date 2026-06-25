@@ -13,6 +13,7 @@ from app.utils.job_metadata import geocode_location_query
 from app.clients import jobbank_client
 from app.clients import jsearch_client
 from app.clients import newgrad_jobs_client
+from app.clients import themuse_client
 from app.utils.job_metadata import normalize_job_metadata
 from app.clients import remote_jobs_client
 from sqlalchemy import select
@@ -35,6 +36,7 @@ async def _fetch_jobs_for_source(
     location: str | None,
     remote_only: bool,
     limit: int,
+    occupation: str | None = None,
 ) -> tuple[list[dict], dict]:
     stat = normalize._source_stat(source)
     try:
@@ -69,6 +71,14 @@ async def _fetch_jobs_for_source(
         elif source == "jobbank":
             jobs = await jobbank_client.search_jobbank(
                 query, location=location, limit=limit
+            )
+        elif source == "themuse":
+            jobs = await themuse_client.search_themuse(
+                query,
+                occupation=occupation,
+                location=location,
+                remote_only=remote_only,
+                limit=limit,
             )
         elif source == "newgrad":
             jobs = await newgrad_jobs_client.search_newgrad_jobs(query=query)
@@ -144,6 +154,7 @@ async def search_jobs(
                 location=location,
                 remote_only=remote_only,
                 limit=limit,
+                occupation=occupation_hint,
             )
             for source in all_sources
         )

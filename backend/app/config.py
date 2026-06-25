@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     # user_agent must be the email registered with the key. Optional/fail-soft.
     usajobs_api_key: str = ""
     usajobs_user_agent: str = ""
+    # The Muse public jobs API — free, all-industry, no key required. A key
+    # (free from themuse.com/developers) only raises the rate limit; the client
+    # works keyless and fails soft. This is the cross-industry curated-breadth
+    # source that backstops JSearch/Adzuna for every non-tech occupation.
+    themuse_api_key: str = ""
     anthropic_api_key: str = ""
     openai_api_key: str = ""
     google_api_key: str = ""

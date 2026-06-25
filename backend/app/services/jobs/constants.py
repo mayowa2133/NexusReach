@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_SEARCH_SOURCES = [
     "jsearch",
     "adzuna",
+    "themuse",
     "remotive",
     "jobicy",
     "dice",
@@ -65,17 +66,40 @@ def _suppress_tech_sources(resolved_occupations: list[str] | None) -> bool:
 # Curated non-tech employer lists are the vertical analog of the tech ATS
 # boards. This maps an occupation to the verticals whose employers actually hire
 # it, so a nursing search pulls health systems and a finance search pulls banks.
-# Only occupations with a clear vertical home are mapped; everything else relies
-# on the broad aggregators. Cross-industry occupations (sales, support) map to
-# multiple verticals since those employers hire heavily for them.
+#
+# The big curated employers (health systems, universities, banks/insurers,
+# retailers) are large organizations that staff a full back office — finance,
+# HR, marketing, legal/compliance, project management, business analysis,
+# management — not just their headline clinical/retail roles. So the
+# general-professional occupations route to ALL_NONTECH_VERTICALS: a hospital
+# posts accountants and HR partners the same way a bank posts nurses' payroll
+# staff. Relevance is then handled downstream by occupation tagging + the feed's
+# occupation filter + match scoring, exactly as it is for tech ATS boards (which
+# also return every function, not just engineering). This is the routing breadth
+# that closes the historical gap where marketing/HR/legal/PM/finance seekers got
+# zero curated employers and collapsed onto the paid aggregators alone.
+ALL_NONTECH_VERTICALS = frozenset({"healthcare", "education", "finance", "retail"})
+
 OCCUPATION_VERTICALS: dict[str, frozenset[str]] = {
+    # Industry-anchored: one obvious vertical home.
     "healthcare": frozenset({"healthcare"}),
     "education_training": frozenset({"education"}),
-    "accounting_finance": frozenset({"finance"}),
-    "sales": frozenset({"finance", "retail"}),
-    "customer_service_support": frozenset({"finance", "retail"}),
-    "supply_chain": frozenset({"retail"}),
     "public_sector_government": frozenset({"government"}),
+    # Back-office / general-professional functions every large employer staffs.
+    "accounting_finance": ALL_NONTECH_VERTICALS,
+    "human_resources": ALL_NONTECH_VERTICALS,
+    "marketing": ALL_NONTECH_VERTICALS,
+    "business_analyst": ALL_NONTECH_VERTICALS,
+    "project_management": ALL_NONTECH_VERTICALS,
+    "management_executive": ALL_NONTECH_VERTICALS,
+    "legal_compliance": frozenset({"finance", "healthcare", "education"}),
+    "consulting": frozenset({"finance", "retail"}),
+    "product_management": frozenset({"finance", "retail"}),
+    "creatives_design": frozenset({"retail", "education", "healthcare"}),
+    # Cross-industry roles concentrated in specific verticals.
+    "sales": frozenset({"finance", "retail"}),
+    "customer_service_support": frozenset({"finance", "retail", "healthcare"}),
+    "supply_chain": frozenset({"retail", "healthcare"}),
 }
 
 

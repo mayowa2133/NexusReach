@@ -53,7 +53,7 @@ async def _discover_nontech_vertical_boards(
     user_id: uuid.UUID,
     verticals: set[str],
     profile,
-    limit_per_company: int = 20,
+    limit_per_company: int = 40,
 ) -> int:
     """Pull jobs from curated Workday employers in the given verticals.
 
