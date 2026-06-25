@@ -72,22 +72,25 @@ def _seed_queries_from_profile(profile: Profile) -> list[str]:
 
 async def _seed_saved_searches(
     db: AsyncSession, user_id: uuid.UUID, profile: Profile,
-) -> None:
+) -> bool:
     """Create saved searches from the profile if the user has none yet.
 
     Idempotent: skips entirely when any saved search already exists, so it never
     overwrites user-curated searches. Seeds from target_roles when present, else
-    from target_occupations (see ``_seed_queries_from_profile``).
+    from target_occupations (see ``_seed_queries_from_profile``). Returns True
+    when it actually seeded new searches (the caller uses this to fire a one-time
+    cold-start discovery so the feed fills immediately instead of waiting for the
+    next background beat).
     """
     result = await db.execute(
         select(SearchPreference).where(SearchPreference.user_id == user_id).limit(1)
     )
     if result.scalar_one_or_none() is not None:
-        return  # User already has saved searches — don't overwrite
+        return False  # User already has saved searches — don't overwrite
 
     queries = _seed_queries_from_profile(profile)
     if not queries:
-        return
+        return False
 
     locations = profile.target_locations or []
     if locations:
@@ -103,6 +106,7 @@ async def _seed_saved_searches(
             ))
 
     await db.commit()
+    return True
 
 
 ALLOWED_CONTENT_TYPES = {
@@ -294,7 +298,12 @@ async def update_profile(
     # never seed a saved search and its feed would never auto-refresh.
     seed_trigger_fields = {"target_roles", "target_locations", "target_occupations"}
     if seed_trigger_fields & set(update_data.keys()):
-        await _seed_saved_searches(db, user_id, profile)
+        seeded = await _seed_saved_searches(db, user_id, profile)
+        # First time we enroll this user into background ingestion — fill the feed
+        # right away so jobs appear on their next Jobs visit without a button.
+        if seeded:
+            from app.tasks.jobs import discover_for_user  # noqa: PLC0415
+            discover_for_user.delay(str(user_id))
 
     # Re-score jobs if scoring-relevant fields changed
     scoring_fields = {

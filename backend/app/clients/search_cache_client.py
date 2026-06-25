@@ -50,6 +50,22 @@ async def get_json(key: str) -> Any | None:
         return None
 
 
+async def acquire_debounce(key: str, *, ttl_seconds: int) -> bool:
+    """Best-effort distributed debounce via SET NX EX.
+
+    Returns True when the caller acquired the slot (key was absent and is now
+    held for ``ttl_seconds``), False when the slot is already held OR Redis is
+    unavailable. Fail-closed on error is deliberate: a Redis outage must not let
+    a per-visit nudge fan out into a discovery storm — the background beat keeps
+    feeds fresh regardless.
+    """
+    try:
+        return bool(await _client().set(key, "1", ex=ttl_seconds, nx=True))
+    except Exception as exc:  # pragma: no cover - network failures are environment-specific
+        logger.warning("debounce acquire failed", extra={"cache_key": key, "error": str(exc)})
+        return False
+
+
 async def set_json(key: str, payload: Any, *, ttl_seconds: int | None = None) -> None:
     """Store JSON payload in Redis, swallowing infra failures."""
     try:

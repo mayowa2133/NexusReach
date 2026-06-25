@@ -159,6 +159,15 @@ class RefreshResponse(BaseModel):
     new_jobs_found: int
 
 
+class EnsureFreshResponse(BaseModel):
+    """Result of the debounced, button-free feed nudge fired when Jobs opens."""
+
+    triggered: bool
+    # "discover" = full cold-start fill (empty feed), "refresh" = light top-up
+    # (warm but stale feed), None = nothing needed / debounced.
+    mode: str | None = None
+
+
 class JobSourceRunResponse(BaseModel):
     id: str
     refresh_run_id: str

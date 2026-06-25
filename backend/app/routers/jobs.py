@@ -25,6 +25,7 @@ from app.schemas.jobs import (
     JobSourceRunResponse,
     DiscoverRequest,
     RefreshResponse,
+    EnsureFreshResponse,
     MatchAnalysisResponse,
     TailoredResumeResponse,
     ResumeArtifactResponse,
@@ -57,6 +58,7 @@ from app.services.search_preference_service import (
     delete_search_preference,
 )
 from app.tasks.jobs import refresh_user_feeds
+from app.clients import search_cache_client
 from app.services.resume_artifact import (
     generate_resume_artifact_for_job,
     get_resume_auto_reuse_enabled,
@@ -382,6 +384,73 @@ async def refresh_feeds(
     """Manually trigger a refresh of all enabled saved searches."""
     new_count = await refresh_user_feeds(user_id)
     return RefreshResponse(new_jobs_found=new_count)
+
+
+@router.post("/ensure-fresh", response_model=EnsureFreshResponse)
+@limiter.limit("20/minute")
+async def ensure_fresh(
+    request: Request,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Button-free feed nudge — fired when the Jobs page opens.
+
+    Replaces the manual "Discover Jobs" button: the user never asks for jobs,
+    they just appear. Behavior, all non-blocking and debounced in Redis so rapid
+    refreshes never re-trigger and the paid APIs are never hammered:
+
+    - no enabled saved search yet -> no-op (the user hasn't told us what they
+      want; onboarding / profile targeting enrolls them and fires the first fill)
+    - feed empty -> full background discovery (cold-start fill)
+    - feed warm but stale (>20 min since last refresh) -> light background refresh
+    - feed fresh -> nothing
+    """
+    from datetime import timedelta, timezone  # noqa: PLC0415
+    from sqlalchemy import func as sa_func  # noqa: PLC0415
+    from app.models.job import Job  # noqa: PLC0415
+    from app.models.search_preference import SearchPreference  # noqa: PLC0415
+    from app.tasks.jobs import discover_for_user, refresh_single_user_feeds  # noqa: PLC0415
+
+    pref_row = await db.execute(
+        select(
+            sa_func.count(SearchPreference.id),
+            sa_func.max(SearchPreference.last_refreshed_at),
+        ).where(
+            SearchPreference.user_id == user_id,
+            SearchPreference.enabled == True,  # noqa: E712
+        )
+    )
+    pref_count, last_refreshed = pref_row.one()
+    if not pref_count:
+        return EnsureFreshResponse(triggered=False)
+
+    job_count = (
+        await db.execute(
+            select(sa_func.count(Job.id)).where(Job.user_id == user_id)
+        )
+    ).scalar() or 0
+
+    if job_count == 0:
+        mode = "discover"
+    else:
+        stale_cutoff = datetime.now(timezone.utc) - timedelta(minutes=20)
+        if last_refreshed is None or last_refreshed < stale_cutoff:
+            mode = "refresh"
+        else:
+            return EnsureFreshResponse(triggered=False)
+
+    # Debounce: one nudge per user per 10 min, regardless of how often they open
+    # the page. Fail-closed (no trigger) if Redis is down.
+    if not await search_cache_client.acquire_debounce(
+        f"jobs:ensure-fresh:{user_id}", ttl_seconds=600
+    ):
+        return EnsureFreshResponse(triggered=False)
+
+    if mode == "discover":
+        discover_for_user.delay(str(user_id))
+    else:
+        refresh_single_user_feeds.delay(str(user_id))
+    return EnsureFreshResponse(triggered=True, mode=mode)
 
 
 # --- Saved Searches ---

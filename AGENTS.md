@@ -181,7 +181,7 @@ NexusReach defaults to draft-first workflows. Users can optionally enable delaye
 
 ### Frontend state and UX
 - Saved contacts are grouped by company on the People page.
-- Jobs now has separate `Discover Jobs` and `Discover Startup Jobs` actions.
+- **Jobs auto-populate — there is no manual "Discover" button.** Opening the Jobs page fires `POST /api/jobs/ensure-fresh`, a debounced, non-blocking nudge: an empty feed gets a full background cold-start discovery (`tasks/jobs.discover_for_user`, default + startup folded in), a warm-but-stale feed (>20 min) gets a light `refresh_single_user_feeds`, a fresh feed does nothing. Debounced in Redis (`search_cache_client.acquire_debounce`, 10 min, fail-closed) so rapid refreshes never re-trigger or hammer the paid APIs. Enrollment is profile-driven: setting target occupations/roles/locations seeds saved searches (`profile._seed_saved_searches`) and fires the first `discover_for_user`, so the existing background beats keep the feed fresh — the LinkedIn model (jobs are ingested into our own index in the background and the page reads it instantly). Startup jobs are folded into the same feed (reachable via the `Startup` filter); the occupation chips remain as a feed filter.
 - Jobs now has:
   - a server-backed `Startup` filter
   - a client-side country filter derived from `location`

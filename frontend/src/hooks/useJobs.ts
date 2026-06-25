@@ -269,6 +269,25 @@ export function useDiscoverJobs() {
   });
 }
 
+// --- Ensure Fresh (button-free feed nudge) ---
+
+export interface EnsureFreshResult {
+  triggered: boolean;
+  mode: 'discover' | 'refresh' | null;
+}
+
+/**
+ * Fired when the Jobs page opens. The backend decides — debounced — whether to
+ * cold-start a discovery (empty feed) or do a light refresh (warm but stale), so
+ * jobs just appear without the user pressing anything. Non-blocking: the actual
+ * work runs in a background task and surfaces via the jobs query's polling.
+ */
+export function useEnsureFreshJobs() {
+  return useMutation({
+    mutationFn: () => api.post<EnsureFreshResult>('/api/jobs/ensure-fresh', {}),
+  });
+}
+
 // --- Saved Searches ---
 
 export function useSavedSearches() {

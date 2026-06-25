@@ -50,7 +50,10 @@ const mockUseJobs = vi.fn((filters: unknown) => {
     isLoading: false,
   };
 });
-const mockDiscoverJobs = { mutate: vi.fn(), isPending: false };
+const mockEnsureFresh = {
+  mutateAsync: vi.fn().mockResolvedValue({ triggered: false, mode: null }),
+  isPending: false,
+};
 const mockToggleSavedSearch = { mutate: vi.fn() };
 const mockDeleteSavedSearch = { mutate: vi.fn() };
 
@@ -77,7 +80,7 @@ vi.mock('@/hooks/useJobs', () => ({
   useToggleSavedSearch: () => mockToggleSavedSearch,
   useDeleteSavedSearch: () => mockDeleteSavedSearch,
   useRefreshJobs: () => ({ mutate: vi.fn(), isPending: false }),
-  useDiscoverJobs: () => mockDiscoverJobs,
+  useEnsureFreshJobs: () => mockEnsureFresh,
 }));
 
 vi.mock('sonner', () => ({
@@ -144,7 +147,7 @@ beforeEach(() => {
   mockSavedJobs = undefined;
   mockSavedSearches = [];
   mockUseJobs.mockClear();
-  mockDiscoverJobs.mutate.mockReset();
+  mockEnsureFresh.mutateAsync.mockClear();
   mockToggleSavedSearch.mutate.mockReset();
   mockDeleteSavedSearch.mutate.mockReset();
 });
@@ -180,14 +183,22 @@ describe('JobsPage', () => {
     expect(buttons.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('renders the startup discover action', () => {
+  it('has no manual discover buttons (jobs auto-populate)', () => {
     renderJobs();
-    expect(screen.getByRole('button', { name: /discover startup jobs/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /discover jobs/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /discover startup jobs/i })).not.toBeInTheDocument();
+  });
+
+  it('nudges the backend to keep the feed fresh on mount', () => {
+    renderJobs();
+    expect(mockEnsureFresh.mutateAsync).toHaveBeenCalled();
   });
 
   it('renders empty state when no jobs', () => {
     renderJobs();
-    expect(screen.getByText(/search for jobs above/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/set your target occupations in your profile/i),
+    ).toBeInTheDocument();
   });
 
   it('renders remote-only checkbox', () => {
@@ -387,21 +398,6 @@ describe('JobsPage', () => {
     await userEvent.click(screen.getByRole('button', { name: /^startup$/i }));
 
     expect(mockUseJobs).toHaveBeenLastCalledWith(expect.objectContaining({ startup: true }));
-  });
-
-  it('triggers startup discover mode from the CTA', async () => {
-    renderJobs();
-
-    await userEvent.click(screen.getByRole('button', { name: /discover startup jobs/i }));
-
-    expect(mockDiscoverJobs.mutate).toHaveBeenCalledWith(
-      { mode: 'startup' },
-      expect.objectContaining({
-        onSuccess: expect.any(Function),
-        onError: expect.any(Function),
-        onSettled: expect.any(Function),
-      })
-    );
   });
 
   it('shows startup badges when a saved job is startup-tagged', () => {

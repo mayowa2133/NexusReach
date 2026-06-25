@@ -216,6 +216,66 @@ async def refresh_user_feeds(user_id: uuid.UUID) -> int:
     return count
 
 
+@celery_app.task(
+    name="app.tasks.jobs.refresh_single_user_feeds",
+    autoretry_for=(Exception,),
+    retry_backoff=30,
+    retry_backoff_max=300,
+    max_retries=2,
+)
+def refresh_single_user_feeds(user_id: str) -> dict:
+    """Celery task: light refresh of one user's saved searches (warm-feed nudge).
+
+    Backs the debounced ``ensure-fresh`` nudge when a user opens the Jobs page
+    and their feed already has jobs but has gone slightly stale. Cheap — runs the
+    per-saved-search aggregator/Muse pass only, not the curated-board crawl
+    (which the hourly global task already handles).
+    """
+    count = run_async(_refresh_user_feeds(uuid.UUID(user_id)))
+    return {"status": "ok", "new_jobs": count}
+
+
+async def _discover_for_user(user_id: uuid.UUID) -> int:
+    """Run a full default + startup discovery pass for one user.
+
+    This is the cold-start fill: it populates a user's feed immediately when they
+    first set their targeting (so they never wait for the next background beat)
+    and backs the empty-feed branch of the ``ensure-fresh`` nudge. Startup
+    discovery is folded in (fail-soft) so startup roles surface in the same
+    ambient feed instead of behind a separate button.
+    """
+    from app.services.jobs import discovery  # noqa: PLC0415
+
+    total = 0
+    async with async_session() as db:
+        try:
+            total += await discovery.discover_jobs(db, user_id, mode="default")
+        except Exception:
+            await db.rollback()
+            logger.exception("cold-start default discover failed for user %s", user_id)
+    # Startup is best-effort (Wellfound can 403); never let it sink the default fill.
+    async with async_session() as db:
+        try:
+            total += await discovery.discover_jobs(db, user_id, mode="startup")
+        except Exception:
+            await db.rollback()
+            logger.exception("cold-start startup discover failed for user %s", user_id)
+    return total
+
+
+@celery_app.task(
+    name="app.tasks.jobs.discover_for_user",
+    autoretry_for=(Exception,),
+    retry_backoff=30,
+    retry_backoff_max=300,
+    max_retries=2,
+)
+def discover_for_user(user_id: str) -> dict:
+    """Celery task: full discovery pass for one user (cold-start / empty-feed fill)."""
+    count = run_async(_discover_for_user(uuid.UUID(user_id)))
+    return {"status": "ok", "new_jobs": count}
+
+
 async def _refresh_all() -> None:
     """Refresh job feeds for all users with enabled search preferences."""
     async with async_session() as db:

@@ -19,8 +19,9 @@ import {
   useToggleSavedSearch,
   useDeleteSavedSearch,
   useRefreshJobs,
-  useDiscoverJobs,
+  useEnsureFreshJobs,
 } from '@/hooks/useJobs';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   clampPeopleSearchTargetCount,
   getStoredPeopleSearchTargetCount,
@@ -174,7 +175,8 @@ export function JobsPage() {
   const [remoteFilter, setRemoteFilter] = useState(storedFilters.remoteFilter);
   const [startupFilter, setStartupFilter] = useState(storedFilters.startupFilter);
   const [salaryMinFilter, setSalaryMinFilter] = useState(storedFilters.salaryMinFilter);
-  const [discoverMode, setDiscoverMode] = useState<'default' | 'startup' | null>(null);
+  // True while a button-free cold-start discovery is filling an empty feed.
+  const [coldStartFilling, setColdStartFilling] = useState(false);
 
   // Occupation filter — initialize from profile.target_occupations on first load.
   const { data: profile } = useProfile();
@@ -285,13 +287,56 @@ export function JobsPage() {
   const toggleSavedSearch = useToggleSavedSearch();
   const deleteSavedSearch = useDeleteSavedSearch();
   const refreshJobs = useRefreshJobs();
-  const discoverJobs = useDiscoverJobs();
+  const ensureFresh = useEnsureFreshJobs();
+  const queryClient = useQueryClient();
+
+  // Button-free population: opening Jobs nudges the backend to keep the feed
+  // fresh (debounced server-side). No "Discover" button — jobs just appear, the
+  // way they do on LinkedIn. Runs once per mount.
+  useEffect(() => {
+    let cancelled = false;
+    ensureFresh
+      .mutateAsync()
+      .then((res) => {
+        if (!cancelled && res.triggered && res.mode === 'discover') {
+          setColdStartFilling(true);
+        }
+      })
+      .catch(() => {
+        /* non-blocking nudge — failures are harmless, the beat still runs */
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const newJobCount = useMemo(
     () => lastVisited ? savedJobs.filter((j) => j.created_at > lastVisited).length : 0,
     [savedJobs, lastVisited],
   );
   const latestRefreshRuns = refreshRuns?.slice(0, 3) ?? [];
+
+  // While a cold-start fill is running on an empty feed, poll the jobs query so
+  // the first results appear on their own. Stops as soon as jobs land or after a
+  // bounded window (the per-job people pre-warm then keeps the feed updating via
+  // its own `warming_count` poll).
+  useEffect(() => {
+    if (!coldStartFilling) return;
+    if (savedJobs.length > 0) {
+      setColdStartFilling(false);
+      return;
+    }
+    const startedAt = Date.now();
+    const interval = setInterval(() => {
+      if (Date.now() - startedAt > 120000) {
+        setColdStartFilling(false);
+        return;
+      }
+      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [coldStartFilling, savedJobs.length, queryClient]);
 
   const handleUseCurrentLocation = () => {
     if (!navigator.geolocation) {
@@ -484,71 +529,24 @@ export function JobsPage() {
         </Card>
       </div>
 
-      {/* Quick Discover */}
+      {/* Occupation targeting — the feed auto-populates from these; no button. */}
       <Card>
         <CardContent className="pt-5 pb-5 space-y-4">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div>
-              <div className="font-medium">Discover Jobs</div>
+              <div className="font-medium">Your job feed</div>
               <p className="text-sm text-muted-foreground">
                 {selectedOccupations.length > 0
-                  ? `Targeting ${selectedOccupations.length} occupation${selectedOccupations.length === 1 ? '' : 's'}. Toggle chips below to widen or narrow.`
-                  : 'Pick the occupations you care about, or run the default flow.'}
+                  ? `Auto-updating for ${selectedOccupations.length} occupation${selectedOccupations.length === 1 ? '' : 's'} — new jobs appear on their own. Toggle chips to widen or narrow.`
+                  : 'New jobs populate automatically from your profile. Toggle chips to focus the feed.'}
               </p>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <Button
-                disabled={discoverJobs.isPending}
-                onClick={() => {
-                  setDiscoverMode('default');
-                  discoverJobs.mutate(
-                    {
-                      mode: 'default',
-                      occupations: selectedOccupations.length > 0 ? selectedOccupations : undefined,
-                    },
-                    {
-                      onSuccess: (data) => {
-                        toast.success(
-                          `Discovered ${data.new_jobs_found} new jobs — finding the best people for each`,
-                        );
-                      },
-                      onError: (err) => {
-                        toast.error(err instanceof Error ? err.message : 'Discovery failed');
-                      },
-                      onSettled: () => setDiscoverMode(null),
-                    },
-                  );
-                }}
-              >
-                {discoverMode === 'default' && discoverJobs.isPending ? 'Discovering...' : 'Discover Jobs'}
-              </Button>
-              <Button
-                variant="outline"
-                disabled={discoverJobs.isPending}
-                onClick={() => {
-                  setDiscoverMode('startup');
-                  discoverJobs.mutate(
-                    {
-                      mode: 'startup',
-                      occupations: selectedOccupations.length > 0 ? selectedOccupations : undefined,
-                    },
-                    {
-                      onSuccess: (data) => {
-                        toast.success(
-                          `Discovered ${data.new_jobs_found} startup jobs — finding the best people for each`,
-                        );
-                      },
-                      onError: (err) => {
-                        toast.error(err instanceof Error ? err.message : 'Startup discovery failed');
-                      },
-                      onSettled: () => setDiscoverMode(null),
-                    },
-                  );
-                }}
-              >
-                {discoverMode === 'startup' && discoverJobs.isPending ? 'Discovering...' : 'Discover Startup Jobs'}
-              </Button>
-            </div>
+            {coldStartFilling && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground shrink-0">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Finding jobs for you…
+              </div>
+            )}
           </div>
           <OccupationChipRow
             selected={selectedOccupations}
@@ -918,10 +916,18 @@ export function JobsPage() {
                 No jobs match the current filters.
               </p>
             </div>
+          ) : coldStartFilling || ensureFresh.isPending ? (
+            <div className="rounded-lg border border-dashed p-8 text-center">
+              <div className="flex items-center justify-center gap-2 text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <p>Finding jobs for you… they'll appear here automatically.</p>
+              </div>
+            </div>
           ) : (
             <div className="rounded-lg border border-dashed p-8 text-center">
               <p className="text-muted-foreground">
-                Search for jobs above to get started.
+                Jobs populate automatically from your profile. Set your target
+                occupations in your profile and they'll show up here.
               </p>
             </div>
           )}
