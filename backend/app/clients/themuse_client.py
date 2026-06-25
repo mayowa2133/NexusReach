@@ -31,7 +31,12 @@ logger = logging.getLogger(__name__)
 
 _BASE_URL = "https://www.themuse.com/api/public/jobs"
 _PER_PAGE = 20  # The Muse returns 20 results per page (not configurable).
-_MAX_PAGES_PER_CATEGORY = 5  # Hard ceiling so one occupation can't fan out forever.
+_MAX_PAGES_HARD_CAP = 12  # Absolute page ceiling per (category, level) spec.
+# Early-career roles to harvest per call when boost_early_career is set. The Muse
+# carries hundreds-to-thousands of entry-level/internship roles per non-tech
+# category (e.g. Healthcare ~3.6k internships, Marketing ~440), so this is the
+# lever that makes non-tech early-career volume rival the tech-only GitHub lists.
+_EARLY_CAREER_BUDGET = 200
 _REQUEST_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; NexusReach/1.0)"}
 
 
@@ -254,10 +259,16 @@ async def _fetch_category(
     ``max_results`` jobs pass.
 
     ``keep`` is applied per normalized job so we page deeper when a relevance
-    gate is filtering hard, instead of returning a thin under-filled batch.
+    gate is filtering hard, instead of returning a thin under-filled batch. The
+    page ceiling scales with ``max_results`` (×2 to absorb gate filtering) so a
+    deep early-career target genuinely harvests The Muse's depth.
     """
+    max_pages = min(
+        _MAX_PAGES_HARD_CAP,
+        max(1, (max_results * 2 + _PER_PAGE - 1) // _PER_PAGE),
+    )
     collected: list[dict] = []
-    for page in range(1, _MAX_PAGES_PER_CATEGORY + 1):
+    for page in range(1, max_pages + 1):
         results, page_count = await _fetch_category_page(
             client, category=category, page=page, level=level
         )
@@ -313,6 +324,10 @@ async def search_themuse(
         resolved_categories = _categories_for_query(query)
 
     def keep(job: dict) -> bool:
+        # The distinctive-token / query gate is essential even with category +
+        # level filters: The Muse mis-tags high-volume retail roles ("Tire Center
+        # Associate", "Member Team Lead") into every category's entry level, so
+        # without it the early-career boost floods non-tech feeds with junk.
         if remote_only and not job["remote"]:
             return False
         if occupation:
@@ -321,23 +336,26 @@ async def search_themuse(
 
     # No category resolved → one broad page so the source is never a hard zero.
     fetch_targets: list[str | None] = resolved_categories or [None]
-    # (category, level) specs. Early-career levels come first so they're never
-    # crowded out of the result cap by the all-levels pull.
-    specs: list[tuple[str | None, str | None]] = []
-    budget = limit
+    # (category, level, max_results) specs. Early-career levels come first so
+    # they're never crowded out of the result cap by the all-levels pull, and get
+    # a deep dedicated budget so we genuinely harvest The Muse's early-career
+    # depth rather than skimming the first page.
+    specs: list[tuple[str | None, str | None, int]] = []
     if boost_early_career:
-        specs.extend((cat, lvl) for lvl in EARLY_CAREER_LEVELS for cat in fetch_targets)
-        budget = limit * 2  # additive headroom for the early-career roles
-    specs.extend((cat, None) for cat in fetch_targets)
-    per_spec = max(_PER_PAGE, (budget + len(specs) - 1) // len(specs))
+        ec_pairs = [(cat, lvl) for lvl in EARLY_CAREER_LEVELS for cat in fetch_targets]
+        per_ec = max(_PER_PAGE, _EARLY_CAREER_BUDGET // max(1, len(ec_pairs)))
+        specs.extend((cat, lvl, per_ec) for cat, lvl in ec_pairs)
+    per_all = max(_PER_PAGE, (limit + len(fetch_targets) - 1) // len(fetch_targets))
+    specs.extend((cat, None, per_all) for cat in fetch_targets)
+    budget = sum(m for _, _, m in specs)
 
     async with httpx.AsyncClient(timeout=20) as client:
         batches = await asyncio.gather(
             *(
                 _fetch_category(
-                    client, category=cat, level=lvl, max_results=per_spec, keep=keep
+                    client, category=cat, level=lvl, max_results=mx, keep=keep
                 )
-                for cat, lvl in specs
+                for cat, lvl, mx in specs
             )
         )
 
