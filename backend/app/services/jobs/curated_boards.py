@@ -162,24 +162,9 @@ async def fetch_curated_ats_source_payloads(
 
         source_fetches.append(run_source(source_key, fetch_lever))
 
-    # Auto-discovered boards (scripts/discover_ats_boards.py) — hundreds of verified
-    # Greenhouse/Lever/Ashby employers beyond the hand-curated lists, all crawled
-    # through the same ATS adapters with direct employer apply links.
-    for board in discovered_boards.load_discovered_boards():
-        source_key = f"{board['ats']}:{board['slug']}"
-
-        async def fetch_discovered(board=board) -> list[dict]:
-            adapter = ats.get_adapter(board["ats"])
-            if not (adapter and adapter.search_board is not None):
-                return []
-            jobs = await adapter.search_board(board["slug"], limit_per_board)
-            # The board APIs sometimes return just the slug as the org name; use
-            # the verified company name captured at discovery time instead.
-            for job in jobs:
-                job["company_name"] = board["company"]
-            return jobs
-
-        source_fetches.append(run_source(source_key, fetch_discovered))
+    # NOTE: the ~900 auto-discovered boards are NOT fetched here — holding every
+    # board's jobs in one payload dict OOM-kills the worker at that scale. They're
+    # crawled in memory-bounded chunks by `crawl_and_store_discovered_boards`.
 
     async def fetch_workday() -> list[dict]:
         return await workday_client.discover_all_workday(limit_per_company=20)
@@ -288,3 +273,81 @@ async def store_curated_ats_payloads_for_user(
         db, refresh_run_id=refresh_run_id, source_stats=user_source_stats
     )
     return len(stored)
+
+
+async def _fetch_board_payloads(
+    boards: list[dict], limit_per_board: int
+) -> tuple[dict[str, list[dict]], list[dict]]:
+    """Fetch one chunk of auto-discovered boards through the ATS adapters.
+
+    Stamps the verified company name (the board APIs sometimes return only the
+    slug) and fails soft per board.
+    """
+    semaphore = asyncio.Semaphore(12)
+
+    async def one(board: dict) -> tuple[str, list[dict], dict]:
+        source_key = f"{board['ats']}:{board['slug']}"
+        stat = normalize._source_stat(source_key)
+        try:
+            adapter = ats.get_adapter(board["ats"])
+            async with semaphore:
+                jobs = (
+                    await adapter.search_board(board["slug"], limit_per_board)
+                    if adapter and adapter.search_board is not None
+                    else []
+                )
+            for job in jobs:
+                job["company_name"] = board["company"]
+                job["_source_run_key"] = source_key
+            stat["raw_count"] = len(jobs)
+            normalize._finish_source_stat(stat, status="success")
+            return source_key, jobs, stat
+        except (httpx.TimeoutException, httpx.RequestError) as exc:
+            normalize._finish_source_stat(stat, status="failed", error=exc.__class__.__name__)
+            return source_key, [], stat
+        except Exception as exc:
+            logger.exception("discovered board failed: %s", source_key)
+            normalize._finish_source_stat(stat, status="failed", error=str(exc))
+            return source_key, [], stat
+
+    payloads: dict[str, list[dict]] = {}
+    stats: list[dict] = []
+    for source_key, jobs, stat in await asyncio.gather(*(one(b) for b in boards)):
+        payloads[source_key] = jobs
+        stats.append(stat)
+    return payloads, stats
+
+
+async def crawl_and_store_discovered_boards(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    preferences=None,
+    limit_per_board: int = 25,
+    chunk_size: int = 60,
+    refresh_run_id: uuid.UUID | None = None,
+) -> int:
+    """Crawl the ~900 auto-discovered boards in memory-bounded chunks.
+
+    Fetching every board at once held ~20k jobs (with full HTML descriptions) in
+    memory and OOM-killed the worker (SIGKILL). Instead we fetch a chunk, store
+    it, and free it before the next chunk — peak memory is bounded to ~one chunk.
+    """
+    boards = list(discovered_boards.load_discovered_boards())
+    total = 0
+    for start in range(0, len(boards), chunk_size):
+        chunk = boards[start:start + chunk_size]
+        payloads, stats = await _fetch_board_payloads(chunk, limit_per_board)
+        try:
+            total += await store_curated_ats_payloads_for_user(
+                db,
+                user_id,
+                source_payloads=payloads,
+                source_stats=stats,
+                preferences=preferences,
+                refresh_run_id=refresh_run_id,
+            )
+        except Exception:
+            await db.rollback()
+            logger.exception("discovered-board chunk store failed (user %s)", user_id)
+    return total

@@ -449,6 +449,15 @@ async def _discover_all_boards() -> None:
                     preferences=prefs_by_user.get(uid, []),
                     refresh_run_id=refresh_run.id,
                 )
+                # ~900 auto-discovered boards, crawled in memory-bounded chunks so
+                # the worker can't OOM (holding them all at once SIGKILL'd it).
+                from app.services.jobs import curated_boards as _cb  # noqa: PLC0415
+                new_count += await _cb.crawl_and_store_discovered_boards(
+                    db,
+                    uid,
+                    preferences=prefs_by_user.get(uid, []),
+                    refresh_run_id=refresh_run.id,
+                )
                 finished_at = datetime.now(timezone.utc)
                 refresh_run.finished_at = finished_at
                 refresh_run.duration_seconds = round(
