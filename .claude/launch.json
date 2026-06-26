@@ -9,9 +9,23 @@
       "cwd": "frontend"
     },
     {
+      "name": "frontend-bypass",
+      "runtimeExecutable": "/opt/homebrew/bin/node",
+      "runtimeArgs": ["node_modules/.bin/vite", "--mode", "devauth", "--host"],
+      "port": 5173,
+      "cwd": "frontend"
+    },
+    {
       "name": "backend",
       "runtimeExecutable": "/Users/mayowaadesanya/.pyenv/versions/3.11.6/bin/uvicorn",
       "runtimeArgs": ["app.main:app", "--reload", "--port", "8000"],
+      "port": 8000,
+      "cwd": "backend"
+    },
+    {
+      "name": "backend-dev",
+      "runtimeExecutable": "/bin/bash",
+      "runtimeArgs": ["-lc", "NEXUSREACH_DATABASE_URL='postgresql+asyncpg://postgres:postgres@localhost:5432/nexusreach' NEXUSREACH_AUTH_MODE=dev NEXUSREACH_DEV_AUTH_BYPASS_ENABLED=true exec /Users/mayowaadesanya/.pyenv/versions/3.11.6/bin/uvicorn app.main:app --reload --port 8000"],
       "port": 8000,
       "cwd": "backend"
     }

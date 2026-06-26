@@ -100,7 +100,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (isDevAuthMode) {
       const user = buildDevUser();
       const session = buildDevSession(user);
-      await bootstrapAuthenticatedUser();
+      // Best-effort: render the authenticated shell even if the local backend
+      // isn't up yet, so the UI stays inspectable (data-driven pages just show
+      // their empty/loading states). The backend creates the dev user lazily.
+      try {
+        await bootstrapAuthenticatedUser();
+      } catch (error) {
+        console.warn('Dev auth bootstrap failed (is the backend running in dev mode?).', error);
+      }
       set({
         session,
         user,

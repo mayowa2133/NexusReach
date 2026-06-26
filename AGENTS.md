@@ -355,6 +355,35 @@ cd backend && python scripts/linkedin_graph_connector.py --help
 cd backend && python scripts/verify_workday_boards.py
 ```
 
+## Local dev auth bypass (preview authed pages without a Supabase login)
+
+So Claude Code / Codex (and humans) can see authenticated pages directly in a
+preview, both sides ship a **dev auth bypass** (no Supabase, no real login). The
+code already exists (`auth_mode=dev` + bypass guards); this is how to run it.
+
+- **Frontend:** `cd frontend && npm run dev:bypass` (= `vite --mode devauth`).
+  Loads the committed, non-secret `frontend/.env.devauth`
+  (`VITE_AUTH_MODE=dev` + `VITE_DEV_AUTH_BYPASS_ENABLED=true`), which overrides
+  `.env` in `devauth` mode **only** — plain `npm run dev` is untouched. The store
+  builds a dev session and skips the login screen; the bootstrap is best-effort,
+  so the authed shell still renders if the backend is down (data pages just show
+  empty/loading states).
+- **Backend:** run it with `NEXUSREACH_AUTH_MODE=dev` +
+  `NEXUSREACH_DEV_AUTH_BYPASS_ENABLED=true` (every request resolves to
+  `dev_user_id` `00000000-…-0001`, created lazily on first `/api/auth/me`).
+  The Supabase **pooler resets direct asyncpg from a local box** (truth #3 family),
+  so point the dev backend at a **local Postgres** (e.g.
+  `NEXUSREACH_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/nexusreach`)
+  and `alembic upgrade head` — never the prod pooler. Do **not** flip the
+  committed prod `.env`'s `DATABASE_URL`; override per-run.
+- **Preview launch configs** (`.claude/launch.json`): `frontend-bypass` (vite
+  devauth) + `backend-dev` (uvicorn with the dev env inlined, local DB). Start
+  both, then the authed app renders at `localhost:5173`.
+- **Caveat:** the dev user is empty unless seeded; taxonomy-driven UI (e.g. the
+  occupation chips, `/api/occupations`) renders regardless. `GET /api/jobs` with
+  **no `limit`** serializes the whole feed and can 500 on a large local dataset —
+  the real frontend always paginates, so this only bites raw unbounded calls.
+
 ## Environment variables
 
 ### Backend
