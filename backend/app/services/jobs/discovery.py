@@ -3,7 +3,6 @@
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.job import Job
-from app.models.profile import Profile
 from app.models.search_preference import SearchPreference
 from app.services.occupation_taxonomy import discover_queries_for_occupations
 from app.clients import newgrad_jobs_client
@@ -83,8 +82,9 @@ async def discover_jobs(
                      Falls back to ``profile.target_occupations`` and finally
                      to ``constants.DISCOVER_QUERIES``.
     """
-    result = await db.execute(select(Profile).where(Profile.user_id == user_id))
-    profile = result.scalar_one_or_none()
+    # Detached so a mid-discover source rollback can't expire it and make the
+    # sync scorer trigger a reload (MissingGreenlet). See load_profile_for_scoring.
+    profile = await storage.load_profile_for_scoring(db, user_id)
 
     resolved_occupations = (
         list(occupations)

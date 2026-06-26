@@ -3,7 +3,6 @@
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.job import Job
-from app.models.profile import Profile
 from app.models.search_preference import SearchPreference
 from app.clients import adzuna_client
 import asyncio
@@ -147,11 +146,9 @@ async def search_jobs(
     ):
         all_sources = [*all_sources, "jobbank"]
 
-    # Load user profile for scoring
-    result = await db.execute(
-        select(Profile).where(Profile.user_id == user_id)
-    )
-    profile = result.scalar_one_or_none()
+    # Load user profile for scoring (detached so a rollback can't expire it and
+    # make the sync scorer trigger a reload — see load_profile_for_scoring).
+    profile = await storage.load_profile_for_scoring(db, user_id)
 
     fetch_results = await asyncio.gather(
         *(
@@ -313,10 +310,8 @@ async def search_ats_jobs(
     if not adapter:
         raise ValueError("Unsupported or invalid job posting URL.")
 
-    result = await db.execute(
-        select(Profile).where(Profile.user_id == user_id)
-    )
-    profile = result.scalar_one_or_none()
+    # Detached so a rollback can't expire it (see load_profile_for_scoring).
+    profile = await storage.load_profile_for_scoring(db, user_id)
 
     if job_url and parsed_job_url and adapter.fetch_exact is not None:
         try:

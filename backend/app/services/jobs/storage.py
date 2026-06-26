@@ -260,6 +260,31 @@ def _score_job(job_data: dict, profile: Profile | None) -> tuple[float | None, d
     return score_job(job_data, profile)
 
 
+async def load_profile_for_scoring(
+    db: AsyncSession, user_id: uuid.UUID
+) -> Profile | None:
+    """Load the user's profile for scoring, DETACHED from the session.
+
+    ``score_job`` reads profile columns (``resume_parsed``, ``target_*``) from a
+    *sync* function. If the session later rolls back — a job source fails mid
+    ``discover_jobs`` and the handler calls ``db.rollback()`` — SQLAlchemy
+    EXPIRES every attached ORM object. The next attribute read on the profile
+    would then trigger a *synchronous* reload from inside the sync scorer,
+    raising ``MissingGreenlet: greenlet_spawn has not been called``. Note
+    ``expire_on_commit=False`` does NOT prevent this: rollback expires regardless.
+
+    Detaching (``expunge``) the profile right after load makes its already-loaded
+    columns immune to both commit- and rollback-driven expiry. Safe here because
+    scoring only reads columns, never a lazy relationship (which would raise
+    ``DetachedInstanceError`` on a detached object).
+    """
+    result = await db.execute(select(Profile).where(Profile.user_id == user_id))
+    profile = result.scalar_one_or_none()
+    if profile is not None:
+        db.expunge(profile)
+    return profile
+
+
 async def _record_source_runs(
     db: AsyncSession,
     *,

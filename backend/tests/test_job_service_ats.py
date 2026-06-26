@@ -453,3 +453,42 @@ async def test_search_ats_jobs_allows_exact_job_without_location():
     mock_fetch_exact.assert_awaited_once()
     assert len(jobs) == 1
     assert jobs[0].location is None
+
+
+# --- load_profile_for_scoring: detach so a rollback can't trigger MissingGreenlet ---
+
+
+async def test_load_profile_for_scoring_detaches_profile():
+    """The profile must be expunged from the session.
+
+    Regression for Sentry PYTHON-T: in discover_jobs a failed source calls
+    db.rollback(), which EXPIRES every attached ORM object. The sync scorer
+    (score_job) then reads profile.resume_parsed, which would trigger a
+    synchronous reload from inside the greenlet-less sync frame -> MissingGreenlet.
+    Detaching the profile makes its loaded columns immune to rollback expiry.
+    """
+    from app.services.jobs import storage
+
+    profile = MagicMock()
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=_ScalarResult(profile))
+    db.expunge = MagicMock()
+
+    out = await storage.load_profile_for_scoring(db, uuid.uuid4())
+
+    assert out is profile
+    db.expunge.assert_called_once_with(profile)
+
+
+async def test_load_profile_for_scoring_handles_missing_profile():
+    """No profile row -> return None, never expunge None."""
+    from app.services.jobs import storage
+
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=_ScalarResult(None))
+    db.expunge = MagicMock()
+
+    out = await storage.load_profile_for_scoring(db, uuid.uuid4())
+
+    assert out is None
+    db.expunge.assert_not_called()
