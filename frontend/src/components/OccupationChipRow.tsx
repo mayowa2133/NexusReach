@@ -34,7 +34,7 @@ export function OccupationChipRow({
 
   if (isLoading) {
     return (
-      <div className={cn('flex gap-2 overflow-x-auto py-1', className)} aria-label="Loading occupations">
+      <div className={cn('flex flex-wrap gap-2 py-1', className)} aria-label="Loading occupations">
         {[0, 1, 2, 3, 4].map((i) => (
           <div key={i} className="h-7 w-24 shrink-0 animate-pulse rounded-full bg-muted" />
         ))}
@@ -63,7 +63,7 @@ export function OccupationChipRow({
 
   return (
     <div
-      className={cn('flex gap-2 overflow-x-auto py-1', className)}
+      className={cn('flex flex-wrap gap-2 py-1', className)}
       role="group"
       aria-label="Filter by occupation"
     >
