@@ -21,6 +21,7 @@ from app.clients import usajobs_client
 import uuid
 from app.clients import workday_client
 from app.services.jobs import constants
+from app.services.jobs import discovered_boards
 from app.services.jobs import normalize
 from app.services.jobs import storage
 
@@ -108,7 +109,9 @@ async def fetch_curated_ats_source_payloads(
     limit_per_board: int = 50,
 ) -> tuple[dict[str, list[dict]], list[dict]]:
     """Fetch curated ATS/proprietary sources once for fanout to users."""
-    semaphore = asyncio.Semaphore(8)
+    # Bumped from 8: the registry now includes hundreds of auto-discovered boards,
+    # and these are independent ATS APIs, so more concurrency keeps the crawl fast.
+    semaphore = asyncio.Semaphore(16)
     source_fetches = []
 
     async def run_source(source_key: str, fetcher) -> tuple[str, list[dict], dict]:
@@ -158,6 +161,25 @@ async def fetch_curated_ats_source_payloads(
             return await lever_scrape_client.search_lever_html(slug, limit=limit_per_board)
 
         source_fetches.append(run_source(source_key, fetch_lever))
+
+    # Auto-discovered boards (scripts/discover_ats_boards.py) — hundreds of verified
+    # Greenhouse/Lever/Ashby employers beyond the hand-curated lists, all crawled
+    # through the same ATS adapters with direct employer apply links.
+    for board in discovered_boards.load_discovered_boards():
+        source_key = f"{board['ats']}:{board['slug']}"
+
+        async def fetch_discovered(board=board) -> list[dict]:
+            adapter = ats.get_adapter(board["ats"])
+            if not (adapter and adapter.search_board is not None):
+                return []
+            jobs = await adapter.search_board(board["slug"], limit_per_board)
+            # The board APIs sometimes return just the slug as the org name; use
+            # the verified company name captured at discovery time instead.
+            for job in jobs:
+                job["company_name"] = board["company"]
+            return jobs
+
+        source_fetches.append(run_source(source_key, fetch_discovered))
 
     async def fetch_workday() -> list[dict]:
         return await workday_client.discover_all_workday(limit_per_company=20)
