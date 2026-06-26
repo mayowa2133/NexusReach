@@ -78,6 +78,21 @@ _SUFFIX_WORDS = {
     "worldwide", "global", "the",
 }
 
+# A real single-employer board on Greenhouse/Lever/Ashby almost never exceeds a
+# few hundred openings; way above this is a staffing agency / gig platform whose
+# postings are client/gig roles, not the company's own — and they'd pollute the
+# feed with mislabeled non-employer jobs. (Verified: "pulse" = an NHS staffing
+# agency with 2.5k roles, "agency" = a freelance-AI-trainer gig platform.)
+_MAX_PLAUSIBLE_BOARD_JOBS = 500
+
+# Slugs too generic/aggregator-y to trust even when the name technically matches.
+_GENERIC_SLUG_DENYLIST = frozenset({
+    "pulse", "agency", "staffing", "recruiting", "recruitment", "talent",
+    "careers", "career", "jobs", "job", "hiring", "hire", "remote", "freelance",
+    "contractor", "contract", "gig", "people", "candidates", "apply", "employer",
+    "workforce", "outsourcing", "consulting",
+})
+
 
 def _normalize(name: str) -> str:
     return re.sub(r"[^a-z0-9]", "", (name or "").lower())
@@ -168,9 +183,13 @@ async def discover_company(
     """Return the best verified board for a company, or None."""
     async with sem:
         for slug in _slug_candidates(name):
+            if slug in _GENERIC_SLUG_DENYLIST:
+                continue
             for ats, probe in _PROBERS:
                 board_name, n_jobs = await probe(client, slug)
-                if n_jobs > 0 and _name_matches(name, board_name, slug):
+                if not (0 < n_jobs <= _MAX_PLAUSIBLE_BOARD_JOBS):
+                    continue  # no jobs, or aggregator-scale (likely staffing/gig)
+                if _name_matches(name, board_name, slug):
                     return {
                         "company": name,
                         "ats": ats,
@@ -206,13 +225,76 @@ async def _simplify_seed_companies() -> list[str]:
     return out
 
 
+async def _themuse_seed_companies(max_pages: int = 60) -> list[str]:
+    """All-industry company names from The Muse public companies API (free, keyless).
+
+    The Muse spans every industry, so this seeds the discovery with ~1k+ companies
+    well beyond tech — exactly the breadth needed to grow non-tech board coverage.
+    """
+    base = "https://www.themuse.com/api/public/companies"
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; NexusReach/1.0)"}
+    names: list[str] = []
+    async with httpx.AsyncClient(timeout=20, headers=headers) as client:
+        try:
+            first = await client.get(base, params={"page": 1})
+            if first.status_code != 200:
+                return []
+            data = first.json()
+        except Exception:
+            return []
+        names.extend(c["name"] for c in (data.get("results") or []) if c.get("name"))
+        page_count = min(int(data.get("page_count") or 1), max_pages)
+
+        async def fetch(page: int) -> list[str]:
+            try:
+                r = await client.get(base, params={"page": page})
+                if r.status_code != 200:
+                    return []
+                return [c["name"] for c in (r.json().get("results") or []) if c.get("name")]
+            except Exception:
+                return []
+
+        for batch in await asyncio.gather(*(fetch(p) for p in range(2, page_count + 1))):
+            names.extend(batch)
+    return names
+
+
+async def _yc_seed_companies() -> list[str]:
+    """Every YC company name (free yc-oss dataset). YC startups overwhelmingly run
+    on Greenhouse/Lever/Ashby, so this is the highest-hit-rate seed by far."""
+    url = "https://yc-oss.github.io/api/companies/all.json"
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; NexusReach/1.0)"}
+    try:
+        async with httpx.AsyncClient(timeout=45, headers=headers) as client:
+            r = await client.get(url, follow_redirects=True)
+            if r.status_code != 200:
+                return []
+            data = r.json()
+    except Exception:
+        return []
+    companies = data if isinstance(data, list) else data.get("companies", [])
+    return [c["name"] for c in companies if isinstance(c, dict) and c.get("name")]
+
+
 async def main(limit: int | None) -> None:
-    seed = list(dict.fromkeys([*SEED_COMPANIES, *(await _simplify_seed_companies())]))
+    simplify, themuse, yc = await asyncio.gather(
+        _simplify_seed_companies(), _themuse_seed_companies(), _yc_seed_companies()
+    )
+    print(f"Seed sources: curated={len(SEED_COMPANIES)} simplify={len(simplify)} "
+          f"themuse={len(themuse)} yc={len(yc)}")
+    # De-dupe by normalized name so "Audible, Inc." and "Audible" don't both probe.
+    seen: set[str] = set()
+    seed: list[str] = []
+    for name in [*SEED_COMPANIES, *simplify, *themuse, *yc]:
+        key = _normalize(name)
+        if key and key not in seen:
+            seen.add(key)
+            seed.append(name)
     if limit:
         seed = seed[:limit]
-    print(f"Seed companies: {len(seed)}")
+    print(f"Seed companies (deduped): {len(seed)}")
 
-    sem = asyncio.Semaphore(24)
+    sem = asyncio.Semaphore(32)
     async with httpx.AsyncClient(follow_redirects=True) as client:
         results = await asyncio.gather(*(discover_company(client, n, sem) for n in seed))
 

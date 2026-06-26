@@ -109,9 +109,9 @@ async def fetch_curated_ats_source_payloads(
     limit_per_board: int = 50,
 ) -> tuple[dict[str, list[dict]], list[dict]]:
     """Fetch curated ATS/proprietary sources once for fanout to users."""
-    # Bumped from 8: the registry now includes hundreds of auto-discovered boards,
-    # and these are independent ATS APIs, so more concurrency keeps the crawl fast.
-    semaphore = asyncio.Semaphore(16)
+    # Bumped from 8: the registry now includes ~900+ auto-discovered boards, and
+    # these are independent ATS APIs, so more concurrency keeps the crawl fast.
+    semaphore = asyncio.Semaphore(24)
     source_fetches = []
 
     async def run_source(source_key: str, fetcher) -> tuple[str, list[dict], dict]:
