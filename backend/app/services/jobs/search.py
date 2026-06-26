@@ -401,11 +401,22 @@ async def search_ats_jobs(
 
 
 async def _repair_missing_apply_urls(db: AsyncSession, jobs: list[Job]) -> None:
+    """Resolve real apply URLs for the dice/newgrad rows whose listing URL differs
+    from the apply URL, persisting only that small, capped subset.
+
+    This deliberately does NOT persist a plain ``apply_url = url`` fallback for the
+    rest of the page. ``_to_response`` already serves ``job.apply_url or job.url``
+    and ingest sets ``apply_url`` at write time (storage._build_job), so copying
+    ``url -> apply_url`` for every legacy row on this hot ``GET /api/jobs`` only
+    dirtied up to a full page of rows and forced a large ``UPDATE`` + ``commit``.
+    On a sizable feed that commit could invalidate the pooled connection mid
+    request; the implicit rollback then expired every loaded row, and the *sync*
+    ``_to_response`` serializer would trip a lazy reload of an expired column —
+    raising ``MissingGreenlet`` and 500-ing the whole feed. Keeping only the
+    dice/newgrad resolution (each capped at ``APPLY_URL_REPAIR_MAX_JOBS``) makes
+    the commit small and reliable while the user-facing apply link is unchanged.
+    """
     did_update = False
-    for job in jobs:
-        if job.source == "simplify_github" and not job.apply_url and job.url:
-            job.apply_url = job.url
-            did_update = True
 
     dice_jobs = [
         job
@@ -439,11 +450,6 @@ async def _repair_missing_apply_urls(db: AsyncSession, jobs: list[Job]) -> None:
             if not apply_url:
                 continue
             job.apply_url = apply_url
-            did_update = True
-
-    for job in jobs:
-        if not job.apply_url and job.url:
-            job.apply_url = job.url
             did_update = True
 
     if did_update:

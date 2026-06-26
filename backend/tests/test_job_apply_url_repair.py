@@ -31,7 +31,9 @@ async def test_repair_missing_apply_urls_updates_saved_dice_jobs():
 
     mock_resolve.assert_awaited_once_with([dice_job.url])
     assert dice_job.apply_url == "https://careers.example.com/jobs/example/apply"
-    assert other_job.apply_url == "https://example.com/job"
+    # Non-dice/newgrad rows are no longer persisted on the read path — _to_response
+    # serves `apply_url or url`, so the feed GET doesn't dirty every row.
+    assert other_job.apply_url is None
     db.commit.assert_awaited_once()
 
 
@@ -68,12 +70,20 @@ async def test_repair_missing_apply_urls_updates_newgrad_and_simplify_jobs():
     mock_dice_resolve.assert_not_awaited()
     mock_newgrad_resolve.assert_awaited_once_with([newgrad_job.url])
     assert newgrad_job.apply_url == "https://careers.example.com/jobs/new-grad-engineer"
-    assert simplify_job.apply_url == "https://jobs.example.com/new-grad-engineer"
+    # simplify rows are served via `apply_url or url` in _to_response, not persisted here.
+    assert simplify_job.apply_url is None
     db.commit.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_repair_missing_apply_urls_falls_back_to_source_url_when_no_direct_url_found():
+async def test_repair_missing_apply_urls_no_commit_when_nothing_resolved():
+    """No resolved dice/newgrad URL -> nothing persisted and no commit.
+
+    The plain url fallback is served by ``_to_response`` (``apply_url or url``),
+    so the read path stays free of the large per-row UPDATE + commit that could
+    invalidate the connection, expire the loaded rows, and 500 serialization with
+    MissingGreenlet.
+    """
     dice_job = MagicMock()
     dice_job.source = "dice"
     dice_job.url = "https://www.dice.com/job-detail/example"
@@ -89,5 +99,5 @@ async def test_repair_missing_apply_urls_falls_back_to_source_url_when_no_direct
     ):
         await _repair_missing_apply_urls(db, [dice_job])
 
-    assert dice_job.apply_url == "https://www.dice.com/job-detail/example"
-    db.commit.assert_awaited_once()
+    assert dice_job.apply_url is None
+    db.commit.assert_not_awaited()
