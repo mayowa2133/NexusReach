@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { CompanyLogo } from '@/components/CompanyLogo';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -852,30 +853,33 @@ const JobListCard = memo(function JobListCard({
     >
       <CardContent className="pt-3 pb-3 space-y-1">
         <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5">
-              <div className="font-medium text-sm truncate">{job.title}</div>
-              {isNew && (
-                <Badge variant="default" className="text-[9px] px-1 py-0 bg-blue-600 hover:bg-blue-600 shrink-0">
-                  NEW
-                </Badge>
-              )}
-              {job.source_status === 'stale' && (
-                <Badge variant="outline" className="text-[9px] px-1 py-0 shrink-0">
-                  STALE
-                </Badge>
-              )}
-              {job.source_status === 'closed' && (
-                <Badge variant="destructive" className="text-[9px] px-1 py-0 shrink-0">
-                  CLOSED
-                </Badge>
-              )}
-            </div>
-            <div className="text-xs text-muted-foreground">
-              {job.company_name}
-              {formatJobPostedAt(job) && (
-                <span className="opacity-70"> · {formatJobPostedAt(job)}</span>
-              )}
+          <div className="flex items-start gap-2 min-w-0 flex-1">
+            <CompanyLogo name={job.company_name} logoUrl={job.company_logo} className="mt-0.5" />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5">
+                <div className="font-medium text-sm truncate">{job.title}</div>
+                {isNew && (
+                  <Badge variant="default" className="text-[9px] px-1 py-0 bg-blue-600 hover:bg-blue-600 shrink-0">
+                    NEW
+                  </Badge>
+                )}
+                {job.source_status === 'stale' && (
+                  <Badge variant="outline" className="text-[9px] px-1 py-0 shrink-0">
+                    STALE
+                  </Badge>
+                )}
+                {job.source_status === 'closed' && (
+                  <Badge variant="destructive" className="text-[9px] px-1 py-0 shrink-0">
+                    CLOSED
+                  </Badge>
+                )}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {job.company_name}
+                {formatJobPostedAt(job) && (
+                  <span className="opacity-70"> · {formatJobPostedAt(job)}</span>
+                )}
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
