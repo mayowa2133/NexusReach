@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 
+import { API_URL } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 const SUFFIX_WORDS = new Set([
@@ -43,10 +44,11 @@ interface CompanyLogoProps {
 
 /**
  * Square company logo for job cards. Tries the source-provided logo first, then
- * the company's favicon (its logo mark) by guessed domain, and finally a neutral
- * initials badge. Each image that 404s/errors advances to the next candidate, so
- * an unknown company degrades cleanly rather than showing a broken image.
- * Decorative: the company name is always shown as text alongside it.
+ * the company's logo mark via our backend logo proxy (cached favicon, keyed by a
+ * domain guessed from the name), and finally a neutral initials badge. Each image
+ * that 404s/errors advances to the next candidate, so an unknown company degrades
+ * cleanly rather than showing a broken image or a generic globe. Decorative: the
+ * company name is always shown as text alongside it.
  */
 export function CompanyLogo({ name, logoUrl, className }: CompanyLogoProps) {
   const sources = useMemo(() => {
@@ -54,9 +56,7 @@ export function CompanyLogo({ name, logoUrl, className }: CompanyLogoProps) {
     if (logoUrl) candidates.push(logoUrl);
     const domain = guessDomain(name);
     if (domain) {
-      candidates.push(
-        `https://www.google.com/s2/favicons?domain=${domain}&sz=64`,
-      );
+      candidates.push(`${API_URL}/api/companies/logo?domain=${encodeURIComponent(domain)}`);
     }
     return candidates;
   }, [logoUrl, name]);
