@@ -133,19 +133,21 @@ async def discover_jobs(
             for loc in target_locations:
                 expanded_seeds.append({**seed, "location": loc})
 
-    suppress_tech = constants._suppress_tech_sources(resolved_occupations)
-    if suppress_tech:
-        # All-industry sources only — the curated tech employers and tech-leaning
-        # boards (Dice/Simplify/Jobicy) are noise for nursing / teaching / law.
-        # The Muse is the cross-industry curated-breadth source here and is what
-        # gives these occupations real depth independent of the paid aggregators.
-        discover_sources = ["jsearch", "adzuna", "themuse", "remotive"]
+    # The engineering-only boards (Dice/Jobicy/Remotive/Simplify) and the tech
+    # new-grad scraper / ATS crawl only ever carry tech roles — Remotive even
+    # ignores the query. Run them only for engineering-relevant searches; a
+    # non-engineering search (marketing, sales, finance, ...) uses the broad
+    # all-industry aggregators + the curated non-tech vertical boards, so it can't
+    # be polluted with engineering roles that get mis-tagged by the discover hint.
+    engineering_relevant = constants._engineering_relevant(resolved_occupations)
+    discover_sources = list(constants.ALL_INDUSTRY_DISCOVER_SOURCES)
+    if engineering_relevant:
+        discover_sources += constants.ENGINEERING_ONLY_DISCOVER_SOURCES
+    else:
         logger.info(
-            "Discover: routing to broad aggregators only (non-tech occupations: %s)",
+            "Discover: all-industry sources only (non-engineering occupations: %s)",
             resolved_occupations,
         )
-    else:
-        discover_sources = ["jsearch", "adzuna", "themuse", "remotive", "jobicy", "dice", "simplify"]
 
     for seed in expanded_seeds:
         try:
@@ -164,8 +166,8 @@ async def discover_jobs(
             await db.rollback()
             logger.exception("Discover failed for query: %s", seed["query"])
 
-    # 2. newgrad-jobs.com — tech/new-grad-leaning; skip for non-tech occupations.
-    if not suppress_tech:
+    # 2. newgrad-jobs.com — tech/new-grad-leaning; only for engineering searches.
+    if engineering_relevant:
         try:
             raw_newgrad = await newgrad_jobs_client.search_newgrad_jobs()
             ng_stored = await storage._store_raw_jobs(db, user_id, raw_newgrad, profile)
@@ -176,8 +178,10 @@ async def discover_jobs(
             await db.rollback()
             logger.exception("newgrad-jobs discover failed")
 
-    # 3. Curated ATS boards are all tech companies — skip for non-tech occupations.
-    if not suppress_tech:
+    # 3. Curated ATS boards are all tech companies — only for engineering searches.
+    #    (Non-engineering roles at these employers still reach the feed via the
+    #    hourly global board crawl, tagged by title classification.)
+    if engineering_relevant:
         try:
             ats_new = await curated_boards._discover_ats_boards(db, user_id)
             total_new += ats_new

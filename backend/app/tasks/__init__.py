@@ -126,6 +126,10 @@ celery_app.conf.update(
             "task": "app.tasks.jobs.verify_curated_boards",
             "schedule": crontab(minute=0, hour=6, day_of_week=1),  # Monday 06:00 UTC
         },
+        "retag-occupation-tags": {
+            "task": "app.tasks.jobs.retag_occupation_tags",
+            "schedule": crontab(minute=20, hour=4),  # daily 04:20 UTC (self-heal tags)
+        },
     },
 )
 

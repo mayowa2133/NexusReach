@@ -536,6 +536,53 @@ def verify_curated_boards() -> dict:
     return run_async(_verify_curated_boards())
 
 
+async def _retag_occupation_tags(batch_size: int = 1000) -> dict:
+    """Recompute `occupation:` tags on stored jobs from their title/description.
+
+    Self-heals the existing feed after a classifier/routing change: drops stale
+    discover-hint tags that mis-labeled roles (engineering jobs under Marketing)
+    and adds occupation tags the classifier now recognizes. Keyset-paginated and
+    expunged per batch so a full-table scan stays memory-bounded.
+    """
+    from app.models.job import Job  # noqa: PLC0415
+    from app.services.jobs import storage  # noqa: PLC0415
+
+    scanned = 0
+    updated = 0
+    last_id: uuid.UUID | None = None
+    async with async_session() as db:
+        while True:
+            query = select(Job).order_by(Job.id).limit(batch_size)
+            if last_id is not None:
+                query = query.where(Job.id > last_id)
+            rows = (await db.execute(query)).scalars().all()
+            if not rows:
+                break
+            for job in rows:
+                last_id = job.id
+                scanned += 1
+                fresh = storage.recompute_occupation_tags(job)
+                if fresh is not None:
+                    job.tags = fresh
+                    updated += 1
+            await db.commit()
+            db.expunge_all()
+    logger.info("retag_occupation_tags: scanned=%d updated=%d", scanned, updated)
+    return {"scanned": scanned, "updated": updated}
+
+
+@celery_app.task(
+    name="app.tasks.jobs.retag_occupation_tags",
+    autoretry_for=(Exception,),
+    retry_backoff=60,
+    retry_backoff_max=600,
+    max_retries=2,
+)
+def retag_occupation_tags() -> dict:
+    """Celery task: daily re-classification of stored jobs' occupation tags."""
+    return run_async(_retag_occupation_tags())
+
+
 # --- Re-scoring ---
 
 

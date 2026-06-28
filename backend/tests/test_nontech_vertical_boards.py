@@ -217,7 +217,7 @@ async def test_discover_jobs_engineering_skips_vertical_boards():
     mock_vert.assert_not_awaited()
 
 
-async def test_discover_jobs_finance_keeps_tech_and_adds_finance_vertical():
+async def test_discover_jobs_finance_skips_eng_boards_and_adds_finance_vertical():
     profile = MagicMock()
     profile.target_occupations = ["accounting_finance"]
     profile.target_roles = None
@@ -232,10 +232,11 @@ async def test_discover_jobs_finance_keeps_tech_and_adds_finance_vertical():
     ):
         await job_service.discover_jobs(_mock_db(profile), uuid.uuid4())
 
-    # finance is cross-industry: tech boards stay AND the curated verticals are
-    # added. Accounting/finance staff exist at every large employer, so it pulls
-    # all four non-tech verticals (the third positional arg is the vertical set).
-    mock_ats.assert_awaited_once()
+    # finance is non-engineering: the engineering-only ATS crawl is skipped (those
+    # finance roles still reach the feed via the hourly board crawl), but the
+    # curated verticals ARE added. Accounting/finance staff exist at every large
+    # employer, so it pulls all four (the third positional arg is the vertical set).
+    mock_ats.assert_not_awaited()
     mock_vert.assert_awaited_once()
     assert mock_vert.await_args.args[2] == {"finance", "healthcare", "education", "retail"}
 

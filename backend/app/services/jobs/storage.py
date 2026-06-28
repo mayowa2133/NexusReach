@@ -382,6 +382,31 @@ def _infer_occupation_tags_for_job(data: dict) -> None:
         data["tags"] = merge_tags(existing, inferred)
 
 
+def recompute_occupation_tags(job: Job) -> list[str] | None:
+    """Return a corrected tag list for a stored job, or ``None`` if unchanged.
+
+    Re-derives `occupation:` tags purely from the job's title/description (no
+    discover-hint fallback), so a stored job's occupation tags reflect what the
+    role actually is. This drops stale fallback tags that mis-labeled a role (e.g.
+    an engineering job tagged ``occupation:marketing`` because it was fetched
+    during a marketing discover) and adds tags the classifier now recognizes.
+    Non-occupation tags (skills, startup provenance) are preserved.
+    """
+    current = list(job.tags or [])
+    non_occupation = [
+        t for t in current
+        if not (isinstance(t, str) and t.startswith(OCCUPATION_TAG_PREFIX))
+    ]
+    current_occupation = sorted(
+        t for t in current
+        if isinstance(t, str) and t.startswith(OCCUPATION_TAG_PREFIX)
+    )
+    fresh = occupation_tags_for_job(title=job.title, description=job.description)
+    if sorted(fresh) == current_occupation:
+        return None
+    return non_occupation + fresh
+
+
 async def _store_raw_jobs(
     db: AsyncSession,
     user_id: uuid.UUID,

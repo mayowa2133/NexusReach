@@ -176,7 +176,10 @@ async def test_discover_fans_out_locations_and_passes_hint():
         kwargs = call.kwargs
         assert kwargs["limit"] == job_service.DISCOVER_LIMIT_PER_SOURCE
         assert kwargs["occupation_hint"] == "sales"
-        assert "jobicy" in kwargs["sources"] and "simplify" in kwargs["sources"]
+        # sales is non-engineering: all-industry aggregators only, none of the
+        # engineering-only boards (which would inject mis-tagged tech roles).
+        assert "themuse" in kwargs["sources"]
+        assert "jobicy" not in kwargs["sources"] and "dice" not in kwargs["sources"]
         seen_locations.add(kwargs["location"])
     # base (None) plus the first two target locations - capped fan-out
     assert None in seen_locations

@@ -63,6 +63,38 @@ def _suppress_tech_sources(resolved_occupations: list[str] | None) -> bool:
     return all(o in INDUSTRY_BOUND_NONTECH_OCCUPATIONS for o in occs)
 
 
+# The tech-only job boards (Dice / Jobicy / Remotive / Simplify) and the new-grad
+# tech scraper only ever carry engineering/tech roles — Remotive even ignores the
+# query and returns its own tech feed. Running them for a non-engineering discover
+# (marketing, sales, finance, HR, ...) injects engineering roles that, when their
+# titles don't classify, get mis-tagged with the discover occupation (a "Senior
+# Quality Engineer" surfacing under Marketing). So gate them to the occupations
+# they actually serve. The broad aggregators (JSearch/Adzuna/The Muse) and the
+# curated non-tech vertical boards cover every other occupation.
+ALL_INDUSTRY_DISCOVER_SOURCES = ["jsearch", "adzuna", "themuse"]
+ENGINEERING_ONLY_DISCOVER_SOURCES = ["remotive", "jobicy", "dice", "simplify"]
+ENGINEERING_RELEVANT_OCCUPATIONS = frozenset({
+    "software_engineering",
+    "data_engineer",
+    "machine_learning_ai",
+    "cybersecurity",
+    "engineering_development",
+    "data_analyst",
+    "product_management",
+})
+
+
+def _engineering_relevant(resolved_occupations: list[str] | None) -> bool:
+    """True when the engineering-only boards (and the tech new-grad scraper / ATS
+    crawl) should run: the default feed (no occupations) and any search that
+    includes an engineering-relevant occupation. A purely non-engineering search
+    skips them so they can't inject tech noise."""
+    occs = [o for o in (resolved_occupations or []) if o]
+    if not occs:
+        return True
+    return any(o in ENGINEERING_RELEVANT_OCCUPATIONS for o in occs)
+
+
 # Curated non-tech employer lists are the vertical analog of the tech ATS
 # boards. This maps an occupation to the verticals whose employers actually hire
 # it, so a nursing search pulls health systems and a finance search pulls banks.

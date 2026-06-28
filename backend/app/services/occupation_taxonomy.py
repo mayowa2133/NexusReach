@@ -147,6 +147,9 @@ OCCUPATIONS: tuple[Occupation, ...] = (
         key="marketing",
         label="Marketing",
         aliases=(
+            # The bare word "marketing" already matches any "... Marketing ..."
+            # title (Digital/Product/Field Marketing, Marketing Analyst, etc.);
+            # the rest cover common marketing roles that DON'T contain the word.
             "marketing",
             "growth marketing",
             "performance marketing",
@@ -154,9 +157,20 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "content marketing",
             "lifecycle marketing",
             "demand generation",
+            "demand gen",
             "seo specialist",
+            "seo",
             "marketing coordinator",
             "marketing manager",
+            "brand manager",
+            "social media",
+            "content strategist",
+            "communications manager",
+            "communications specialist",
+            "public relations",
+            "media buyer",
+            "paid media",
+            "campaign manager",
         ),
         default_search_queries=(
             "Marketing Manager",
@@ -550,13 +564,22 @@ OCCUPATIONS: tuple[Occupation, ...] = (
         key="arts_entertainment",
         label="Arts and Entertainment",
         aliases=(
+            # Bare "director"/"producer"/"editor"/"writer" matched *every*
+            # "Marketing Director", "Sales Producer", "Engineering ... Editor"
+            # title, cross-tagging unrelated roles as arts. Use specific forms.
             "artist",
             "musician",
             "actor",
-            "producer",
-            "director",
-            "writer",
-            "editor",
+            "film producer",
+            "music producer",
+            "executive producer",
+            "art director",
+            "creative director",
+            "film director",
+            "screenwriter",
+            "video editor",
+            "photo editor",
+            "film editor",
             "videographer",
             "animator",
             "audio engineer",

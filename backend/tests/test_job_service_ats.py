@@ -492,3 +492,41 @@ async def test_load_profile_for_scoring_handles_missing_profile():
 
     assert out is None
     db.expunge.assert_not_called()
+
+
+# --- recompute_occupation_tags: self-heal stored jobs' occupation tags ---------
+
+
+def test_recompute_occupation_tags_drops_stale_fallback_tag():
+    """An engineering role mis-tagged marketing (by an old discover-hint fallback)
+    loses the marketing tag on recompute; non-occupation tags are preserved."""
+    from app.services.jobs import storage
+
+    job = MagicMock()
+    job.title = "Senior Quality Engineer"  # doesn't classify -> no occupation tag
+    job.description = ""
+    job.tags = ["python", "occupation:marketing"]
+
+    assert storage.recompute_occupation_tags(job) == ["python"]
+
+
+def test_recompute_occupation_tags_adds_newly_classified_marketing():
+    from app.services.jobs import storage
+
+    job = MagicMock()
+    job.title = "Social Media Manager"
+    job.description = ""
+    job.tags = ["startup"]
+
+    assert storage.recompute_occupation_tags(job) == ["startup", "occupation:marketing"]
+
+
+def test_recompute_occupation_tags_returns_none_when_unchanged():
+    from app.services.jobs import storage
+
+    job = MagicMock()
+    job.title = "Software Engineer"
+    job.description = ""
+    job.tags = ["occupation:software_engineering"]
+
+    assert storage.recompute_occupation_tags(job) is None
