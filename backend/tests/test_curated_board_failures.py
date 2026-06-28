@@ -1,12 +1,33 @@
-from unittest.mock import AsyncMock, patch
+import json
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
 
+from app.clients import workday_client
 from app.services.jobs.curated_boards import fetch_curated_ats_source_payloads
 
 
 pytestmark = pytest.mark.asyncio
+
+
+async def test_search_workday_soft_fails_on_non_json_200():
+    """A Workday tenant returning a 200 with a non-JSON body (maintenance /
+    anti-bot) must break softly to [], not raise a JSONDecodeError that the
+    caller reports to Sentry (regression for PYTHON-V)."""
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.side_effect = json.JSONDecodeError("Expecting value", "", 0)
+
+    client = MagicMock()
+    client.post = AsyncMock(return_value=resp)
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("app.clients.workday_client.httpx.AsyncClient", return_value=client):
+        jobs = await workday_client.search_workday("acme", "wd5", "ext", "Acme")
+
+    assert jobs == []
 
 
 async def test_fetch_curated_ats_source_payloads_soft_fails_transient_http_errors():

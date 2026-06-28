@@ -158,7 +158,17 @@ async def search_workday(
             if resp.status_code != 200:
                 logger.debug("Workday %d for %s/%s", resp.status_code, company, site)
                 break
-            data = resp.json()
+            try:
+                data = resp.json()
+            except ValueError:
+                # A 200 with an empty/HTML body (tenant in maintenance, anti-bot
+                # challenge, or a config that no longer serves JSON). Benign for a
+                # best-effort crawl — break like a non-200 instead of raising a
+                # JSONDecodeError that the caller logs to Sentry as an error.
+                logger.debug("Workday non-JSON body for %s/%s", company, site)
+                break
+            if not isinstance(data, dict):
+                break
             total = data.get("total", total)
             page_postings = data.get("jobPostings", [])
             if not page_postings:
