@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-06-26T04:43:38.074572+00:00",
-  "count": 933,
+  "generated_at": "2026-06-29T03:35:38.513236+00:00",
+  "count": 948,
   "boards": [
     {
       "slug": "lyrahealth",
@@ -4530,7 +4530,7 @@
     {
       "slug": "dots",
       "ats": "greenhouse",
-      "company": "Dots \ud83d\udcb8"
+      "company": "Dots 💸"
     },
     {
       "slug": "malga",
@@ -4666,6 +4666,81 @@
       "slug": "whitespace",
       "ats": "greenhouse",
       "company": "Whitespace"
+    },
+    {
+      "slug": "hellofresh",
+      "ats": "greenhouse",
+      "company": "HelloFresh"
+    },
+    {
+      "slug": "klaviyo",
+      "ats": "greenhouse",
+      "company": "Klaviyo"
+    },
+    {
+      "slug": "thenewyorktimes",
+      "ats": "greenhouse",
+      "company": "The New York Times"
+    },
+    {
+      "slug": "reformation",
+      "ats": "greenhouse",
+      "company": "Reformation"
+    },
+    {
+      "slug": "getyourguide",
+      "ats": "greenhouse",
+      "company": "GetYourGuide"
+    },
+    {
+      "slug": "attentive",
+      "ats": "greenhouse",
+      "company": "Attentive"
+    },
+    {
+      "slug": "iterable",
+      "ats": "greenhouse",
+      "company": "Iterable"
+    },
+    {
+      "slug": "voxmedia",
+      "ats": "greenhouse",
+      "company": "Vox Media"
+    },
+    {
+      "slug": "gymshark",
+      "ats": "greenhouse",
+      "company": "Gymshark"
+    },
+    {
+      "slug": "harrys",
+      "ats": "greenhouse",
+      "company": "Harry's"
+    },
+    {
+      "slug": "olipop",
+      "ats": "greenhouse",
+      "company": "Olipop"
+    },
+    {
+      "slug": "buzzfeed",
+      "ats": "greenhouse",
+      "company": "BuzzFeed"
+    },
+    {
+      "slug": "sproutsocial",
+      "ats": "greenhouse",
+      "company": "Sprout Social"
+    },
+    {
+      "slug": "impossible-foods",
+      "ats": "ashby",
+      "company": "Impossible Foods"
+    },
+    {
+      "slug": "rothys",
+      "ats": "ashby",
+      "company": "Rothy's"
     }
   ]
 }

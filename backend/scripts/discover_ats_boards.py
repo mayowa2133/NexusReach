@@ -70,6 +70,15 @@ SEED_COMPANIES: tuple[str, ...] = (
     "Sourcegraph", "Replit", "Hugging Face", "Weights and Biases", "Scale AI",
     "Anthropic", "OpenAI", "Cohere", "Mistral AI", "Perplexity", "Glean", "Sierra",
     "Harvey", "Abridge", "Ambience Healthcare", "OpenEvidence",
+    # Marketing-heavy consumer / media / martech / DTC (the brands that post the
+    # most marketing + brand + comms roles and seasonal marketing internships).
+    "HelloFresh", "Airbnb", "Roku", "Klaviyo", "Instacart", "The New York Times",
+    "Reformation", "Spotify", "Hopper", "Twitch", "GetYourGuide", "Attentive",
+    "Squarespace", "Iterable", "Vox Media", "Gymshark", "Harry's", "Olipop",
+    "BuzzFeed", "Sprout Social", "Impossible Foods", "Rothy's", "Peloton",
+    "Poshmark", "Bombas", "Yelp", "Mailchimp", "Lululemon", "Conde Nast",
+    "SiriusXM", "Liquid Death", "Athletic Greens", "Curology", "Vuori", "Oatly",
+    "Chobani", "Beyond Meat", "Gopuff", "Sephora",
 )
 
 _SUFFIX_WORDS = {
