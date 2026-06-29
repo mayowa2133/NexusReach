@@ -79,6 +79,17 @@ SEED_COMPANIES: tuple[str, ...] = (
     "Poshmark", "Bombas", "Yelp", "Mailchimp", "Lululemon", "Conde Nast",
     "SiriusXM", "Liquid Death", "Athletic Greens", "Curology", "Vuori", "Oatly",
     "Chobani", "Beyond Meat", "Gopuff", "Sephora",
+    # Broad non-tech-recruiting verticals (lift the general-professional + thin
+    # categories: legal, HR, sales, support, finance, consulting, supply chain).
+    # Legal tech / adtech / insurtech / proptech / gaming / hospitality / commerce.
+    "Relativity", "DISCO", "Everlaw", "Ironclad", "Clio", "Rocket Lawyer", "Evisort",
+    "The Trade Desk", "DoubleVerify", "Criteo", "AppLovin", "Bloomreach", "Yotpo",
+    "Movable Ink", "Tatari", "Lemonade", "Ethos Life", "Pie Insurance", "Next Insurance",
+    "Policygenius", "Opendoor", "Roofstock", "Pacaso", "Kiavi", "SoFi", "Gemini",
+    "Earnest", "Justworks", "Culture Amp", "15Five", "BambooHR", "Checkr", "Scopely",
+    "Roblox", "Unity Technologies", "Riot Games", "Bungie", "Mindbody", "CookUnity",
+    "Stitch Fix", "Loop Returns", "Motive", "Bringg", "Khan Academy", "Edmentum",
+    "Code.org", "DonorsChoose", "Thoughtworks", "Sesame", "Calm", "Headspace",
 )
 
 _SUFFIX_WORDS = {
