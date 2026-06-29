@@ -343,4 +343,34 @@ describe('JobsPage', () => {
     expect(screen.getAllByText('Startup').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('Y Combinator')).toBeInTheDocument();
   });
+
+  // --- Occupation selection persistence (survives leaving and returning) ---
+
+  it('restores a persisted occupation selection into the jobs query on mount', () => {
+    // Simulates returning to the Jobs page after clicking into a job detail:
+    // the page remounts, and the previously-chosen occupation must be reapplied
+    // rather than resetting to "All".
+    window.localStorage.setItem(
+      'nexusreach-jobs-occupations',
+      JSON.stringify(['software_engineering'])
+    );
+    mockSavedJobs = { items: [sampleJob], total: 1, limit: null, offset: 0 };
+
+    renderJobs();
+
+    expect(mockUseJobs).toHaveBeenCalledWith(
+      expect.objectContaining({ occupations: ['software_engineering'] })
+    );
+  });
+
+  it('treats an explicitly-stored "All" ([]) as no occupation filter', () => {
+    window.localStorage.setItem('nexusreach-jobs-occupations', JSON.stringify([]));
+    mockSavedJobs = { items: [sampleJob], total: 1, limit: null, offset: 0 };
+
+    renderJobs();
+
+    expect(mockUseJobs).toHaveBeenCalledWith(
+      expect.objectContaining({ occupations: undefined })
+    );
+  });
 });

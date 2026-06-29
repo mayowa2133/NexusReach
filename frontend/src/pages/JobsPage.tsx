@@ -24,7 +24,12 @@ import {
   getStoredPeopleSearchTargetCount,
   setStoredPeopleSearchTargetCount,
 } from '@/lib/peopleSearchCount';
-import { getStoredJobsFilters, setStoredJobsFilters } from '@/lib/jobsFilters';
+import {
+  getStoredJobsFilters,
+  setStoredJobsFilters,
+  getStoredJobsOccupations,
+  setStoredJobsOccupations,
+} from '@/lib/jobsFilters';
 import { toast } from 'sonner';
 import { sanitizeHTML } from '@/lib/sanitize';
 import { formatJobPostedAt } from '@/lib/dateUtils';
@@ -175,17 +180,33 @@ export function JobsPage() {
   // True while a button-free cold-start discovery is filling an empty feed.
   const [coldStartFilling, setColdStartFilling] = useState(false);
 
-  // Occupation filter — initialize from profile.target_occupations on first load.
+  // Occupation filter — persisted across navigation/reload so the user's pick
+  // (e.g. "Software Engineering") survives clicking into a job and coming back.
+  // A stored value (incl. an explicit "All" / `[]`) wins; only a never-set
+  // selection (`null`) seeds from profile.target_occupations.
   const { data: profile } = useProfile();
   const { data: occupations } = useOccupations();
-  const [selectedOccupations, setSelectedOccupations] = useState<string[]>([]);
-  const [hasInitializedFromProfile, setHasInitializedFromProfile] = useState(false);
+  const [storedOccupations] = useState(getStoredJobsOccupations);
+  const [selectedOccupations, setSelectedOccupations] = useState<string[]>(
+    storedOccupations ?? []
+  );
+  const [hasInitializedFromProfile, setHasInitializedFromProfile] = useState(
+    storedOccupations !== null
+  );
   if (profile && !hasInitializedFromProfile) {
     if (profile.target_occupations && profile.target_occupations.length > 0) {
       setSelectedOccupations(profile.target_occupations);
     }
     setHasInitializedFromProfile(true);
   }
+
+  // Persist explicit occupation chip changes so they restore on remount. The
+  // profile seed above is intentionally NOT persisted (storage stays `null`),
+  // so changing target occupations in the profile keeps re-seeding the feed.
+  const handleOccupationsChange = (next: string[]) => {
+    setSelectedOccupations(next);
+    setStoredJobsOccupations(next);
+  };
 
   // "New jobs" tracking
   const [lastVisited] = useState<string | null>(() => getJobsLastVisited());
@@ -559,7 +580,7 @@ export function JobsPage() {
           </div>
           <OccupationChipRow
             selected={selectedOccupations}
-            onChange={setSelectedOccupations}
+            onChange={handleOccupationsChange}
           />
         </CardContent>
       </Card>

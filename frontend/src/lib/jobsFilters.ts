@@ -117,3 +117,48 @@ export function setStoredJobsFilters(filters: JobsFilters): void {
     // Ignore quota / serialization errors — persistence is best-effort.
   }
 }
+
+/**
+ * The selected occupation chips are persisted separately from the rest of the
+ * filter bar because they carry a tri-state meaning the other filters don't:
+ *
+ *  - `null`  → the user has never picked occupations on the Jobs page, so the
+ *              page should seed the selection from `profile.target_occupations`.
+ *  - `[]`    → the user explicitly chose "All" — restore it, do NOT re-seed.
+ *  - `[...]` → the user's explicit chip selection — restore it.
+ *
+ * Keeping this distinct from `JobsFilters` (whose persist effect rewrites the
+ * whole object on every render) avoids a first-mount write clobbering the `null`
+ * sentinel with `[]` before the profile has loaded.
+ */
+const JOBS_OCCUPATIONS_STORAGE_KEY = 'nexusreach-jobs-occupations';
+
+export function getStoredJobsOccupations(): string[] | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  const raw = window.localStorage.getItem(JOBS_OCCUPATIONS_STORAGE_KEY);
+  if (!raw) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed) && parsed.every((item) => typeof item === 'string')) {
+      return parsed as string[];
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function setStoredJobsOccupations(occupations: string[]): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    window.localStorage.setItem(JOBS_OCCUPATIONS_STORAGE_KEY, JSON.stringify(occupations));
+  } catch {
+    // Ignore quota / serialization errors — persistence is best-effort.
+  }
+}

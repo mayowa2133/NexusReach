@@ -7,9 +7,12 @@ import {
   DEFAULT_JOBS_FILTERS,
   getStoredJobsFilters,
   setStoredJobsFilters,
+  getStoredJobsOccupations,
+  setStoredJobsOccupations,
 } from '@/lib/jobsFilters';
 
 const KEY = 'nexusreach-jobs-filters';
+const OCCUPATIONS_KEY = 'nexusreach-jobs-occupations';
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -59,5 +62,39 @@ describe('getStoredJobsFilters', () => {
   it('returns defaults on corrupt JSON', () => {
     window.localStorage.setItem(KEY, '{not valid json');
     expect(getStoredJobsFilters()).toEqual(DEFAULT_JOBS_FILTERS);
+  });
+});
+
+describe('getStoredJobsOccupations', () => {
+  it('returns null (the "never set" sentinel) when nothing is stored', () => {
+    expect(getStoredJobsOccupations()).toBeNull();
+  });
+
+  it('round-trips an explicit occupation selection', () => {
+    setStoredJobsOccupations(['software_engineering', 'data_analyst']);
+    expect(getStoredJobsOccupations()).toEqual([
+      'software_engineering',
+      'data_analyst',
+    ]);
+  });
+
+  it('distinguishes an explicit "All" ([]) from never-set (null)', () => {
+    setStoredJobsOccupations([]);
+    expect(getStoredJobsOccupations()).toEqual([]);
+  });
+
+  it('returns null on a non-array payload', () => {
+    window.localStorage.setItem(OCCUPATIONS_KEY, JSON.stringify({ foo: 'bar' }));
+    expect(getStoredJobsOccupations()).toBeNull();
+  });
+
+  it('returns null when the array contains non-strings', () => {
+    window.localStorage.setItem(OCCUPATIONS_KEY, JSON.stringify(['ok', 3]));
+    expect(getStoredJobsOccupations()).toBeNull();
+  });
+
+  it('returns null on corrupt JSON', () => {
+    window.localStorage.setItem(OCCUPATIONS_KEY, '{not valid json');
+    expect(getStoredJobsOccupations()).toBeNull();
   });
 });
