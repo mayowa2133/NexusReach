@@ -28,6 +28,83 @@ from app.services.jobs import storage
 logger = logging.getLogger(__name__)
 
 
+async def _dispatch_source_fetch(
+    source: str,
+    *,
+    query: str,
+    location: str | None,
+    remote_only: bool,
+    limit: int,
+    occupation: str | None,
+) -> list[dict]:
+    """Run a single aggregator's fetch and return its raw job dicts.
+
+    Split out from ``_fetch_jobs_for_source`` so the call can be wrapped in
+    ``asyncio.wait_for`` — no single slow/hung source can stall the whole
+    ``search_jobs`` gather (and the interactive search request) anymore.
+    """
+    if source == "jsearch":
+        return await jsearch_client.search_jobs(
+            query, location=location, remote_only=remote_only, limit=limit
+        )
+    if source == "adzuna":
+        return await adzuna_client.search_jobs(
+            query,
+            location=location,
+            country=normalize._adzuna_country_for_location(location),
+            limit=limit,
+        )
+    if source == "remotive":
+        return await remote_jobs_client.search_remotive(query, limit=limit)
+    if source == "jobicy":
+        return await remote_jobs_client.search_jobicy(query, limit=limit)
+    if source == "dice":
+        return await remote_jobs_client.search_dice(
+            query,
+            location=location,
+            country_code=(
+                geocode_location_query(location).country_code
+                if geocode_location_query(location)
+                else country_code_for_name(location)
+            ),
+            limit=limit,
+        )
+    if source == "simplify":
+        # New-grad + internship curated lists (level-stamped). Capped well
+        # above `limit` because the goal here is early-career *volume*.
+        return await remote_jobs_client.fetch_simplify_early_career_jobs(
+            limit_per_repo=max(limit, 400)
+        )
+    if source == "jobbank":
+        return await jobbank_client.search_jobbank(
+            query, location=location, limit=limit
+        )
+    if source == "themuse":
+        return await themuse_client.search_themuse(
+            query,
+            occupation=occupation,
+            location=location,
+            remote_only=remote_only,
+            limit=limit,
+            # Pull dedicated entry-level + internship roles on top of the
+            # all-levels results so early-career volume isn't crowded out.
+            boost_early_career=True,
+        )
+    if source == "newgrad":
+        # Respect ``limit`` here (it used to default to 500): newgrad enriches a
+        # detail page per matched job, so an uncapped interactive search fanned
+        # out into hundreds of sequential scrapes — the main cause of the search
+        # button hanging. The deep crawl in ``discovery.py`` still uncaps it.
+        return await newgrad_jobs_client.search_newgrad_jobs(query=query, limit=limit)
+    if source == "yc_jobs":
+        return await yc_jobs_client.search_yc_jobs(query=query, limit=max(limit, 50))
+    if source == "wellfound":
+        return await wellfound_jobs_client.search_wellfound_jobs(query=query, limit=max(limit, 50))
+    if source == "ventureloop":
+        return await ventureloop_jobs_client.search_ventureloop_jobs(query=query, limit=max(limit, 100))
+    return []
+
+
 async def _fetch_jobs_for_source(
     source: str,
     *,
@@ -39,70 +116,30 @@ async def _fetch_jobs_for_source(
 ) -> tuple[list[dict], dict]:
     stat = normalize._source_stat(source)
     try:
-        if source == "jsearch":
-            jobs = await jsearch_client.search_jobs(
-                query, location=location, remote_only=remote_only, limit=limit
-            )
-        elif source == "adzuna":
-            jobs = await adzuna_client.search_jobs(
-                query,
-                location=location,
-                country=normalize._adzuna_country_for_location(location),
-                limit=limit,
-            )
-        elif source == "remotive":
-            jobs = await remote_jobs_client.search_remotive(query, limit=limit)
-        elif source == "jobicy":
-            jobs = await remote_jobs_client.search_jobicy(query, limit=limit)
-        elif source == "dice":
-            jobs = await remote_jobs_client.search_dice(
-                query,
-                location=location,
-                country_code=(
-                    geocode_location_query(location).country_code
-                    if geocode_location_query(location)
-                    else country_code_for_name(location)
-                ),
-                limit=limit,
-            )
-        elif source == "simplify":
-            # New-grad + internship curated lists (level-stamped). Capped well
-            # above `limit` because the goal here is early-career *volume*.
-            jobs = await remote_jobs_client.fetch_simplify_early_career_jobs(
-                limit_per_repo=max(limit, 400)
-            )
-        elif source == "jobbank":
-            jobs = await jobbank_client.search_jobbank(
-                query, location=location, limit=limit
-            )
-        elif source == "themuse":
-            jobs = await themuse_client.search_themuse(
-                query,
-                occupation=occupation,
+        jobs = await asyncio.wait_for(
+            _dispatch_source_fetch(
+                source,
+                query=query,
                 location=location,
                 remote_only=remote_only,
                 limit=limit,
-                # Pull dedicated entry-level + internship roles on top of the
-                # all-levels results so early-career volume isn't crowded out.
-                boost_early_career=True,
-            )
-        elif source == "newgrad":
-            jobs = await newgrad_jobs_client.search_newgrad_jobs(query=query)
-        elif source == "yc_jobs":
-            jobs = await yc_jobs_client.search_yc_jobs(query=query, limit=max(limit, 50))
-        elif source == "wellfound":
-            jobs = await wellfound_jobs_client.search_wellfound_jobs(query=query, limit=max(limit, 50))
-        elif source == "ventureloop":
-            jobs = await ventureloop_jobs_client.search_ventureloop_jobs(query=query, limit=max(limit, 100))
-        else:
-            jobs = []
-            stat["details"] = {"skipped_reason": "unknown_source"}
-
+                occupation=occupation,
+            ),
+            timeout=constants.SOURCE_FETCH_TIMEOUT_SECONDS,
+        )
         for job in jobs:
             job["_fetch_source_key"] = source
         stat["raw_count"] = len(jobs)
         normalize._finish_source_stat(stat, status="success")
         return jobs, stat
+    except asyncio.TimeoutError:
+        logger.warning(
+            "Job source fetch timed out after %ss: %s",
+            constants.SOURCE_FETCH_TIMEOUT_SECONDS,
+            source,
+        )
+        normalize._finish_source_stat(stat, status="failed", error="timeout")
+        return [], stat
     except Exception as exc:
         logger.exception("Job source fetch failed: %s", source)
         normalize._finish_source_stat(stat, status="failed", error=str(exc))

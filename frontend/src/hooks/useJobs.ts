@@ -36,8 +36,12 @@ export function useJobSearch() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    // The backend caps each aggregator source at ~30s, so a healthy search
+    // returns well under this. The client timeout is a safety net so the
+    // "Searching…" button fails with a clear error instead of spinning forever
+    // if the backend stalls.
     mutationFn: (params: JobSearchRequest) =>
-      api.post<Job[]>('/api/jobs/search', params),
+      api.post<Job[]>('/api/jobs/search', params, { timeoutMs: 75000 }),
     onSuccess: (jobs) => {
       trackJobsFound('job_search', jobs.length);
       queryClient.invalidateQueries({ queryKey: ['jobs'] });
@@ -50,8 +54,10 @@ export function useATSSearch() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    // Safety-net timeout — an ATS/exact-job fetch also fans out to upstream
+    // boards and should fail visibly rather than hang the button.
     mutationFn: (params: ATSSearchRequest) =>
-      api.post<Job[]>('/api/jobs/search/ats', params),
+      api.post<Job[]>('/api/jobs/search/ats', params, { timeoutMs: 75000 }),
     onSuccess: (jobs) => {
       trackJobsFound('ats_search', jobs.length);
       queryClient.invalidateQueries({ queryKey: ['jobs'] });

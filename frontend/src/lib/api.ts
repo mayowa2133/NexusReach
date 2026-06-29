@@ -40,7 +40,8 @@ class ApiClient {
 
   private async request<T>(
     path: string,
-    options: RequestInit = {}
+    options: RequestInit = {},
+    timeoutMs?: number
   ): Promise<T> {
     const token = await getApiAccessToken();
     const isFormData = options.body instanceof FormData;
@@ -56,10 +57,35 @@ class ApiClient {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
-    const response = await fetch(`${this.baseUrl}${path}`, {
-      ...options,
-      headers,
-    });
+    // Optional client-side timeout. Without it a slow/hung endpoint leaves the
+    // caller (e.g. the "Searching…" button) spinning forever with no failure
+    // path. On timeout we abort the fetch and surface a clear, retryable error.
+    let controller: AbortController | undefined;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    if (timeoutMs && timeoutMs > 0) {
+      controller = new AbortController();
+      timeoutId = setTimeout(() => controller!.abort(), timeoutMs);
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(`${this.baseUrl}${path}`, {
+        ...options,
+        headers,
+        signal: controller?.signal,
+      });
+    } catch (err) {
+      if (controller?.signal.aborted) {
+        throw new Error(
+          'The request took too long and timed out. Please try again.'
+        );
+      }
+      throw err;
+    } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    }
 
     // On 401, clear auth state so the UI redirects to login
     if (response.status === 401) {
@@ -118,11 +144,15 @@ class ApiClient {
     return response.blob();
   }
 
-  post<T>(path: string, data?: unknown) {
-    return this.request<T>(path, {
-      method: 'POST',
-      body: data ? JSON.stringify(data) : undefined,
-    });
+  post<T>(path: string, data?: unknown, options?: { timeoutMs?: number }) {
+    return this.request<T>(
+      path,
+      {
+        method: 'POST',
+        body: data ? JSON.stringify(data) : undefined,
+      },
+      options?.timeoutMs
+    );
   }
 
   postForm<T>(path: string, formData: FormData) {

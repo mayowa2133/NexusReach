@@ -24,6 +24,16 @@ STARTUP_BOARD_SOURCES = ["yc_jobs", "wellfound", "ventureloop"]
 STARTUP_LINK_RESOLVE_CONCURRENCY = 6
 
 
+# Hard per-source cap on a single aggregator fetch inside ``search_jobs``. Each
+# source already fails soft, but a provider that hangs (slow scrape, upstream
+# stall) would otherwise hold the whole ``asyncio.gather`` — and the interactive
+# ``POST /api/jobs/search`` request — open indefinitely. Capping each source
+# bounds the total request time to roughly this value; a source that exceeds it
+# is dropped for that cycle (returns [] + a failed stat) instead of stalling
+# every other source and the user's "Searching…" spinner.
+SOURCE_FETCH_TIMEOUT_SECONDS = 30
+
+
 DISCOVER_LIMIT_PER_SOURCE = 50
 
 
