@@ -141,7 +141,13 @@ async def _fetch_jobs_for_source(
         normalize._finish_source_stat(stat, status="failed", error="timeout")
         return [], stat
     except Exception as exc:
-        logger.exception("Job source fetch failed: %s", source)
+        # A transient network failure to a best-effort third-party board is
+        # expected operational noise — log at WARNING so it doesn't surface as a
+        # Sentry error. Genuine bugs still go through logger.exception.
+        if normalize.is_transient_fetch_error(exc):
+            logger.warning("Job source fetch network error (%s): %s", source, exc)
+        else:
+            logger.exception("Job source fetch failed: %s", source)
         normalize._finish_source_stat(stat, status="failed", error=str(exc))
         return [], stat
 

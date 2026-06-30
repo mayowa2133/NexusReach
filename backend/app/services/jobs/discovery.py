@@ -12,6 +12,7 @@ from app.utils.startup_jobs import startup_discover_queries
 import uuid
 from app.services.jobs import constants
 from app.services.jobs import curated_boards
+from app.services.jobs import normalize
 from app.services.jobs import search
 from app.services.jobs import startup
 from app.services.jobs import storage
@@ -174,9 +175,14 @@ async def discover_jobs(
             if ng_stored:
                 logger.info("newgrad-jobs discover: %d new jobs", len(ng_stored))
             total_new += len(ng_stored)
-        except Exception:
+        except Exception as exc:
             await db.rollback()
-            logger.exception("newgrad-jobs discover failed")
+            # newgrad-jobs.com is a best-effort scrape; a transient connect/read
+            # failure is expected noise, not a bug worth a Sentry error.
+            if normalize.is_transient_fetch_error(exc):
+                logger.warning("newgrad-jobs discover network error: %s", exc)
+            else:
+                logger.exception("newgrad-jobs discover failed")
 
     # 3. Curated ATS boards are all tech companies — only for engineering searches.
     #    (Non-engineering roles at these employers still reach the feed via the

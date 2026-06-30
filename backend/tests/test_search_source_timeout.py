@@ -7,13 +7,75 @@ timeout instead of stalling every other source.
 """
 
 import asyncio
+import logging
 from unittest.mock import patch
 
+import httpx
 import pytest
 
-from app.services.jobs import constants, search
+from app.services.jobs import constants, normalize, search
 
 pytestmark = pytest.mark.asyncio
+
+
+async def test_is_transient_fetch_error_classification():
+    """Network/timeout errors are transient; logic bugs are not."""
+    assert normalize.is_transient_fetch_error(httpx.ConnectTimeout("boom"))
+    assert normalize.is_transient_fetch_error(httpx.ReadTimeout("boom"))
+    assert normalize.is_transient_fetch_error(httpx.ConnectError("boom"))
+    assert normalize.is_transient_fetch_error(asyncio.TimeoutError())
+    assert normalize.is_transient_fetch_error(ConnectionResetError())
+    # Genuine bugs must NOT be classified as transient (they stay Sentry errors).
+    assert not normalize.is_transient_fetch_error(ValueError("bad parse"))
+    assert not normalize.is_transient_fetch_error(KeyError("missing"))
+
+
+async def test_connect_timeout_logs_warning_not_exception(caplog):
+    """A ConnectTimeout from a source fails soft and logs at WARNING (no Sentry).
+
+    Sentry's logging integration captures ERROR+ records; logging the expected
+    third-party connect timeout at WARNING keeps it out of the issue stream.
+    """
+
+    async def _boom(*args, **kwargs):
+        raise httpx.ConnectTimeout("connection timed out")
+
+    with patch.object(search, "_dispatch_source_fetch", side_effect=_boom):
+        with caplog.at_level(logging.WARNING, logger="app.services.jobs.search"):
+            jobs, stat = await search._fetch_jobs_for_source(
+                "newgrad",
+                query="software engineer",
+                location=None,
+                remote_only=False,
+                limit=20,
+            )
+
+    assert jobs == []
+    assert stat["status"] == "failed"
+    # The record must be WARNING, never ERROR (ERROR is what reaches Sentry).
+    records = [r for r in caplog.records if "newgrad" in r.getMessage()]
+    assert records, "expected a log record mentioning the source"
+    assert all(r.levelno == logging.WARNING for r in records)
+
+
+async def test_real_bug_still_logged_as_error(caplog):
+    """A non-network exception still goes through logger.exception (ERROR)."""
+
+    async def _bug(*args, **kwargs):
+        raise ValueError("genuine parse bug")
+
+    with patch.object(search, "_dispatch_source_fetch", side_effect=_bug):
+        with caplog.at_level(logging.DEBUG, logger="app.services.jobs.search"):
+            jobs, stat = await search._fetch_jobs_for_source(
+                "jsearch",
+                query="software engineer",
+                location=None,
+                remote_only=False,
+                limit=20,
+            )
+
+    assert jobs == []
+    assert any(r.levelno == logging.ERROR for r in caplog.records)
 
 
 async def test_hung_source_times_out_and_fails_soft():

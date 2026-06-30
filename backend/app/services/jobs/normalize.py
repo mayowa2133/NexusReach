@@ -1,6 +1,8 @@
 """Pure helpers: fingerprinting, URL canonicalization, source stats, metadata coercion."""
 
+import asyncio
 import logging
+import httpx
 from app.models.job import Job
 from app.clients import ats
 from app.utils.job_metadata import country_code_for_name
@@ -18,6 +20,21 @@ from urllib.parse import urlparse
 from urllib.parse import urlunparse
 
 logger = logging.getLogger(__name__)
+
+
+def is_transient_fetch_error(exc: BaseException) -> bool:
+    """True for expected, transient failures fetching an external job source.
+
+    The aggregator/board clients are best-effort and already fail soft, so a
+    third-party site being slow, unreachable, or returning a transport error is
+    operational noise — not a bug. Callers log these at WARNING (which stays out
+    of Sentry) and reserve ``logger.exception`` for genuinely unexpected errors
+    (parse bugs, programming errors) so real problems still surface.
+
+    Covers httpx transport/timeout/status errors, asyncio timeouts, and raw
+    socket ``OSError``/``ConnectionError``.
+    """
+    return isinstance(exc, (httpx.HTTPError, asyncio.TimeoutError, OSError))
 
 
 EARTH_RADIUS_KM = 6371.0
