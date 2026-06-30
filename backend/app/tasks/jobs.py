@@ -536,6 +536,61 @@ def verify_curated_boards() -> dict:
     return run_async(_verify_curated_boards())
 
 
+async def _monitor_source_health() -> dict:
+    """Escalate *sustained* per-source outages to a single aggregated alert.
+
+    Transient fetch failures are logged at WARNING by the fetch layer and never
+    reach Sentry (a third-party board blipping for one cycle is expected). This
+    reads the JobSourceRun history instead and, for any source failing across
+    most of its attempts over the window, emits ONE ERROR per down source — so
+    Sentry shows a single deduped issue ("Job source DOWN: dice …") with a
+    rising count, the actionable "a source is actually broken" signal, rather
+    than one event per timeout.
+    """
+    from app.services.jobs import constants, storage  # noqa: PLC0415
+
+    async with async_session() as db:
+        results = await storage.evaluate_source_health(
+            db,
+            window_hours=constants.SOURCE_HEALTH_WINDOW_HOURS,
+            min_attempts=constants.SOURCE_HEALTH_MIN_ATTEMPTS,
+            failure_rate_threshold=constants.SOURCE_HEALTH_FAILURE_RATE,
+        )
+
+    degraded = [r for r in results if r["degraded"]]
+    for r in degraded:
+        logger.error(
+            "Job source DOWN: '%s' failed %d/%d (%.0f%%) over the last %dh "
+            "(last success: %s). Sample error: %s",
+            r["source"],
+            r["failures"],
+            r["attempts"],
+            r["failure_rate"] * 100,
+            constants.SOURCE_HEALTH_WINDOW_HOURS,
+            r["last_success"] or "none in window",
+            (r["sample_error"] or "n/a")[:300],
+        )
+    logger.info(
+        "Source health check: %d sources evaluated, %d degraded%s",
+        len(results),
+        len(degraded),
+        f" ({', '.join(str(r['source']) for r in degraded)})" if degraded else "",
+    )
+    return {"checked": len(results), "degraded": [r["source"] for r in degraded]}
+
+
+@celery_app.task(
+    name="app.tasks.jobs.monitor_source_health",
+    autoretry_for=(Exception,),
+    retry_backoff=60,
+    retry_backoff_max=600,
+    max_retries=2,
+)
+def monitor_source_health() -> dict:
+    """Celery task: hourly per-source sustained-outage check (see _monitor_source_health)."""
+    return run_async(_monitor_source_health())
+
+
 async def _retag_occupation_tags(batch_size: int = 1000) -> dict:
     """Recompute `occupation:` tags on stored jobs from their title/description.
 

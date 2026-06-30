@@ -313,6 +313,86 @@ async def _record_source_runs(
         )
 
 
+def classify_source_health(
+    rows: list[dict],
+    *,
+    min_attempts: int,
+    failure_rate_threshold: float,
+) -> list[dict]:
+    """Flag sources whose recent run history looks like a sustained outage.
+
+    Pure function over aggregated per-source rows (``source``, ``attempts``,
+    ``failures``, ``last_success``, ``sample_error``) so it's unit-testable
+    without a database. A source is ``degraded`` only when it has enough signal
+    (``attempts >= min_attempts``) *and* is failing at or above
+    ``failure_rate_threshold`` — so a lone transient failure never trips it.
+    """
+    results: list[dict] = []
+    for row in rows:
+        attempts = int(row.get("attempts") or 0)
+        failures = int(row.get("failures") or 0)
+        rate = (failures / attempts) if attempts else 0.0
+        degraded = attempts >= min_attempts and rate >= failure_rate_threshold
+        results.append(
+            {
+                "source": row.get("source"),
+                "attempts": attempts,
+                "failures": failures,
+                "failure_rate": round(rate, 4),
+                "last_success": row.get("last_success"),
+                "sample_error": row.get("sample_error"),
+                "degraded": degraded,
+            }
+        )
+    return results
+
+
+async def evaluate_source_health(
+    db: AsyncSession,
+    *,
+    window_hours: int,
+    min_attempts: int,
+    failure_rate_threshold: float,
+) -> list[dict]:
+    """Aggregate JobSourceRun outcomes per source over a recent window.
+
+    Returns the classification produced by ``classify_source_health``. The
+    aggregation runs in SQL (counts + FILTERed counts) so we never load the
+    per-run rows into memory.
+    """
+    window_start = datetime.now(timezone.utc) - timedelta(hours=window_hours)
+    is_failed = JobSourceRun.status == "failed"
+    is_success = JobSourceRun.status == "success"
+    stmt = (
+        select(
+            JobSourceRun.source,
+            sa_func.count().label("attempts"),
+            sa_func.count().filter(is_failed).label("failures"),
+            sa_func.max(JobSourceRun.created_at).filter(is_success).label("last_success"),
+            sa_func.max(JobSourceRun.error).filter(is_failed).label("sample_error"),
+        )
+        .where(JobSourceRun.created_at >= window_start)
+        .group_by(JobSourceRun.source)
+        .order_by(JobSourceRun.source)
+    )
+    rows = (await db.execute(stmt)).all()
+    mapped = [
+        {
+            "source": row.source,
+            "attempts": row.attempts,
+            "failures": row.failures,
+            "last_success": row.last_success.isoformat() if row.last_success else None,
+            "sample_error": row.sample_error,
+        }
+        for row in rows
+    ]
+    return classify_source_health(
+        mapped,
+        min_attempts=min_attempts,
+        failure_rate_threshold=failure_rate_threshold,
+    )
+
+
 async def _load_known_startup_company_names(
     db: AsyncSession, user_id: uuid.UUID
 ) -> set[str]:

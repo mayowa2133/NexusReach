@@ -130,6 +130,10 @@ celery_app.conf.update(
             "task": "app.tasks.jobs.retag_occupation_tags",
             "schedule": crontab(minute=20, hour=4),  # daily 04:20 UTC (self-heal tags)
         },
+        "monitor-source-health": {
+            "task": "app.tasks.jobs.monitor_source_health",
+            "schedule": crontab(minute=50, hour="*/1"),  # hourly at :50 (sustained-outage alerts)
+        },
     },
 )
 

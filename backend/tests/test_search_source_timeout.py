@@ -13,7 +13,7 @@ from unittest.mock import patch
 import httpx
 import pytest
 
-from app.services.jobs import constants, normalize, search
+from app.services.jobs import constants, normalize, search, storage
 
 pytestmark = pytest.mark.asyncio
 
@@ -143,3 +143,46 @@ async def test_newgrad_interactive_fetch_is_capped_to_limit():
         )
 
     assert captured.get("limit") == 20
+
+
+# --- Sustained-outage monitoring (storage.classify_source_health) ---
+
+
+async def test_classify_flags_sustained_outage_not_transient_blips():
+    """A source failing ~100% over many attempts is degraded; a 1-in-N blip isn't."""
+    rows = [
+        # Matches the real prod pattern: 1 transient failure out of ~1288 runs.
+        {"source": "jobicy", "attempts": 1288, "failures": 1, "last_success": "x"},
+        # Genuinely down: every attempt in the window failed.
+        {"source": "dice", "attempts": 320, "failures": 320, "last_success": None,
+         "sample_error": "ConnectTimeout"},
+    ]
+    out = {
+        r["source"]: r
+        for r in storage.classify_source_health(
+            rows, min_attempts=10, failure_rate_threshold=0.9
+        )
+    }
+    assert out["jobicy"]["degraded"] is False
+    assert out["dice"]["degraded"] is True
+    assert out["dice"]["failure_rate"] == 1.0
+    assert out["jobicy"]["failure_rate"] < 0.01
+
+
+async def test_classify_requires_minimum_attempts():
+    """A source with too few attempts is never flagged, even at 100% failure."""
+    rows = [{"source": "usajobs", "attempts": 3, "failures": 3, "last_success": None}]
+    out = storage.classify_source_health(
+        rows, min_attempts=10, failure_rate_threshold=0.9
+    )
+    assert out[0]["degraded"] is False
+
+
+async def test_classify_handles_zero_attempts():
+    """No attempts → rate 0.0, not a ZeroDivisionError, not degraded."""
+    rows = [{"source": "newgrad", "attempts": 0, "failures": 0}]
+    out = storage.classify_source_health(
+        rows, min_attempts=10, failure_rate_threshold=0.9
+    )
+    assert out[0]["failure_rate"] == 0.0
+    assert out[0]["degraded"] is False

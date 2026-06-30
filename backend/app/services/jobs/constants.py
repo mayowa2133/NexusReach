@@ -34,6 +34,18 @@ STARTUP_LINK_RESOLVE_CONCURRENCY = 6
 SOURCE_FETCH_TIMEOUT_SECONDS = 30
 
 
+# Source-health monitoring. Single transient fetch failures are logged at
+# WARNING and never surface (a third-party board blipping for one cycle is
+# expected). This catches the *sustained* case: a source failing across most of
+# its attempts over a window, which the monitor task escalates to a single
+# aggregated ERROR (→ one deduped Sentry issue per down source). A source must
+# have at least MIN_ATTEMPTS runs in the window to be judged at all, so rarely
+# run sources don't false-positive on a thin sample.
+SOURCE_HEALTH_WINDOW_HOURS = 6
+SOURCE_HEALTH_MIN_ATTEMPTS = 10
+SOURCE_HEALTH_FAILURE_RATE = 0.9
+
+
 DISCOVER_LIMIT_PER_SOURCE = 50
 
 
