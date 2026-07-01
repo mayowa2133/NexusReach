@@ -15,6 +15,7 @@ from app.utils.job_metadata import normalize_job_metadata
 from app.services.occupation_taxonomy import occupation_tags_for_job
 from sqlalchemy import func as sa_func
 from sqlalchemy import select
+from sqlalchemy.orm import defer
 from app.utils.startup_jobs import startup_source_tag
 from datetime import timedelta
 from datetime import timezone
@@ -176,6 +177,26 @@ def _build_job(
     )
 
 
+# Dedup lookups run once per imported job on every hourly board crawl and
+# 15-min feed refresh, so at ~24k jobs/crawl they dominate Supabase egress
+# (billed on bytes read out of Postgres). The heavy columns below are the bulk
+# of each row — `description` alone is ~74% of the ~3.5 KB average width — and
+# none are *read* when refreshing an existing row (`_refresh_existing_job` only
+# overwrites them, and overwriting a deferred attribute issues no SELECT). The
+# small read on this path (`tags`) is deliberately left loaded. Deferring these
+# cuts the per-lookup read to the identity/dedup columns, dropping dedup egress
+# by roughly 3-4x. Never read a deferred column from a returned row on the
+# async session — that would trigger a lazy load and raise MissingGreenlet.
+_DEDUP_DEFER_OPTIONS = (
+    defer(Job.description),
+    defer(Job.score_breakdown),
+    defer(Job.metadata_provenance),
+    defer(Job.locations),
+    defer(Job.offer_details),
+    defer(Job.interview_rounds),
+)
+
+
 async def _find_existing_job(
     db: AsyncSession,
     *,
@@ -192,6 +213,7 @@ async def _find_existing_job(
         if source_key and external_id:
             result = await db.execute(
                 select(Job)
+                .options(*_DEDUP_DEFER_OPTIONS)
                 .where(Job.user_id == user_id, Job.source == source_key, Job.external_id == external_id)
                 .order_by(Job.created_at.asc(), Job.id.asc())
             )
@@ -206,6 +228,7 @@ async def _find_existing_job(
             # and recomputed canonical URLs in Python.
             result = await db.execute(
                 select(Job)
+                .options(*_DEDUP_DEFER_OPTIONS)
                 .where(Job.user_id == user_id, Job.canonical_url == normalized_url)
                 .order_by(Job.created_at.asc(), Job.id.asc())
             )
@@ -227,7 +250,10 @@ async def _find_existing_job(
                 safe_host = host.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
                 legacy_filters.append(Job.url.ilike(f"%{safe_host}%", escape="\\"))
             legacy_result = await db.execute(
-                select(Job).where(*legacy_filters).order_by(Job.created_at.asc(), Job.id.asc())
+                select(Job)
+                .options(*_DEDUP_DEFER_OPTIONS)
+                .where(*legacy_filters)
+                .order_by(Job.created_at.asc(), Job.id.asc())
             )
             for existing in legacy_result.scalars().all():
                 if normalize._canonical_job_url(existing.url) == normalized_url:
@@ -237,6 +263,7 @@ async def _find_existing_job(
         if fingerprint:
             result = await db.execute(
                 select(Job)
+                .options(*_DEDUP_DEFER_OPTIONS)
                 .where(Job.user_id == user_id, Job.fingerprint == fingerprint)
                 .order_by(Job.created_at.asc(), Job.id.asc())
             )

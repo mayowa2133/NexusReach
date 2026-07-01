@@ -322,6 +322,7 @@ NexusReach/
 - Never treat cross-company public results as safe fallback contacts.
 - Company verification, role ranking, and email trust are separate axes.
 - Imported LinkedIn graph rows must remain separate from saved CRM contacts.
+- **Every `public` table must have RLS enabled.** Supabase auto-exposes the `public` schema through PostgREST to the `anon`/`authenticated` roles (the public anon key ships in the frontend), so an RLS-disabled table is readable/writable directly via the Supabase REST API, bypassing the FastAPI `user_id` scoping. Migration `055_enable_row_level_security` enables RLS (deny-all, no policies) on all tables; the backend is unaffected because it connects as the `postgres` owner, which bypasses RLS (we `ENABLE`, never `FORCE`). **Any new table added in a later migration must `ALTER TABLE … ENABLE ROW LEVEL SECURITY` in the same migration** — new tables are not covered automatically.
 
 ## Key commands
 

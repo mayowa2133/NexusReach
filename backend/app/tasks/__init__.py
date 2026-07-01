@@ -9,6 +9,7 @@ from typing import Any, TypeVar
 
 from celery import Celery
 from celery.schedules import crontab
+from celery.signals import worker_process_init
 
 from app.config import settings
 from app.observability import init_sentry
@@ -65,6 +66,21 @@ def run_async(coro: Coroutine[Any, Any, _T]) -> _T:
 
 init_sentry("worker")
 
+
+@worker_process_init.connect
+def _configure_worker_db(**_kwargs: Any) -> None:
+    """Give each forked worker child a fork/pooler-safe NullPool DB engine.
+
+    Runs once per prefork child (after fork, before any task). See
+    ``app.database.use_null_pool_engine`` for why the inherited pooled engine
+    produces MissingGreenlet / ConnectionDoesNotExist errors on the Supabase
+    pooler. Beat does not execute tasks, so only worker children need this.
+    """
+    from app.database import use_null_pool_engine
+
+    use_null_pool_engine()
+
+
 celery_app = Celery(
     "nexusreach",
     broker=settings.redis_url,
@@ -88,11 +104,18 @@ celery_app.conf.update(
     beat_schedule={
         "refresh-job-feeds": {
             "task": "app.tasks.jobs.refresh_all_job_feeds",
-            "schedule": crontab(minute="*/15"),  # every 15 minutes
+            # Hourly (was */15). Each refresh dedups every fetched job against the
+            # DB, so its read volume is the largest driver of Supabase egress;
+            # hourly keeps the feed fresh enough while staying under the free-tier
+            # egress cap. See supabase-egress-overage memory.
+            "schedule": crontab(minute=0),  # hourly
         },
         "discover-ats-boards": {
             "task": "app.tasks.jobs.discover_ats_boards",
-            "schedule": crontab(minute=7, hour="*/1"),  # hourly, offset from feed refresh
+            # Every 6h (was hourly). The full board crawl dedups ~24k jobs per run
+            # — the single heaviest egress source — and the boards themselves
+            # change slowly, so 6h loses little freshness for a large egress cut.
+            "schedule": crontab(minute=7, hour="*/6"),  # every 6 hours, offset from feed refresh
         },
         "reverify-stale-contacts": {
             "task": "app.tasks.reverify.reverify_stale_contacts",
