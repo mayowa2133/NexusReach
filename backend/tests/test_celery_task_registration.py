@@ -12,12 +12,24 @@ def test_beat_schedule_tasks_are_registered_by_worker_app():
     assert missing == []
 
 
-def test_job_refresh_cadence_is_every_fifteen_minutes():
+def test_job_refresh_cadence_is_hourly_to_bound_egress():
+    # Lowered from */15 to hourly to keep Supabase egress under the free-tier
+    # cap: each refresh dedups every fetched job against the DB, so its read
+    # volume is the largest egress driver. See supabase-egress-overage memory.
     from app.tasks import celery_app
 
     schedule = celery_app.conf.beat_schedule["refresh-job-feeds"]["schedule"]
 
-    assert schedule._orig_minute == "*/15"
+    assert schedule._orig_minute == 0
+    assert schedule._orig_hour == "*"
+
+
+def test_ats_board_crawl_cadence_is_every_six_hours_to_bound_egress():
+    from app.tasks import celery_app
+
+    schedule = celery_app.conf.beat_schedule["discover-ats-boards"]["schedule"]
+
+    assert schedule._orig_hour == "*/6"
 
 
 def test_worker_runtime_defaults_limit_prefetch_and_child_reuse():

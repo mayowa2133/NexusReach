@@ -104,11 +104,18 @@ celery_app.conf.update(
     beat_schedule={
         "refresh-job-feeds": {
             "task": "app.tasks.jobs.refresh_all_job_feeds",
-            "schedule": crontab(minute="*/15"),  # every 15 minutes
+            # Hourly (was */15). Each refresh dedups every fetched job against the
+            # DB, so its read volume is the largest driver of Supabase egress;
+            # hourly keeps the feed fresh enough while staying under the free-tier
+            # egress cap. See supabase-egress-overage memory.
+            "schedule": crontab(minute=0),  # hourly
         },
         "discover-ats-boards": {
             "task": "app.tasks.jobs.discover_ats_boards",
-            "schedule": crontab(minute=7, hour="*/1"),  # hourly, offset from feed refresh
+            # Every 6h (was hourly). The full board crawl dedups ~24k jobs per run
+            # — the single heaviest egress source — and the boards themselves
+            # change slowly, so 6h loses little freshness for a large egress cut.
+            "schedule": crontab(minute=7, hour="*/6"),  # every 6 hours, offset from feed refresh
         },
         "reverify-stale-contacts": {
             "task": "app.tasks.reverify.reverify_stale_contacts",
