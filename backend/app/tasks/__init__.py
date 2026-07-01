@@ -9,6 +9,7 @@ from typing import Any, TypeVar
 
 from celery import Celery
 from celery.schedules import crontab
+from celery.signals import worker_process_init
 
 from app.config import settings
 from app.observability import init_sentry
@@ -64,6 +65,21 @@ def run_async(coro: Coroutine[Any, Any, _T]) -> _T:
 
 
 init_sentry("worker")
+
+
+@worker_process_init.connect
+def _configure_worker_db(**_kwargs: Any) -> None:
+    """Give each forked worker child a fork/pooler-safe NullPool DB engine.
+
+    Runs once per prefork child (after fork, before any task). See
+    ``app.database.use_null_pool_engine`` for why the inherited pooled engine
+    produces MissingGreenlet / ConnectionDoesNotExist errors on the Supabase
+    pooler. Beat does not execute tasks, so only worker children need this.
+    """
+    from app.database import use_null_pool_engine
+
+    use_null_pool_engine()
+
 
 celery_app = Celery(
     "nexusreach",
