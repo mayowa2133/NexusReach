@@ -246,6 +246,15 @@ async def discover_workday_companies(
                     client=client,
                 )
                 all_jobs.extend(jobs)
+            except (httpx.TimeoutException, httpx.RequestError) as exc:
+                # A slow/unreachable tenant is routine for a best-effort crawl:
+                # WARNING, not Sentry-error (sustained outages surface via
+                # monitor_source_health).
+                logger.warning(
+                    "Workday fetch failed for %s (%s)",
+                    entry["label"],
+                    exc.__class__.__name__,
+                )
             except Exception:
                 logger.exception("Workday fetch failed for %s", entry["label"])
     return all_jobs

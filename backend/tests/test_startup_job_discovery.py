@@ -311,6 +311,8 @@ async def test_refresh_task_routes_startup_prefs_to_startup_refresh():
         return_value=MagicMock(all=MagicMock(return_value=[]))
     )
     db.execute = AsyncMock(side_effect=[prefs_result, starred_result])
+    # Each preference now reloads by id inside its own session.
+    db.get = AsyncMock(side_effect=[default_pref, startup_pref])
     db.flush = AsyncMock()
     db.commit = AsyncMock()
 
@@ -326,6 +328,8 @@ async def test_refresh_task_routes_startup_prefs_to_startup_refresh():
         patch.object(jobs_task, "search_jobs", new=search_mock),
         patch.object(jobs_task, "run_startup_refresh_for_query", new=startup_mock),
         patch.object(jobs_task, "mark_stale_jobs_for_user", new=AsyncMock()),
+        patch("app.clients.search_cache_client.acquire_lock", new=AsyncMock(return_value=True)),
+        patch("app.clients.search_cache_client.release_lock", new=AsyncMock()),
     ):
         await jobs_task._refresh_user_feeds(user_id)
 
@@ -364,6 +368,7 @@ async def test_refresh_user_feeds_rolls_back_before_persisting_failure_metadata(
             self.needs_rollback = False
             self.rollback_called = False
             self.execute = AsyncMock(side_effect=[prefs_result, starred_result])
+            self.get = AsyncMock(return_value=default_pref)
             self.flush = AsyncMock()
             self.add = MagicMock()
             self.commit = AsyncMock(side_effect=self._commit)
@@ -391,6 +396,8 @@ async def test_refresh_user_feeds_rolls_back_before_persisting_failure_metadata(
         patch.object(jobs_task, "async_session", return_value=session_cm),
         patch.object(jobs_task, "search_jobs", new=_poisoned_search_jobs),
         patch.object(jobs_task, "mark_stale_jobs_for_user", new=AsyncMock()),
+        patch("app.clients.search_cache_client.acquire_lock", new=AsyncMock(return_value=True)),
+        patch("app.clients.search_cache_client.release_lock", new=AsyncMock()),
     ):
         await jobs_task._refresh_user_feeds(user_id)
 
@@ -461,3 +468,91 @@ def test_infer_startup_tags_for_job_noop_for_unknown_company():
     data = {"company_name": "Megacorp", "title": "SWE", "tags": []}
     _infer_startup_tags_for_job(data, known_startup_companies={"cartesia"})
     assert data["tags"] == []
+
+
+async def test_refresh_isolates_preference_failures():
+    """One preference's failure (poisoned connection) must not sink the user's
+    remaining preferences — each refreshes in its own session (PYTHON-Z)."""
+    from app.tasks import jobs as jobs_task
+
+    user_id = uuid.uuid4()
+
+    pref_a = MagicMock()
+    pref_a.id = uuid.uuid4()
+    pref_a.query = "ui designer"
+    pref_a.location = None
+    pref_a.remote_only = False
+    pref_a.mode = "default"
+
+    pref_b = MagicMock()
+    pref_b.id = uuid.uuid4()
+    pref_b.query = "product manager"
+    pref_b.location = None
+    pref_b.remote_only = False
+    pref_b.mode = "default"
+
+    prefs_result = MagicMock()
+    prefs_result.scalars = MagicMock(
+        return_value=MagicMock(all=MagicMock(return_value=[pref_a, pref_b]))
+    )
+    starred_result = MagicMock()
+    starred_result.scalars = MagicMock(
+        return_value=MagicMock(all=MagicMock(return_value=[]))
+    )
+
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[prefs_result, starred_result])
+    db.get = AsyncMock(side_effect=[pref_a, pref_b])
+    db.flush = AsyncMock()
+    db.add = MagicMock()
+    db.commit = AsyncMock()
+    db.rollback = AsyncMock()
+
+    session_cm = MagicMock()
+    session_cm.__aenter__ = AsyncMock(return_value=db)
+    session_cm.__aexit__ = AsyncMock(return_value=None)
+
+    search_mock = AsyncMock(
+        side_effect=[RuntimeError("statement timeout during refresh"), []]
+    )
+
+    with (
+        patch.object(jobs_task, "async_session", return_value=session_cm),
+        patch.object(jobs_task, "search_jobs", new=search_mock),
+        patch.object(jobs_task, "mark_stale_jobs_for_user", new=AsyncMock()),
+        patch("app.clients.search_cache_client.acquire_lock", new=AsyncMock(return_value=True)),
+        patch("app.clients.search_cache_client.release_lock", new=AsyncMock()),
+    ):
+        total = await jobs_task._refresh_user_feeds(user_id)
+
+    # Both preferences were attempted despite the first one failing.
+    assert search_mock.await_count == 2
+    assert search_mock.await_args_list[1].kwargs["query"] == "product manager"
+    assert total == 0
+
+
+async def test_refresh_skips_when_another_refresh_holds_the_lock():
+    """Concurrent refreshes for the same user (hourly beat + ensure-fresh
+    nudge) must not run simultaneously (PYTHON-16 lock contention)."""
+    from app.tasks import jobs as jobs_task
+
+    user_id = uuid.uuid4()
+    search_mock = AsyncMock()
+    session_factory = MagicMock()
+
+    with (
+        patch.object(jobs_task, "async_session", new=session_factory),
+        patch.object(jobs_task, "search_jobs", new=search_mock),
+        patch(
+            "app.clients.search_cache_client.acquire_lock",
+            new=AsyncMock(return_value=False),
+        ),
+        patch("app.clients.search_cache_client.release_lock", new=AsyncMock()) as mock_release,
+    ):
+        total = await jobs_task._refresh_user_feeds(user_id)
+
+    assert total == 0
+    search_mock.assert_not_awaited()
+    session_factory.assert_not_called()
+    # A held lock is not ours to release.
+    mock_release.assert_not_awaited()

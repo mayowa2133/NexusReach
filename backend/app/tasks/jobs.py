@@ -54,134 +54,201 @@ async def _notification_exists(
     return result.scalar_one_or_none() is not None
 
 
-async def _refresh_user_feeds(user_id: uuid.UUID) -> int:
-    """Re-run all enabled search preferences for a user and create notifications."""
-    total_new = 0
-    async with async_session() as db:
-        # Fetch enabled search preferences
-        stmt = select(SearchPreference).where(
-            SearchPreference.user_id == user_id,
-            SearchPreference.enabled == True,  # noqa: E712
-        )
-        result = await db.execute(stmt)
-        preferences = list(result.scalars().all())
+# Crash backstop for the per-user refresh lock: long enough for a slow full
+# refresh, short enough that a worker OOM/SIGKILL can't block a user's
+# refreshes for more than one beat cycle.
+FEED_REFRESH_LOCK_TTL_SECONDS = 1800
 
-        if not preferences:
+
+async def _refresh_user_feeds(user_id: uuid.UUID) -> int:
+    """Re-run all enabled search preferences for a user and create notifications.
+
+    Isolation notes (Sentry PYTHON-Z / PYTHON-16):
+    - A per-user Redis lock skips the run when another refresh for the same
+      user is already in flight — the hourly all-users beat and the
+      ensure-fresh nudge can overlap now that the worker runs two slots, which
+      caused lock contention and statement timeouts on the same pref rows.
+    - Each preference refreshes in its OWN session/connection
+      (``_refresh_single_preference``), so one preference's poisoned
+      connection (statement timeout mid-flush, cancelled commit) can't sink
+      the user's remaining preferences.
+    """
+    from app.clients import search_cache_client  # noqa: PLC0415
+
+    lock_key = f"feed_refresh_lock:{user_id}"
+    if not await search_cache_client.acquire_lock(
+        lock_key, ttl_seconds=FEED_REFRESH_LOCK_TTL_SECONDS
+    ):
+        logger.info("Feed refresh already in flight for user %s; skipping", user_id)
+        return 0
+
+    try:
+        async with async_session() as db:
+            # Fetch enabled search preferences; detach plain ids — each
+            # preference reloads inside its own session.
+            stmt = select(SearchPreference).where(
+                SearchPreference.user_id == user_id,
+                SearchPreference.enabled == True,  # noqa: E712
+            )
+            result = await db.execute(stmt)
+            pref_ids = [pref.id for pref in result.scalars().all()]
+
+            if not pref_ids:
+                return 0
+
+            # Fetch starred companies for this user
+            starred_stmt = select(Company).where(
+                Company.user_id == user_id,
+                Company.starred == True,  # noqa: E712
+            )
+            starred_result = await db.execute(starred_stmt)
+            starred_companies = {
+                c.name.lower().strip() for c in starred_result.scalars().all()
+            }
+
+        total_new = 0
+        for pref_id in pref_ids:
+            total_new += await _refresh_single_preference(
+                user_id, pref_id, starred_companies
+            )
+
+        async with async_session() as db:
+            await mark_stale_jobs_for_user(db, user_id)
+
+        return total_new
+    finally:
+        await search_cache_client.release_lock(lock_key)
+
+
+async def _refresh_single_preference(
+    user_id: uuid.UUID,
+    pref_id: uuid.UUID,
+    starred_companies: set[str],
+) -> int:
+    """Refresh one saved search in its own session; returns the new-job count."""
+    async with async_session() as db:
+        pref = await db.get(SearchPreference, pref_id)
+        if pref is None or not pref.enabled:
             return 0
 
-        # Fetch starred companies for this user
-        starred_stmt = select(Company).where(
-            Company.user_id == user_id,
-            Company.starred == True,  # noqa: E712
+        # Plain-value copies for the except handler: rollback expires ORM
+        # attributes, and reading an expired attribute from except-path code
+        # lazy-loads synchronously and raises MissingGreenlet (Sentry PYTHON-Z).
+        query_text = pref.query
+        pref_location = pref.location
+        pref_remote_only = bool(pref.remote_only)
+        pref_mode = getattr(pref, "mode", "default") or "default"
+
+        started_at = datetime.now(timezone.utc)
+        refresh_run = JobRefreshRun(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            search_preference_id=pref_id,
+            mode=pref_mode,
+            query=query_text,
+            location=pref_location,
+            remote_only=pref_remote_only,
+            status="running",
+            started_at=started_at,
         )
-        starred_result = await db.execute(starred_stmt)
-        starred_companies = {
-            c.name.lower().strip() for c in starred_result.scalars().all()
-        }
+        db.add(refresh_run)
+        pref.last_attempted_at = started_at
+        await db.flush()
+        source_stats: list[dict] = []
+        try:
+            if pref_mode == "startup":
+                matched_jobs = await run_startup_refresh_for_query(
+                    db=db,
+                    user_id=user_id,
+                    query=query_text,
+                )
+            else:
+                matched_jobs = await search_jobs(
+                    db=db,
+                    user_id=user_id,
+                    query=query_text,
+                    location=pref_location,
+                    remote_only=pref_remote_only,
+                    limit=50,
+                    refresh_run_id=refresh_run.id,
+                    source_stats=source_stats,
+                )
 
-        for pref in preferences:
-            started_at = datetime.now(timezone.utc)
-            refresh_run = JobRefreshRun(
-                id=uuid.uuid4(),
-                user_id=user_id,
-                search_preference_id=pref.id,
-                mode=getattr(pref, "mode", "default") or "default",
-                query=pref.query,
-                location=pref.location,
-                remote_only=bool(pref.remote_only),
-                status="running",
-                started_at=started_at,
+            # search_jobs now also returns refreshed existing rows (audit C3);
+            # keep counts and notifications scoped to genuinely-new jobs. The
+            # startup path returns only new rows, so absence of the flag = new.
+            new_jobs = [
+                job
+                for job in matched_jobs
+                if getattr(job, "_is_new_job", True)
+            ]
+
+            # Record refresh metadata
+            finished_at = datetime.now(timezone.utc)
+            summary = summarize_source_stats(source_stats)
+            refresh_run.finished_at = finished_at
+            refresh_run.duration_seconds = round(
+                (finished_at - started_at).total_seconds(), 3
             )
-            db.add(refresh_run)
-            pref.last_attempted_at = started_at
-            await db.flush()
-            source_stats: list[dict] = []
+            refresh_run.total_new = len(new_jobs)
+            refresh_run.total_seen = summary["total_seen"]
+            refresh_run.total_existing = summary["total_existing"]
+            refresh_run.total_duplicates = summary["total_duplicates"]
+            refresh_run.total_errors = summary["total_errors"]
+            refresh_run.status = (
+                "partial_success" if summary["total_errors"] else "success"
+            )
+            pref.last_refreshed_at = finished_at
+            pref.last_success_at = finished_at
+            pref.last_duration_seconds = refresh_run.duration_seconds
+            pref.last_error = (
+                f"{summary['total_errors']} source(s) failed"
+                if summary["total_errors"]
+                else None
+            )
+            pref.new_jobs_found = len(new_jobs)
+            await db.commit()
+
+            for job in new_jobs:
+                company_lower = job.company_name.lower().strip()
+
+                # Check if this job is from a starred company
+                if company_lower in starred_companies:
+                    if not await _notification_exists(
+                        db, user_id=user_id, job_id=job.id, type="starred_company_job",
+                    ):
+                        await create_notification(
+                            db,
+                            user_id,
+                            type="starred_company_job",
+                            title=f"{job.company_name} posted: {job.title}",
+                            body=f"Your starred company has a new opening in {job.location or 'Unknown location'}",
+                            job_id=job.id,
+                        )
+                elif job.match_score is not None and job.match_score >= 50:
+                    if not await _notification_exists(
+                        db, user_id=user_id, job_id=job.id, type="new_job",
+                    ):
+                        await create_notification(
+                            db,
+                            user_id,
+                            type="new_job",
+                            title=f"New match: {job.title} at {job.company_name}",
+                            body=f"{int(job.match_score)}% match score",
+                            job_id=job.id,
+                        )
+
+            return len(new_jobs)
+
+        except Exception:
+            # Log FIRST with plain-value context — the metadata write below can
+            # itself fail on a poisoned connection and must not eat this.
+            logger.exception(
+                "Failed to refresh feed for user %s, query '%s'",
+                user_id,
+                query_text,
+            )
             try:
-                pref_mode = getattr(pref, "mode", "default") or "default"
-                if pref_mode == "startup":
-                    matched_jobs = await run_startup_refresh_for_query(
-                        db=db,
-                        user_id=user_id,
-                        query=pref.query,
-                    )
-                else:
-                    matched_jobs = await search_jobs(
-                        db=db,
-                        user_id=user_id,
-                        query=pref.query,
-                        location=pref.location,
-                        remote_only=pref.remote_only,
-                        limit=50,
-                        refresh_run_id=refresh_run.id,
-                        source_stats=source_stats,
-                    )
-
-                # search_jobs now also returns refreshed existing rows (audit C3);
-                # keep counts and notifications scoped to genuinely-new jobs. The
-                # startup path returns only new rows, so absence of the flag = new.
-                new_jobs = [
-                    job
-                    for job in matched_jobs
-                    if getattr(job, "_is_new_job", True)
-                ]
-
-                # Record refresh metadata
-                finished_at = datetime.now(timezone.utc)
-                summary = summarize_source_stats(source_stats)
-                refresh_run.finished_at = finished_at
-                refresh_run.duration_seconds = round(
-                    (finished_at - started_at).total_seconds(), 3
-                )
-                refresh_run.total_new = len(new_jobs)
-                refresh_run.total_seen = summary["total_seen"]
-                refresh_run.total_existing = summary["total_existing"]
-                refresh_run.total_duplicates = summary["total_duplicates"]
-                refresh_run.total_errors = summary["total_errors"]
-                refresh_run.status = (
-                    "partial_success" if summary["total_errors"] else "success"
-                )
-                pref.last_refreshed_at = finished_at
-                pref.last_success_at = finished_at
-                pref.last_duration_seconds = refresh_run.duration_seconds
-                pref.last_error = (
-                    f"{summary['total_errors']} source(s) failed"
-                    if summary["total_errors"]
-                    else None
-                )
-                pref.new_jobs_found = len(new_jobs)
-                total_new += len(new_jobs)
-                await db.commit()
-
-                for job in new_jobs:
-                    company_lower = job.company_name.lower().strip()
-
-                    # Check if this job is from a starred company
-                    if company_lower in starred_companies:
-                        if not await _notification_exists(
-                            db, user_id=user_id, job_id=job.id, type="starred_company_job",
-                        ):
-                            await create_notification(
-                                db,
-                                user_id,
-                                type="starred_company_job",
-                                title=f"{job.company_name} posted: {job.title}",
-                                body=f"Your starred company has a new opening in {job.location or 'Unknown location'}",
-                                job_id=job.id,
-                            )
-                    elif job.match_score is not None and job.match_score >= 50:
-                        if not await _notification_exists(
-                            db, user_id=user_id, job_id=job.id, type="new_job",
-                        ):
-                            await create_notification(
-                                db,
-                                user_id,
-                                type="new_job",
-                                title=f"New match: {job.title} at {job.company_name}",
-                                body=f"{int(job.match_score)}% match score",
-                                job_id=job.id,
-                            )
-
-            except Exception:
                 # search_jobs / startup refresh can leave the transaction in a
                 # failed state (for example on statement timeout during flush).
                 # Roll back before writing failure metadata or the follow-up
@@ -199,15 +266,15 @@ async def _refresh_user_feeds(user_id: uuid.UUID) -> int:
                 pref.last_duration_seconds = refresh_run.duration_seconds
                 pref.last_error = refresh_run.error
                 await db.commit()
-                logger.exception(
-                    "Failed to refresh feed for user %s, query '%s'",
-                    user_id,
-                    pref.query,
+            except Exception:
+                # The connection itself is poisoned (e.g. cancelled mid-commit).
+                # Give up on metadata for this cycle: this session closes here,
+                # the next preference opens a fresh connection, and the next
+                # refresh cycle overwrites this metadata anyway.
+                logger.warning(
+                    "Could not record refresh failure metadata for pref %s", pref_id,
                 )
-
-        await mark_stale_jobs_for_user(db, user_id)
-
-    return total_new
+            return 0
 
 
 async def refresh_user_feeds(user_id: uuid.UUID) -> int:

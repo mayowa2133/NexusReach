@@ -293,7 +293,12 @@ async def search_jobs(
         SearchPreference.remote_only == remote_only,
         SearchPreference.mode == "default",
     )
-    pref_result = await db.execute(pref_stmt)
+    # no_autoflush: the store loop above leaves new Job rows pending; without
+    # it this SELECT flushes them mid-lookup, and any insert failure surfaces
+    # here as an opaque "Query-invoked autoflush" DBAPIError (Sentry PYTHON-15)
+    # instead of at the commit below where the caller's handler rolls back.
+    with db.no_autoflush:
+        pref_result = await db.execute(pref_stmt)
     target_location_key = normalize._normalized_pref_location(location)
     existing_pref = next(
         (

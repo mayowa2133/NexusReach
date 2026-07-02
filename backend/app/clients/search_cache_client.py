@@ -66,6 +66,29 @@ async def acquire_debounce(key: str, *, ttl_seconds: int) -> bool:
         return False
 
 
+async def acquire_lock(key: str, *, ttl_seconds: int) -> bool:
+    """Best-effort distributed mutex via SET NX EX.
+
+    Unlike ``acquire_debounce`` this fails OPEN: on a Redis outage it returns
+    True so the guarded work still runs (a lock outage must not stop feed
+    refreshes — worst case we lose mutual exclusion, which is the pre-lock
+    status quo). The TTL is a crash backstop; release with ``release_lock``.
+    """
+    try:
+        return bool(await _client().set(key, "1", ex=ttl_seconds, nx=True))
+    except Exception as exc:  # pragma: no cover - network failures are environment-specific
+        logger.warning("lock acquire failed", extra={"cache_key": key, "error": str(exc)})
+        return True
+
+
+async def release_lock(key: str) -> None:
+    """Release a lock taken with ``acquire_lock``; swallows infra failures."""
+    try:
+        await _client().delete(key)
+    except Exception as exc:  # pragma: no cover - network failures are environment-specific
+        logger.warning("lock release failed", extra={"cache_key": key, "error": str(exc)})
+
+
 async def set_json(key: str, payload: Any, *, ttl_seconds: int | None = None) -> None:
     """Store JSON payload in Redis, swallowing infra failures."""
     try:

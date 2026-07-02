@@ -76,6 +76,13 @@ async def _fetch_lsd_token(client: httpx.AsyncClient) -> str | None:
             logger.debug("Meta LSD token not found in page HTML")
             return None
         return match.group(1)
+    except (httpx.TimeoutException, httpx.RequestError) as exc:
+        # Transient network failure against a best-effort source: WARNING, not
+        # Sentry-error (sustained outages surface via monitor_source_health).
+        logger.warning(
+            "Meta LSD token fetch failed (%s)", exc.__class__.__name__
+        )
+        return None
     except Exception:
         logger.exception("Meta LSD token fetch failed")
         return None

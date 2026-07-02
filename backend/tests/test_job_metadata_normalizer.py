@@ -218,3 +218,43 @@ def test_source_fixture_regressions(raw_job: dict, expected: dict) -> None:
     assert normalized["work_mode"] == expected["work_mode"]
     assert normalized["description"]
     assert normalized["metadata_provenance"]["source_quality"]
+
+
+def test_normalize_clamps_oversized_string_fields_to_column_widths():
+    """One oversized value fails the whole INSERT batch with
+    StringDataRightTruncationError (Sentry PYTHON-15) — normalization must
+    truncate free-text fields to their jobs-table column widths."""
+    from app.utils.job_metadata import JOB_STRING_FIELD_LIMITS, normalize_job_metadata
+
+    normalized = normalize_job_metadata(
+        {
+            "title": "Engineer " * 100,                    # 500 cap
+            "company_name": "A" * 400,                     # 255 cap
+            "location": "New York, NY; " + "x" * 300,      # 255 cap
+            "external_id": "id-" + "9" * 400,              # 255 cap
+            "url": "https://example.com/" + "p" * 1200,    # 1000 cap
+            "posted_at": "posted a very long time ago " * 5,  # 50 cap
+            "source": "jsearch",
+        }
+    )
+
+    for field in ("title", "company_name", "location", "external_id", "url", "posted_at"):
+        assert len(normalized[field]) <= JOB_STRING_FIELD_LIMITS[field], field
+    assert normalized["company_name"] == "A" * 255
+    # Short values and non-strings pass through untouched.
+    assert normalized["source"] == "jsearch"
+
+
+def test_clamp_limits_match_job_model_columns():
+    """The clamp map must stay in sync with the actual column widths."""
+    from sqlalchemy import String
+
+    from app.models.job import Job
+    from app.utils.job_metadata import JOB_STRING_FIELD_LIMITS
+
+    for field, max_len in JOB_STRING_FIELD_LIMITS.items():
+        column_type = Job.__table__.columns[field].type
+        assert isinstance(column_type, String), field
+        assert column_type.length == max_len, (
+            f"{field}: clamp {max_len} != column {column_type.length}"
+        )

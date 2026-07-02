@@ -766,6 +766,47 @@ def _salary_from_job_data(job_data: dict[str, Any]) -> SalaryExtraction | None:
     )
 
 
+# Mirrors the String(...) column widths on app.models.job.Job. Source feeds
+# occasionally return oversized values (a multi-location string, a data-URL
+# logo, a rambling posted_at phrase); ONE oversized value fails the whole
+# INSERT batch with StringDataRightTruncationError (Sentry PYTHON-15), so
+# best-effort truncation at ingest beats losing the batch. Text columns
+# (description, notes) are unbounded and deliberately absent.
+JOB_STRING_FIELD_LIMITS: dict[str, int] = {
+    "external_id": 255,
+    "title": 500,
+    "company_name": 255,
+    "company_logo": 500,
+    "location": 255,
+    "location_geocode_label": 255,
+    "work_mode": 50,
+    "url": 1000,
+    "apply_url": 1000,
+    "employment_type": 50,
+    "experience_level": 50,
+    "salary_currency": 10,
+    "salary_period": 50,
+    "source": 50,
+    "ats": 50,
+    "ats_slug": 255,
+    "posted_at": 50,
+    "department": 255,
+}
+
+
+def _clamp_job_string_fields(normalized: dict[str, Any]) -> None:
+    """Truncate free-text fields to their DB column widths, in place.
+
+    Runs at the end of normalization — before fingerprinting/dedup in the
+    store paths — so the stored value and every identity derived from it see
+    the same clamped string.
+    """
+    for field, max_len in JOB_STRING_FIELD_LIMITS.items():
+        value = normalized.get(field)
+        if isinstance(value, str) and len(value) > max_len:
+            normalized[field] = value[:max_len]
+
+
 def normalize_job_metadata(job_data: dict[str, Any]) -> dict[str, Any]:
     """Return a copy of *job_data* with normalized metadata fields attached."""
     normalized = dict(job_data)
@@ -846,4 +887,5 @@ def normalize_job_metadata(job_data: dict[str, Any]) -> dict[str, Any]:
     source = str(normalized.get("source") or normalized.get("ats") or "unknown")
     provenance["source_quality"] = SOURCE_QUALITY_MATRIX.get(source, {})
     normalized["metadata_provenance"] = provenance
+    _clamp_job_string_fields(normalized)
     return normalized
