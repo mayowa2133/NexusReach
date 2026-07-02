@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -76,7 +77,19 @@ def _latex_escape(value: str | None) -> str:
 
 
 def _latex_url(value: str | None) -> str:
-    return _clean(value).replace("\\", "/")
+    """Sanitize a URL for use inside a LaTeX ``\\url{}``/``\\href{}`` argument.
+
+    Strips characters that are invalid in a real URL but carry LaTeX meaning and
+    could break out of the argument or form a control sequence — backslashes
+    (control sequences), braces (argument delimiters), and whitespace/control
+    chars. URL-legal characters (including ``%`` and ``#``, which hyperref
+    handles) are left intact so legitimate links still render. Defense-in-depth:
+    the profile URL fields are also validated at the API boundary, but
+    resume-parsed contact/project links bypass that path, so this is the
+    catch-all. See the security-audit note on ``_latex_url``.
+    """
+    cleaned = _clean(value).replace("\\", "").replace("{", "").replace("}", "")
+    return "".join(ch for ch in cleaned if ch.isprintable() and not ch.isspace())
 
 
 def _categorize_skills(skills: list[str]) -> tuple[list[str], list[str], list[str]]:
@@ -481,15 +494,26 @@ def render_resume_artifact_pdf(content: str) -> bytes:
             pdflatex,
             "-interaction=nonstopmode",
             "-halt-on-error",
+            # Explicitly disable \write18 shell escape (blocks RCE) and confine
+            # \input/\openin/\openout to the temp working dir via paranoid file
+            # access, so a LaTeX-injection payload can't read absolute paths
+            # (e.g. /app/.env) or traverse out with `..`. Defense-in-depth.
+            "-no-shell-escape",
             "-output-directory",
             str(tmp_path),
             str(tex_path),
         ]
+        # openin_any/openout_any=p (paranoid) are honored by web2c via env vars;
+        # they only block absolute/`..` user file access, not kpathsea package
+        # loads, so standard resume packages still compile.
+        env = {**os.environ, "openin_any": "p", "openout_any": "p"}
         result = subprocess.run(
             command,
             capture_output=True,
             text=True,
             check=False,
+            cwd=str(tmp_path),
+            env=env,
         )
         if result.returncode != 0 or not pdf_path.exists():
             raise ValueError(

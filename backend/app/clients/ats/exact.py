@@ -7,7 +7,7 @@ from typing import Callable
 import httpx
 
 from app.clients import crawl4ai_client, firecrawl_client
-from app.utils.url_safety import is_safe_public_url, safe_get
+from app.utils.url_safety import is_safe_public_url, is_safe_public_url_async, safe_get
 from app.clients.ats.boards import search_workable
 from app.clients.ats.html import _extract_title
 from app.clients.ats.normalize import _job_richness_score, _normalize_apple_job, _normalize_exact_page, _normalize_generic_exact_job, _normalize_icims_job, _normalize_workday_job, _workday_page_matches
@@ -74,15 +74,22 @@ async def _fetch_exact_page_candidates(
     if direct_page:
         pages.append(direct_page)
 
-    crawl4ai_page = await crawl4ai_client.fetch_url(url, timeout_seconds=20)
-    if crawl4ai_page:
-        crawl4ai_page["fallback_used"] = bool(pages)
-        pages.append(crawl4ai_page)
+    # crawl4ai and firecrawl do their own fetch + DNS resolution, bypassing
+    # safe_get's per-hop SSRF guard. Re-validate the host immediately before
+    # handing them the URL, mirroring _probe_workday_job_redirect — otherwise a
+    # rebound/internal host that safe_get would refuse could still be reached
+    # through these fetchers (SSRF). This narrows the DNS-rebinding TOCTOU window
+    # to the same level as the direct path.
+    if await is_safe_public_url_async(url):
+        crawl4ai_page = await crawl4ai_client.fetch_url(url, timeout_seconds=20)
+        if crawl4ai_page:
+            crawl4ai_page["fallback_used"] = bool(pages)
+            pages.append(crawl4ai_page)
 
-    firecrawl_page = await firecrawl_client.scrape_url(url, timeout_seconds=20)
-    if firecrawl_page:
-        firecrawl_page["fallback_used"] = bool(pages)
-        pages.append(firecrawl_page)
+        firecrawl_page = await firecrawl_client.scrape_url(url, timeout_seconds=20)
+        if firecrawl_page:
+            firecrawl_page["fallback_used"] = bool(pages)
+            pages.append(firecrawl_page)
 
     return pages
 
