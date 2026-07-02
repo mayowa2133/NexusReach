@@ -1,6 +1,7 @@
 """Job persistence: build/find/refresh rows, scoring, tagging, raw-job storage, staleness."""
 
 import logging
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.job import Job
 from app.models.job_refresh_run import JobSourceRun
@@ -703,47 +704,73 @@ async def _store_raw_jobs(
         seen_job_keys.add(job_key)
         prepared.append((data, fp))
 
-    dedup_index = (
-        await _prefetch_existing_jobs(db, user_id, prepared) if prepared else None
-    )
-
-    for data, fp in prepared:
-        existing = await _find_existing_job(
-            db,
-            user_id=user_id,
-            source=data.get("source"),
-            ats=data.get("ats"),
-            external_id=data.get("external_id"),
-            url=data.get("url"),
-            fingerprint=fp,
-            index=dedup_index,
+    # Resolve + commit with one retry: concurrent discovery tasks for the same
+    # user can insert a row for the same (user_id, ats, external_id) between our
+    # prefetch and our commit, so the commit raises IntegrityError on the unique
+    # constraint (Sentry PYTHON-1B, exposed once the worker went to concurrency
+    # 2). On conflict we roll back and redo the resolve loop — the re-prefetch
+    # now sees the row the other task inserted, so the conflict becomes a
+    # refresh instead of a duplicate insert.
+    for attempt in range(2):
+        stored = []
+        refreshed_existing = False
+        dedup_index = (
+            await _prefetch_existing_jobs(db, user_id, prepared) if prepared else None
         )
-        score, breakdown = _score_job(data, profile)
-        experience_level = normalize._experience_level_for_job(data)
-        if existing:
-            _refresh_existing_job(
-                existing,
-                data,
+
+        for data, fp in prepared:
+            existing = await _find_existing_job(
+                db,
+                user_id=user_id,
+                source=data.get("source"),
+                ats=data.get("ats"),
+                external_id=data.get("external_id"),
+                url=data.get("url"),
                 fingerprint=fp,
+                index=dedup_index,
+            )
+            score, breakdown = _score_job(data, profile)
+            experience_level = normalize._experience_level_for_job(data)
+            if existing:
+                _refresh_existing_job(
+                    existing,
+                    data,
+                    fingerprint=fp,
+                    score=score,
+                    breakdown=breakdown,
+                    experience_level=experience_level,
+                )
+                refreshed_existing = True
+                continue
+
+            job = _build_job(
+                user_id=user_id,
+                data=data,
                 score=score,
                 breakdown=breakdown,
-                experience_level=experience_level,
+                fingerprint=fp,
             )
-            refreshed_existing = True
-            continue
+            db.add(job)
+            stored.append(job)
 
-        job = _build_job(
-            user_id=user_id,
-            data=data,
-            score=score,
-            breakdown=breakdown,
-            fingerprint=fp,
-        )
-        db.add(job)
-        stored.append(job)
-
-    if stored or refreshed_existing:
-        await db.commit()
+        if not (stored or refreshed_existing):
+            break
+        try:
+            await db.commit()
+            break
+        except IntegrityError:
+            await db.rollback()
+            if attempt == 1:
+                # A second concurrent insert hit the same tiny window; the data
+                # is safe (the constraint held), and the next refresh cycle will
+                # pick up these rows. Drop this batch rather than error out.
+                logger.warning(
+                    "Job store still conflicting after retry for user %s; "
+                    "skipping batch of %d",
+                    user_id,
+                    len(prepared),
+                )
+                return []
 
     if stored:
         # Trigger auto-prospect for newly stored jobs (if enabled)

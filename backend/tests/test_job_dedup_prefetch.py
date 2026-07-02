@@ -8,7 +8,7 @@ per-row queries in ``_find_existing_job``.
 """
 
 import uuid
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -179,3 +179,105 @@ async def test_prefetch_existing_jobs_builds_keep_first_maps():
     assert index.legacy_by_canonical["https://example.com/jobs/3"] is legacy
     assert index.by_fingerprint["fp-3"] is by_fp
     assert db.execute.await_count == 4
+
+
+async def test_store_raw_jobs_retries_on_concurrent_insert_conflict():
+    """A concurrent discovery task can insert the same (user, ats, external_id)
+    between our prefetch and commit (Sentry PYTHON-1B). The batch commit must
+    catch the IntegrityError, roll back, and redo the resolve loop — the
+    re-prefetch now sees the row, so the conflict becomes a refresh."""
+    from sqlalchemy.exc import IntegrityError
+
+    user_id = uuid.uuid4()
+    raw = [
+        {
+            "source": "workday",
+            "ats": "workday",
+            "external_id": "wd-1",
+            "company_name": "Acme",
+            "title": "Engineer",
+            "location": "NYC",
+            "url": "https://acme.wd5.myworkdayjobs.com/1",
+        }
+    ]
+
+    built = _job(source="workday", external_id="wd-1")
+    existing = _job(source="workday", external_id="wd-1")
+
+    db = MagicMock()
+    db.add = MagicMock()
+    db.rollback = AsyncMock()
+    # First commit conflicts (another task inserted it), second succeeds.
+    db.commit = AsyncMock(
+        side_effect=[IntegrityError("INSERT", {}, Exception("dup")), None]
+    )
+
+    with (
+        patch.object(storage, "_load_known_startup_company_names", new=AsyncMock(return_value=set())),
+        patch.object(storage, "_infer_startup_tags_for_job"),
+        patch.object(storage, "_infer_occupation_tags_for_job"),
+        patch.object(storage, "normalize_job_metadata", side_effect=lambda d: d),
+        patch.object(storage, "_prefetch_existing_jobs", new=AsyncMock(return_value=None)),
+        # Attempt 1: not found -> insert -> conflict. Attempt 2: found -> refresh.
+        patch.object(storage, "_find_existing_job", new=AsyncMock(side_effect=[None, existing])),
+        patch.object(storage, "_score_job", return_value=(50.0, {})),
+        patch.object(storage, "_build_job", return_value=built),
+        patch.object(storage, "_refresh_existing_job"),
+        patch.object(storage, "_maybe_auto_prospect", new=AsyncMock()),
+        patch.object(storage, "_maybe_prewarm_people", new=AsyncMock()),
+    ):
+        result = await storage._store_raw_jobs(db, user_id, raw, None)
+
+    assert db.rollback.await_count == 1
+    assert db.commit.await_count == 2
+    # On retry the row resolved to an existing refresh, so nothing new was stored.
+    assert result == []
+
+
+async def test_store_raw_jobs_gives_up_after_second_conflict_without_raising():
+    """If a second concurrent insert hits the same window, the batch is dropped
+    (data is safe — the constraint held) rather than crashing the discovery."""
+    from sqlalchemy.exc import IntegrityError
+
+    user_id = uuid.uuid4()
+    raw = [
+        {
+            "source": "workday",
+            "ats": "workday",
+            "external_id": "wd-2",
+            "company_name": "Globex",
+            "title": "Analyst",
+            "location": "Remote",
+            "url": "https://globex.wd1.myworkdayjobs.com/2",
+        }
+    ]
+
+    db = MagicMock()
+    db.add = MagicMock()
+    db.rollback = AsyncMock()
+    db.commit = AsyncMock(
+        side_effect=[
+            IntegrityError("INSERT", {}, Exception("dup")),
+            IntegrityError("INSERT", {}, Exception("dup")),
+        ]
+    )
+
+    with (
+        patch.object(storage, "_load_known_startup_company_names", new=AsyncMock(return_value=set())),
+        patch.object(storage, "_infer_startup_tags_for_job"),
+        patch.object(storage, "_infer_occupation_tags_for_job"),
+        patch.object(storage, "normalize_job_metadata", side_effect=lambda d: d),
+        patch.object(storage, "_prefetch_existing_jobs", new=AsyncMock(return_value=None)),
+        patch.object(storage, "_find_existing_job", new=AsyncMock(return_value=None)),
+        patch.object(storage, "_score_job", return_value=(50.0, {})),
+        patch.object(storage, "_build_job", return_value=_job(source="workday", external_id="wd-2")),
+        patch.object(storage, "_maybe_auto_prospect", new=AsyncMock()) as prospect,
+        patch.object(storage, "_maybe_prewarm_people", new=AsyncMock()) as prewarm,
+    ):
+        result = await storage._store_raw_jobs(db, user_id, raw, None)
+
+    assert result == []
+    assert db.rollback.await_count == 2
+    # No post-store side effects run when the batch is dropped.
+    prospect.assert_not_awaited()
+    prewarm.assert_not_awaited()
