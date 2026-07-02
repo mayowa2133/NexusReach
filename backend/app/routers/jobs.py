@@ -43,6 +43,7 @@ from app.services.job_service import (
     search_jobs,
     search_ats_jobs,
     get_jobs,
+    get_description_previews,
     count_warming_jobs,
     get_job,
     get_job_command_center,
@@ -173,7 +174,16 @@ async def _build_artifact_response(
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
-def _to_response(job) -> JobResponse:
+def _to_response(
+    job, *, description_preview: tuple[str | None, bool] | None = None
+) -> JobResponse:
+    # The list endpoint loads jobs with the description column deferred and
+    # passes a short preview here instead — reading job.description on those
+    # rows would lazy-load on the async session and raise MissingGreenlet.
+    if description_preview is not None:
+        description, description_truncated = description_preview
+    else:
+        description, description_truncated = job.description, False
     source_status = getattr(job, "source_status", "active")
     if not isinstance(source_status, str):
         source_status = "active"
@@ -203,7 +213,8 @@ def _to_response(job) -> JobResponse:
         work_mode=getattr(job, "work_mode", None),
         url=job.url,
         apply_url=job.apply_url or job.url,
-        description=job.description,
+        description=description,
+        description_truncated=description_truncated,
         employment_type=job.employment_type,
         experience_level=job.experience_level,
         experience_level_confidence=getattr(job, "experience_level_confidence", None),
@@ -325,16 +336,37 @@ async def list_jobs(
         remote=remote, startup=startup,
         occupations=occupation_keys, search=search,
         limit=limit, offset=offset,
+        # The list serves a short description preview (see below) instead of
+        # transferring full descriptions for every row on each feed read.
+        defer_description=True,
     )
+    previews = await get_description_previews(db, jobs)
     return {
-        "items": [_to_response(j) for j in jobs],
+        "items": [
+            _to_response(j, description_preview=previews.get(j.id, (None, False)))
+            for j in jobs
+        ],
         "total": total,
         "limit": limit,
         "offset": offset,
-        # Jobs still hidden by an in-flight people pre-warm. While > 0 the feed
-        # polls so newly warmed jobs appear as their contacts become ready.
+        # Jobs still hidden by an in-flight people pre-warm. While > 0 the
+        # frontend polls the cheap /warming-count endpoint and refetches the
+        # feed only when the count drops.
         "warming_count": await count_warming_jobs(db, user_id),
     }
+
+
+@router.get("/warming-count")
+async def get_warming_count(
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Cheap poll target while people pre-warm runs.
+
+    Returns only the number of jobs still hidden by an in-flight pre-warm so
+    the frontend can poll every few seconds without re-downloading the feed.
+    """
+    return {"warming_count": await count_warming_jobs(db, user_id)}
 
 
 # --- Seed Defaults ---

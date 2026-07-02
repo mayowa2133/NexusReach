@@ -736,3 +736,43 @@ async def _rescore_user_jobs(user_id: uuid.UUID) -> dict:
 def rescore_user_jobs(user_id: str) -> dict:
     """Celery task: re-score all jobs for a user after resume/profile update."""
     return run_async(_rescore_user_jobs(uuid.UUID(user_id)))
+
+
+async def _repair_job_apply_urls(user_id: uuid.UUID, job_ids: list[uuid.UUID]) -> int:
+    """Resolve real apply URLs for the queued dice/newgrad rows.
+
+    Runs the same capped repair that used to execute inline on the feed read
+    (``search._repair_missing_apply_urls``), now off the request path.
+    """
+    from app.models.job import Job  # noqa: PLC0415
+    from app.services.jobs import search as search_mod  # noqa: PLC0415
+
+    if not job_ids:
+        return 0
+    async with async_session() as db:
+        result = await db.execute(
+            select(Job).where(Job.user_id == user_id, Job.id.in_(job_ids))
+        )
+        jobs = list(result.scalars().all())
+        if not jobs:
+            return 0
+        await search_mod._repair_missing_apply_urls(db, jobs)
+        return len(jobs)
+
+
+@celery_app.task(
+    name="app.tasks.jobs.repair_job_apply_urls",
+    soft_time_limit=120,
+    time_limit=180,
+)
+def repair_job_apply_urls(user_id: str, job_ids: list[str]) -> int:
+    """Celery task: background apply-URL repair queued from the jobs feed read.
+
+    No retries: the feed re-queues (debounced) on the next read if rows are
+    still missing their apply URL, so a transient upstream failure self-heals.
+    """
+    return run_async(
+        _repair_job_apply_urls(
+            uuid.UUID(user_id), [uuid.UUID(job_id) for job_id in job_ids]
+        )
+    )

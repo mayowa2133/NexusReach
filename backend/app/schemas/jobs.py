@@ -86,6 +86,10 @@ class JobResponse(BaseModel):
     url: str | None
     apply_url: str | None = None
     description: str | None
+    # True when this response carries only a preview of the description (the
+    # list endpoint truncates to keep the feed payload small). Fetch
+    # GET /api/jobs/{id} for the full text.
+    description_truncated: bool = False
     employment_type: str | None
     experience_level: str | None
     experience_level_confidence: float | None = None

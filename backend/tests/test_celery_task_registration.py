@@ -38,7 +38,12 @@ def test_worker_runtime_defaults_limit_prefetch_and_child_reuse():
 
     assert celery_app.conf.worker_prefetch_multiplier == 1
     assert celery_app.conf.worker_max_tasks_per_child == 5
-    assert celery_app.conf.worker_max_memory_per_child == 400_000
+    assert celery_app.conf.worker_max_memory_per_child == 300_000
+    # The people pre-warm fan-out must stay on its own queue so beat tasks
+    # (email sends, feed refreshes) never queue behind its backlog.
+    routes = celery_app.conf.task_routes
+    assert routes["app.tasks.auto_prospect.prewarm_job_people"] == {"queue": "prewarm"}
+    assert routes["app.tasks.auto_prospect.refresh_job_research_snapshot"] == {"queue": "prewarm"}
     assert Settings.model_fields["reverify_batch_size"].default == 5
 
 

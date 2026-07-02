@@ -443,6 +443,55 @@ async def search_ats_jobs(
     return ordered_jobs
 
 
+# Sources whose listing URL differs from the real apply URL and need a
+# detail-page resolution to repair it.
+_APPLY_URL_REPAIR_SOURCES = ("dice", "newgrad_jobs")
+
+# One repair task per user per window is plenty — the task itself is capped and
+# repaired rows drop out of the candidate set.
+_APPLY_URL_REPAIR_DEBOUNCE_SECONDS = 600
+
+
+def _apply_url_repair_candidates(jobs: list[Job]) -> list[str]:
+    return [
+        str(job.id)
+        for job in jobs
+        if job.source in _APPLY_URL_REPAIR_SOURCES and not job.apply_url and job.url
+    ]
+
+
+async def queue_apply_url_repair(user_id: uuid.UUID, jobs: list[Job]) -> bool:
+    """Queue a background apply-URL repair for the dice/newgrad rows in *jobs*.
+
+    Replaces the old inline repair on the hot ``GET /api/jobs`` path, which
+    awaited third-party detail pages inside the request. Debounced per user so
+    feed polling can't fan out into repeated tasks, and fully fail-soft: a
+    Redis or broker outage must never break a feed read (the UI already falls
+    back to ``job.url`` for the apply link).
+    """
+    try:
+        candidate_ids = _apply_url_repair_candidates(jobs)
+        if not candidate_ids:
+            return False
+        from app.clients import search_cache_client  # noqa: PLC0415
+
+        acquired = await search_cache_client.acquire_debounce(
+            f"apply_url_repair:{user_id}",
+            ttl_seconds=_APPLY_URL_REPAIR_DEBOUNCE_SECONDS,
+        )
+        if not acquired:
+            return False
+        from app.tasks.jobs import repair_job_apply_urls  # noqa: PLC0415
+
+        repair_job_apply_urls.delay(
+            str(user_id), candidate_ids[: 2 * constants.APPLY_URL_REPAIR_MAX_JOBS]
+        )
+        return True
+    except Exception:
+        logger.warning("Failed to queue apply-URL repair", exc_info=True)
+        return False
+
+
 async def _repair_missing_apply_urls(db: AsyncSession, jobs: list[Job]) -> None:
     """Resolve real apply URLs for the dice/newgrad rows whose listing URL differs
     from the apply URL, persisting only that small, capped subset.

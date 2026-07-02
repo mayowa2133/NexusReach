@@ -4,6 +4,8 @@ import posthog
 from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import ORJSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
@@ -46,6 +48,9 @@ app = FastAPI(
     title="NexusReach API",
     description="Smart personal networking assistant",
     version="0.2.0",
+    # orjson renders large JSON payloads (e.g. the jobs feed) several times
+    # faster than the stdlib encoder.
+    default_response_class=ORJSONResponse,
 )
 
 
@@ -66,6 +71,9 @@ def _cors_origin_regex() -> str | None:
 app.state.limiter = limiter
 
 # --- Middleware ---
+# GZip is added before CORS so CORS ends up outermost (last-added wraps first)
+# and error responses keep their CORS headers. Text JSON compresses ~10x.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),

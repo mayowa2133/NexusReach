@@ -15,6 +15,7 @@ from app.utils.job_metadata import normalize_job_metadata
 from app.services.occupation_taxonomy import occupation_tags_for_job
 from sqlalchemy import func as sa_func
 from sqlalchemy import select
+from sqlalchemy import tuple_
 from sqlalchemy.orm import defer
 from app.utils.startup_jobs import startup_source_tag
 from datetime import timedelta
@@ -197,6 +198,149 @@ _DEDUP_DEFER_OPTIONS = (
 )
 
 
+# Batch size for the set-based dedup prefetch IN-queries. Large enough to keep
+# a full board-crawl batch to a handful of round trips, small enough that the
+# bind-parameter lists stay comfortable for Postgres.
+_DEDUP_PREFETCH_CHUNK = 500
+
+
+def _chunked(values: list, size: int = _DEDUP_PREFETCH_CHUNK):
+    for start in range(0, len(values), size):
+        yield values[start : start + size]
+
+
+class _DedupIndex:
+    """In-memory lookup of existing jobs, prefetched once per store batch.
+
+    Mirrors the per-row probe order of ``_find_existing_job`` exactly:
+    (source, external_id) → canonical_url → legacy canonical (backfilled on
+    match) → fingerprint. Replaces up to 4 DB round trips *per raw job* with a
+    handful of set-based IN queries per batch.
+    """
+
+    def __init__(self) -> None:
+        self.by_source_external: dict[tuple[str, str], Job] = {}
+        self.by_canonical: dict[str, Job] = {}
+        self.legacy_by_canonical: dict[str, Job] = {}
+        self.by_fingerprint: dict[str, Job] = {}
+
+    def lookup(
+        self,
+        *,
+        source_key: str | None,
+        external_id: str | None,
+        normalized_url: str | None,
+        fingerprint: str | None,
+    ) -> Job | None:
+        if source_key and external_id:
+            job = self.by_source_external.get((source_key, str(external_id)))
+            if job is not None:
+                return job
+        if normalized_url:
+            job = self.by_canonical.get(normalized_url)
+            if job is not None:
+                return job
+            job = self.legacy_by_canonical.get(normalized_url)
+            if job is not None:
+                # Same backfill the per-row legacy scan performs on match.
+                job.canonical_url = normalized_url
+                return job
+        if fingerprint:
+            job = self.by_fingerprint.get(fingerprint)
+            if job is not None:
+                return job
+        return None
+
+
+async def _prefetch_existing_jobs(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    prepared: list[tuple[dict, str]],
+) -> _DedupIndex:
+    """Bulk-load every job that could dedup against this batch of raw rows.
+
+    ``prepared`` holds ``(normalized_data, fingerprint)`` pairs. Keep-first
+    semantics match the per-row queries' ``ORDER BY created_at, id``: rows for
+    one key value always land in the same chunk, so ``setdefault`` over the
+    ordered result preserves the earliest match.
+    """
+    index = _DedupIndex()
+    pairs: set[tuple[str, str]] = set()
+    urls: set[str] = set()
+    fingerprints: set[str] = set()
+    for data, fp in prepared:
+        source_key = normalize._job_source_key(
+            source=data.get("source"), ats=data.get("ats")
+        )
+        external_id = data.get("external_id")
+        if source_key and external_id:
+            pairs.add((source_key, str(external_id)))
+        normalized_url = normalize._canonical_job_url(data.get("url"))
+        if normalized_url:
+            urls.add(normalized_url)
+        if fp:
+            fingerprints.add(fp)
+
+    with db.no_autoflush:
+        for chunk in _chunked(sorted(pairs)):
+            result = await db.execute(
+                select(Job)
+                .options(*_DEDUP_DEFER_OPTIONS)
+                .where(
+                    Job.user_id == user_id,
+                    tuple_(Job.source, Job.external_id).in_(chunk),
+                )
+                .order_by(Job.created_at.asc(), Job.id.asc())
+            )
+            for job in result.scalars().all():
+                index.by_source_external.setdefault(
+                    (job.source, job.external_id), job
+                )
+
+        for chunk in _chunked(sorted(urls)):
+            result = await db.execute(
+                select(Job)
+                .options(*_DEDUP_DEFER_OPTIONS)
+                .where(Job.user_id == user_id, Job.canonical_url.in_(chunk))
+                .order_by(Job.created_at.asc(), Job.id.asc())
+            )
+            for job in result.scalars().all():
+                if job.canonical_url:
+                    index.by_canonical.setdefault(job.canonical_url, job)
+
+        if urls:
+            # Legacy rows ingested before canonical_url existed: canonicalize
+            # once per batch instead of once per raw job (they backfill on
+            # match, so this set only shrinks over time).
+            result = await db.execute(
+                select(Job)
+                .options(*_DEDUP_DEFER_OPTIONS)
+                .where(
+                    Job.user_id == user_id,
+                    Job.canonical_url.is_(None),
+                    Job.url.is_not(None),
+                )
+                .order_by(Job.created_at.asc(), Job.id.asc())
+            )
+            for job in result.scalars().all():
+                canonical = normalize._canonical_job_url(job.url)
+                if canonical and canonical in urls:
+                    index.legacy_by_canonical.setdefault(canonical, job)
+
+        for chunk in _chunked(sorted(fingerprints)):
+            result = await db.execute(
+                select(Job)
+                .options(*_DEDUP_DEFER_OPTIONS)
+                .where(Job.user_id == user_id, Job.fingerprint.in_(chunk))
+                .order_by(Job.created_at.asc(), Job.id.asc())
+            )
+            for job in result.scalars().all():
+                if job.fingerprint:
+                    index.by_fingerprint.setdefault(job.fingerprint, job)
+
+    return index
+
+
 async def _find_existing_job(
     db: AsyncSession,
     *,
@@ -206,8 +350,19 @@ async def _find_existing_job(
     external_id: str | None,
     url: str | None,
     fingerprint: str | None,
+    index: _DedupIndex | None = None,
 ) -> Job | None:
     source_key = normalize._job_source_key(source=source, ats=ats)
+
+    if index is not None:
+        # Batch path: every candidate was prefetched set-based, so dedup is a
+        # pure in-memory lookup (identical probe order to the queries below).
+        return index.lookup(
+            source_key=source_key,
+            external_id=external_id,
+            normalized_url=normalize._canonical_job_url(url),
+            fingerprint=fingerprint,
+        )
 
     with db.no_autoflush:
         if source_key and external_id:
@@ -528,6 +683,10 @@ async def _store_raw_jobs(
         await _load_known_startup_company_names(db, user_id) if raw_jobs else set()
     )
 
+    # Normalize the whole batch first so dedup candidates can be prefetched
+    # with a handful of set-based queries instead of up to 4 round trips per
+    # raw job (the board crawl stores ~24k rows per run).
+    prepared: list[tuple[dict, str]] = []
     for data in raw_jobs:
         _infer_startup_tags_for_job(data, known_startup_companies)
         _infer_occupation_tags_for_job(data)
@@ -537,7 +696,13 @@ async def _store_raw_jobs(
         if job_key in seen_job_keys:
             continue
         seen_job_keys.add(job_key)
+        prepared.append((data, fp))
 
+    dedup_index = (
+        await _prefetch_existing_jobs(db, user_id, prepared) if prepared else None
+    )
+
+    for data, fp in prepared:
         existing = await _find_existing_job(
             db,
             user_id=user_id,
@@ -546,6 +711,7 @@ async def _store_raw_jobs(
             external_id=data.get("external_id"),
             url=data.get("url"),
             fingerprint=fp,
+            index=dedup_index,
         )
         score, breakdown = _score_job(data, profile)
         experience_level = normalize._experience_level_for_job(data)

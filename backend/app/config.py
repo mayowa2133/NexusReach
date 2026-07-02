@@ -14,8 +14,12 @@ class Settings(BaseSettings):
 
     # Database
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/nexusreach"
-    db_pool_size: int = 3
-    db_max_overflow: int = 0
+    # Web-service DB pool. pool_size is the idle footprint; overflow connections
+    # open under burst load and close when returned, so concurrent dashboard +
+    # feed + notification reads stop queueing on a 3-connection ceiling while
+    # the steady-state connection count against the Supabase pooler stays low.
+    db_pool_size: int = 5
+    db_max_overflow: int = 5
     db_pool_timeout_seconds: int = 30
     db_pool_recycle_seconds: int = 1800
 

@@ -3,6 +3,10 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "celery -A app.tasks worker --loglevel=info --concurrency=1"
+# concurrency=2: the people pre-warm queue is I/O-bound and was fully serial at
+# 1, starving beat tasks behind a 300-task backlog. Two prefork children fit the
+# 1 GB service (worker_max_memory_per_child recycles at 300 MB RSS). -Q lists
+# both queues; move "prewarm" to a dedicated worker service to scale further.
+startCommand = "celery -A app.tasks worker --loglevel=info --concurrency=2 -Q celery,prewarm"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10

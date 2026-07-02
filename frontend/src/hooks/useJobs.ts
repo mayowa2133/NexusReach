@@ -146,11 +146,23 @@ export function useJobs(filters: JobFilters = {}) {
       search,
     ],
     queryFn: () => api.get<PaginatedResponse<Job>>(`/api/jobs${qs ? `?${qs}` : ''}`),
-    // While jobs are still warming people in the background, poll so they
-    // surface as soon as their contacts are ready. Stops once warming_count
-    // returns to 0 (or the reveal timeout has flushed them all).
+  });
+}
+
+/**
+ * Cheap poll while people pre-warm runs: hits the count-only endpoint every
+ * few seconds instead of re-downloading the whole feed. The caller invalidates
+ * the jobs list when the count drops so newly warmed jobs surface. Enable it
+ * while the last feed response reported warming_count > 0.
+ */
+export function useWarmingCount(enabled: boolean) {
+  return useQuery({
+    queryKey: ['jobs-warming-count'],
+    queryFn: () => api.get<{ warming_count: number }>('/api/jobs/warming-count'),
+    enabled,
+    // Stop polling on its own once the count reaches 0.
     refetchInterval: (query) =>
-      (query.state.data?.warming_count ?? 0) > 0 ? 4000 : false,
+      (query.state.data?.warming_count ?? 1) > 0 ? 4000 : false,
   });
 }
 

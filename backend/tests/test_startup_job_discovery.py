@@ -119,6 +119,7 @@ async def test_discover_jobs_startup_mode_stores_tagged_direct_board_jobs():
         patch("app.services.job_service.conviction_jobs_client.fetch_conviction_startups", new_callable=AsyncMock, return_value=[]),
         patch("app.services.job_service.speedrun_jobs_client.fetch_speedrun_companies", new_callable=AsyncMock, return_value=[]),
         patch("app.services.job_service.curated_startups_client.get_curated_startups", return_value=[]),
+        patch("app.services.jobs.storage._prefetch_existing_jobs", new_callable=AsyncMock, return_value=None),
         patch("app.services.jobs.storage._find_existing_job", new_callable=AsyncMock, return_value=None),
     ):
         total_new = await discover_jobs(db, user_id, mode="startup")
@@ -164,6 +165,7 @@ async def test_discover_jobs_startup_mode_resolves_speedrun_company_to_ats_board
         ),
         patch("app.services.job_service.public_page_client.fetch_direct_page", new_callable=AsyncMock, return_value=homepage),
         patch("app.services.job_service.ats.get_adapter", return_value=adapter),
+        patch("app.services.jobs.storage._prefetch_existing_jobs", new_callable=AsyncMock, return_value=None),
         patch("app.services.jobs.storage._find_existing_job", new_callable=AsyncMock, return_value=None),
     ):
         total_new = await discover_jobs(db, user_id, mode="startup")
@@ -199,6 +201,7 @@ async def test_search_ats_jobs_merges_startup_tags_into_existing_job():
 
     with (
         patch("app.services.job_service.ats.get_adapter", return_value=adapter),
+        patch("app.services.jobs.storage._prefetch_existing_jobs", new_callable=AsyncMock, return_value=None),
         patch("app.services.jobs.storage._find_existing_job", new_callable=AsyncMock, return_value=existing_job),
     ):
         await search_ats_jobs(

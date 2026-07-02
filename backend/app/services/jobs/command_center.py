@@ -22,6 +22,7 @@ from app.services.occupation_taxonomy import occupation_tag
 from sqlalchemy import or_
 from sqlalchemy import func as sa_func
 from sqlalchemy import select
+from sqlalchemy.orm import defer
 from sqlalchemy.orm import selectinload
 from app.services.job_research_snapshot_service import serialize_snapshot
 from datetime import timezone
@@ -82,14 +83,23 @@ async def get_jobs(
     search: str | None = None,
     limit: int | None = None,
     offset: int = 0,
+    defer_description: bool = False,
 ) -> tuple[list[Job], int]:
     """Get saved jobs for a user with optional filtering and pagination.
 
     Returns ``(jobs, total_count)``.
+
+    ``defer_description=True`` skips loading the (large) description column —
+    the list endpoint serves a short preview instead (``get_description_previews``)
+    so the feed payload and the Supabase egress per read stay small. Callers
+    using it must NOT read ``job.description`` on the returned rows: that would
+    lazy-load on the async session and raise ``MissingGreenlet``.
     """
     from app.utils.pagination import paginate
 
     query = select(Job).where(Job.user_id == user_id)
+    if defer_description:
+        query = query.options(defer(Job.description))
     # Hide jobs whose people pre-warm is still running, so the user never sees a
     # job before its top contacts are ready. A job surfaces once it is warmed
     # (status flipped to "ready") OR once it is older than the reveal timeout —
@@ -196,8 +206,43 @@ async def get_jobs(
         query = query.order_by(recency.desc().nullslast(), Job.created_at.desc())
 
     jobs, total = await paginate(db, query, limit=limit, offset=offset)
-    await _search_mod._repair_missing_apply_urls(db, jobs)
+    # Apply-URL repair used to run inline here (third-party detail-page fetches
+    # inside the hot feed read). It's now a debounced background task; the UI
+    # falls back to job.url until the repair lands.
+    await _search_mod.queue_apply_url_repair(user_id, jobs)
     return jobs, total
+
+
+# Characters of description served on the list endpoint. Cards don't render
+# the description at all; the inline detail panel fetches the full job when
+# the preview is truncated, so this only needs to cover the first glance.
+DESCRIPTION_PREVIEW_CHARS = 500
+
+
+async def get_description_previews(
+    db: AsyncSession, jobs: list[Job]
+) -> dict[uuid.UUID, tuple[str | None, bool]]:
+    """Return ``{job_id: (preview, truncated)}`` for the given jobs.
+
+    One indexed PK query shipping at most ``DESCRIPTION_PREVIEW_CHARS`` per row,
+    used with ``get_jobs(defer_description=True)`` so the feed never transfers
+    full descriptions from the database. ``substr``/``length`` are portable
+    across Postgres and SQLite (tests).
+    """
+    if not jobs:
+        return {}
+    ids = [job.id for job in jobs]
+    result = await db.execute(
+        select(
+            Job.id,
+            sa_func.substr(Job.description, 1, DESCRIPTION_PREVIEW_CHARS),
+            sa_func.length(Job.description),
+        ).where(Job.id.in_(ids))
+    )
+    previews: dict[uuid.UUID, tuple[str | None, bool]] = {}
+    for job_id, preview, full_length in result.all():
+        previews[job_id] = (preview, (full_length or 0) > DESCRIPTION_PREVIEW_CHARS)
+    return previews
 
 
 async def count_warming_jobs(db: AsyncSession, user_id: uuid.UUID) -> int:
@@ -319,7 +364,7 @@ async def get_job(
     )
     job = result.scalar_one_or_none()
     if job:
-        await _search_mod._repair_missing_apply_urls(db, [job])
+        await _search_mod.queue_apply_url_repair(user_id, [job])
     return job
 
 

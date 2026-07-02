@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, memo, type FormEvent } from 'react';
+import { useState, useEffect, useMemo, useRef, memo, type FormEvent } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -12,11 +12,13 @@ import { Checkbox } from '@/components/ui/checkbox';
 import {
   useJobSearch,
   useATSSearch,
+  useJob,
   useJobs,
   useUpdateJobStage,
   useToggleJobStar,
   useEnsureFreshJobs,
   useDiscoverOccupations,
+  useWarmingCount,
 } from '@/hooks/useJobs';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -302,6 +304,22 @@ export function JobsPage() {
   const ensureFresh = useEnsureFreshJobs();
   const discoverOccupations = useDiscoverOccupations();
   const queryClient = useQueryClient();
+
+  // While people pre-warm runs, poll the cheap count-only endpoint instead of
+  // re-downloading the whole feed every few seconds; refetch the feed only
+  // when the count drops (a job finished warming and is now visible).
+  const listWarmingCount = savedJobsData?.warming_count ?? 0;
+  const { data: warmingData } = useWarmingCount(listWarmingCount > 0);
+  const warmingCount = warmingData?.warming_count ?? listWarmingCount;
+  const prevWarmingCount = useRef<number | null>(null);
+  useEffect(() => {
+    const current = warmingData?.warming_count;
+    if (current == null) return;
+    if (prevWarmingCount.current != null && current < prevWarmingCount.current) {
+      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+    }
+    prevWarmingCount.current = current;
+  }, [warmingData?.warming_count, queryClient]);
 
   // Button-free population: opening Jobs nudges the backend to keep the feed
   // fresh (debounced server-side). No "Discover" button — jobs just appear, the
@@ -757,12 +775,12 @@ export function JobsPage() {
 
       {/* People pre-warm in progress: new jobs stay hidden until their top
           contacts are ready, then appear here automatically (feed polls). */}
-      {(savedJobsData?.warming_count ?? 0) > 0 && (
+      {warmingCount > 0 && (
         <div className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-300">
           <Loader2 className="h-4 w-4 animate-spin shrink-0" />
           <span>
-            Finding the best people for {savedJobsData?.warming_count} new{' '}
-            {savedJobsData?.warming_count === 1 ? 'job' : 'jobs'}… they'll appear
+            Finding the best people for {warmingCount} new{' '}
+            {warmingCount === 1 ? 'job' : 'jobs'}… they'll appear
             here the moment their contacts are ready.
           </span>
         </div>
@@ -866,7 +884,9 @@ const JobListCard = memo(function JobListCard({
 
   return (
     <Card
-      className={`cursor-pointer transition-colors ${isSelected ? 'border-primary bg-muted/30' : 'hover:bg-muted/20'}`}
+      // content-visibility lets the browser skip layout/paint for offscreen
+      // cards — the feed renders up to 200 of these without virtualization.
+      className={`cursor-pointer transition-colors [content-visibility:auto] [contain-intrinsic-size:auto_92px] ${isSelected ? 'border-primary bg-muted/30' : 'hover:bg-muted/20'}`}
       onClick={onClick}
       role="button"
       tabIndex={0}
@@ -971,6 +991,15 @@ function JobDetail({
   const workModeLabel = job.work_mode
     ? job.work_mode.replace('-', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
     : job.remote ? 'Remote' : null;
+  // The list payload carries only a short description preview; fetch the full
+  // job for the detail panel when it was truncated. Falls back to the preview
+  // while loading. Memoized so DOMPurify doesn't re-run on unrelated renders.
+  const { data: fullJob } = useJob(job.description_truncated ? job.id : undefined);
+  const description = fullJob?.description ?? job.description;
+  const descriptionHtml = useMemo(
+    () => (description ? sanitizeHTML(description.slice(0, 3000)) : null),
+    [description],
+  );
 
   return (
     <Card>
@@ -1132,13 +1161,13 @@ function JobDetail({
         </div>
 
         {/* Description */}
-        {job.description && (
+        {descriptionHtml && (
           <div className="space-y-1">
             <Separator />
             <div className="text-sm font-medium">Description</div>
             <div
               className="text-sm text-muted-foreground max-h-[400px] overflow-y-auto prose prose-sm dark:prose-invert"
-              dangerouslySetInnerHTML={{ __html: sanitizeHTML(job.description.slice(0, 3000)) }}
+              dangerouslySetInnerHTML={{ __html: descriptionHtml }}
             />
           </div>
         )}

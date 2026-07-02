@@ -217,6 +217,7 @@ async def test_list_jobs(client, mock_user_id):
 
     with (
         patch("app.routers.jobs.get_jobs", new_callable=AsyncMock) as mock_get,
+        patch("app.routers.jobs.get_description_previews", new=AsyncMock(return_value={})),
         patch("app.routers.jobs.count_warming_jobs", new=AsyncMock(return_value=0)),
     ):
         mock_get.return_value = ([job1, job2], 2)
@@ -234,6 +235,7 @@ async def test_list_jobs_with_stage_filter(client, mock_user_id):
 
     with (
         patch("app.routers.jobs.get_jobs", new_callable=AsyncMock) as mock_get,
+        patch("app.routers.jobs.get_description_previews", new=AsyncMock(return_value={})),
         patch("app.routers.jobs.count_warming_jobs", new=AsyncMock(return_value=0)),
     ):
         mock_get.return_value = ([job], 1)
@@ -252,6 +254,7 @@ async def test_list_jobs_with_startup_filter(client, mock_user_id):
 
     with (
         patch("app.routers.jobs.get_jobs", new_callable=AsyncMock) as mock_get,
+        patch("app.routers.jobs.get_description_previews", new=AsyncMock(return_value={})),
         patch("app.routers.jobs.count_warming_jobs", new=AsyncMock(return_value=0)),
     ):
         mock_get.return_value = ([job], 1)
@@ -269,6 +272,7 @@ async def test_list_jobs_with_country_filter(client, mock_user_id):
 
     with (
         patch("app.routers.jobs.get_jobs", new_callable=AsyncMock) as mock_get,
+        patch("app.routers.jobs.get_description_previews", new=AsyncMock(return_value={})),
         patch("app.routers.jobs.count_warming_jobs", new=AsyncMock(return_value=0)),
     ):
         mock_get.return_value = ([job], 1)
@@ -291,6 +295,7 @@ async def test_list_jobs_with_nearby_filter(client, mock_user_id):
 
     with (
         patch("app.routers.jobs.get_jobs", new_callable=AsyncMock) as mock_get,
+        patch("app.routers.jobs.get_description_previews", new=AsyncMock(return_value={})),
         patch("app.routers.jobs.count_warming_jobs", new=AsyncMock(return_value=0)),
     ):
         mock_get.return_value = ([job], 1)
@@ -944,3 +949,52 @@ async def test_update_job_stage_not_found(client, mock_user_id):
         )
 
     assert resp.status_code == 404
+
+
+async def test_list_jobs_serves_description_preview(client, mock_user_id):
+    """The list endpoint serves a truncated preview, flagged so the client
+    knows to fetch GET /api/jobs/{id} for the full description."""
+    job = _mock_job(mock_user_id)
+
+    with (
+        patch("app.routers.jobs.get_jobs", new_callable=AsyncMock) as mock_get,
+        patch(
+            "app.routers.jobs.get_description_previews",
+            new=AsyncMock(return_value={job.id: ("Build thin", True)}),
+        ),
+        patch("app.routers.jobs.count_warming_jobs", new=AsyncMock(return_value=0)),
+    ):
+        mock_get.return_value = ([job], 1)
+        resp = await client.get("/api/jobs")
+
+    assert resp.status_code == 200
+    item = resp.json()["items"][0]
+    assert item["description"] == "Build thin"
+    assert item["description_truncated"] is True
+    # The list path must load jobs with the description column deferred.
+    assert mock_get.call_args.kwargs.get("defer_description") is True
+
+
+async def test_single_job_serves_full_description(client, mock_user_id):
+    """GET /api/jobs/{id} keeps serving the full, un-truncated description."""
+    job = _mock_job(mock_user_id, description="Full description text")
+
+    with patch("app.routers.jobs.get_job", new_callable=AsyncMock, return_value=job):
+        resp = await client.get(f"/api/jobs/{job.id}")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["description"] == "Full description text"
+    assert data["description_truncated"] is False
+
+
+async def test_warming_count_endpoint(client, mock_user_id):
+    """The count-only poll target returns warming_count without the feed."""
+    with patch(
+        "app.routers.jobs.count_warming_jobs", new=AsyncMock(return_value=3)
+    ) as mock_count:
+        resp = await client.get("/api/jobs/warming-count")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"warming_count": 3}
+    mock_count.assert_awaited_once()

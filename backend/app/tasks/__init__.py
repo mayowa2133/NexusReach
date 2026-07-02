@@ -98,9 +98,21 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
     # Search/browser integrations retain native-library memory between tasks.
     # Recycle prefork children before that growth reaches Railway's 1 GB service
-    # limit, and force a recycle after any task leaves a child above 400 MB RSS.
+    # limit, and force a recycle after any task leaves a child above 300 MB RSS
+    # (lowered from 400 MB when worker concurrency went 1 -> 2: two children
+    # must fit under the same 1 GB cap).
     worker_max_tasks_per_child=5,
-    worker_max_memory_per_child=400_000,
+    worker_max_memory_per_child=300_000,
+    # The per-job people pre-warm fan-out (up to PREWARM_MAX_JOBS_PER_BATCH
+    # tasks per discovery, minutes each) gets its own queue so time-sensitive
+    # work — scheduled email sends, feed refreshes, cold-start discovery —
+    # never sits behind the backlog. The single Railway worker consumes both
+    # queues (railway.worker.toml -Q celery,prewarm); to scale further, add a
+    # second worker service consuming only -Q prewarm.
+    task_routes={
+        "app.tasks.auto_prospect.prewarm_job_people": {"queue": "prewarm"},
+        "app.tasks.auto_prospect.refresh_job_research_snapshot": {"queue": "prewarm"},
+    },
     beat_schedule={
         "refresh-job-feeds": {
             "task": "app.tasks.jobs.refresh_all_job_feeds",

@@ -159,6 +159,7 @@ from app.services.jobs.curated_boards import (
 from app.services.jobs.command_center import (
     toggle_job_starred,
     get_jobs,
+    get_description_previews,
     count_warming_jobs,
     update_job_stage,
     update_interview_rounds,

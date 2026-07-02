@@ -44,6 +44,9 @@ export interface Job {
   url: string | null;
   apply_url: string | null;
   description: string | null;
+  // True when this payload carries only a truncated description preview (the
+  // list endpoint). Fetch GET /api/jobs/{id} for the full text.
+  description_truncated?: boolean;
   employment_type: string | null;
   experience_level: string | null;
   experience_level_confidence?: number | null;

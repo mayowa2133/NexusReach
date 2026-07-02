@@ -382,6 +382,7 @@ async def test_discover_jobs_stores_same_enriched_newgrad_fields():
             new_callable=AsyncMock,
             return_value=[_newgrad_job()],
         ),
+        patch("app.services.jobs.storage._prefetch_existing_jobs", new_callable=AsyncMock, return_value=None),
         patch("app.services.jobs.storage._find_existing_job", new_callable=AsyncMock, return_value=None),
         patch("app.services.jobs.curated_boards._discover_ats_boards", new_callable=AsyncMock, return_value=0),
     ):
@@ -411,6 +412,7 @@ async def test_store_raw_jobs_commits_existing_apply_url_update():
 
     with (
         patch("app.services.jobs.storage._load_known_startup_company_names", new_callable=AsyncMock, return_value=set()),
+        patch("app.services.jobs.storage._prefetch_existing_jobs", new_callable=AsyncMock, return_value=None),
         patch("app.services.jobs.storage._find_existing_job", new_callable=AsyncMock, return_value=existing_job),
         patch("app.services.jobs.storage._maybe_auto_prospect", new_callable=AsyncMock) as mock_auto_prospect,
     ):

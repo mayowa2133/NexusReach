@@ -41,11 +41,19 @@ vi.mock('@/stores/auth', () => ({
   ),
 }));
 
-let mockSavedJobs: { items: Array<Record<string, unknown>>; total: number; limit: null; offset: 0 } | undefined;
+let mockSavedJobs: { items: Array<Record<string, unknown>>; total: number; limit: null; offset: 0; warming_count?: number } | undefined;
 const mockUseJobs = vi.fn((filters: unknown) => {
   void filters;
   return {
     data: mockSavedJobs,
+    isLoading: false,
+  };
+});
+let mockWarmingCount: number | undefined;
+const mockUseWarmingCount = vi.fn((enabled: boolean) => {
+  void enabled;
+  return {
+    data: mockWarmingCount === undefined ? undefined : { warming_count: mockWarmingCount },
     isLoading: false,
   };
 });
@@ -64,6 +72,8 @@ vi.mock('@/hooks/useJobs', () => ({
     isPending: false,
   }),
   useJobs: (filters?: unknown) => mockUseJobs(filters),
+  useJob: () => ({ data: undefined, isLoading: false }),
+  useWarmingCount: (enabled: boolean) => mockUseWarmingCount(enabled),
   useUpdateJobStage: () => ({
     mutateAsync: vi.fn(),
   }),
@@ -139,6 +149,8 @@ beforeEach(() => {
   window.localStorage.clear();
   mockNavigate.mockReset();
   mockSavedJobs = undefined;
+  mockWarmingCount = undefined;
+  mockUseWarmingCount.mockClear();
   mockUseJobs.mockClear();
   mockEnsureFresh.mutateAsync.mockClear();
 });
@@ -190,6 +202,16 @@ describe('JobsPage', () => {
     expect(
       screen.getByText(/set your target occupations in your profile/i),
     ).toBeInTheDocument();
+  });
+
+  it('shows the warming banner from the cheap count poll, not the feed payload', () => {
+    // The feed reported warming jobs, so the count poll is enabled; the banner
+    // must render the live polled count (the feed itself is no longer polled).
+    mockSavedJobs = { items: [sampleJob], total: 1, limit: null, offset: 0, warming_count: 1 };
+    mockWarmingCount = 3;
+    renderJobs();
+    expect(mockUseWarmingCount).toHaveBeenCalledWith(true);
+    expect(screen.getByText(/finding the best people for 3 new jobs/i)).toBeInTheDocument();
   });
 
   it('renders remote-only checkbox', () => {
