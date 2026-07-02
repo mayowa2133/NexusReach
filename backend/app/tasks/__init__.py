@@ -111,6 +111,7 @@ celery_app.conf.update(
     # second worker service consuming only -Q prewarm.
     task_routes={
         "app.tasks.auto_prospect.prewarm_job_people": {"queue": "prewarm"},
+        "app.tasks.auto_prospect.prewarm_job_people_batch": {"queue": "prewarm"},
         "app.tasks.auto_prospect.refresh_job_research_snapshot": {"queue": "prewarm"},
     },
     beat_schedule={

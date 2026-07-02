@@ -106,13 +106,15 @@ async def test_prewarm_job_reveals_even_when_search_fails():
 
 
 @pytest.mark.asyncio()
-async def test_maybe_prewarm_marks_pending_and_queues_per_job():
-    """Every new job is marked pending and gets its own pre-warm task."""
+async def test_maybe_prewarm_marks_pending_and_queues_company_batches():
+    """New jobs are marked pending and queued as company-grouped batch tasks:
+    same-employer jobs share one task (shared caches, less task overhead)."""
     from app.services.jobs import storage
 
     jobs = [
-        SimpleNamespace(id=uuid.uuid4(), match_score=float(i), people_prewarm_status="ready")
-        for i in range(3)
+        SimpleNamespace(id=uuid.uuid4(), match_score=3.0, people_prewarm_status="ready", company_name="Acme"),
+        SimpleNamespace(id=uuid.uuid4(), match_score=2.0, people_prewarm_status="ready", company_name="Globex"),
+        SimpleNamespace(id=uuid.uuid4(), match_score=1.0, people_prewarm_status="ready", company_name="Acme Inc."),
     ]
     user_id = uuid.uuid4()
     with (
@@ -120,16 +122,45 @@ async def test_maybe_prewarm_marks_pending_and_queues_per_job():
             "app.services.settings_service.is_people_prewarm_enabled",
             new=AsyncMock(return_value=True),
         ),
-        patch("app.tasks.auto_prospect.prewarm_job_people") as mock_task,
+        patch("app.tasks.auto_prospect.prewarm_job_people_batch") as mock_task,
     ):
         await storage._maybe_prewarm_people(AsyncMock(), user_id, jobs)
 
-    assert mock_task.delay.call_count == 3
     assert all(job.people_prewarm_status == "pending" for job in jobs)
-    queued_job_ids = {call.args[1] for call in mock_task.delay.call_args_list}
+    # Two batches: the two Acme jobs together (normalized company match), Globex alone.
+    assert mock_task.delay.call_count == 2
+    batches = [call.args[1] for call in mock_task.delay.call_args_list]
+    assert sorted(len(batch) for batch in batches) == [1, 2]
+    queued_job_ids = {job_id for batch in batches for job_id in batch}
     assert queued_job_ids == {str(job.id) for job in jobs}
+    acme_batch = next(batch for batch in batches if len(batch) == 2)
+    assert acme_batch == [str(jobs[0].id), str(jobs[2].id)]
     # Every task is queued for this user.
     assert all(call.args[0] == str(user_id) for call in mock_task.delay.call_args_list)
+
+
+@pytest.mark.asyncio()
+async def test_maybe_prewarm_chunks_large_company_groups():
+    """A company group larger than PREWARM_COMPANY_BATCH_MAX splits so one task
+    can't blow past its time budget."""
+    from app.services.jobs import storage
+
+    jobs = [
+        SimpleNamespace(id=uuid.uuid4(), match_score=float(i), people_prewarm_status="ready", company_name="Acme")
+        for i in range(7)
+    ]
+    with (
+        patch.object(storage, "PREWARM_COMPANY_BATCH_MAX", 3),
+        patch(
+            "app.services.settings_service.is_people_prewarm_enabled",
+            new=AsyncMock(return_value=True),
+        ),
+        patch("app.tasks.auto_prospect.prewarm_job_people_batch") as mock_task,
+    ):
+        await storage._maybe_prewarm_people(AsyncMock(), uuid.uuid4(), jobs)
+
+    batches = [call.args[1] for call in mock_task.delay.call_args_list]
+    assert [len(batch) for batch in batches] == [3, 3, 1]
 
 
 @pytest.mark.asyncio()
@@ -147,11 +178,12 @@ async def test_maybe_prewarm_ranks_and_caps():
             "app.services.settings_service.is_people_prewarm_enabled",
             new=AsyncMock(return_value=True),
         ),
-        patch("app.tasks.auto_prospect.prewarm_job_people") as mock_task,
+        patch("app.tasks.auto_prospect.prewarm_job_people_batch") as mock_task,
     ):
         await storage._maybe_prewarm_people(AsyncMock(), uuid.uuid4(), jobs)
 
-    assert mock_task.delay.call_count == 2
+    queued = [job_id for call in mock_task.delay.call_args_list for job_id in call.args[1]]
+    assert len(queued) == 2
     # The two top-scored jobs (40.0, 30.0) are pending; the rest remain ready.
     pending = {job.match_score for job in jobs if job.people_prewarm_status == "pending"}
     assert pending == {40.0, 30.0}
@@ -187,10 +219,50 @@ async def test_maybe_prewarm_respects_opt_out():
             "app.services.settings_service.is_people_prewarm_enabled",
             new=AsyncMock(return_value=False),
         ),
-        patch("app.tasks.auto_prospect.prewarm_job_people") as mock_task,
+        patch("app.tasks.auto_prospect.prewarm_job_people_batch") as mock_task,
     ):
         await storage._maybe_prewarm_people(AsyncMock(), uuid.uuid4(), jobs)
 
     mock_task.delay.assert_not_called()
     # Opt-out leaves jobs visible immediately.
     assert jobs[0].people_prewarm_status == "ready"
+
+
+@pytest.mark.asyncio()
+async def test_prewarm_batch_runs_jobs_in_order():
+    """The batch impl warms each job sequentially and reports completion."""
+    from app.tasks import auto_prospect
+
+    user_id = uuid.uuid4()
+    job_ids = [uuid.uuid4(), uuid.uuid4(), uuid.uuid4()]
+    with patch.object(
+        auto_prospect, "_prewarm_job_people", new=AsyncMock(return_value={})
+    ) as mock_one:
+        stats = await auto_prospect._prewarm_job_people_batch(user_id, job_ids)
+
+    assert stats == {"jobs": 3, "completed": 3, "revealed_unwarmed": 0}
+    assert [call.args[1] for call in mock_one.await_args_list] == job_ids
+
+
+@pytest.mark.asyncio()
+async def test_prewarm_batch_reveals_remaining_jobs_when_budget_runs_out():
+    """When the wall-clock budget is exhausted the rest of the batch is revealed
+    unwarmed in one statement instead of tripping the task time limit."""
+    from app.tasks import auto_prospect
+
+    user_id = uuid.uuid4()
+    job_ids = [uuid.uuid4(), uuid.uuid4()]
+    with (
+        # Deadline is already in the past before the first job runs.
+        patch.object(auto_prospect, "PREWARM_BATCH_TIME_BUDGET_SECONDS", -1),
+        patch.object(
+            auto_prospect, "_prewarm_job_people", new=AsyncMock()
+        ) as mock_one,
+        patch.object(auto_prospect, "_reveal_jobs", new=AsyncMock()) as mock_reveal,
+    ):
+        stats = await auto_prospect._prewarm_job_people_batch(user_id, job_ids)
+
+    mock_one.assert_not_awaited()
+    mock_reveal.assert_awaited_once_with(user_id, job_ids)
+    assert stats["completed"] == 0
+    assert stats["revealed_unwarmed"] == 2

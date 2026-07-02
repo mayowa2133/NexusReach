@@ -27,11 +27,16 @@ from app.services.jobs import normalize
 
 logger = logging.getLogger(__name__)
 
-# Safety cap on per-job people pre-warm tasks queued from one discovery batch.
+# Safety cap on people pre-warm jobs queued from one discovery batch.
 # Every new job gets people pre-warmed, but a runaway run shouldn't queue
 # thousands of tasks at once. Highest-scored jobs warm first; any tail beyond
 # the cap stays visible without a pre-warm (Find People still works live).
 PREWARM_MAX_JOBS_PER_BATCH = 300
+
+# Max jobs per company-grouped pre-warm task: same-employer jobs share company
+# resolution and cache hits, but one task must stay comfortably inside its
+# time budget (auto_prospect.PREWARM_BATCH_TIME_BUDGET_SECONDS).
+PREWARM_COMPANY_BATCH_MAX = 5
 
 
 def _refresh_existing_job(
@@ -832,9 +837,15 @@ async def _maybe_prewarm_people(
     opening the job is instant. Highest-scored jobs warm first; a runaway batch
     is capped at ``PREWARM_MAX_JOBS_PER_BATCH`` (the tail stays visible without a
     pre-warm). Never finds emails, drafts, or sends — discovery only.
+
+    Jobs are queued as company-grouped batches (``prewarm_job_people_batch``):
+    same-employer jobs share company resolution and cache hits, and one task
+    per company group avoids per-task overhead (fresh NullPool DB connection,
+    child recycling) across a 300-job fan-out.
     """
-    from app.tasks.auto_prospect import prewarm_job_people  # noqa: PLC0415
+    from app.tasks.auto_prospect import prewarm_job_people_batch  # noqa: PLC0415
     from app.services.settings_service import is_people_prewarm_enabled  # noqa: PLC0415
+    from app.utils.company_identity import normalize_company_name  # noqa: PLC0415
 
     if not await is_people_prewarm_enabled(db, user_id):
         return  # leave jobs "ready" so they show immediately
@@ -853,6 +864,26 @@ async def _maybe_prewarm_people(
             user_id, len(selected), len(candidates) - len(selected),
         )
 
+    # Group by normalized company, preserving the score order of each group's
+    # best job, then chunk so no single task exceeds its time budget.
+    groups: dict[str, list] = {}
+    group_order: list[str] = []
+    for job in selected:
+        company_key = (
+            normalize_company_name(getattr(job, "company_name", "") or "")
+            or f"__unknown__{job.id}"
+        )
+        if company_key not in groups:
+            groups[company_key] = []
+            group_order.append(company_key)
+        groups[company_key].append(job)
+
+    batches: list[list] = []
+    for company_key in group_order:
+        group = groups[company_key]
+        for start in range(0, len(group), PREWARM_COMPANY_BATCH_MAX):
+            batches.append(group[start : start + PREWARM_COMPANY_BATCH_MAX])
+
     # Mark pending and COMMIT before enqueuing: otherwise a fast worker could
     # complete and set the job back to "ready" before this write lands, leaving
     # it stuck pending until the reveal timeout.
@@ -860,11 +891,14 @@ async def _maybe_prewarm_people(
         job.people_prewarm_status = "pending"
     await db.commit()
 
-    for job in selected:
+    for batch in batches:
         try:
-            prewarm_job_people.delay(str(user_id), str(job.id))
+            prewarm_job_people_batch.delay(
+                str(user_id), [str(job.id) for job in batch]
+            )
         except Exception:
             logger.debug("Failed to queue job people pre-warm", exc_info=True)
-            # Don't strand the job in "pending" forever if enqueue failed.
-            job.people_prewarm_status = "ready"
+            # Don't strand the jobs in "pending" forever if enqueue failed.
+            for job in batch:
+                job.people_prewarm_status = "ready"
     await db.commit()

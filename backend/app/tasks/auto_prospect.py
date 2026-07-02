@@ -1,6 +1,7 @@
 """Celery tasks for auto-prospect: background people search + email finding + auto-send."""
 
 import logging
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -196,10 +197,91 @@ async def _prewarm_job_people(
 def prewarm_job_people(
     user_id: str, job_id: str, target_count_per_bucket: int = 1,
 ) -> dict:
-    """Celery task: pre-warm a single job's top contacts and reveal it."""
+    """Celery task: pre-warm a single job's top contacts and reveal it.
+
+    Kept for in-flight compatibility during deploys; new fan-outs queue
+    ``prewarm_job_people_batch`` (one task per company group) instead.
+    """
     return run_async(
         _prewarm_job_people(
             uuid.UUID(user_id), uuid.UUID(job_id), target_count_per_bucket,
+        )
+    )
+
+
+# Self-imposed wall-clock budget for one batch, kept safely under the task's
+# soft time limit: when it runs out, the remaining jobs are revealed unwarmed
+# instead of tripping the limit mid-search (they behave like the cap-overflow
+# tail — visible, with "Find People" still available live).
+PREWARM_BATCH_TIME_BUDGET_SECONDS = 780
+
+
+async def _reveal_jobs(user_id: uuid.UUID, job_ids: list[uuid.UUID]) -> None:
+    """Flip jobs back to ready in one statement (never leave them hidden)."""
+    from sqlalchemy import update  # noqa: PLC0415
+    from app.models.job import Job  # noqa: PLC0415
+
+    if not job_ids:
+        return
+    async with async_session() as db:
+        await db.execute(
+            update(Job)
+            .where(Job.user_id == user_id, Job.id.in_(job_ids))
+            .values(people_prewarm_status="ready")
+        )
+        await db.commit()
+
+
+async def _prewarm_job_people_batch(
+    user_id: uuid.UUID, job_ids: list[uuid.UUID], target_count_per_bucket: int = 1,
+) -> dict:
+    """Pre-warm a company-grouped batch of jobs in one task.
+
+    Jobs at the same employer share company resolution, known-people cache and
+    search-provider cache hits, so running them consecutively in one worker
+    slot is much cheaper than one task (fresh DB connection, task overhead)
+    per job. Each job still reveals individually as it completes.
+    """
+    stats = {"jobs": len(job_ids), "completed": 0, "revealed_unwarmed": 0}
+    deadline = time.monotonic() + PREWARM_BATCH_TIME_BUDGET_SECONDS
+    for position, job_id in enumerate(job_ids):
+        if time.monotonic() > deadline:
+            remaining = job_ids[position:]
+            try:
+                await _reveal_jobs(user_id, remaining)
+            except Exception:
+                logger.exception(
+                    "Failed revealing remaining batch jobs: user=%s", user_id,
+                )
+            stats["revealed_unwarmed"] = len(remaining)
+            logger.warning(
+                "Pre-warm batch out of budget: user=%s completed=%d revealed=%d",
+                user_id, stats["completed"], len(remaining),
+            )
+            break
+        await _prewarm_job_people(user_id, job_id, target_count_per_bucket)
+        stats["completed"] += 1
+    return stats
+
+
+@celery_app.task(
+    name="app.tasks.auto_prospect.prewarm_job_people_batch",
+    soft_time_limit=900,
+    time_limit=960,
+)
+def prewarm_job_people_batch(
+    user_id: str, job_ids: list[str], target_count_per_bucket: int = 1,
+) -> dict:
+    """Celery task: pre-warm one company group of jobs (see the async impl).
+
+    No retries: every job is flipped ready by the per-job worker or the budget
+    guard, and the feed's reveal timeout is the final backstop.
+    """
+    return run_async(
+        _prewarm_job_people_batch(
+            uuid.UUID(user_id),
+            [uuid.UUID(job_id) for job_id in job_ids],
+            target_count_per_bucket,
         )
     )
 

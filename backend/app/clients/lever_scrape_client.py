@@ -14,14 +14,35 @@ from bs4 import BeautifulSoup
 logger = logging.getLogger(__name__)
 
 
-async def search_lever_html(company_slug: str, limit: int = 50) -> list[dict]:
-    """Scrape open jobs from a Lever company board page."""
+async def search_lever_html(
+    company_slug: str,
+    limit: int = 50,
+    *,
+    client: httpx.AsyncClient | None = None,
+) -> list[dict]:
+    """Scrape open jobs from a Lever company board page.
+
+    Pass a shared ``client`` when fanning out over many boards so keep-alive
+    connections to jobs.lever.co are reused; omitted, the call owns its own
+    short-lived client (old behavior).
+    """
     url = f"https://jobs.lever.co/{company_slug}"
-    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
-        resp = await client.get(url, headers={"User-Agent": "NexusReach/1.0"})
+    owns_client = client is None
+    if client is None:
+        client = httpx.AsyncClient(timeout=15, follow_redirects=True)
+    try:
+        resp = await client.get(
+            url,
+            headers={"User-Agent": "NexusReach/1.0"},
+            timeout=15,
+            follow_redirects=True,
+        )
         if resp.status_code != 200:
             logger.debug("Lever HTML %d for %s", resp.status_code, company_slug)
             return []
+    finally:
+        if owns_client:
+            await client.aclose()
 
     soup = BeautifulSoup(resp.text, "html.parser")
     postings = soup.select(".posting")

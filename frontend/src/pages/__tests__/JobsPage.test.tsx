@@ -214,6 +214,25 @@ describe('JobsPage', () => {
     expect(screen.getByText(/finding the best people for 3 new jobs/i)).toBeInTheDocument();
   });
 
+  it('windows long job lists and grows via Show more', async () => {
+    const manyJobs = Array.from({ length: 60 }, (_, i) => ({
+      ...sampleJob,
+      id: `job-${i}`,
+      title: `Role ${i}`,
+    }));
+    mockSavedJobs = { items: manyJobs, total: 60, limit: null, offset: 0 };
+    renderJobs();
+    // First window renders, the tail doesn't (48 initial cards).
+    expect(screen.getByText('Role 0')).toBeInTheDocument();
+    expect(screen.getByText('Role 47')).toBeInTheDocument();
+    expect(screen.queryByText('Role 48')).not.toBeInTheDocument();
+    // The header still shows the full count; Show more reveals the rest.
+    expect(screen.getByText(/60 jobs/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /show more \(12 more\)/i }));
+    expect(screen.getByText('Role 59')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /show more/i })).not.toBeInTheDocument();
+  });
+
   it('renders remote-only checkbox', () => {
     renderJobs();
     expect(screen.getByRole('checkbox', { name: /remote only/i })).toBeInTheDocument();

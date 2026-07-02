@@ -113,6 +113,14 @@ async def fetch_curated_ats_source_payloads(
     # these are independent ATS APIs, so more concurrency keeps the crawl fast.
     semaphore = asyncio.Semaphore(24)
     source_fetches = []
+    # One client for the whole fan-out: the Greenhouse/Lever/Ashby boards all
+    # live on a handful of API hosts, so keep-alive reuse skips a TLS handshake
+    # per board (~1k boards/run). Closed in the finally below; max_connections
+    # stays above the semaphore so the pool can't deadlock the crawl.
+    shared_client = httpx.AsyncClient(
+        timeout=15,
+        limits=httpx.Limits(max_connections=32, max_keepalive_connections=24),
+    )
 
     async def run_source(source_key: str, fetcher) -> tuple[str, list[dict], dict]:
         stat = normalize._source_stat(source_key)
@@ -147,7 +155,9 @@ async def fetch_curated_ats_source_payloads(
         async def fetch_board(board=board) -> list[dict]:
             adapter = ats.get_adapter(board["ats"])
             return (
-                await adapter.search_board(board["slug"], limit_per_board)
+                await adapter.search_board(
+                    board["slug"], limit_per_board, client=shared_client
+                )
                 if adapter and adapter.search_board is not None
                 else []
             )
@@ -158,7 +168,9 @@ async def fetch_curated_ats_source_payloads(
         source_key = f"lever:{slug}"
 
         async def fetch_lever(slug=slug) -> list[dict]:
-            return await lever_scrape_client.search_lever_html(slug, limit=limit_per_board)
+            return await lever_scrape_client.search_lever_html(
+                slug, limit=limit_per_board, client=shared_client
+            )
 
         source_fetches.append(run_source(source_key, fetch_lever))
 
@@ -187,7 +199,11 @@ async def fetch_curated_ats_source_payloads(
 
     source_payloads: dict[str, list[dict]] = {}
     source_stats: list[dict] = []
-    for source_key, raw_jobs, stat in await asyncio.gather(*source_fetches):
+    try:
+        results = await asyncio.gather(*source_fetches)
+    finally:
+        await shared_client.aclose()
+    for source_key, raw_jobs, stat in results:
         source_payloads[source_key] = raw_jobs
         source_stats.append(stat)
 
@@ -276,12 +292,16 @@ async def store_curated_ats_payloads_for_user(
 
 
 async def _fetch_board_payloads(
-    boards: list[dict], limit_per_board: int
+    boards: list[dict],
+    limit_per_board: int,
+    *,
+    client: httpx.AsyncClient | None = None,
 ) -> tuple[dict[str, list[dict]], list[dict]]:
     """Fetch one chunk of auto-discovered boards through the ATS adapters.
 
     Stamps the verified company name (the board APIs sometimes return only the
-    slug) and fails soft per board.
+    slug) and fails soft per board. ``client`` is the crawl-wide shared client
+    (see ``crawl_and_store_discovered_boards``); None keeps per-board clients.
     """
     semaphore = asyncio.Semaphore(12)
 
@@ -292,7 +312,9 @@ async def _fetch_board_payloads(
             adapter = ats.get_adapter(board["ats"])
             async with semaphore:
                 jobs = (
-                    await adapter.search_board(board["slug"], limit_per_board)
+                    await adapter.search_board(
+                        board["slug"], limit_per_board, client=client
+                    )
                     if adapter and adapter.search_board is not None
                     else []
                 )
@@ -335,19 +357,27 @@ async def crawl_and_store_discovered_boards(
     """
     boards = list(discovered_boards.load_discovered_boards())
     total = 0
-    for start in range(0, len(boards), chunk_size):
-        chunk = boards[start:start + chunk_size]
-        payloads, stats = await _fetch_board_payloads(chunk, limit_per_board)
-        try:
-            total += await store_curated_ats_payloads_for_user(
-                db,
-                user_id,
-                source_payloads=payloads,
-                source_stats=stats,
-                preferences=preferences,
-                refresh_run_id=refresh_run_id,
+    # One keep-alive client across every chunk: ~985 boards live on three ATS
+    # API hosts, so this skips a TLS handshake per board for the whole run.
+    async with httpx.AsyncClient(
+        timeout=15,
+        limits=httpx.Limits(max_connections=16, max_keepalive_connections=12),
+    ) as shared_client:
+        for start in range(0, len(boards), chunk_size):
+            chunk = boards[start:start + chunk_size]
+            payloads, stats = await _fetch_board_payloads(
+                chunk, limit_per_board, client=shared_client
             )
-        except Exception:
-            await db.rollback()
-            logger.exception("discovered-board chunk store failed (user %s)", user_id)
+            try:
+                total += await store_curated_ats_payloads_for_user(
+                    db,
+                    user_id,
+                    source_payloads=payloads,
+                    source_stats=stats,
+                    preferences=preferences,
+                    refresh_run_id=refresh_run_id,
+                )
+            except Exception:
+                await db.rollback()
+                logger.exception("discovered-board chunk store failed (user %s)", user_id)
     return total

@@ -7,15 +7,32 @@ import httpx
 from app.clients.ats.html import _epoch_ms_to_iso, _humanize_company_slug
 
 
+# The board crawls fan out over ~1k boards; passing one shared ``client``
+# through the whole run reuses keep-alive connections to the three ATS API
+# hosts instead of paying a TLS handshake per board. When ``client`` is None
+# each call owns a short-lived client — identical to the old behavior, so
+# interactive one-off searches and existing tests are unaffected.
 
-async def search_greenhouse(company_slug: str, limit: int | None = None) -> list[dict]:
+
+async def search_greenhouse(
+    company_slug: str,
+    limit: int | None = None,
+    *,
+    client: httpx.AsyncClient | None = None,
+) -> list[dict]:
     """Fetch open jobs from a Greenhouse company board."""
     url = f"https://boards-api.greenhouse.io/v1/boards/{company_slug}/jobs"
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.get(url, params={"content": "true"})
+    owns_client = client is None
+    if client is None:
+        client = httpx.AsyncClient(timeout=15)
+    try:
+        resp = await client.get(url, params={"content": "true"}, timeout=15)
         if resp.status_code != 200:
             return []
         data = resp.json()
+    finally:
+        if owns_client:
+            await client.aclose()
 
     jobs = [
         {
@@ -37,14 +54,25 @@ async def search_greenhouse(company_slug: str, limit: int | None = None) -> list
     return jobs[:limit] if limit is not None else jobs
 
 
-async def search_lever(company_slug: str, limit: int | None = None) -> list[dict]:
+async def search_lever(
+    company_slug: str,
+    limit: int | None = None,
+    *,
+    client: httpx.AsyncClient | None = None,
+) -> list[dict]:
     """Fetch open jobs from a Lever company board."""
     url = f"https://api.lever.co/v0/postings/{company_slug}"
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.get(url, params={"mode": "json"})
+    owns_client = client is None
+    if client is None:
+        client = httpx.AsyncClient(timeout=15)
+    try:
+        resp = await client.get(url, params={"mode": "json"}, timeout=15)
         if resp.status_code != 200:
             return []
         postings = resp.json()
+    finally:
+        if owns_client:
+            await client.aclose()
 
     if not isinstance(postings, list):
         return []
@@ -70,14 +98,25 @@ async def search_lever(company_slug: str, limit: int | None = None) -> list[dict
     return normalized[:limit] if limit is not None else normalized
 
 
-async def search_ashby(company_slug: str, limit: int | None = None) -> list[dict]:
+async def search_ashby(
+    company_slug: str,
+    limit: int | None = None,
+    *,
+    client: httpx.AsyncClient | None = None,
+) -> list[dict]:
     """Fetch open jobs from an Ashby job board."""
     url = f"https://api.ashbyhq.com/posting-api/job-board/{company_slug}"
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.get(url)
+    owns_client = client is None
+    if client is None:
+        client = httpx.AsyncClient(timeout=15)
+    try:
+        resp = await client.get(url, timeout=15)
         if resp.status_code != 200:
             return []
         data = resp.json()
+    finally:
+        if owns_client:
+            await client.aclose()
 
     jobs = [
         {

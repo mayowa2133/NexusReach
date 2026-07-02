@@ -99,6 +99,10 @@ const STAGE_COLORS: Record<string, 'default' | 'secondary' | 'outline' | 'destru
   withdrawn: 'outline',
 };
 
+// Cards rendered before the list starts windowing; also the growth step when
+// the user nears the bottom (IntersectionObserver / Show-more).
+const INITIAL_VISIBLE_JOBS = 48;
+
 const SOURCE_LABELS: Record<string, string> = {
   jsearch: 'JSearch',
   adzuna: 'Adzuna',
@@ -304,6 +308,32 @@ export function JobsPage() {
   const ensureFresh = useEnsureFreshJobs();
   const discoverOccupations = useDiscoverOccupations();
   const queryClient = useQueryClient();
+
+  // Render the saved list incrementally: 200 cards at once is ~8k DOM nodes on
+  // first paint. Start with a window and grow it as the user nears the bottom
+  // (IntersectionObserver), with a Show-more button as the fallback.
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_JOBS);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
+  const visibleJobs = useMemo(
+    () => savedJobs.slice(0, visibleCount),
+    [savedJobs, visibleCount],
+  );
+  const hasMoreJobs = savedJobs.length > visibleCount;
+  useEffect(() => {
+    if (!hasMoreJobs) return;
+    const node = loadMoreRef.current;
+    if (!node || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setVisibleCount((count) => count + INITIAL_VISIBLE_JOBS);
+        }
+      },
+      { rootMargin: '600px' },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [hasMoreJobs]);
 
   // While people pre-warm runs, poll the cheap count-only endpoint instead of
   // re-downloading the whole feed every few seconds; refetch the feed only
@@ -791,17 +821,30 @@ export function JobsPage() {
         {/* Job list */}
         <div className="lg:col-span-2 space-y-2">
           {savedJobs.length > 0 ? (
-            savedJobs.map((job) => (
-              <JobListCard
-                key={job.id}
-                job={job}
-                isSelected={selectedJob?.id === job.id}
-                isNew={!!lastVisited && job.created_at > lastVisited}
-                occupations={occupations}
-                onClick={() => navigate(`/jobs/${job.id}`)}
-                onToggleStar={(starred) => handleToggleStar(job.id, starred)}
-              />
-            ))
+            <>
+              {visibleJobs.map((job) => (
+                <JobListCard
+                  key={job.id}
+                  job={job}
+                  isSelected={selectedJob?.id === job.id}
+                  isNew={!!lastVisited && job.created_at > lastVisited}
+                  occupations={occupations}
+                  onClick={() => navigate(`/jobs/${job.id}`)}
+                  onToggleStar={(starred) => handleToggleStar(job.id, starred)}
+                />
+              ))}
+              {hasMoreJobs && (
+                <div ref={loadMoreRef} className="py-2 text-center">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setVisibleCount((count) => count + INITIAL_VISIBLE_JOBS)}
+                  >
+                    Show more ({savedJobs.length - visibleCount} more)
+                  </Button>
+                </div>
+              )}
+            </>
           ) : baseSavedJobs.length > 0 ? (
             <div className="rounded-lg border border-dashed p-8 text-center">
               <p className="text-muted-foreground">

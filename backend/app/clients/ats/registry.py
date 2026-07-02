@@ -15,7 +15,9 @@ from app.clients.ats.urls import ParsedATSJobURL, _parse_apple_jobs_url, _parse_
 class ATSAdapter:
     ats_type: str
     parse_url: Callable[[str], ParsedATSJobURL | None]
-    search_board: Callable[[str, int | None], Awaitable[list[dict]]] | None = None
+    # (company_slug, limit, *, client=None) — the keyword-only ``client`` lets
+    # the board crawls share one keep-alive httpx client across the fan-out.
+    search_board: Callable[..., Awaitable[list[dict]]] | None = None
     fetch_exact: Callable[[ParsedATSJobURL], Awaitable[list[dict]]] | None = None
 
 

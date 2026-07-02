@@ -136,12 +136,17 @@ async def search_workday(
     label: str,
     search_text: str = "",
     limit: int = 20,
+    *,
+    client: httpx.AsyncClient | None = None,
 ) -> list[dict]:
     """Fetch jobs from a Workday careers site's hidden JSON API.
 
     Workday caps each request at 20 postings, so we page through with the
     ``offset`` parameter until we reach ``limit`` or run out (audit M16) —
     large employers (IBM, Salesforce, NVIDIA) have far more than 20 openings.
+
+    Pass a shared ``client`` when fanning out over many tenants (the curated
+    crawl) so connections are reused; omitted, the call owns its own client.
     """
     url = f"https://{company}.{wd}.myworkdayjobs.com/wday/cxs/{company}/{site}/jobs"
     base_url = f"https://{company}.{wd}.myworkdayjobs.com"
@@ -149,12 +154,17 @@ async def search_workday(
 
     postings: list[dict] = []
     total = 0
-    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+    owns_client = client is None
+    if client is None:
+        client = httpx.AsyncClient(timeout=15, follow_redirects=True)
+    try:
         for offset in range(0, max(limit, 1), page_size):
             body: dict = {"limit": page_size, "offset": offset, "appliedFacets": {}}
             if search_text:
                 body["searchText"] = search_text
-            resp = await client.post(url, json=body, headers=_HEADERS)
+            resp = await client.post(
+                url, json=body, headers=_HEADERS, timeout=15, follow_redirects=True
+            )
             if resp.status_code != 200:
                 logger.debug("Workday %d for %s/%s", resp.status_code, company, site)
                 break
@@ -176,6 +186,9 @@ async def search_workday(
             postings.extend(page_postings)
             if len(postings) >= limit or len(page_postings) < page_size:
                 break
+    finally:
+        if owns_client:
+            await client.aclose()
 
     jobs: list[dict] = []
     for p in postings:
@@ -213,21 +226,28 @@ async def discover_workday_companies(
     search_text: str = "",
     limit_per_company: int = 20,
 ) -> list[dict]:
-    """Query a list of Workday company configs and return combined results."""
+    """Query a list of Workday company configs and return combined results.
+
+    One shared client for the whole fan-out: tenant hosts differ, but httpx
+    pools per-host keep-alive connections, so multi-page tenants and the
+    handful of shared ``wd`` tiers still skip repeat TLS handshakes.
+    """
     all_jobs: list[dict] = []
-    for entry in companies:
-        try:
-            jobs = await search_workday(
-                company=entry["company"],
-                wd=entry["wd"],
-                site=entry["site"],
-                label=entry["label"],
-                search_text=search_text,
-                limit=limit_per_company,
-            )
-            all_jobs.extend(jobs)
-        except Exception:
-            logger.exception("Workday fetch failed for %s", entry["label"])
+    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+        for entry in companies:
+            try:
+                jobs = await search_workday(
+                    company=entry["company"],
+                    wd=entry["wd"],
+                    site=entry["site"],
+                    label=entry["label"],
+                    search_text=search_text,
+                    limit=limit_per_company,
+                    client=client,
+                )
+                all_jobs.extend(jobs)
+            except Exception:
+                logger.exception("Workday fetch failed for %s", entry["label"])
     return all_jobs
 
 

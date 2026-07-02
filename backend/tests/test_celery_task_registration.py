@@ -43,6 +43,7 @@ def test_worker_runtime_defaults_limit_prefetch_and_child_reuse():
     # (email sends, feed refreshes) never queue behind its backlog.
     routes = celery_app.conf.task_routes
     assert routes["app.tasks.auto_prospect.prewarm_job_people"] == {"queue": "prewarm"}
+    assert routes["app.tasks.auto_prospect.prewarm_job_people_batch"] == {"queue": "prewarm"}
     assert routes["app.tasks.auto_prospect.refresh_job_research_snapshot"] == {"queue": "prewarm"}
     assert Settings.model_fields["reverify_batch_size"].default == 5
 
