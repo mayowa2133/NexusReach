@@ -111,7 +111,12 @@ async def search_tesla_jobs(
                 "Tesla client: Playwright browser not installed in runtime, skipping Tesla jobs"
             )
             return []
-        logger.exception("Tesla careers headless fetch failed")
+        # This source is best-effort by design: Akamai blocking the headless
+        # browser, Chromium failing to launch under worker resource pressure
+        # ("BrowserType.launch: Connection closed", Sentry PYTHON-1C), or any
+        # other render failure is an environment condition, not a code bug —
+        # WARNING, never a paged error.
+        logger.warning("Tesla careers headless fetch failed: %s", exc)
         return []
 
     if not getattr(result, "success", False):

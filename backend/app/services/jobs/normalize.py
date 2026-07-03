@@ -31,10 +31,17 @@ def is_transient_fetch_error(exc: BaseException) -> bool:
     of Sentry) and reserve ``logger.exception`` for genuinely unexpected errors
     (parse bugs, programming errors) so real problems still surface.
 
-    Covers httpx transport/timeout/status errors, asyncio timeouts, and raw
-    socket ``OSError``/``ConnectionError``.
+    Covers httpx transport/timeout/status errors, asyncio timeouts, raw socket
+    ``OSError``/``ConnectionError``, and thread-pool exhaustion (``RuntimeError:
+    can't start new thread`` — every in-flight fetch that needs a DNS/executor
+    thread raises it at once when the worker is under resource pressure, so it
+    would page dozens of duplicate Sentry events per episode; the worker
+    self-heals via child recycling and the real signal is the source-health
+    monitor).
     """
-    return isinstance(exc, (httpx.HTTPError, asyncio.TimeoutError, OSError))
+    if isinstance(exc, (httpx.HTTPError, asyncio.TimeoutError, OSError)):
+        return True
+    return isinstance(exc, RuntimeError) and "can't start new thread" in str(exc)
 
 
 EARTH_RADIUS_KM = 6371.0

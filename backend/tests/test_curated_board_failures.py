@@ -133,3 +133,58 @@ async def test_fetch_curated_ats_source_payloads_shares_one_client():
     assert all(c is clients[0] for c in clients)
     assert isinstance(clients[0], httpx.AsyncClient)
     assert clients[0].is_closed
+
+
+async def test_browser_source_runs_after_gather_and_fails_soft():
+    """Tesla (Crawl4AI/Chromium) is serialized after the HTTP fan-out but still
+    lands in the payloads; a launch failure fails soft as a failed stat, and a
+    success is stamped like any other source."""
+    with (
+        patch("app.services.jobs.curated_boards.constants.ATS_DISCOVER_BOARDS", []),
+        patch("app.services.jobs.curated_boards.constants.LEVER_DISCOVER_SLUGS", []),
+        patch(
+            "app.services.jobs.curated_boards.workday_client.discover_all_workday",
+            new=AsyncMock(return_value=[]),
+        ),
+        patch(
+            "app.services.jobs.curated_boards.amazon_client.search_amazon_jobs",
+            new=AsyncMock(return_value=[]),
+        ),
+        patch(
+            "app.services.jobs.curated_boards.microsoft_client.search_microsoft_jobs",
+            new=AsyncMock(return_value=[]),
+        ),
+        patch(
+            "app.services.jobs.curated_boards.apple_client.search_apple_jobs",
+            new=AsyncMock(return_value=[]),
+        ),
+        patch(
+            "app.services.jobs.curated_boards.google_client.search_google_jobs",
+            new=AsyncMock(return_value=[]),
+        ),
+        patch(
+            "app.services.jobs.curated_boards.meta_client.search_meta_jobs",
+            new=AsyncMock(return_value=[]),
+        ),
+        patch(
+            "app.services.jobs.curated_boards.tesla_client.search_tesla_jobs",
+            new=AsyncMock(
+                return_value=[
+                    {
+                        "external_id": "tesla_123",
+                        "title": "Software Engineer",
+                        "company_name": "Tesla",
+                        "url": "https://www.tesla.com/careers/search/job/x-123",
+                        "source": "tesla",
+                    }
+                ]
+            ),
+        ),
+    ):
+        source_payloads, source_stats = await fetch_curated_ats_source_payloads()
+
+    assert len(source_payloads["tesla"]) == 1
+    assert source_payloads["tesla"][0]["_source_run_key"] == "tesla"
+    tesla_stat = next(s for s in source_stats if s["source"] == "tesla")
+    assert tesla_stat["status"] == "success"
+    assert tesla_stat["raw_count"] == 1

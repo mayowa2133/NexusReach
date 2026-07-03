@@ -145,7 +145,15 @@ async def fetch_curated_ats_source_payloads(
             )
             return source_key, [], stat
         except Exception as exc:
-            logger.exception("Curated job source failed: %s", source_key)
+            # Same WARNING/ERROR split as the aggregator path: operational
+            # failures (network, thread-pool exhaustion under load) are noise
+            # per-board; genuine bugs still page (Sentry PYTHON-1D/1E).
+            if normalize.is_transient_fetch_error(exc):
+                logger.warning(
+                    "Curated job source transient failure: %s (%s)", source_key, exc
+                )
+            else:
+                logger.exception("Curated job source failed: %s", source_key)
             normalize._finish_source_stat(stat, status="failed", error=str(exc))
             return source_key, [], stat
 
@@ -188,7 +196,6 @@ async def fetch_curated_ats_source_payloads(
         ("microsoft", microsoft_client.search_microsoft_jobs),
         ("apple", apple_client.search_apple_jobs),
         ("google", google_client.search_google_jobs),
-        ("tesla", tesla_client.search_tesla_jobs),
         ("meta", meta_client.search_meta_jobs),
     ]
     for source_key, fetcher in proprietary_sources:
@@ -197,12 +204,29 @@ async def fetch_curated_ats_source_payloads(
 
         source_fetches.append(run_source(source_key, fetch_proprietary))
 
+    # Browser-based sources (Crawl4AI → headless Chromium) run AFTER the HTTP
+    # fan-out, one at a time. Launching Chromium while ~24 board fetches hold
+    # the worker's threads/memory pushed the child into thread exhaustion
+    # (Sentry PYTHON-1C/1D/1E: "can't start new thread" across the crawl +
+    # "BrowserType.launch: Connection closed" at the same second). Serialized,
+    # the browser gets the whole child's headroom to itself.
+    browser_sources: list[tuple[str, object]] = [
+        ("tesla", tesla_client.search_tesla_jobs),
+    ]
+
     source_payloads: dict[str, list[dict]] = {}
     source_stats: list[dict] = []
     try:
         results = await asyncio.gather(*source_fetches)
     finally:
         await shared_client.aclose()
+
+    for source_key, fetcher in browser_sources:
+        async def fetch_browser(fetcher=fetcher) -> list[dict]:
+            return await fetcher(limit=20)
+
+        results.append(await run_source(source_key, fetch_browser))
+
     for source_key, raw_jobs, stat in results:
         source_payloads[source_key] = raw_jobs
         source_stats.append(stat)
@@ -328,7 +352,12 @@ async def _fetch_board_payloads(
             normalize._finish_source_stat(stat, status="failed", error=exc.__class__.__name__)
             return source_key, [], stat
         except Exception as exc:
-            logger.exception("discovered board failed: %s", source_key)
+            if normalize.is_transient_fetch_error(exc):
+                logger.warning(
+                    "discovered board transient failure: %s (%s)", source_key, exc
+                )
+            else:
+                logger.exception("discovered board failed: %s", source_key)
             normalize._finish_source_stat(stat, status="failed", error=str(exc))
             return source_key, [], stat
 

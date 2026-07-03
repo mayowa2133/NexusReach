@@ -186,3 +186,10 @@ async def test_classify_handles_zero_attempts():
     )
     assert out[0]["failure_rate"] == 0.0
     assert out[0]["degraded"] is False
+
+
+async def test_thread_exhaustion_is_transient():
+    """Worker thread-pool exhaustion is operational, not a paged bug (PYTHON-1D/1E)."""
+    assert normalize.is_transient_fetch_error(RuntimeError("can't start new thread"))
+    # Other RuntimeErrors stay genuine bugs.
+    assert not normalize.is_transient_fetch_error(RuntimeError("dict changed size"))
