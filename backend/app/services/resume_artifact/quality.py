@@ -337,6 +337,7 @@ def _strip_unverified_inferred_additions(
     content: str,
     rewrites: Iterable[dict[str, Any]],
     decisions: dict[str, str],
+    supported_source: str = "",
 ) -> tuple[str, list[str], list[str]]:
     scorable = content
     removed: list[str] = []
@@ -355,6 +356,14 @@ def _strip_unverified_inferred_additions(
         for addition in _list(rewrite.get("inferred_additions")):
             phrase = _text(addition)
             if not phrase:
+                continue
+            # An "inferred" phrase that already appears verbatim in the
+            # candidate's own source evidence is not unverified — the tailorer
+            # sometimes mis-labels a real, listed skill (e.g. "JavaScript") as
+            # inferred. Stripping it there wrongly penalizes a genuine skill and
+            # can drop the tailored score BELOW the source resume, defeating the
+            # purpose. Keep genuinely-absent additions (e.g. "GraphQL") gated.
+            if supported_source and _term_present(supported_source, phrase):
                 continue
             scorable = re.sub(re.escape(phrase), " ", scorable, flags=re.IGNORECASE)
             removed.append(phrase)
@@ -759,17 +768,17 @@ def evaluate_resume_quality(
     """Evaluate a rendered artifact using supported, user-scoped evidence."""
     profile = select_quality_profile(parsed, job)
     decisions = rewrite_decisions or {}
+    supported_base = _supported_source_text(parsed)
     scorable_content, unverified_additions, confirmed_additions = (
         _strip_unverified_inferred_additions(
         content,
         rewrites,
         decisions,
+        supported_base,
         )
     )
     rendered_text = _latex_plain_text(scorable_content)
-    supported_text = "\n".join(
-        [_supported_source_text(parsed), *confirmed_additions]
-    )
+    supported_text = "\n".join([supported_base, *confirmed_additions])
     terms = _job_terms(job)
     categories = (
         _technical_categories(profile, parsed, rendered_text, scorable_content, terms)

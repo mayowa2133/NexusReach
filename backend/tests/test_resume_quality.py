@@ -499,3 +499,54 @@ def test_short_tech_hint_does_not_match_inside_unrelated_words():
     assert "XP" not in surfaced
     # Genuine standalone mentions still surface.
     assert "Go" in extract_jd_must_surface("Build backend services in Go and Python.")["must_surface"]
+
+
+def test_inferred_addition_supported_by_source_is_not_stripped():
+    """A tailored resume must never score below the source for a real skill.
+
+    The tailorer sometimes mislabels a skill the candidate actually lists (e.g.
+    "JavaScript") as an inferred_claim. Stripping such a phrase when it is
+    verbatim in the source evidence dropped the pending tailored score below the
+    original resume — defeating the whole point. Genuinely-absent additions
+    (e.g. "GraphQL") must still be excluded until confirmed.
+    """
+    parsed = {
+        "contact": {"email": "c@example.com"},
+        "experience": [
+            {
+                "title": "Software Engineering Intern",
+                "company": "Acme",
+                "bullets": [
+                    "Built React and JavaScript interfaces used by 500 customers.",
+                ],
+            }
+        ],
+        "skills": ["React", "JavaScript", "TypeScript"],
+    }
+    content = (
+        r"\documentclass{article}\begin{document}\subsection*{Experience}"
+        "j@example.com Built React and JavaScript and GraphQL interfaces "
+        r"\subsection*{Skills}React, JavaScript, TypeScript\end{document}"
+    )
+    rewrites = [
+        {
+            "id": "r1",
+            "change_type": "inferred_claim",
+            "inferred_additions": ["JavaScript", "GraphQL"],
+        }
+    ]
+    job = SimpleNamespace(
+        title="Frontend Engineer",
+        description="Build React, JavaScript, TypeScript, and GraphQL web apps.",
+        tags=["occupation:software_engineering"],
+        experience_level="intern",
+        department="engineering",
+    )
+    evaluation = evaluate_resume_quality(
+        parsed=parsed, content=content, job=job, rewrites=rewrites, rewrite_decisions={}
+    )
+    excluded = evaluation["truthfulness"]["excluded_phrases"]
+    # The genuinely-absent inferred claim is still gated...
+    assert "GraphQL" in excluded
+    # ...but the one the candidate actually lists is not stripped.
+    assert "JavaScript" not in excluded
