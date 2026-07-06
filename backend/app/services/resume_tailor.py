@@ -59,20 +59,21 @@ Rules:
 - skills_to_emphasize: skills the candidate already has that should be more prominent
 - skills_to_add: skills from the JD that the candidate likely has but didn't list
 - keywords_to_add: ATS-relevant terms from the JD missing from the resume
-- bullet_rewrites: AGGRESSIVE DEFAULT MODE. Rewrite 12-16 bullets total, evenly distributed across the resume. COVERAGE FLOOR (hard requirement):
-  * Every experience at indices 0, 1, 2 MUST receive at least 2 rewrites.
-  * Every project at indices 0, 1, 2 (when they exist) MUST receive at least 2 rewrites.
+- bullet_rewrites: thorough but TRUTHFUL. Rewrite 12-16 bullets total, evenly distributed across the resume. Coverage targets:
+  * Every experience at indices 0, 1, 2 should receive at least 2 rewrites.
+  * Every project at indices 0, 1, 2 (when they exist) should receive at least 2 rewrites.
   * No single section may hold more than half of the total rewrites.
-  * Across the full set, at least 5 rewrites MUST be change_type="inferred_claim" AND those inferred_claims MUST be spread across BOTH experience and project sections (not bunched on one entry).
-  * Across the full set, at least 3 rewrites MUST be change_type="keyword".
-  * MUST_SURFACE_BASELINE: If MUST_SURFACE_IN_BULLET_TEXT terms are provided (below), at least 75% of them (rounded up) MUST appear verbatim in the final bullet_rewrites[].rewritten strings. Fail-safe: Never drop a high-priority term (JavaScript, Java, unit testing) once surfaced in favor of other changes.
+  * Use change_type="inferred_claim" ONLY where a term is genuinely plausible for the candidate's real work — do NOT manufacture inferred claims to hit a quota. Quality and truthfulness over count.
+  * MUST_SURFACE handling: if MUST_SURFACE_IN_BULLET_TEXT terms are provided (below), be THOROUGH — surface every term the candidate can TRUTHFULLY claim, woven naturally into a bullet where it fits. This includes honest reframes their real work supports (e.g. "customer-facing" for a shipped consumer feature, "cross-functional" for Agile team work, "frontend" for someone who built UI). Leaving a truthful, matchable term unsurfaced is a miss. The ONLY terms to skip are those that would be false — a platform the candidate never worked on, or a tool they never used. Never drop a term the candidate clearly has once surfaced.
   For experience bullets, set section="experience" and provide experience_index. For project bullets, set section="projects" and provide project_index. Use quantified achievements where possible.
 - For every rewrite, classify change_type precisely:
   - "keyword" = you only swapped in JD-aligned terminology; the underlying scope and claims are unchanged.
   - "reframe" = same facts, sharper angle (e.g. calling a mobile feature "customer-facing product work"); no new capability asserted.
-  - "inferred_claim" = the rewrite asserts a capability, tool, scope, or outcome NOT explicit in the original bullet but plausibly true for the role (e.g. adding "component-based web UI" to an iOS role that likely had an internal web companion, or "accessible, WCAG-compliant" to a UI that plausibly considered accessibility).
+  - "inferred_claim" = the rewrite asserts a capability, tool, scope, or outcome NOT explicit in the original bullet but plausibly true GIVEN THE CANDIDATE'S ACTUAL WORK (e.g. adding "unit testing" to a backend engineer who shipped production services, or "accessible, WCAG-compliant" to a UI the candidate actually built). It must be a claim the candidate could truthfully confirm, not a claim invented because the JD wants it.
 - For inferred_claim rewrites, list every inferred phrase in inferred_additions and set requires_user_confirm=true. For keyword/reframe set requires_user_confirm=false and inferred_additions=[].
-- Be aggressive with inferred_claim rewrites when they strengthen the match: surface plausible truthful-adjacent claims and let the user accept or reject. Never fabricate specific metrics or named tools the candidate did not list somewhere in their resume, but you MAY surface likely-true capabilities, practices, and scope language that match the JD.
+- Use inferred_claim rewrites where they truthfully strengthen the match, and let the user accept or reject. Never fabricate specific metrics or named tools the candidate did not list. Do NOT surface a term just because the JD asks for it — only surface capabilities, practices, and scope the candidate genuinely has a basis for.
+- PLATFORM FIT (critical): match the candidate's actual platform. Do NOT add "web application"/"web-based"/"web UI" language to native mobile (iOS/Android) work, or mobile language to pure web work. A native iOS feature is an "iOS" or "mobile" feature, never a "web application". If the JD's platform differs from the candidate's, surface the transferable engineering practices (testing, architecture, collaboration) truthfully instead of claiming the wrong platform.
+- NO KEYWORD STUFFING: use each term at most once, in its natural form. Never inject multiple near-duplicate variants of one keyword (e.g. "mobile-responsive", "mobile-ready", "mobile-capable", "mobile-friendly") to pad density — a recruiter reads that as spam and it weakens the resume.
 - Ensure every experience and every top project has at least TWO proposed rewrites — no entry may receive zero or one rewrite while another entry receives three or more. Balance coverage first; depth second.
 - section_suggestions: high-level guidance for each resume section
 - Be specific and actionable, not generic
@@ -84,12 +85,12 @@ Rules:
 - Prioritize JD phrases that are likely to affect ATS and recruiter screening, such as frameworks, testing tools, frontend/backend architecture terms, accessibility, CI/CD, telemetry, experimentation, personalization, collaboration, and performance.
 - When the job is frontend-heavy but the candidate's strongest evidence is in projects, still produce experience rewrites that truthfully surface transferable software engineering practices instead of inventing frontend ownership.
 - Rewrite project bullets aggressively when projects are the strongest proof of fit for the role.
-- For frontend/fullstack web roles, prefer the concise recruiter-ready style used in strong manual tailoring:
+- For frontend/fullstack web roles WHERE THE CANDIDATE ACTUALLY DID WEB WORK, prefer the concise recruiter-ready style used in strong manual tailoring:
   - customer-facing product features
   - scalable, maintainable application behavior
   - RESTful APIs and client-server integration
   - telemetry, testing, debugging, and Git-based collaboration
-  - responsive, component-based UI language for the strongest web projects
+  - responsive, component-based UI language ONLY for genuine web projects (never for native iOS/Android work)
   - preserve a crisp 1-sentence bullet style unless a second clause is needed to preserve measurable impact
 - When the JD mentions personalization, experimentation, A/B testing, accessibility, WCAG, internationalization, or experimentation platforms, surface those exact phrases in `keywords_to_add` and weave them into 1-2 bullet rewrites where the candidate has a truthful basis (e.g. a feature flag, an experiment, a reusable component, an accessibility concern).
 - Rewrite at least one experience bullet AND one project bullet for any frontend/fullstack JD, even when the score is high; the goal is ATS keyword density without inventing capabilities.
@@ -503,26 +504,28 @@ async def tailor_resume(
         user_parts.extend([
             "",
             "--- MUST_SURFACE_IN_BULLET_TEXT ---",
-            "AT LEAST 75% of the terms listed below MUST appear verbatim "
-            "(case-insensitive) in the final bullet_rewrites[].rewritten strings. "
-            "Skills-section-only placement does NOT count — the term must be "
-            "woven into an experience or project bullet.",
+            "Be THOROUGH: surface every term below that the candidate can "
+            "TRUTHFULLY claim, weaving each into an experience or project bullet "
+            "(skills-section-only placement does not count). This includes honest "
+            "reframes their real work supports (customer-facing, cross-functional, "
+            "frontend for someone who built UI, etc.) — leaving a truthful, "
+            "matchable term unsurfaced is a miss. Skip ONLY terms that would be "
+            "false: a platform the candidate never worked on or a tool they never "
+            "used. Do not stuff or repeat a term; use it once, naturally.",
             "",
-            "CRITICAL HIGH-PRIORITY TERMS (never omit these):",
+            "HIGH-PRIORITY TERMS (surface if the candidate truthfully has them):",
             ", ".join(high_must) if high_must else "(none specified)",
             "",
             "TRUTHFUL-BASIS RULE: The user may not have listed every skill "
-            "explicitly. If the candidate's background makes a term HIGHLY PLAUSIBLE "
-            "(e.g., JavaScript for full-stack work, Java for backend roles, unit "
-            "testing for any software engineer, SCRUM for Agile teams), surface it "
-            "as inferred_claim and let the user accept/reject. NEVER invent projects "
-            "or tools they didn't touch. DO surface universal practices that fit "
-            "their role family.",
+            "explicitly. If the candidate's ACTUAL background makes a term truthfully "
+            "plausible (e.g., JavaScript when they list React, unit testing when they "
+            "shipped production code), surface it as inferred_claim for the user to "
+            "accept/reject. If a term does NOT fit their real work (e.g. a web-only "
+            "term for a native-mobile candidate), leave it out entirely.",
             "",
-            "WEAVING STRATEGY: For each term, find a bullet it naturally fits "
-            "(JavaScript in a full-stack project, unit testing in backend work, "
-            "SCRUM in team collaboration context). Rewrite that bullet to include "
-            "the term naturally (not appended). Preserve metrics and scope.",
+            "WEAVING STRATEGY: For each term, find a bullet it naturally fits and "
+            "rewrite that bullet to include the term naturally (not appended). "
+            "Preserve metrics and scope.",
             "",
             "MUST_SURFACE_TERMS:",
             ", ".join(must_surface),
@@ -530,18 +533,18 @@ async def tailor_resume(
         if role_family:
             user_parts.extend([
                 "",
-                f"ROLE_FAMILY_HINT: Position the candidate as a {role_family} "
-                "engineer in the summary and overall_strategy. Re-anchor 1-2 "
-                "bullets per top section to match this role family.",
+                f"ROLE_FAMILY_HINT: Where truthful, position the candidate toward "
+                f"the {role_family} role family in the summary and overall_strategy, "
+                "re-anchoring 1-2 bullets per top section — but only using terms "
+                "their real experience supports.",
                 "",
-                "TECHNOLOGY_WEAVING_RULES (strict):",
-                "- If a bullet mentions React, Next.js, or frontend work, JavaScript MUST be in the same bullet.",
-                "- If a bullet mentions Java, Spring, or backend services, Java MUST be in the same bullet.",
-                "- If a bullet mentions testing, TDD, or QA, unit testing MUST be mentioned.",
-                "- If a bullet mentions teams, sprints, ceremonies, or Agile, SCRUM MUST be mentioned.",
-                "- If a bullet describes architecture, design, or full lifecycle work, SDLC MUST be mentioned.",
-                "- If a bullet mentions code review, peer feedback, or team practices, peer reviews MUST be mentioned.",
-                "- If a bullet describes UI, frontend, or user interaction, web applications or web-based MUST be mentioned.",
+                "TECHNOLOGY_WEAVING_RULES (apply only where truthful for THIS candidate):",
+                "- If a bullet mentions React/Next.js/frontend work, JavaScript may join the same bullet.",
+                "- If a bullet mentions Java/Spring/backend services, Java may join the same bullet.",
+                "- If a bullet mentions testing/TDD/QA, unit testing may be surfaced.",
+                "- If a bullet mentions teams/sprints/ceremonies/Agile, SCRUM may be surfaced.",
+                "- Do NOT add web-platform terms to native mobile work, or mobile terms to pure web work.",
+                "- Never repeat near-duplicate variants of a term to inflate density.",
             ])
 
     if score is not None:
