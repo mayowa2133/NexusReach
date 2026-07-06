@@ -144,6 +144,16 @@ _JOB_STOPWORDS = {
     "role", "that", "the", "their", "them", "they", "this", "through", "using",
     "what", "when", "where", "which", "will", "with", "work", "would", "years",
     "your", "you", "responsibilities", "requirements", "preferred", "required",
+    # Seniority + generic-title words: a resume matching the seniority word
+    # ("Senior") must not inflate job-fit, and these aren't role requirements.
+    "senior", "junior", "lead", "principal", "staff", "entry", "mid", "level",
+    # High-frequency JD filler that would otherwise dominate the non-tech term
+    # set (which relies on body tokens, unlike the tech hint path).
+    "experience", "experiences", "including", "across", "within", "various",
+    "ability", "strong", "excellent", "proficiency", "knowledge", "plus",
+    "related", "field", "degree", "year", "month", "team", "teams", "help",
+    "provide", "prepare", "present", "manage", "build", "own", "run", "hit",
+    "value", "used", "well", "able", "such", "who", "has", "was", "were",
 }
 
 
@@ -274,10 +284,15 @@ def _job_terms(job: object) -> list[str]:
         token for token in title_tokens
         if token.lower().strip("./-") not in _JOB_STOPWORDS
     ]
+    # Body candidates: repeated tokens (>= 2 = emphasized) OR longer domain nouns
+    # seen once ("reconciliation", "compliance", "curriculum", "assessment").
+    # JDs rarely repeat skill nouns, so a strict >= 2 gate collapsed non-tech
+    # term sets to just the title words; the length>= 7 rule recovers the real
+    # requirements without admitting short filler.
     body_candidates = [
         original[key]
         for key, _ in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
-        if counts[key] >= 2
+        if counts[key] >= 2 or len(key) >= 7
     ]
     candidates = [*ordered, *title_candidates, *body_candidates]
 
@@ -288,9 +303,18 @@ def _job_terms(job: object) -> list[str]:
         if key not in seen:
             seen.add(key)
             result.append(term)
-    if ordered:
-        return result[: len(ordered)]
-    return result[:20]
+
+    # Tiered return:
+    # - A rich explicit skill vocabulary (>= 3 verified tech/method hints) means
+    #   the JD states its requirements plainly; trust those exclusively so
+    #   repeated boilerplate ("team", "every team ...") can't pollute the set
+    #   and the resume is judged on the real stack.
+    # - Otherwise (non-tech roles, thin tech JDs) the title + body extraction IS
+    #   the signal — returning only the hints used to collapse finance/legal/
+    #   nursing to their title words and discard every real requirement.
+    if len(ordered) >= 3:
+        return ordered[:14]
+    return result[:14]
 
 
 def _term_present(text: str, term: str) -> bool:
@@ -567,10 +591,20 @@ def _general_categories(
     projects = _project_signal(parsed, rendered_text, raw_content)
     skills = [skill for skill in _skills(parsed) if _term_present(rendered_text, skill)]
     matching_terms = [term for term in job_terms if _term_present(rendered_text, term)]
-    supported = _supported_source_text(parsed)
+    # Quantified outcomes must be detected per BULLET on entries visible in the
+    # rendered artifact. The old approach split _supported_source_text() by line,
+    # but that helper concatenates each role's title+company+bullets into one
+    # blob line, so line[:40] was the entry header (title+company) — which never
+    # appears contiguously in the rendered resume (a date sits between them).
+    # That pinned "Demonstrated outcomes" near zero for every non-tech resume no
+    # matter how metric-rich. Iterate visible entries' bullets instead, mirroring
+    # _production_signal / _project_signal.
     outcome_lines = [
-        line for line in supported.splitlines()
-        if _OUTCOME_RE.search(line) and _metric_tokens(line) and _term_present(rendered_text, line[:40])
+        bullet
+        for key in ("experience", "projects")
+        for entry in _visible_entries(parsed, rendered_text, key)
+        for bullet in _entry_bullets(entry)
+        if _OUTCOME_RE.search(bullet) and _metric_tokens(bullet)
     ]
     urls = _URL_RE.findall(raw_content)
 

@@ -371,3 +371,131 @@ def test_malformed_or_sparse_resume_data_fails_soft_with_bounded_scores(parsed, 
     validate_quality_evaluation(evaluation)
     assert evaluation["status"] == "ready"
     assert 0 <= evaluation["overall_score"] <= 100
+
+
+# ---------------------------------------------------------------------------
+# Non-technical job coverage (2026-07 category-accuracy pass)
+# ---------------------------------------------------------------------------
+
+def _general_job(title: str, description: str, tags: list[str]) -> SimpleNamespace:
+    return SimpleNamespace(
+        title=title,
+        company_name="Co",
+        description=description,
+        experience_level="",
+        department="",
+        tags=tags,
+    )
+
+
+def _render_general(parsed: dict) -> str:
+    parts = ["candidate@example.com | 555-123-4567"]
+    for entry in parsed.get("experience", []):
+        parts.append(f"{entry.get('title', '')} at {entry.get('company', '')}")
+        parts.extend(r"\item " + b for b in entry.get("bullets", []))
+    skills = parsed.get("skills", [])
+    parts.append("Skills: " + ", ".join(skills))
+    body = " ".join(parts)
+    return (
+        r"\documentclass{article}\begin{document}\subsection*{Experience}"
+        + body
+        + r"\subsection*{Education}B.S. 2024\subsection*{Skills}"
+        + ", ".join(skills)
+        + r"\end{document}"
+    )
+
+
+def test_nontech_job_terms_are_role_relevant_not_just_title_words():
+    """A finance JD must yield its real requirements, not collapse to the title.
+
+    Regression: _job_terms used to return only the title tokens
+    (['Senior', 'Financial', 'Analyst']) for non-tech roles because the JD term
+    extractor only knows software hints and the body frequency gate was too
+    strict. That made the 45%-weighted job-fit axis measure the wrong thing.
+    """
+    job = _general_job(
+        "Senior Financial Analyst",
+        "Lead FP&A, build financial models, own month-end close and variance "
+        "analysis. Prepare forecasts, manage budgets. CPA and Excel required. "
+        "Experience with accounting, reconciliation, and audit preferred.",
+        ["occupation:accounting_finance"],
+    )
+    terms = [t.lower() for t in _job_terms(job)]
+    # Real domain requirements are surfaced...
+    for required in ("reconciliation", "variance", "forecasts", "budgets"):
+        assert required in terms, f"expected {required!r} in {terms}"
+    # ...and the seniority word is never a job term.
+    assert "senior" not in terms
+
+
+def test_surviving_method_hint_does_not_discard_real_role_terms():
+    """A stray method hint must not truncate away the real role vocabulary.
+
+    Regression: `if ordered: return result[:len(ordered)]` meant a marketing JD
+    that mentioned "metrics"/"A/B testing" returned only those two terms and
+    dropped brand/campaign/content/SEO entirely.
+    """
+    job = _general_job(
+        "Marketing Manager",
+        "Own brand campaigns and content strategy. Run A/B testing on paid media, "
+        "track metrics, grow demand generation and SEO. Campaign management "
+        "and social media required.",
+        ["occupation:marketing"],
+    )
+    terms = [t.lower() for t in _job_terms(job)]
+    assert "metrics" in terms  # the surviving hint is still present...
+    # ...but so are the real marketing requirements it used to discard.
+    assert any(t in terms for t in ("campaign", "campaigns"))
+    assert any(t in terms for t in ("content", "strategy", "generation"))
+
+
+def test_quantified_outcomes_are_detected_per_bullet_for_general_profile():
+    """Metric-rich outcome bullets must score the outcomes category.
+
+    Regression: outcomes were detected against the first 40 chars of a
+    concatenated title+company+bullets blob line, which never matched the
+    rendered artifact, pinning "Demonstrated outcomes" near zero for every
+    non-technical resume regardless of quantified impact.
+    """
+    job = _general_job(
+        "Operations Manager",
+        "Own operational metrics, improve process efficiency, manage budgets and "
+        "vendor relationships. Experience leading cross-functional teams preferred.",
+        ["occupation:management_executive"],
+    )
+    parsed = {
+        "contact": {"email": "c@example.com"},
+        "experience": [
+            {
+                "title": "Operations Manager",
+                "company": "Corp",
+                "bullets": [
+                    "Improved process efficiency by 35% across three fulfillment sites.",
+                    "Reduced vendor costs by 20% while managing a $5M operating budget.",
+                ],
+            }
+        ],
+        "skills": ["Process Improvement", "Budget Management", "Vendor Management"],
+    }
+    evaluation = evaluate_resume_quality(
+        parsed=parsed, content=_render_general(parsed), job=job
+    )
+    outcomes = next(c for c in evaluation["categories"] if c["key"] == "outcomes")
+    assert outcomes["score"] >= 12, evaluation["categories"]
+
+
+def test_short_tech_hint_does_not_match_inside_unrelated_words():
+    """extract_jd_must_surface must use word boundaries, not naive substrings.
+
+    Regression: "Go" matched inside "negotiate", "XP" inside "experience",
+    injecting junk skills into non-tech resume plans and scoring.
+    """
+    from app.services.resume_tailor import extract_jd_must_surface
+
+    surfaced = extract_jd_must_surface(
+        "Negotiate contracts and manage regulatory experience for the category."
+    )["must_surface"]
+    assert "Go" not in surfaced
+    assert "XP" not in surfaced
+    # Genuine standalone mentions still surface.
+    assert "Go" in extract_jd_must_surface("Build backend services in Go and Python.")["must_surface"]

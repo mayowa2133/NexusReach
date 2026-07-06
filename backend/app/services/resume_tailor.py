@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import TYPE_CHECKING
 
 from app.clients.llm_client import generate_message
@@ -217,14 +218,24 @@ def extract_jd_must_surface(job_description: str) -> dict:
             role_family = family
             break
 
-    tech_hits = [
-        term for term in _TECH_HINTS
-        if term.lower() in low or term.lower().replace(".", "") in low.replace(".", "")
-    ]
-    method_hits: list[str] = []
-    for term in _METHOD_HINTS:
-        if term.lower() in low:
-            method_hits.append(term)
+    # Word-boundary matching: naive substring matching made short hints like
+    # "Go", "XP", "C#", "R" fire inside unrelated words ("ne-go-tiate",
+    # "e-xp-erience", "categor-y"), injecting junk skills into non-tech resume
+    # plans and scoring. Boundaries are alphanumeric-only, so dotted/hashed
+    # terms ("C#", "Next.js", "CI/CD") still match — including at a sentence
+    # end where the next char is punctuation.
+    def _hint_present(term: str) -> bool:
+        t = re.escape(term.lower())
+        if re.search(rf"(?<![a-z0-9]){t}(?![a-z0-9])", low):
+            return True
+        # Tolerate dotted variants written without the dot ("nextjs" ~ "next.js").
+        if "." in term:
+            td = re.escape(term.lower().replace(".", ""))
+            return bool(re.search(rf"(?<![a-z0-9]){td}(?![a-z0-9])", low.replace(".", "")))
+        return False
+
+    tech_hits = [term for term in _TECH_HINTS if _hint_present(term)]
+    method_hits = [term for term in _METHOD_HINTS if _hint_present(term)]
 
     # Priority: role family -> technology -> methodology.
     must_surface: list[str] = []
