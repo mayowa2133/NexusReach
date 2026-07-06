@@ -71,6 +71,8 @@ export interface Person {
   warm_path_type?: 'direct_connection' | 'same_company_bridge' | null;
   warm_path_reason?: string | null;
   warm_path_connection?: LinkedInGraphConnection | null;
+  /** Distinct discovery strategies that independently surfaced this person (>= 2 when present). */
+  corroborated_by?: string[] | null;
   followed_person?: boolean;
   followed_company?: boolean;
   linkedin_signal_reason?: string | null;

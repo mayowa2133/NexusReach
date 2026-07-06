@@ -516,6 +516,17 @@ def _dedupe_candidates(*groups: list[dict]) -> list[dict]:
             kept_by_key[key] = candidate
             candidate["_corroborated_by"] = [source] if source else []
             deduped.append(candidate)
+    # Mirror ≥2-source corroboration into profile_data so it persists on the
+    # Person row and serializes to the UI (the landing page promises the user
+    # can SEE when multiple independent sources agree, not just rank by it).
+    for candidate in deduped:
+        sources = candidate.get("_corroborated_by") or []
+        if len(sources) >= 2:
+            profile_data = candidate.get("profile_data")
+            if not isinstance(profile_data, dict):
+                profile_data = {}
+                candidate["profile_data"] = profile_data
+            profile_data["corroborated_by"] = list(sources)
     return deduped
 
 

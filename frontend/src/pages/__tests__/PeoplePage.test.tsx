@@ -483,7 +483,8 @@ describe('PeoplePage', () => {
 
     expect(await screen.findByRole('heading', { name: /your connections at affirm/i })).toBeInTheDocument();
     expect(screen.getByText('Jamie Rivera')).toBeInTheDocument();
-    expect(screen.getByText('Warm Path')).toBeInTheDocument();
+    // The warm-path chip now names the actual connection when it's known.
+    expect(screen.getByText('Warm path via Jamie Rivera')).toBeInTheDocument();
     expect(screen.getByText(/you already know jamie rivera at affirm\./i)).toBeInTheDocument();
   });
 

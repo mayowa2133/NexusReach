@@ -84,6 +84,13 @@ def _serialize_person(person) -> PersonResponse:
     )
     if warm_path_connection is not None:
         payload["warm_path_connection"] = warm_path_connection
+    # Corroboration lives in profile_data (JSON), not a column — surface it as
+    # a first-class response field when >= 2 independent sources agreed.
+    profile_data = _safe_value(getattr(person, "profile_data", None))
+    if isinstance(profile_data, dict):
+        corroborated = profile_data.get("corroborated_by")
+        if isinstance(corroborated, list) and len(corroborated) >= 2:
+            payload["corroborated_by"] = [str(s) for s in corroborated]
     return PersonResponse(**payload)
 
 

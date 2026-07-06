@@ -711,10 +711,12 @@ function YourConnectionsSection({
 }) {
   return (
     <div className="space-y-2">
-      <div>
-        <h3 className="font-medium">Your Connections at {companyName}</h3>
-        <p className="text-sm text-muted-foreground">
-          These are imported first-degree LinkedIn connections at the target company.
+      <div className="rounded-md border border-status-positive/20 bg-status-positive/10 px-3 py-2">
+        <h3 className="font-mono text-[11px] font-semibold uppercase tracking-widest text-status-positive">
+          Your Connections at {companyName} ({connections.length})
+        </h3>
+        <p className="mt-0.5 text-sm text-muted-foreground">
+          Imported first-degree LinkedIn connections at the target company.
         </p>
       </div>
       <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
@@ -752,6 +754,39 @@ function YourConnectionsSection({
     </div>
   );
 }
+
+function EvidenceChip({
+  tone = 'neutral',
+  children,
+}: {
+  tone?: 'neutral' | 'positive' | 'pending';
+  children: React.ReactNode;
+}) {
+  const toneClasses = {
+    neutral: 'border-border text-foreground/70',
+    positive: 'border-status-positive/40 text-status-positive',
+    pending: 'border-status-pending/40 text-status-pending',
+  } as const;
+  const dotClasses = {
+    neutral: 'bg-foreground/40',
+    positive: 'bg-status-positive',
+    pending: 'bg-status-pending',
+  } as const;
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-md border bg-card px-2 py-0.5 font-mono text-[10px] font-medium uppercase tracking-wider ${toneClasses[tone]}`}
+    >
+      <span className={`h-1 w-1 shrink-0 rounded-full ${dotClasses[tone]}`} />
+      {children}
+    </span>
+  );
+}
+
+const BUCKET_STAMPS: Record<string, string> = {
+  recruiter: 'RECRUITER',
+  hiring_manager: 'HIRING MANAGER',
+  peer: 'PEER',
+};
 
 function PersonSection({
   title,
@@ -1000,77 +1035,73 @@ function PersonCard({
             Select for batch email
           </label>
         )}
-        <div>
-          <div className="font-medium">{person.full_name || 'Unknown'}</div>
-          <div className="text-sm text-muted-foreground">{person.title || 'No title'}</div>
+        <div className="flex items-baseline justify-between gap-2">
+          <div className="min-w-0">
+            <div className="font-medium">{person.full_name || 'Unknown'}</div>
+            <div className="text-sm text-muted-foreground">{person.title || 'No title'}</div>
+          </div>
+          {person.person_type && BUCKET_STAMPS[person.person_type] && (
+            <span className="shrink-0 font-mono text-[9px] font-semibold uppercase tracking-widest text-muted-foreground">
+              {BUCKET_STAMPS[person.person_type]}
+            </span>
+          )}
         </div>
 
-        {person.person_type && (
-          <Badge
-            variant={
-              person.person_type === 'recruiter'
-                ? 'default'
-                : person.person_type === 'hiring_manager'
-                  ? 'secondary'
-                  : 'outline'
-            }
-          >
-            {person.person_type === 'hiring_manager' ? 'Hiring Manager' :
-             person.person_type.charAt(0).toUpperCase() + person.person_type.slice(1)}
-          </Badge>
-        )}
+        <div className="flex flex-wrap gap-1.5">
+          {verificationStatusLabel && (
+            <EvidenceChip
+              tone={
+                companyVerification.current_company_verification_status === 'verified'
+                  ? 'positive'
+                  : 'neutral'
+              }
+            >
+              {verificationStatusLabel}
+            </EvidenceChip>
+          )}
 
-        {verificationStatusLabel && (
-          <Badge
-            variant={
-              companyVerification.current_company_verification_status === 'verified'
-                ? 'secondary'
-                : 'outline'
-            }
-          >
-            {verificationStatusLabel}
-          </Badge>
-        )}
+          {formatCompanyMatchConfidence(person.company_match_confidence) && person.company_match_confidence !== 'verified' && (
+            <EvidenceChip>
+              {formatCompanyMatchConfidence(person.company_match_confidence)}
+            </EvidenceChip>
+          )}
 
-        {formatCompanyMatchConfidence(person.company_match_confidence) && person.company_match_confidence !== 'verified' && (
-          <Badge variant="outline">
-            {formatCompanyMatchConfidence(person.company_match_confidence)}
-          </Badge>
-        )}
+          {person.org_level && (
+            <EvidenceChip>{formatOrgLevel(person.org_level)}</EvidenceChip>
+          )}
 
-        {person.org_level && (
-          <Badge variant="outline">
-            {formatOrgLevel(person.org_level)}
-          </Badge>
-        )}
+          {person.match_quality && (
+            <EvidenceChip tone={person.match_quality === 'direct' ? 'positive' : 'neutral'}>
+              {formatMatchQuality(person.match_quality)}
+            </EvidenceChip>
+          )}
 
-        {person.match_quality && (
-          <Badge variant={person.match_quality === 'direct' ? 'secondary' : 'outline'}>
-            {formatMatchQuality(person.match_quality)}
-          </Badge>
-        )}
+          {formatWarmPathType(person.warm_path_type) && (
+            <EvidenceChip tone="positive">
+              {person.warm_path_connection?.display_name
+                ? `Warm path via ${person.warm_path_connection.display_name}`
+                : formatWarmPathType(person.warm_path_type)}
+            </EvidenceChip>
+          )}
 
-        {formatWarmPathType(person.warm_path_type) && (
-          <Badge variant={person.warm_path_type === 'direct_connection' ? 'secondary' : 'outline'}>
-            {formatWarmPathType(person.warm_path_type)}
-          </Badge>
-        )}
+          {person.corroborated_by && person.corroborated_by.length >= 2 && (
+            <EvidenceChip tone="positive">
+              Corroborated ×{person.corroborated_by.length}
+            </EvidenceChip>
+          )}
 
-        {person.followed_person && (
-          <Badge variant="outline">Following</Badge>
-        )}
+          {person.followed_person && <EvidenceChip>Following</EvidenceChip>}
 
-        {person.followed_company && !person.followed_person && (
-          <Badge variant="outline">Following company</Badge>
-        )}
+          {person.followed_company && !person.followed_person && (
+            <EvidenceChip>Following company</EvidenceChip>
+          )}
 
-        {person.usefulness_score != null && person.usefulness_score > 0 && (
-          <Badge
-            variant={person.usefulness_score >= 70 ? 'secondary' : 'outline'}
-          >
-            Usefulness: {person.usefulness_score}%
-          </Badge>
-        )}
+          {person.usefulness_score != null && person.usefulness_score > 0 && (
+            <EvidenceChip tone={person.usefulness_score >= 70 ? 'positive' : 'neutral'}>
+              Usefulness: {person.usefulness_score}%
+            </EvidenceChip>
+          )}
+        </div>
 
         {person.linkedin_url && companyVerification.current_company_verification_status !== 'verified' && (
           <Button

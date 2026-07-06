@@ -58,6 +58,10 @@ class PersonResponse(BaseModel):
     warm_path_type: str | None = None
     warm_path_reason: str | None = None
     warm_path_connection: LinkedInGraphConnectionResponse | None = None
+    # Distinct discovery strategies that independently surfaced this person
+    # (populated when >= 2 agree). Read from Person.profile_data at serialize
+    # time — corroboration is user-visible evidence, not just a ranking input.
+    corroborated_by: list[str] | None = None
     followed_person: bool = False
     followed_company: bool = False
     linkedin_signal_reason: str | None = None

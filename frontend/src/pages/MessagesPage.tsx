@@ -547,7 +547,7 @@ function SingleMessagesView() {
       )}
 
       <div className="grid gap-4 lg:grid-cols-5">
-        <div className="lg:col-span-2 space-y-4">
+        <div className="min-w-0 lg:col-span-2 space-y-4">
           <Card>
             <CardHeader>
               <CardTitle>New Draft</CardTitle>
@@ -713,7 +713,7 @@ function SingleMessagesView() {
           </Card>
         </div>
 
-        <div className="lg:col-span-3 space-y-4">
+        <div className="min-w-0 lg:col-span-3 space-y-4">
           {activeDraft ? (
             <>
               <Card>
@@ -728,8 +728,36 @@ function SingleMessagesView() {
                         {GOAL_LABELS[activeDraft.goal] || activeDraft.goal}
                       </CardDescription>
                     </div>
-                    <Badge variant={STATUS_COLORS[activeDraft.status] || 'outline'}>{activeDraft.status}</Badge>
+                    <span
+                      className={`shrink-0 rounded-md px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-widest ${
+                        activeDraft.status === 'sent'
+                          ? 'bg-status-positive/10 text-status-positive'
+                          : activeDraft.status === 'staged'
+                            ? 'bg-status-positive/10 text-status-positive'
+                            : 'bg-status-pending/10 text-status-pending'
+                      }`}
+                    >
+                      {activeDraft.status === 'sent'
+                        ? 'SENT'
+                        : activeDraft.status === 'staged'
+                          ? 'STAGED — NOT SENT'
+                          : 'DRAFT — NOT SENT'}
+                    </span>
                   </div>
+                  {(activeDraft.person_name || activeDraft.subject) && (
+                    <div className="mt-2 space-y-0.5 font-mono text-[11px] text-muted-foreground">
+                      {activeDraft.person_name && (
+                        <div>
+                          To: <span className="font-semibold text-foreground">{activeDraft.person_name}</span>
+                        </div>
+                      )}
+                      {activeDraft.subject && (
+                        <div>
+                          Subject: <span className="font-semibold text-foreground">{activeDraft.subject}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="flex flex-wrap gap-2">
@@ -1413,7 +1441,7 @@ function BatchMessagesView({
       </div>
 
       <div className="grid gap-4 lg:grid-cols-5">
-        <div className="lg:col-span-2 space-y-4">
+        <div className="min-w-0 lg:col-span-2 space-y-4">
           <Card>
             <CardHeader>
               <CardTitle>Batch Settings</CardTitle>
@@ -1530,7 +1558,7 @@ function BatchMessagesView({
           </Card>
         </div>
 
-        <div className="lg:col-span-3 space-y-4">
+        <div className="min-w-0 lg:col-span-3 space-y-4">
           {batchDraft.isPending && batchItems.length === 0 ? (
             <div className="rounded-lg border border-dashed p-12 text-center text-muted-foreground">
               Preparing your batch review queue...
