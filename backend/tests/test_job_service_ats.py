@@ -499,15 +499,20 @@ async def test_load_profile_for_scoring_handles_missing_profile():
 
 def test_recompute_occupation_tags_drops_stale_fallback_tag():
     """An engineering role mis-tagged marketing (by an old discover-hint fallback)
-    loses the marketing tag on recompute; non-occupation tags are preserved."""
+    loses the marketing tag on recompute; non-occupation tags are preserved.
+    (The title now also classifies correctly as engineering_development — the
+    "quality engineer" alias landed in the 2026-07 category-coverage pass.)"""
     from app.services.jobs import storage
 
     job = MagicMock()
-    job.title = "Senior Quality Engineer"  # doesn't classify -> no occupation tag
+    job.title = "Senior Quality Engineer"
     job.description = ""
     job.tags = ["python", "occupation:marketing"]
 
-    assert storage.recompute_occupation_tags(job) == ["python"]
+    assert storage.recompute_occupation_tags(job) == [
+        "python",
+        "occupation:engineering_development",
+    ]
 
 
 def test_recompute_occupation_tags_adds_newly_classified_marketing():

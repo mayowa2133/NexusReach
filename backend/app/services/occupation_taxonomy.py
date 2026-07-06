@@ -64,6 +64,9 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "founding engineer",
             "staff engineer",
             "principal engineer",
+            "qa engineer",
+            "quality assurance",
+            "sdet",
         ),
         default_search_queries=(
             "Software Engineer",
@@ -113,6 +116,10 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "business intelligence analyst",
             "bi analyst",
             "analytics analyst",
+            "analytics manager",
+            "bi developer",
+            "business intelligence",
+            "data visualization",
             "reporting analyst",
             "operations analyst",
         ),
@@ -214,6 +221,11 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "nlp engineer",
             "computer vision",
             "mlops",
+            "data scientist",
+            "ai researcher",
+            "ai scientist",
+            "llm",
+            "generative ai",
         ),
         default_search_queries=(
             "Machine Learning Engineer",
@@ -253,6 +265,8 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "etl engineer",
             "data infrastructure",
             "data pipeline engineer",
+            "etl",
+            "data warehouse",
         ),
         default_search_queries=(
             "Data Engineer",
@@ -288,6 +302,7 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "process analyst",
             "operations analyst",
             "strategy analyst",
+            "process improvement",
         ),
         default_search_queries=(
             "Business Analyst",
@@ -324,6 +339,10 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "principal product manager",
             "head of product",
             "director of product",
+            "product owner",
+            "product lead",
+            "chief product officer",
+            "cpo",
         ),
         default_search_queries=(
             "Product Manager",
@@ -364,6 +383,9 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "creative director",
             "industrial designer",
             "motion designer",
+            "creative",
+            "illustrator",
+            "copywriter",
         ),
         default_search_queries=(
             "Product Designer",
@@ -512,6 +534,9 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "structural engineer",
             "robotics engineer",
             "embedded engineer",
+            "process engineer",
+            "quality engineer",
+            "hardware engineer",
         ),
         default_search_queries=(
             "Mechanical Engineer",
@@ -628,6 +653,11 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "content creator",
             "sound engineer",
             "camera operator",
+            "casting director",
+            "casting associate",
+            "talent agent",
+            "curator",
+            "broadcast",
         ),
         default_search_queries=(
             "Producer",
@@ -668,6 +698,8 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "managing director",
             "executive director",
             "vice president",
+            "chief of staff",
+            "chief operating officer",
         ),
         default_search_queries=(
             "General Manager",
@@ -700,11 +732,27 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "customer support",
             "customer service",
             "customer success",
+            "client success",
+            "customer care",
+            "customer advocate",
             "support engineer",
             "technical support",
             "client services",
             "account manager",
             "customer experience",
+            # High-volume service-desk families the bank/retail vertical call
+            # centers post; no bare "support" — it collides with everything
+            # from "Sales Support" to "Child Support Officer".
+            "help desk",
+            "service desk",
+            "call center",
+            "contact center",
+            "desktop support",
+            "support specialist",
+            "support representative",
+            "support agent",
+            "support technician",
+            "guest services",
         ),
         default_search_queries=(
             "Customer Success Manager",
@@ -799,6 +847,22 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             # they don't bill engagements.
             "solutions consultant",
             "sales consultant",
+            "solutions engineer",
+            "presales",
+            "pre-sales",
+            # Sales families whose titles don't carry the word "sales"
+            # (measured 2026-07-06: all fell through untagged).
+            "territory manager",
+            "account director",
+            "partnerships",
+            "channel partner",
+            "alliances",
+            # "revops" only — the spelled-out "revenue operations" phrase would
+            # push the "operations" token's doc-frequency over the Muse gate's
+            # distinctiveness ceiling and silently break the business_analyst
+            # gate (its archetypal titles depend on "operations" being
+            # distinctive). RevOps long-form titles keep their analyst tags.
+            "revops",
         ),
         default_search_queries=(
             "Account Executive",
@@ -838,6 +902,9 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "foreign service",
             "civil servant",
             "public administrator",
+            "program officer",
+            "city planner",
+            "urban planner",
         ),
         default_search_queries=(
             "Policy Analyst",
@@ -882,6 +949,9 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "teaching assistant",
             "school counselor",
             "registrar",
+            "curriculum",
+            "admissions",
+            "dean",
         ),
         default_search_queries=(
             "Teacher",
@@ -964,6 +1034,8 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "agile coach",
             "delivery manager",
             "project coordinator",
+            "pmo",
+            "project management",
         ),
         default_search_queries=(
             "Project Manager",
@@ -1101,6 +1173,15 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "supply chain analyst",
             "buyer",
             "demand planner",
+            # Specific warehouse forms only — bare "warehouse" would claim
+            # "Data Warehouse Engineer" (a data-engineering title).
+            "warehouse associate",
+            "warehouse supervisor",
+            "warehouse operations",
+            "inventory",
+            "fulfillment",
+            "strategic sourcing",
+            "sourcing manager",
         ),
         default_search_queries=(
             "Supply Chain Analyst",
