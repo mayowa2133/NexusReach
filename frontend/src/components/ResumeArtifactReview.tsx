@@ -514,37 +514,37 @@ export function ResumeArtifactReview({ jobId, artifact }: Props) {
           </div>
         )}
 
-        <div className="rounded-xl border bg-slate-950 p-3 text-slate-100 shadow-sm">
+        <div className="dark rounded-xl border border-border bg-background p-3 text-foreground shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm font-medium">Visual redline preview</span>
-                <Badge className="bg-emerald-100 text-[11px] text-emerald-900">
+                <Badge className="bg-primary/15 text-[11px] text-primary">
                   Rendered PDF
                 </Badge>
               </div>
-              <p className="mt-1 text-xs text-slate-300">
+              <p className="mt-1 text-xs text-muted-foreground">
                 This review-only PDF shows the edits directly on the resume page:
                 red strikethrough for removed wording and green highlights for
                 additions. Download still uses the clean final PDF.
               </p>
             </div>
             {dirty && (
-              <Badge variant="outline" className="border-yellow-300 text-yellow-200">
+              <Badge variant="outline" className="border-status-pending/60 text-status-pending">
                 Apply changes to refresh PDF preview
               </Badge>
             )}
           </div>
 
-          <div className="mt-3 overflow-hidden rounded-lg border border-slate-700 bg-slate-900">
+          <div className="mt-3 overflow-hidden rounded-lg border border-border bg-card">
             {redlinePdf.isLoading && (
-              <div className="flex min-h-[28rem] items-center justify-center p-6 text-xs text-slate-300">
+              <div className="flex min-h-[28rem] items-center justify-center p-6 text-xs text-muted-foreground">
                 Rendering visual redline preview...
               </div>
             )}
             {redlinePdf.isError && (
-              <div className="flex min-h-[18rem] flex-col items-center justify-center gap-2 p-6 text-center text-xs text-slate-300">
-                <div className="font-medium text-slate-100">
+              <div className="flex min-h-[18rem] flex-col items-center justify-center gap-2 p-6 text-center text-xs text-muted-foreground">
+                <div className="font-medium text-foreground">
                   Visual PDF preview is unavailable in this environment.
                 </div>
                 <div>
@@ -626,7 +626,7 @@ export function ResumeArtifactReview({ jobId, artifact }: Props) {
                       {DECISION_LABEL[decision]}
                     </Badge>
                     {!row.rendersRewrite && (
-                      <Badge variant="outline" className="border-slate-300 text-[10px] uppercase text-muted-foreground">
+                      <Badge variant="outline" className="text-[10px] uppercase text-muted-foreground">
                         original currently rendered
                       </Badge>
                     )}

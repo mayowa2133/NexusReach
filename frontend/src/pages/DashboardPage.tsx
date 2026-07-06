@@ -196,7 +196,7 @@ export function DashboardPage() {
                       <div className="flex items-center gap-1.5">
                         <div className="font-medium truncate">{job.title}</div>
                         {isNew && (
-                          <Badge variant="default" className="text-[9px] px-1 py-0 bg-blue-600 hover:bg-blue-600 shrink-0">
+                          <Badge variant="default" className="text-[9px] px-1 py-0 shrink-0">
                             NEW
                           </Badge>
                         )}
@@ -329,7 +329,7 @@ export function DashboardPage() {
                         <div className="flex items-center gap-1.5">
                           <div className="font-medium truncate">{job.title}</div>
                           {isNew && (
-                            <Badge variant="default" className="text-[9px] px-1 py-0 bg-blue-600 hover:bg-blue-600 shrink-0">
+                            <Badge variant="default" className="text-[9px] px-1 py-0 shrink-0">
                               NEW
                             </Badge>
                           )}

@@ -26,6 +26,7 @@ const ResumeLibraryPage = lazy(() => import('@/pages/ResumeLibraryPage').then((m
 const TriagePage = lazy(() => import('@/pages/TriagePage').then((m) => ({ default: m.TriagePage })));
 const PrivacyPage = lazy(() => import('@/pages/PrivacyPage').then((m) => ({ default: m.PrivacyPage })));
 const TermsPage = lazy(() => import('@/pages/TermsPage').then((m) => ({ default: m.TermsPage })));
+const LandingPage = lazy(() => import('@/pages/LandingPage').then((m) => ({ default: m.LandingPage })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -50,6 +51,17 @@ function PageSuspense({ children }: { children: React.ReactNode }) {
   );
 }
 
+function LandingRoute() {
+  const session = useAuthStore((s) => s.session);
+
+  if (session) return <Navigate to="/dashboard" replace />;
+  return (
+    <PageSuspense>
+      <LandingPage />
+    </PageSuspense>
+  );
+}
+
 function AppRoutes() {
   const initialize = useAuthStore((s) => s.initialize);
 
@@ -59,6 +71,7 @@ function AppRoutes() {
 
   return (
     <Routes>
+      <Route path="/" element={<LandingRoute />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
       <Route path="/privacy" element={<PageSuspense><PrivacyPage /></PageSuspense>} />

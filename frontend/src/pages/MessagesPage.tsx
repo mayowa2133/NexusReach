@@ -791,7 +791,7 @@ function SingleMessagesView() {
                   )}
 
                   {activeDraft.linkedin_signal && (
-                    <div className="rounded-md border border-sky-200 bg-sky-50/60 p-3 text-sm space-y-1">
+                    <div className="rounded-md border border-border bg-secondary/50 p-3 text-sm space-y-1">
                       <div className="font-medium">
                         LinkedIn signal
                         {activeDraft.linkedin_signal.display_name ? `: ${activeDraft.linkedin_signal.display_name}` : ''}
@@ -810,15 +810,15 @@ function SingleMessagesView() {
 
                   {/* Stories used in this draft */}
                   {(activeDraft.story_ids?.length ?? 0) > 0 && (
-                    <div className="rounded-md border border-purple-200 bg-purple-50/50 p-3 text-sm space-y-1 dark:border-purple-800 dark:bg-purple-900/10">
-                      <div className="font-medium text-purple-900 dark:text-purple-200">
+                    <div className="rounded-md border border-border bg-secondary/50 p-3 text-sm space-y-1">
+                      <div className="font-medium">
                         Stories used ({activeDraft.story_ids!.length})
                       </div>
                       <div className="space-y-0.5">
                         {activeDraft.story_ids!.map((sid) => {
                           const s = allStories?.find((x) => x.id === sid);
                           return (
-                            <div key={sid} className="text-xs text-purple-800 dark:text-purple-300">
+                            <div key={sid} className="text-xs text-muted-foreground">
                               {s ? `• ${s.title}${s.impact_metric ? ` — ${s.impact_metric}` : ''}` : `• ${sid.slice(0, 8)}…`}
                             </div>
                           );
@@ -827,7 +827,7 @@ function SingleMessagesView() {
                       <Button
                         size="sm"
                         variant="outline"
-                        className="mt-1 text-xs h-7 border-purple-300 text-purple-800 dark:border-purple-700 dark:text-purple-200"
+                        className="mt-1 text-xs h-7"
                         onClick={() => {
                           setPickedStoryIds(activeDraft.story_ids ?? []);
                           setShowStoryPicker(true);

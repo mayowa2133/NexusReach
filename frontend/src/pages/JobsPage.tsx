@@ -819,7 +819,7 @@ export function JobsPage() {
       {/* Job list + detail */}
       <div className="grid gap-4 lg:grid-cols-5">
         {/* Job list */}
-        <div className="lg:col-span-2 space-y-2">
+        <div className="min-w-0 lg:col-span-2 space-y-2">
           {savedJobs.length > 0 ? (
             <>
               {visibleJobs.map((job) => (
@@ -980,9 +980,9 @@ const JobListCard = memo(function JobListCard({
             </button>
             {job.match_score != null && (
               <div className={`text-xs font-medium px-1.5 py-0.5 rounded ${
-                job.match_score >= 60 ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' :
-                job.match_score >= 30 ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' :
-                'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
+                job.match_score >= 60 ? 'bg-status-positive/10 text-status-positive' :
+                job.match_score >= 30 ? 'bg-status-pending/10 text-status-pending' :
+                'bg-status-neutral/15 text-status-neutral'
               }`}>
                 {Math.round(job.match_score)}%
               </div>
@@ -1064,9 +1064,9 @@ function JobDetail({
           </div>
           {job.match_score != null && (
             <div className={`text-lg font-bold px-3 py-1 rounded-lg ${
-              job.match_score >= 60 ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' :
-              job.match_score >= 30 ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' :
-              'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
+              job.match_score >= 60 ? 'bg-status-positive/10 text-status-positive' :
+              job.match_score >= 30 ? 'bg-status-pending/10 text-status-pending' :
+              'bg-status-neutral/15 text-status-neutral'
             }`}>
               {Math.round(job.match_score)}% match
             </div>
@@ -1133,7 +1133,7 @@ function JobDetail({
                       </div>
                       <div className="h-1.5 rounded-full bg-muted overflow-hidden">
                         <div
-                          className={`h-full rounded-full transition-all ${pct >= 70 ? 'bg-green-500' : pct >= 40 ? 'bg-yellow-500' : 'bg-gray-400'}`}
+                          className={`h-full rounded-full transition-all ${pct >= 70 ? 'bg-status-positive' : pct >= 40 ? 'bg-status-pending' : 'bg-status-neutral'}`}
                           style={{ width: `${Math.min(pct, 100)}%` }}
                         />
                       </div>

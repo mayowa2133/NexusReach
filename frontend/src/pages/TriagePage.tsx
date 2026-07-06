@@ -17,20 +17,20 @@ const TIER_CONFIG: Record<
   high: {
     label: 'High ROI',
     badgeClass:
-      'border-green-600 bg-green-50 text-green-800 dark:border-green-500 dark:bg-green-900/20 dark:text-green-300',
-    barClass: 'bg-green-500',
+      'border-status-positive/50 bg-status-positive/10 text-status-positive',
+    barClass: 'bg-status-positive',
   },
   medium: {
     label: 'Medium ROI',
     badgeClass:
-      'border-yellow-500 bg-yellow-50 text-yellow-800 dark:border-yellow-400 dark:bg-yellow-900/20 dark:text-yellow-300',
-    barClass: 'bg-yellow-400',
+      'border-status-pending/50 bg-status-pending/10 text-status-pending',
+    barClass: 'bg-status-pending',
   },
   low: {
     label: 'Low ROI',
     badgeClass:
-      'border-orange-400 bg-orange-50 text-orange-800 dark:border-orange-400 dark:bg-orange-900/20 dark:text-orange-300',
-    barClass: 'bg-orange-400',
+      'border-status-neutral/50 bg-status-neutral/10 text-status-neutral',
+    barClass: 'bg-status-neutral',
   },
   skip: {
     label: 'Deprioritize',
@@ -123,7 +123,7 @@ function TriageCard({ result }: { result: TriageResult }) {
             {Math.round(result.roi_score)}
           </span>
           <span
-            className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${cfg.badgeClass}`}
+            className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-medium ${cfg.badgeClass}`}
           >
             {cfg.label}
           </span>
@@ -250,7 +250,7 @@ export function TriagePage() {
             >
               <div className="text-xl font-bold tabular-nums">{count}</div>
               <div
-                className={`text-xs mt-0.5 font-medium ${TIER_CONFIG[tier].badgeClass} inline-flex items-center rounded-full border px-2 py-0.5`}
+                className={`text-xs mt-0.5 font-medium ${TIER_CONFIG[tier].badgeClass} inline-flex items-center rounded-md border px-2 py-0.5`}
               >
                 {TIER_CONFIG[tier].label}
               </div>
@@ -265,7 +265,7 @@ export function TriagePage() {
           <button
             key={stage}
             onClick={() => toggleStage(stage)}
-            className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+            className={`rounded-md border px-3 py-1 text-xs transition-colors ${
               selectedStages.includes(stage)
                 ? 'bg-primary text-primary-foreground border-primary'
                 : 'hover:bg-accent'
@@ -277,7 +277,7 @@ export function TriagePage() {
         {selectedStages.length > 0 && (
           <button
             onClick={() => setSelectedStages([])}
-            className="rounded-full border px-3 py-1 text-xs text-muted-foreground hover:bg-accent"
+            className="rounded-md border px-3 py-1 text-xs text-muted-foreground hover:bg-accent"
           >
             Clear
           </button>

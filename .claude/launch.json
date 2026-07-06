@@ -23,6 +23,13 @@
       "cwd": "backend"
     },
     {
+      "name": "landing",
+      "runtimeExecutable": "/usr/bin/python3",
+      "runtimeArgs": ["-m", "http.server", "4321"],
+      "port": 4321,
+      "cwd": "landing"
+    },
+    {
       "name": "backend-dev",
       "runtimeExecutable": "/bin/bash",
       "runtimeArgs": ["-lc", "NEXUSREACH_DATABASE_URL='postgresql+asyncpg://postgres:postgres@localhost:5432/nexusreach' NEXUSREACH_AUTH_MODE=dev NEXUSREACH_DEV_AUTH_BYPASS_ENABLED=true exec /Users/mayowaadesanya/.pyenv/versions/3.11.6/bin/uvicorn app.main:app --reload --port 8000"],

@@ -11,10 +11,11 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { useAuthStore } from '@/stores/auth';
+import { useThemeStore } from '@/stores/theme';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { NotificationBell } from '@/components/NotificationBell';
 import { cn } from '@/lib/utils';
-import { Menu } from 'lucide-react';
+import { Menu, Moon, Sun } from 'lucide-react';
 
 const navItems = [
   { path: '/dashboard', label: 'Dashboard' },
@@ -31,6 +32,8 @@ const navItems = [
 export function AppLayout() {
   const location = useLocation();
   const { user, signOut } = useAuthStore();
+  const theme = useThemeStore((s) => s.theme);
+  const toggleTheme = useThemeStore((s) => s.toggleTheme);
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const initials = user?.email?.slice(0, 2).toUpperCase() ?? '??';
@@ -48,8 +51,8 @@ export function AppLayout() {
               <span className="sr-only">Toggle menu</span>
             </SheetTrigger>
             <SheetContent side="left" className="w-64">
-              <div className="mb-6 text-lg font-semibold tracking-tight">
-                NexusReach
+              <div className="mb-6 text-lg font-bold tracking-tight">
+                NexusReach<span className="text-primary">.</span>
               </div>
               <nav className="flex flex-col gap-1">
                 {navItems.map((item) => (
@@ -100,8 +103,8 @@ export function AppLayout() {
             </SheetContent>
           </Sheet>
 
-          <Link to="/dashboard" className="mr-8 text-lg font-semibold tracking-tight">
-            NexusReach
+          <Link to="/dashboard" className="mr-8 text-lg font-bold tracking-tight">
+            NexusReach<span className="text-primary">.</span>
           </Link>
 
           {/* Desktop nav — hidden on mobile */}
@@ -123,6 +126,14 @@ export function AppLayout() {
           </nav>
 
           <div className="ml-auto flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={toggleTheme}
+              aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            >
+              {theme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+            </Button>
             <NotificationBell />
             <DropdownMenu>
               <DropdownMenuTrigger className="relative flex h-8 w-8 items-center justify-center rounded-full outline-none">

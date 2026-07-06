@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>NexusReach — The people behind every job posting</title>
+<meta name="description" content="For every job you're targeting: the recruiter, the hiring manager, and a peer — with evidence for why they're right, a warm path from your own network, a safe email, and a drafted message. Nothing sends without you." />
+<meta property="og:title" content="NexusReach — The people behind every job posting" />
+<meta property="og:description" content="Job boards sell postings. NexusReach delivers the people behind them, with receipts." />
+<link rel="preconnect" href="https://api.fontshare.com" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://api.fontshare.com/v2/css?f[]=general-sans@400,500,600,700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+/* ================================================================
+   NEXUSREACH — "THE DOSSIER"
+   paper + ink + one green · mono provenance labels · numbered figures
+   radii: 6 / 12 only · hairlines over shadows · one signature animation
+   ================================================================ */
+:root {
+  --paper: #FAF9F5;
+  --paper-2: #F1EFE7;
+  --card: #FFFFFF;
+  --ink: #1B1A17;
+  --ink-70: rgba(27, 26, 23, 0.70);
+  --ink-55: rgba(27, 26, 23, 0.55);
+  --ink-40: rgba(27, 26, 23, 0.40);
+  --line: rgba(27, 26, 23, 0.14);
+  --line-soft: rgba(27, 26, 23, 0.08);
+  --green: #0C6B4B;
+  --green-deep: #084A34;
+  --green-tint: rgba(12, 107, 75, 0.09);
+  --amber: #93611A;
+  --amber-tint: rgba(147, 97, 26, 0.10);
+  --gray: #75726A;
+  --gray-tint: rgba(117, 114, 106, 0.12);
+  --r-s: 6px;
+  --r-m: 12px;
+  --sans: "General Sans", -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  --mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  --w: 1120px;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+::selection { background: rgba(12, 107, 75, 0.18); }
+body {
+  font-family: var(--sans);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 17px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; border-radius: 2px; }
+
+.wrap { max-width: var(--w); margin: 0 auto; padding: 0 24px; }
+
+/* ---- type ---- */
+h1, h2, h3 { font-weight: 600; letter-spacing: -0.025em; line-height: 1.08; }
+h1 { font-size: clamp(40px, 5.2vw, 62px); }
+h2 { font-size: clamp(30px, 3.6vw, 42px); }
+h3 { font-size: 22px; letter-spacing: -0.015em; }
+.lede { font-size: 19px; color: var(--ink-70); line-height: 1.65; }
+.lede strong { color: var(--ink); font-weight: 600; }
+
+.mono-label {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-55);
+}
+.mono-label .tick { color: var(--green); }
+
+/* ---- buttons ---- */
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--sans); font-size: 15px; font-weight: 600;
+  padding: 13px 22px; border-radius: var(--r-s);
+  text-decoration: none; cursor: pointer; border: 1px solid transparent;
+  transition: background 140ms ease-out, border-color 140ms ease-out, color 140ms ease-out;
+}
+.btn .arrow { font-family: var(--mono); font-weight: 500; transition: transform 140ms ease-out; }
+.btn-primary { background: var(--green); color: #fff; }
+.btn-primary:hover { background: var(--green-deep); }
+.btn-primary:hover .arrow { transform: translateX(3px); }
+.btn-ghost { background: transparent; color: var(--ink); border-color: var(--line); }
+.btn-ghost:hover { border-color: var(--ink-40); background: var(--card); }
+.micro {
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em;
+  color: var(--ink-55); margin-top: 14px;
+}
+
+/* ---- nav ---- */
+nav {
+  position: sticky; top: 0; z-index: 50;
+  background: rgba(250, 249, 245, 0.88);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid transparent;
+  transition: border-color 200ms ease;
+}
+nav.scrolled { border-bottom-color: var(--line-soft); }
+.nav-inner { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+.wordmark { font-weight: 700; font-size: 17px; letter-spacing: -0.02em; text-decoration: none; }
+.wordmark .dot { color: var(--green); }
+.nav-links { display: flex; align-items: center; gap: 28px; }
+.nav-links a.nav-link {
+  font-size: 14.5px; font-weight: 500; color: var(--ink-70);
+  text-decoration: none; transition: color 120ms ease-out;
+}
+.nav-links a.nav-link:hover { color: var(--ink); }
+.nav-links .btn { padding: 9px 16px; font-size: 14px; }
+@media (max-width: 760px) { .nav-links a.nav-link { display: none; } }
+
+/* ---- hero ---- */
+.hero { padding: 76px 0 40px; }
+.hero-grid { display: grid; grid-template-columns: 5fr 6fr; gap: 56px; align-items: center; }
+@media (max-width: 980px) { .hero-grid { grid-template-columns: 1fr; gap: 48px; } }
+.hero h1 { margin: 18px 0 22px; }
+.hero .lede { max-width: 46ch; }
+.hero-ctas { display: flex; gap: 12px; margin-top: 32px; flex-wrap: wrap; }
+
+/* ---- figures (product UI as documentary figures) ---- */
+.figure { position: relative; }
+.figcap {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--ink-40); margin-top: 14px;
+}
+.window {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r-m);
+  box-shadow: 0 1px 2px rgba(27,26,23,.05), 0 12px 32px rgba(27,26,23,.07);
+  overflow: hidden;
+}
+.window-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 16px; border-bottom: 1px solid var(--line-soft);
+}
+.window-head .crumb { font-family: var(--mono); font-size: 11px; color: var(--ink-55); letter-spacing: 0.03em; }
+.window-head .crumb b { color: var(--ink); font-weight: 600; }
+.stamp {
+  font-family: var(--mono); font-size: 10px; font-weight: 600; letter-spacing: 0.08em;
+  padding: 3px 8px; border-radius: var(--r-s); white-space: nowrap;
+}
+.stamp-green { color: var(--green); background: var(--green-tint); }
+.stamp-amber { color: var(--amber); background: var(--amber-tint); }
+.stamp-gray  { color: var(--gray);  background: var(--gray-tint); }
+.window-body { padding: 16px; }
+
+/* warm strip */
+.warm-strip {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 12px; margin-bottom: 12px;
+  background: var(--green-tint); border: 1px solid rgba(12,107,75,.18);
+  border-radius: var(--r-s);
+}
+.warm-strip .who { font-size: 13px; font-weight: 500; color: var(--ink-70); }
+.warm-strip .who b { color: var(--ink); font-weight: 600; }
+
+/* person cards */
+.person { border: 1px solid var(--line-soft); border-radius: var(--r-s); padding: 13px 14px; }
+.person + .person { margin-top: 10px; }
+.person-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.person-name { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+.bucket { font-family: var(--mono); font-size: 9.5px; font-weight: 600; letter-spacing: 0.1em; color: var(--ink-40); }
+.person-role { font-size: 13px; color: var(--ink-55); margin-top: 2px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.chip {
+  font-family: var(--mono); font-size: 9.5px; font-weight: 500; letter-spacing: 0.06em;
+  text-transform: uppercase; padding: 3px 8px;
+  border: 1px solid var(--line); border-radius: var(--r-s);
+  color: var(--ink-70); background: var(--card);
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.chip .d { width: 5px; height: 5px; border-radius: 50%; background: var(--ink-40); flex: none; }
+.chip-green { border-color: rgba(12,107,75,.35); color: var(--green); }
+.chip-green .d { background: var(--green); }
+.chip-amber { border-color: rgba(147,97,26,.35); color: var(--amber); }
+.chip-amber .d { background: var(--amber); }
+.chip-gray { color: var(--gray); }
+.chip-gray .d { background: var(--gray); }
+
+/* signature animation: chips stamp in (hero only) */
+.hero .chip { animation: stamp 320ms ease-out backwards; }
+@keyframes stamp {
+  from { opacity: 0; transform: translateY(-3px) scale(1.05); }
+  to   { opacity: 1; transform: none; }
+}
+.hero .chip:nth-of-type(1) { animation-delay: 400ms; }
+.hero .chip:nth-of-type(2) { animation-delay: 520ms; }
+.hero .chip:nth-of-type(3) { animation-delay: 640ms; }
+
+/* draft card overlapping hero window */
+.draft-card {
+  position: absolute; right: -14px; bottom: -34px; width: min(340px, 88%);
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--r-m);
+  box-shadow: 0 2px 4px rgba(27,26,23,.06), 0 16px 40px rgba(27,26,23,.10);
+  padding: 14px 16px;
+}
+@media (max-width: 980px) {
+  .draft-card { position: static; width: 100%; margin-top: 12px; }
+  .hero .figure { padding-bottom: 0 !important; }
+}
+.draft-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.draft-meta { font-family: var(--mono); font-size: 10.5px; color: var(--ink-55); line-height: 1.7; letter-spacing: 0.02em; }
+.draft-meta b { color: var(--ink); font-weight: 600; }
+.draft-body { font-size: 13px; color: var(--ink-70); line-height: 1.55; margin: 10px 0 12px; }
+.draft-body mark { background: var(--green-tint); color: var(--green-deep); padding: 0 3px; border-radius: 3px; }
+.draft-actions { display: flex; gap: 8px; }
+.mini-btn {
+  font-size: 12px; font-weight: 600; padding: 7px 12px; border-radius: var(--r-s);
+  border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: default;
+}
+.mini-btn.solid { background: var(--green); border-color: var(--green); color: #fff; }
+
+/* ---- credibility strip ---- */
+.cred { border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); margin-top: 96px; }
+.cred-inner {
+  display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  padding: 18px 0;
+}
+.cred .mono-label { font-size: 10.5px; }
+@media (max-width: 760px) { .cred-inner { flex-direction: column; gap: 10px; } }
+
+/* ---- sections ---- */
+section.block { padding: 104px 0 0; }
+.sec-head { max-width: 62ch; }
+.sec-head h2 { margin: 16px 0 18px; }
+.sec-head .lede { font-size: 18px; }
+
+/* ledger rows */
+.ledger { margin-top: 44px; border-top: 1px solid var(--line); }
+.ledger-row {
+  display: grid; grid-template-columns: 64px 1fr; gap: 24px;
+  padding: 22px 0; border-bottom: 1px solid var(--line-soft);
+  transition: background 120ms ease-out;
+}
+.ledger-row:hover { background: rgba(255,255,255,.55); }
+.ledger-row .n { font-family: var(--mono); font-size: 12px; color: var(--ink-40); padding-top: 4px; }
+@media (max-width: 700px) { .ledger-row { grid-template-columns: 36px 1fr; gap: 14px; } }
+.ledger-row .t { font-size: 17px; font-weight: 500; letter-spacing: -0.01em; }
+.ledger-row .s { font-size: 15px; color: var(--ink-55); margin-top: 4px; max-width: 72ch; }
+
+/* pipeline diagram */
+.pipeline {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+  margin: 40px 0 8px; padding: 22px 20px;
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--r-m);
+}
+@media (max-width: 900px) { .pipeline { justify-content: flex-start; } }
+.pipe-t {
+  font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+  padding: 6px 11px; border: 1px solid var(--line); border-radius: var(--r-s); color: var(--ink-70);
+  background: var(--paper);
+}
+.pipe-t.final { color: var(--green); border-color: rgba(12,107,75,.4); background: var(--green-tint); }
+.pipe-a { font-family: var(--mono); font-size: 11px; color: var(--ink-40); }
+
+/* steps */
+.steps { margin-top: 56px; border-top: 1px solid var(--line); }
+.step {
+  display: grid; grid-template-columns: 64px 1.05fr 1fr; gap: 32px; align-items: center;
+  padding: 34px 0; border-bottom: 1px solid var(--line-soft);
+}
+@media (max-width: 900px) { .step { grid-template-columns: 48px 1fr; } .step .step-fig { grid-column: 2; } }
+.step .n { font-family: var(--mono); font-size: 12px; color: var(--ink-40); align-self: start; padding-top: 6px; }
+.step h3 { margin-bottom: 8px; }
+.step p { font-size: 15.5px; color: var(--ink-70); max-width: 52ch; }
+.step-fig .panel {
+  background: var(--card); border: 1px solid var(--line-soft); border-radius: var(--r-s);
+  padding: 12px 14px;
+}
+.row-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; }
+.row-line + .row-line { border-top: 1px solid var(--line-soft); }
+.row-line .rl-t { font-size: 13px; font-weight: 500; }
+.row-line .rl-s { font-size: 11.5px; color: var(--ink-55); margin-top: 1px; }
+.row-line .right { flex: none; }
+
+/* evidence axes */
+.axes {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 1px;
+  background: var(--line-soft); border: 1px solid var(--line); border-radius: var(--r-m);
+  overflow: hidden; margin-top: 20px;
+}
+@media (max-width: 700px) { .axes { grid-template-columns: 1fr; } }
+.axis { background: var(--card); padding: 20px 22px; }
+.axis .a-val { font-size: 16px; font-weight: 600; margin-top: 8px; letter-spacing: -0.01em; }
+.axis .a-note { font-size: 13.5px; color: var(--ink-55); margin-top: 4px; }
+.a-val.v-green { color: var(--green); }
+.a-val.v-amber { color: var(--amber); }
+
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; align-items: center; margin-top: 8px; }
+@media (max-width: 980px) { .split { grid-template-columns: 1fr; gap: 40px; } }
+
+/* refusals */
+.refusals { margin-top: 44px; border-top: 1px solid var(--line); }
+.refusal {
+  display: grid; grid-template-columns: 28px 1fr; gap: 18px;
+  padding: 20px 0; border-bottom: 1px solid var(--line-soft);
+}
+.refusal .x { font-family: var(--mono); font-size: 13px; color: var(--ink-40); padding-top: 2px; }
+.refusal .t { font-size: 16.5px; font-weight: 600; letter-spacing: -0.01em; }
+.refusal .s { font-size: 14.5px; color: var(--ink-55); margin-top: 3px; max-width: 70ch; }
+
+/* CRM table */
+.crm-stats {
+  display: flex; flex-wrap: wrap; gap: 8px 22px; padding: 14px 16px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.crm-stat { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.07em; color: var(--ink-55); text-transform: uppercase; }
+.crm-stat b { color: var(--ink); font-weight: 600; }
+.crm-row {
+  display: grid; grid-template-columns: 1.3fr 1fr auto; gap: 12px; align-items: center;
+  padding: 13px 16px; border-bottom: 1px solid var(--line-soft);
+}
+.crm-row:last-child { border-bottom: none; }
+.crm-row .c-name { font-size: 14px; font-weight: 600; }
+.crm-row .c-sub { font-size: 12px; color: var(--ink-55); margin-top: 1px; }
+.crm-row .c-mid { font-size: 12.5px; color: var(--ink-55); }
+.reply-snippet {
+  grid-column: 1 / -1; font-size: 13px; color: var(--ink-70);
+  background: var(--paper); border-left: 2px solid var(--green);
+  padding: 8px 12px; border-radius: 0 var(--r-s) var(--r-s) 0;
+}
+
+/* final CTA */
+.closer { margin-top: 120px; background: var(--paper-2); border-top: 1px solid var(--line-soft); }
+.closer-inner { padding: 110px 0; text-align: left; }
+.closer h2 { font-size: clamp(34px, 4.4vw, 54px); max-width: 20ch; }
+.closer .lede { margin-top: 20px; max-width: 52ch; }
+
+/* FAQ */
+.faq { padding: 104px 0 0; }
+.faq-list { margin-top: 40px; border-top: 1px solid var(--line); }
+details { border-bottom: 1px solid var(--line-soft); }
+summary {
+  display: flex; justify-content: space-between; align-items: center; gap: 24px;
+  padding: 22px 4px; cursor: pointer; list-style: none;
+  font-size: 17px; font-weight: 500; letter-spacing: -0.01em;
+}
+summary::-webkit-details-marker { display: none; }
+summary .ind { font-family: var(--mono); font-size: 14px; color: var(--ink-40); transition: transform 160ms ease-out; flex: none; }
+details[open] summary .ind { transform: rotate(45deg); }
+details .a { padding: 0 4px 24px; font-size: 15.5px; color: var(--ink-70); max-width: 72ch; }
+
+/* footer */
+footer { margin-top: 104px; border-top: 1px solid var(--line); }
+.foot-inner {
+  display: flex; justify-content: space-between; gap: 24px; flex-wrap: wrap;
+  padding: 40px 0 48px;
+}
+.foot-left .wordmark { font-size: 15px; }
+.foot-note { font-family: var(--mono); font-size: 10.5px; color: var(--ink-40); margin-top: 10px; letter-spacing: 0.04em; }
+.foot-links { display: flex; gap: 24px; flex-wrap: wrap; }
+.foot-links a { font-size: 13.5px; color: var(--ink-55); text-decoration: none; }
+.foot-links a:hover { color: var(--ink); }
+</style>
+</head>
+<body>
+
+<nav id="nav">
+  <div class="wrap nav-inner">
+    <a class="wordmark" href="#">NexusReach<span class="dot">.</span></a>
+    <div class="nav-links">
+      <a class="nav-link" href="#how">How it works</a>
+      <a class="nav-link" href="#evidence">Evidence</a>
+      <a class="nav-link" href="#trust">Trust</a>
+      <a class="nav-link" href="#faq">FAQ</a>
+      <a class="btn btn-primary" href="#join">Join the beta</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ============================ HERO ============================ -->
+<header class="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <span class="mono-label">For serious job seekers <span class="tick">·</span> draft-first, always</span>
+      <h1>Every job posting has people behind it. NexusReach finds them.</h1>
+      <p class="lede">For each job you're targeting: the recruiter, the likely hiring manager, and a peer on the team — with evidence for why they're right, a warm path from your own network, a safe email, and a drafted message. <strong>Nothing sends without you.</strong></p>
+      <div class="hero-ctas" id="join">
+        <a class="btn btn-primary" href="#">Join the beta <span class="arrow">→</span></a>
+        <a class="btn btn-ghost" href="#how">See how it works</a>
+      </div>
+      <p class="micro">FREE DURING BETA · NO CREDIT CARD · YOU APPROVE EVERY MESSAGE</p>
+    </div>
+
+    <div class="figure" style="padding-bottom: 34px;">
+      <div class="window">
+        <div class="window-head">
+          <span class="crumb">Jobs / <b>Software Engineer, New Grad — Meridian</b></span>
+          <span class="stamp stamp-gray">POSTED 2 DAYS AGO</span>
+        </div>
+        <div class="window-body">
+          <div class="warm-strip">
+            <span class="mono-label" style="color: var(--green);">Your connections at Meridian (2)</span>
+            <span class="who"><b>Alex Kim</b> · Product</span>
+            <span class="who"><b>Sofia Marchetti</b> · Data</span>
+          </div>
+          <div class="person">
+            <div class="person-top"><span class="person-name">Dana Whitfield</span><span class="bucket">RECRUITER</span></div>
+            <div class="person-role">University Recruiter · Meridian</div>
+            <div class="chips">
+              <span class="chip"><span class="d"></span>Listed in hiring team</span>
+              <span class="chip chip-green"><span class="d"></span>Email verified</span>
+            </div>
+          </div>
+          <div class="person">
+            <div class="person-top"><span class="person-name">Marcus Chen</span><span class="bucket">HIRING MANAGER</span></div>
+            <div class="person-role">Engineering Manager, Platform · Meridian</div>
+            <div class="chips">
+              <span class="chip"><span class="d"></span>Company team page</span>
+              <span class="chip"><span class="d"></span>github/meridian-platform</span>
+              <span class="chip chip-green"><span class="d"></span>Corroborated ×2</span>
+            </div>
+          </div>
+          <div class="person">
+            <div class="person-top"><span class="person-name">Priya Raghavan</span><span class="bucket">PEER</span></div>
+            <div class="person-role">Software Engineer II, Platform · Meridian</div>
+            <div class="chips">
+              <span class="chip"><span class="d"></span>Recent contributor</span>
+              <span class="chip chip-green"><span class="d"></span>Warm path via Alex Kim</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="draft-card">
+        <div class="draft-head">
+          <span class="mono-label" style="font-size:10px;">Outreach</span>
+          <span class="stamp stamp-amber">DRAFT — NOT SENT</span>
+        </div>
+        <div class="draft-meta">To: <b>Dana Whitfield</b><br />Subject: <b>New Grad SWE — quick question</b></div>
+        <p class="draft-body">Hi Dana — I saw Meridian's new-grad platform role posted this week. <mark>Alex Kim suggested I reach out</mark> — I've been building in the same space Marcus's team works in…</p>
+        <div class="draft-actions">
+          <span class="mini-btn">Edit draft</span>
+          <span class="mini-btn solid">Stage in Gmail</span>
+        </div>
+      </div>
+      <p class="figcap">Fig. 01 — People found for one posting. Draft awaiting your review.</p>
+    </div>
+  </div>
+
+  <div class="cred wrap-outer">
+    <div class="wrap cred-inner">
+      <span class="mono-label">Indexing 1,117 verified company career boards</span>
+      <span class="mono-label">People cross-checked across independent public sources</span>
+      <span class="mono-label">Built by a job seeker, not a growth team</span>
+    </div>
+  </div>
+</header>
+
+<!-- ============================ 01 PROBLEM ============================ -->
+<section class="block">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="mono-label">01 <span class="tick">·</span> The problem</span>
+      <h2>You already know networking works. Here's why you're not doing it.</h2>
+      <p class="lede">You find a great posting. Then the real work starts — and it looks like this:</p>
+    </div>
+    <div class="ledger">
+      <div class="ledger-row"><span class="n">/01</span><div><div class="t">Search LinkedIn for the company. Get 4,000 employees.</div><div class="s">No idea which of them is anywhere near this job.</div></div></div>
+      <div class="ledger-row"><span class="n">/02</span><div><div class="t">Find someone with the right title.</div><div class="s">Is that profile even current? Do they still work there? It says 2023.</div></div></div>
+      <div class="ledger-row"><span class="n">/03</span><div><div class="t">Recruiter, hiring manager, or random employee?</div><div class="s">You get one good message. Guess who deserves it.</div></div></div>
+      <div class="ledger-row"><span class="n">/04</span><div><div class="t">Hunt for an email format.</div><div class="s">j.smith@ or jsmith@? Guess wrong and you've bounced — or hit a stranger.</div></div></div>
+      <div class="ledger-row"><span class="n">/05</span><div><div class="t">Stare at a blank draft.</div><div class="s">"Hi, I saw your company is hiring…" — delete. Try again. Delete.</div></div></div>
+      <div class="ledger-row"><span class="n">/06</span><div><div class="t">Two weeks later: "wait, did I already message someone there?"</div><div class="s">Scroll your sent folder. Check the spreadsheet you stopped updating in March.</div></div></div>
+    </div>
+    <p class="lede" style="margin-top: 40px; max-width: 60ch;">So most people do the rational thing: skip all of it and just apply. Into a pile of 200 resumes. <strong>The problem was never your willingness to reach out — it's 45 minutes of research per company, times the forty companies on your list.</strong></p>
+  </div>
+</section>
+
+<!-- ============================ 02 WORKFLOW ============================ -->
+<section class="block" id="how">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="mono-label">02 <span class="tick">·</span> The workflow</span>
+      <h2>From posting to inbox, with proof at every step.</h2>
+      <p class="lede">NexusReach runs the workflow serious candidates already do by hand — and stops exactly where a human should take over.</p>
+    </div>
+
+    <div class="pipeline" role="img" aria-label="Pipeline: job, people, evidence, warm path, safe email, draft, tracked"><span class="pipe-t">JOB</span><span class="pipe-a">→</span><span class="pipe-t">PEOPLE</span><span class="pipe-a">→</span><span class="pipe-t">EVIDENCE</span><span class="pipe-a">→</span><span class="pipe-t">WARM PATH</span><span class="pipe-a">→</span><span class="pipe-t">SAFE EMAIL</span><span class="pipe-a">→</span><span class="pipe-t">DRAFT</span><span class="pipe-a">→</span><span class="pipe-t final">TRACKED</span></div>
+    <p class="figcap">Fig. 02 — The full path. Automation ends at the send button.</p>
+
+    <div class="steps">
+      <div class="step">
+        <span class="n">1</span>
+        <div>
+          <h3>Your jobs find you.</h3>
+          <p>Set target roles and locations once. NexusReach continuously indexes fresh openings from 1,000+ company career boards, aggregators, startup and government sources — deduplicated, sorted by real posting date. Internships and new-grad roles are first-class, not leftovers.</p>
+        </div>
+        <div class="step-fig"><div class="panel">
+          <div class="row-line"><div><div class="rl-t">Software Engineer, New Grad</div><div class="rl-s">Meridian · SF / Remote</div></div><span class="stamp stamp-gray right">2D AGO</span></div>
+          <div class="row-line"><div><div class="rl-t">SWE Intern, Summer 2027</div><div class="rl-s">Northcell · Toronto</div></div><span class="stamp stamp-gray right">5H AGO</span></div>
+          <div class="row-line"><div><div class="rl-t">Platform Engineer</div><div class="rl-s">Arcadia Bio · NYC</div></div><span class="stamp stamp-gray right">1D AGO</span></div>
+        </div></div>
+      </div>
+
+      <div class="step">
+        <span class="n">2</span>
+        <div>
+          <h3>Every job gets its people.</h3>
+          <p>Behind each posting: the recruiter who likely handles the req, the hiring manager who likely owns it, and a peer you'd work beside. Research runs in the background — the people are usually ready before you click.</p>
+        </div>
+        <div class="step-fig"><div class="panel">
+          <div class="row-line"><div><div class="rl-t">Dana Whitfield</div><div class="rl-s">University Recruiter</div></div><span class="bucket right">RECRUITER</span></div>
+          <div class="row-line"><div><div class="rl-t">Marcus Chen</div><div class="rl-s">EM, Platform</div></div><span class="bucket right">HIRING&nbsp;MANAGER</span></div>
+          <div class="row-line"><div><div class="rl-t">Priya Raghavan</div><div class="rl-s">SWE II, Platform</div></div><span class="bucket right">PEER</span></div>
+        </div></div>
+      </div>
+
+      <div class="step">
+        <span class="n">3</span>
+        <div>
+          <h3>Every person comes with evidence.</h3>
+          <p>Found in the posting's own hiring team. On the company's team page. Active in the team's repositories. Quoted by title in company press. Each source is named on the card — you see what NexusReach saw.</p>
+        </div>
+        <div class="step-fig"><div class="panel">
+          <div class="chips" style="margin-top:0;">
+            <span class="chip"><span class="d"></span>Company team page</span>
+            <span class="chip"><span class="d"></span>Hiring team panel</span>
+            <span class="chip"><span class="d"></span>github/meridian-platform</span>
+            <span class="chip chip-green"><span class="d"></span>Corroborated ×2</span>
+          </div>
+        </div></div>
+      </div>
+
+      <div class="step">
+        <span class="n">4</span>
+        <div>
+          <h3>Warm paths and safe emails.</h3>
+          <p>Your imported connections are checked for anyone who could introduce you. Emails follow a strict ladder: verified first; best-guess only with domain evidence; withheld — and labeled withheld — when the evidence is ambiguous.</p>
+        </div>
+        <div class="step-fig"><div class="panel">
+          <div class="row-line"><div class="rl-t">m.chen@meridian.com</div><span class="stamp stamp-green right">VERIFIED</span></div>
+          <div class="row-line"><div class="rl-t">d.whitfield@meridian.com</div><span class="stamp stamp-amber right">SAFE BEST-GUESS</span></div>
+          <div class="row-line"><div class="rl-t">j.lee@ — no address shown</div><span class="stamp stamp-gray right">WITHHELD</span></div>
+        </div></div>
+      </div>
+
+      <div class="step">
+        <span class="n">5</span>
+        <div>
+          <h3>You send. It tracks.</h3>
+          <p>Drafts are written from the posting, the person, the evidence, and your background — then staged in your Gmail or Outlook. You edit and send from your own address. Replies are detected automatically; follow-ups surface themselves.</p>
+        </div>
+        <div class="step-fig"><div class="panel">
+          <div class="row-line"><div><div class="rl-t">Dana Whitfield</div><div class="rl-s">"Happy to chat — send times?"</div></div><span class="stamp stamp-green right">REPLIED</span></div>
+          <div class="row-line"><div><div class="rl-t">Marcus Chen</div><div class="rl-s">Sent 2 days ago</div></div><span class="stamp stamp-amber right">FOLLOW-UP DUE</span></div>
+        </div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 03 EVIDENCE ============================ -->
+<section class="block" id="evidence">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="mono-label">03 <span class="tick">·</span> The evidence layer</span>
+      <h2>Every contact comes with receipts.</h2>
+      <p class="lede">Other tools hand you a name and a title. NexusReach shows its work — because <strong>your</strong> name goes on the message. Four kinds of confidence, kept deliberately separate:</p>
+    </div>
+
+    <div class="split" style="margin-top: 48px;">
+      <div class="figure">
+        <div class="window">
+          <div class="window-head">
+            <span class="crumb">People / <b>Marcus Chen</b></span>
+            <span class="stamp stamp-green">HIRING MANAGER</span>
+          </div>
+          <div class="window-body">
+            <div class="person" style="border: none; padding: 2px 2px 12px;">
+              <div class="person-top"><span class="person-name" style="font-size: 17px;">Marcus Chen</span></div>
+              <div class="person-role">Engineering Manager, Platform · Meridian</div>
+              <div class="chips">
+                <span class="chip"><span class="d"></span>meridian.com/team</span>
+                <span class="chip"><span class="d"></span>github/meridian-platform · 31 commits this quarter</span>
+                <span class="chip"><span class="d"></span>Hiring team panel</span>
+              </div>
+            </div>
+            <div class="axes" style="margin-top: 6px;">
+              <div class="axis"><span class="mono-label">Match quality</span><div class="a-val">Direct</div><div class="a-note">Manages the team this req belongs to.</div></div>
+              <div class="axis"><span class="mono-label">Company confidence</span><div class="a-val v-green">Verified</div><div class="a-note">Listed on meridian.com/team, current.</div></div>
+              <div class="axis"><span class="mono-label">Email trust</span><div class="a-val v-green">Verified</div><div class="a-note">m.chen@meridian.com</div></div>
+              <div class="axis"><span class="mono-label">Corroboration</span><div class="a-val">×2 sources</div><div class="a-note">Team page + repository activity agree.</div></div>
+            </div>
+          </div>
+        </div>
+        <p class="figcap">Fig. 03 — One contact, four independent confidence axes.</p>
+      </div>
+
+      <div>
+        <div class="ledger" style="margin-top: 0; border-top: 1px solid var(--line);">
+          <div class="ledger-row"><span class="n">A</span><div><div class="t">Match quality</div><div class="s">Direct, adjacent, or next-best to the role. A future teammate is a match; a VP two departments over is not.</div></div></div>
+          <div class="ledger-row"><span class="n">B</span><div><div class="t">Company confidence</div><div class="s">Really, currently at this company — not the similarly named one, not the job they left last year.</div></div></div>
+          <div class="ledger-row"><span class="n">C</span><div><div class="t">Email trust</div><div class="s">Verified, evidence-backed best guess, or honestly withheld. You always see which.</div></div></div>
+          <div class="ledger-row"><span class="n">D</span><div><div class="t">Corroboration</div><div class="s">Flagged when multiple independent sources surface the same person. Two sources agreeing beats one source guessing.</div></div></div>
+        </div>
+        <p class="lede" style="font-size: 16px; margin-top: 28px;">A perfect role match at the wrong company is worthless. A verified employee can still have an unverifiable email. These never blend into one fuzzy score — you see each axis before you reach out.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 04 WARM PATHS ============================ -->
+<section class="block">
+  <div class="wrap">
+    <div class="split">
+      <div>
+        <span class="mono-label">04 <span class="tick">·</span> Warm paths</span>
+        <h2 style="margin: 16px 0 18px;">You might already know someone. NexusReach checks.</h2>
+        <p class="lede" style="font-size: 17px;">Import your LinkedIn connections — an official CSV export, or a connector that runs entirely on your own computer — and every job's company is cross-referenced against your actual network. Shared schools and former employers surface as warm context, threaded straight into your draft where it belongs.</p>
+        <p class="lede" style="font-size: 17px; margin-top: 18px;"><strong>The privacy line is absolute:</strong> your LinkedIn password, cookies, and session never touch our servers. Only your normalized connection list is uploaded — and one click deletes it.</p>
+      </div>
+      <div class="figure">
+        <div class="window">
+          <div class="window-head">
+            <span class="crumb">People / Meridian / <b>Warm paths</b></span>
+            <span class="stamp stamp-green">2 FOUND</span>
+          </div>
+          <div class="window-body">
+            <div class="person">
+              <div class="person-top"><span class="person-name">Alex Kim</span><span class="bucket">1ST-DEGREE</span></div>
+              <div class="person-role">Product Manager · Meridian — your connection since 2024</div>
+              <div class="chips"><span class="chip chip-green"><span class="d"></span>Can introduce you to Platform team</span></div>
+            </div>
+            <div class="person">
+              <div class="person-top"><span class="person-name">Priya Raghavan</span><span class="bucket">COLD — WARM CONTEXT</span></div>
+              <div class="person-role">Software Engineer II · Meridian</div>
+              <div class="chips">
+                <span class="chip chip-green"><span class="d"></span>Works with your connection Alex Kim</span>
+                <span class="chip"><span class="d"></span>Same school · Waterloo</span>
+              </div>
+            </div>
+            <div class="warm-strip" style="margin: 12px 0 2px; background: var(--paper); border-color: var(--line-soft);">
+              <span class="mono-label">Local connector — credentials never leave your machine</span>
+              <span class="mini-btn" style="margin-left: auto; font-size: 11px; padding: 5px 10px;">Clear graph data</span>
+            </div>
+          </div>
+        </div>
+        <p class="figcap">Fig. 04 — Your network, cross-referenced. Deletable in one click.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 05 TRUST ============================ -->
+<section class="block" id="trust">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="mono-label">05 <span class="tick">·</span> Hard lines</span>
+      <h2>What NexusReach will never do.</h2>
+      <p class="lede">The fastest way to ruin networking is to automate the wrong half of it. So we drew hard lines and built them into the product:</p>
+    </div>
+
+    <div class="split" style="margin-top: 48px; align-items: start;">
+      <div class="refusals" style="margin-top: 0;">
+        <div class="refusal"><span class="x">✕</span><div><div class="t">Never sends without you.</div><div class="s">Every message is a draft until you approve it. Optional delayed send exists — with a cancel window — but the default is always your finger on the button.</div></div></div>
+        <div class="refusal"><span class="x">✕</span><div><div class="t">Never does volume.</div><div class="s">A handful of evidenced contacts per job. There is no blast button, and there never will be.</div></div></div>
+        <div class="refusal"><span class="x">✕</span><div><div class="t">Refuses bad emails.</div><div class="s">Ambiguous domain? The guess is withheld and labeled — not handed to you to bounce under your name.</div></div></div>
+        <div class="refusal"><span class="x">✕</span><div><div class="t">Never auto-applies.</div><div class="s">Your applications, your words, your name.</div></div></div>
+        <div class="refusal"><span class="x">✕</span><div><div class="t">Never touches your LinkedIn login.</div><div class="s">No passwords, no cookies, no sessions — ever, by architecture.</div></div></div>
+        <div class="refusal"><span class="x">✕</span><div><div class="t">Never promises interviews.</div><div class="s">No honest tool can. What it promises: the right people, real evidence, safe contact info, and nothing falling through the cracks.</div></div></div>
+      </div>
+
+      <div class="figure">
+        <div class="window">
+          <div class="window-head">
+            <span class="crumb">People / <b>Jordan Lee</b> · Atlas</span>
+            <span class="stamp stamp-gray">EMAIL WITHHELD</span>
+          </div>
+          <div class="window-body">
+            <div class="person" style="border: none; padding: 2px;">
+              <div class="person-top"><span class="person-name">Jordan Lee</span><span class="bucket">RECRUITER</span></div>
+              <div class="person-role">Recruiting Coordinator · Atlas</div>
+              <div class="chips">
+                <span class="chip"><span class="d"></span>Company team page</span>
+                <span class="chip chip-gray"><span class="d"></span>No address shown</span>
+              </div>
+              <div class="reply-snippet" style="margin-top: 14px; border-left-color: var(--gray);">
+                Two companies share the "Atlas" brand and the domain evidence is ambiguous. NexusReach found a likely pattern — <strong>and is not showing it to you.</strong> A wrong guess costs you more than no guess.
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="figcap">Fig. 05 — Yes, that's the product saying no. That's the point.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 06 TRACKED ============================ -->
+<section class="block">
+  <div class="wrap">
+    <div class="split">
+      <div>
+        <span class="mono-label">06 <span class="tick">·</span> Tracked</span>
+        <h2 style="margin: 16px 0 18px;">Out of your head. Off the spreadsheet.</h2>
+        <p class="lede" style="font-size: 17px;">Real outreach dies in the follow-up. NexusReach keeps the whole thread without data entry: drafts staged in your Gmail or Outlook, <strong>sends and replies detected automatically</strong> — a reply flips the contact to Responded, captures what they said, and your next draft becomes a reply, not a re-introduction.</p>
+        <p class="lede" style="font-size: 17px; margin-top: 18px;">Follow-ups surface on schedule, pre-drafted if you want. Sent only if you say so.</p>
+      </div>
+      <div class="figure">
+        <div class="window">
+          <div class="window-head">
+            <span class="crumb"><b>Outreach</b> / all companies</span>
+            <span class="stamp stamp-green">2 REPLIES</span>
+          </div>
+          <div class="crm-stats">
+            <span class="crm-stat">Contacts <b>14</b></span>
+            <span class="crm-stat">Verified <b>9</b></span>
+            <span class="crm-stat">Warm <b>3</b></span>
+            <span class="crm-stat">Sent <b>6</b></span>
+            <span class="crm-stat">Replies <b>2</b></span>
+            <span class="crm-stat">Interviews <b>1</b></span>
+          </div>
+          <div class="crm-row">
+            <div><div class="c-name">Dana Whitfield</div><div class="c-sub">Meridian · Recruiter</div></div>
+            <div class="c-mid">Replied 3h ago</div>
+            <span class="stamp stamp-green">RESPONDED</span>
+            <div class="reply-snippet">"Happy to chat — do you have time Thursday? Also flagging your note to Marcus."</div>
+          </div>
+          <div class="crm-row">
+            <div><div class="c-name">Marcus Chen</div><div class="c-sub">Meridian · Hiring manager</div></div>
+            <div class="c-mid">Sent 2 days ago</div>
+            <span class="stamp stamp-amber">FOLLOW-UP DUE</span>
+          </div>
+          <div class="crm-row">
+            <div><div class="c-name">Priya Raghavan</div><div class="c-sub">Meridian · Peer</div></div>
+            <div class="c-mid">Staged in Gmail</div>
+            <span class="stamp stamp-gray">DRAFT</span>
+          </div>
+          <div class="crm-row">
+            <div><div class="c-name">Sam Okafor</div><div class="c-sub">Arcadia Bio · Recruiter</div></div>
+            <div class="c-mid">Interview booked · Jul 9</div>
+            <span class="stamp stamp-green">INTERVIEW</span>
+          </div>
+        </div>
+        <p class="figcap">Fig. 06 — The whole thread, kept for you. No data entry.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ FINAL CTA ============================ -->
+<section class="closer">
+  <div class="wrap closer-inner">
+    <span class="mono-label">07 <span class="tick">·</span> Join the beta</span>
+    <h2 style="margin-top: 16px;">The posting is public. The path isn't. Now it is.</h2>
+    <p class="lede">Three right people per job. Evidence for every match. A draft worth sending — sent only by you.</p>
+    <div class="hero-ctas">
+      <a class="btn btn-primary" href="#">Join the beta <span class="arrow">→</span></a>
+      <a class="btn btn-ghost" href="#how">See how it works</a>
+    </div>
+    <p class="micro">FREE DURING BETA · NO CREDIT CARD · NOTHING SENDS WITHOUT YOUR APPROVAL</p>
+  </div>
+</section>
+
+<!-- ============================ FAQ ============================ -->
+<section class="faq" id="faq">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="mono-label">08 <span class="tick">·</span> Questions</span>
+      <h2>Fair questions, straight answers.</h2>
+    </div>
+    <div class="faq-list">
+      <details>
+        <summary>Is this a mass-email or auto-apply tool? <span class="ind">+</span></summary>
+        <div class="a">No — deliberately. NexusReach finds a small number of well-evidenced contacts per job and drafts individual messages. Nothing sends without your approval, and there is no bulk send. If you want to blast 500 strangers, this is the wrong tool.</div>
+      </details>
+      <details>
+        <summary>Where does the people data come from? <span class="ind">+</span></summary>
+        <div class="a">Public and legitimate sources, cross-checked against each other: company team pages, the job posting itself, public search, business databases, repository activity for engineering teams, and press, talks, and bylines for everyone else. Every contact card names its sources — you never take a match on faith.</div>
+      </details>
+      <details>
+        <summary>Do you log into my LinkedIn? Is my account at risk? <span class="ind">+</span></summary>
+        <div class="a">No. We never ask for your LinkedIn password and never store cookies or sessions. Connection import is either a CSV you export yourself from LinkedIn's official data-export, or a small connector that runs on your own computer and uploads only the normalized connection list. One click deletes it.</div>
+      </details>
+      <details>
+        <summary>How accurate are the emails? <span class="ind">+</span></summary>
+        <div class="a">NexusReach prefers verified addresses and stops when it finds one. It only offers a pattern-based best guess when the company's domain evidence supports it — and when the evidence is ambiguous, it withholds the guess and tells you so, rather than risking a bounce under your name. You always see which tier an email is.</div>
+      </details>
+      <details>
+        <summary>Will people be annoyed to hear from me? <span class="ind">+</span></summary>
+        <div class="a">A relevant, specific, individually written message to a recruiter or hiring manager about a role they own is normal professional behavior — hearing from candidates is literally a recruiter's job. What annoys people is generic volume. NexusReach is built to make your one message good, not your hundred messages possible.</div>
+      </details>
+      <details>
+        <summary>Does it work outside of software engineering? <span class="ind">+</span></summary>
+        <div class="a">Yes. Job discovery covers marketing, finance, healthcare, education, government, retail, and more — and the people-finding adapts: for non-engineering roles it leans on team pages, press, and organizational data rather than GitHub. Non-tech searches aren't polluted with engineering roles.</div>
+      </details>
+      <details>
+        <summary>What about internships and new-grad roles? <span class="ind">+</span></summary>
+        <div class="a">First-class, not an afterthought. Dedicated early-career sources feed the same pipeline — internship postings get the same recruiter, hiring-manager, and peer treatment as senior roles.</div>
+      </details>
+      <details>
+        <summary>Do you guarantee interviews? <span class="ind">+</span></summary>
+        <div class="a">No, and be suspicious of anyone who does. What we guarantee: the right people identified with evidence, safe contact info or an honest "we're not sure," drafts worth editing instead of writing from zero, and a job search where nothing slips.</div>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ FOOTER ============================ -->
+<footer>
+  <div class="wrap foot-inner">
+    <div class="foot-left">
+      <a class="wordmark" href="#">NexusReach<span class="dot">.</span></a>
+      <div class="foot-note">BUILT BY A JOB SEEKER, NOT A GROWTH TEAM · © 2026</div>
+    </div>
+    <div class="foot-links">
+      <a href="#">Privacy</a>
+      <a href="#">Terms</a>
+      <a href="#">Changelog</a>
+      <a href="#">Contact</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+  const nav = document.getElementById("nav");
+  addEventListener("scroll", () => nav.classList.toggle("scrolled", scrollY > 8), { passive: true });
+</script>
+</body>
+</html>

@@ -5,77 +5,105 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* ================================================================
+   NEXUSREACH — "THE DOSSIER" design system
+   Warm paper + ink, one trustworthy green, mono provenance labels.
+   Semantic status colors (success/warning/error) stay per-component;
+   every surface, border, and control runs on these tokens.
+   Radii discipline: 6px (controls/chips) and 12px (cards/panels).
+   ================================================================ */
+
 :root {
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.145 0 0);
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.145 0 0);
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.145 0 0);
-    --primary: oklch(0.205 0 0);
-    --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.97 0 0);
-    --secondary-foreground: oklch(0.205 0 0);
-    --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
-    --accent: oklch(0.97 0 0);
-    --accent-foreground: oklch(0.205 0 0);
-    --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.922 0 0);
-    --input: oklch(0.922 0 0);
-    --ring: oklch(0.708 0 0);
-    --chart-1: oklch(0.809 0.105 251.813);
-    --chart-2: oklch(0.623 0.214 259.815);
-    --chart-3: oklch(0.546 0.245 262.881);
-    --chart-4: oklch(0.488 0.243 264.376);
-    --chart-5: oklch(0.424 0.199 265.638);
-    --radius: 0.625rem;
-    --sidebar: oklch(0.985 0 0);
-    --sidebar-foreground: oklch(0.145 0 0);
-    --sidebar-primary: oklch(0.205 0 0);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.97 0 0);
-    --sidebar-accent-foreground: oklch(0.205 0 0);
-    --sidebar-border: oklch(0.922 0 0);
-    --sidebar-ring: oklch(0.708 0 0);
+    /* paper + ink */
+    --background: #FAF9F5;
+    --foreground: #1B1A17;
+    --card: #FFFFFF;
+    --card-foreground: #1B1A17;
+    --popover: #FFFFFF;
+    --popover-foreground: #1B1A17;
+
+    /* one green: brand, verified, ring */
+    --primary: #0C6B4B;
+    --primary-foreground: #FFFFFF;
+
+    --secondary: #F1EFE7;
+    --secondary-foreground: #1B1A17;
+    --muted: #F1EFE7;
+    --muted-foreground: #6F6D65;
+    --accent: #F1EFE7;
+    --accent-foreground: #1B1A17;
+    --destructive: #B3372B;
+
+    /* hairlines over shadows */
+    --border: rgba(27, 26, 23, 0.12);
+    --input: rgba(27, 26, 23, 0.16);
+    --ring: #0C6B4B;
+
+    --chart-1: #0C6B4B;
+    --chart-2: #93611A;
+    --chart-3: #75726A;
+    --chart-4: #084A34;
+    --chart-5: #B98A2E;
+
+    /* status hues from the landing's stamp language:
+       green = positive/verified, amber = pending/attention, gray = neutral/informational */
+    --status-positive: #0C6B4B;
+    --status-pending: #93611A;
+    --status-neutral: #75726A;
+
+    --radius: 0.75rem;
+
+    --sidebar: #F5F4ED;
+    --sidebar-foreground: #1B1A17;
+    --sidebar-primary: #0C6B4B;
+    --sidebar-primary-foreground: #FFFFFF;
+    --sidebar-accent: #EBE9E0;
+    --sidebar-accent-foreground: #1B1A17;
+    --sidebar-border: rgba(27, 26, 23, 0.10);
+    --sidebar-ring: #0C6B4B;
 }
 
 .dark {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
-    --chart-1: oklch(0.809 0.105 251.813);
-    --chart-2: oklch(0.623 0.214 259.815);
-    --chart-3: oklch(0.546 0.245 262.881);
-    --chart-4: oklch(0.488 0.243 264.376);
-    --chart-5: oklch(0.424 0.199 265.638);
-    --sidebar: oklch(0.205 0 0);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.556 0 0);
+    /* dossier-dark: warm charcoal ink-paper inversion */
+    --background: #171613;
+    --foreground: #F2F1EC;
+    --card: #1F1E1A;
+    --card-foreground: #F2F1EC;
+    --popover: #1F1E1A;
+    --popover-foreground: #F2F1EC;
+    --primary: #34A47C;
+    --primary-foreground: #0B0B09;
+    --secondary: #26251F;
+    --secondary-foreground: #F2F1EC;
+    --muted: #26251F;
+    --muted-foreground: #A3A199;
+    --accent: #26251F;
+    --accent-foreground: #F2F1EC;
+    --destructive: #E2604F;
+    --border: rgba(242, 241, 236, 0.12);
+    --input: rgba(242, 241, 236, 0.16);
+    --ring: #34A47C;
+    --chart-1: #34A47C;
+    --chart-2: #C9924A;
+    --chart-3: #A3A199;
+    --chart-4: #6FC2A0;
+    --chart-5: #E0B76A;
+    --status-positive: #34A47C;
+    --status-pending: #C9924A;
+    --status-neutral: #A3A199;
+    --sidebar: #1B1A16;
+    --sidebar-foreground: #F2F1EC;
+    --sidebar-primary: #34A47C;
+    --sidebar-primary-foreground: #0B0B09;
+    --sidebar-accent: #26251F;
+    --sidebar-accent-foreground: #F2F1EC;
+    --sidebar-border: rgba(242, 241, 236, 0.10);
+    --sidebar-ring: #34A47C;
 }
 
 @theme inline {
-    --font-sans: 'Geist Variable', sans-serif;
+    --font-sans: 'General Sans', 'Geist Variable', -apple-system, 'Segoe UI', sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -107,13 +135,17 @@
     --color-card: var(--card);
     --color-foreground: var(--foreground);
     --color-background: var(--background);
-    --radius-sm: calc(var(--radius) * 0.6);
-    --radius-md: calc(var(--radius) * 0.8);
-    --radius-lg: var(--radius);
-    --radius-xl: calc(var(--radius) * 1.4);
-    --radius-2xl: calc(var(--radius) * 1.8);
-    --radius-3xl: calc(var(--radius) * 2.2);
-    --radius-4xl: calc(var(--radius) * 2.6);
+    --color-status-positive: var(--status-positive);
+    --color-status-pending: var(--status-pending);
+    --color-status-neutral: var(--status-neutral);
+    /* two radii, enforced: controls 6px (sm/md/lg), cards/panels 12px (xl) */
+    --radius-sm: 0.375rem;
+    --radius-md: 0.375rem;
+    --radius-lg: 0.375rem;
+    --radius-xl: 0.75rem;
+    --radius-2xl: 1rem;
+    --radius-3xl: 1.25rem;
+    --radius-4xl: 1.5rem;
 }
 
 @layer base {
@@ -122,8 +154,16 @@
     }
   body {
     @apply bg-background text-foreground;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
     }
   html {
     @apply font-sans;
+    }
+  h1, h2, h3, h4 {
+    letter-spacing: -0.02em;
+    }
+  ::selection {
+    background: rgba(12, 107, 75, 0.18);
     }
 }

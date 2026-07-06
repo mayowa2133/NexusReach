@@ -10,10 +10,10 @@ import type { InterviewRound, InterviewType, Job, JobStage, OfferDetails } from 
 
 // Pipeline columns — the tracker focuses on active application stages
 const PIPELINE_COLUMNS: { stage: JobStage; label: string; color: string }[] = [
-  { stage: 'applied', label: 'Applied', color: 'bg-blue-500' },
-  { stage: 'interviewing', label: 'Interviewing', color: 'bg-amber-500' },
-  { stage: 'offer', label: 'Offer', color: 'bg-emerald-500' },
-  { stage: 'accepted', label: 'Accepted', color: 'bg-green-600' },
+  { stage: 'applied', label: 'Applied', color: 'bg-status-neutral' },
+  { stage: 'interviewing', label: 'Interviewing', color: 'bg-status-pending' },
+  { stage: 'offer', label: 'Offer', color: 'bg-status-positive' },
+  { stage: 'accepted', label: 'Accepted', color: 'bg-status-positive' },
 ];
 
 const CLOSED_STAGES: { stage: JobStage; label: string }[] = [
@@ -345,7 +345,7 @@ function TrackerJobCard({
           <div className="flex items-center gap-1.5">
             <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
               <div
-                className="h-full rounded-full bg-amber-500 transition-all"
+                className="h-full rounded-full bg-status-pending transition-all"
                 style={{ width: `${totalRounds > 0 ? (completedRounds / totalRounds) * 100 : 0}%` }}
               />
             </div>
@@ -467,27 +467,27 @@ export function TrackerPage() {
           <p className="text-xs text-muted-foreground">Total Active</p>
         </Card>
         <Card className="p-3">
-          <p className="text-2xl font-bold text-blue-500">{stats.applied}</p>
+          <p className="text-2xl font-bold">{stats.applied}</p>
           <p className="text-xs text-muted-foreground">Applied</p>
         </Card>
         <Card className="p-3">
-          <p className="text-2xl font-bold text-amber-500">{stats.interviewing}</p>
+          <p className="text-2xl font-bold text-status-pending">{stats.interviewing}</p>
           <p className="text-xs text-muted-foreground">Interviewing</p>
         </Card>
         <Card className="p-3">
-          <p className="text-2xl font-bold text-emerald-500">{stats.offer}</p>
+          <p className="text-2xl font-bold text-status-positive">{stats.offer}</p>
           <p className="text-xs text-muted-foreground">Offers</p>
         </Card>
         <Card className="p-3">
-          <p className="text-2xl font-bold text-green-600">{stats.accepted}</p>
+          <p className="text-2xl font-bold text-status-positive">{stats.accepted}</p>
           <p className="text-xs text-muted-foreground">Accepted</p>
         </Card>
         <Card className="p-3">
-          <p className="text-2xl font-bold text-red-500">{stats.rejected}</p>
+          <p className="text-2xl font-bold text-destructive">{stats.rejected}</p>
           <p className="text-xs text-muted-foreground">Rejected</p>
         </Card>
         <Card className="p-3">
-          <p className="text-2xl font-bold text-gray-400">{stats.withdrawn}</p>
+          <p className="text-2xl font-bold text-muted-foreground">{stats.withdrawn}</p>
           <p className="text-xs text-muted-foreground">Withdrawn</p>
         </Card>
       </div>
