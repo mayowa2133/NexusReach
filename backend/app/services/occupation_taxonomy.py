@@ -399,13 +399,28 @@ OCCUPATIONS: tuple[Occupation, ...] = (
         label="Accounting and Finance",
         aliases=(
             "accountant",
+            # Bare function nouns, matching the marketing/sales alias style:
+            # "accounting" itself ("Accounting Manager" / "Technical Accounting"
+            # never contain the token "accountant" — word-boundary matching can't
+            # stem) and "finance" ("VP Finance" / "Strategic Finance" /
+            # "Quantitative Finance Analyst" carry no other finance alias).
+            "accounting",
+            "finance",
+            "accounts payable",
+            "accounts receivable",
             "financial analyst",
             "finance manager",
             "controller",
             "auditor",
+            # bare "audit"/"tax" would collide (e.g. "Tax Attorney" is legal);
+            # multi-word forms keep the boundary-matched aliases precise.
+            "internal audit",
             "tax analyst",
+            "tax accountant",
+            "tax manager",
             "fp&a analyst",
             "treasury analyst",
+            "treasurer",
             "bookkeeper",
             "cfo",
         ),
@@ -440,13 +455,22 @@ OCCUPATIONS: tuple[Occupation, ...] = (
         key="consulting",
         label="Consulting",
         aliases=(
-            "consultant",
+            # No bare "consultant": it's the classic generic-collision alias —
+            # "Solutions Consultant" / "Sales Consultant" / "Leasing Consultant"
+            # are pre-sales, sales-floor, and property roles, and they were the
+            # majority of this tag (measured 2026-07-05). Bare "consulting" is
+            # safe: sales roles say "Sales Consultant", never "Sales Consulting",
+            # while firm-side titles do ("Consulting Analyst", "Technology
+            # Consulting Manager").
+            "consulting",
             "management consultant",
             "strategy consultant",
+            "senior consultant",
             "associate consultant",
             "business analyst consultant",
             "engagement manager",
             "principal consultant",
+            "advisory",
         ),
         default_search_queries=(
             "Consultant",
@@ -518,10 +542,18 @@ OCCUPATIONS: tuple[Occupation, ...] = (
         label="Human Resources",
         aliases=(
             "human resources",
+            # Bare "hr" (word-boundary): "HR Coordinator" / "HR Specialist" /
+            # "HR Director" / "HR Analyst" carried no matching alias — the
+            # generalist/business-partner/manager phrases missed every other
+            # HR-prefixed title.
+            "hr",
             "hr generalist",
             "hr business partner",
             "people partner",
             "people operations",
+            "people analytics",
+            "head of people",
+            "chief people officer",
             "talent acquisition",
             "hr manager",
             "chro",
@@ -529,10 +561,17 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "recruiter",
             "recruiting",
             "recruitment",
+            "sourcer",
             "payroll",
             "employee relations",
             "benefits administrator",
+            "total rewards",
+            "hris",
+            # Multi-word compensation forms only: bare "compensation" would
+            # mis-tag insurance "Workers' Compensation" claims roles.
             "compensation analyst",
+            "compensation manager",
+            "compensation and benefits",
         ),
         default_search_queries=(
             "Human Resources",
@@ -702,6 +741,15 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "counsel",
             "general counsel",
             "paralegal",
+            # Bare function nouns, matching the marketing/sales/finance alias
+            # style: "Legal Operations" / "Head of Legal" / "Compliance
+            # Manager" / "Compliance Specialist" carried no matching alias
+            # ("compliance officer" was the only compliance form) and fell
+            # through untagged. Word-boundary matching keeps "paralegal" and
+            # "legally" from matching bare "legal".
+            "legal",
+            "compliance",
+            "litigation",
             "compliance officer",
             "legal analyst",
             "regulatory affairs",
@@ -746,6 +794,11 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "field sales",
             "enterprise sales",
             "sales engineer",
+            # Pre-sales titles that used to mis-tag as consulting via the old
+            # bare-"consultant" alias: a Solutions Consultant demos and closes,
+            # they don't bill engagements.
+            "solutions consultant",
+            "sales consultant",
         ),
         default_search_queries=(
             "Account Executive",
@@ -943,8 +996,66 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "nurse",
             "registered nurse",
             "rn",
+            "lpn",
+            "cna",
             "physician",
+            "surgeon",
             "doctor",
+            # Bare clinical function nouns (word-boundary): the health-system
+            # verticals post whole title families these cover — "Clinical
+            # Resource Manager", "Medical Receptionist", "Patient Service
+            # Representative", "Pharmacy Technician", "Surgical Services".
+            # Measured 2026-07-05: these families were the bulk of the
+            # untagged pool from the ten health-system employers.
+            "clinical",
+            "clinic",
+            "medical",
+            "medicine",
+            "patient",
+            "pharmacy",
+            "surgical",
+            "surgery",
+            "dental",
+            "hygienist",
+            "therapist",
+            "radiology",
+            "technologist",
+            "hospital",
+            "home health",
+            "behavioral health",
+            "mental health",
+            "caregiver",
+            "dietitian",
+            "nutritionist",
+            "phlebotomist",
+            "sonographer",
+            "dosimetrist",
+            "paramedic",
+            "emt",
+            "midwife",
+            # Specialist physicians: titles carry the specialty noun and no
+            # generic keyword ("Gastroenterologist - Marlborough, MA").
+            "cardiologist",
+            "gastroenterologist",
+            "dermatologist",
+            "oncologist",
+            "neurologist",
+            "radiologist",
+            "pathologist",
+            "anesthesiologist",
+            "psychiatrist",
+            "psychologist",
+            "pulmonologist",
+            "urologist",
+            "nephrologist",
+            "ophthalmologist",
+            "endocrinologist",
+            "hematologist",
+            "rheumatologist",
+            "hospitalist",
+            "pediatrician",
+            "obstetrician",
+            "gynecologist",
             "medical assistant",
             "clinical research",
             "pharmacist",

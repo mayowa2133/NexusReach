@@ -171,14 +171,21 @@ async def test_discover_fans_out_locations_and_passes_hint():
         await job_service.discover_jobs(db, uuid.uuid4())
 
     assert mock_search.await_count > 0
+    muse_calls = [
+        c for c in mock_search.await_args_list if c.kwargs["sources"] == ["themuse"]
+    ]
+    seed_calls = [
+        c for c in mock_search.await_args_list if c.kwargs["sources"] != ["themuse"]
+    ]
     seen_locations = set()
-    for call in mock_search.await_args_list:
+    for call in seed_calls:
         kwargs = call.kwargs
         assert kwargs["limit"] == job_service.DISCOVER_LIMIT_PER_SOURCE
         assert kwargs["occupation_hint"] == "sales"
         # sales is non-engineering: all-industry aggregators only, none of the
         # engineering-only boards (which would inject mis-tagged tech roles).
-        assert "themuse" in kwargs["sources"]
+        # The Muse is category-fetched once per occupation (below), not per seed.
+        assert "themuse" not in kwargs["sources"]
         assert "jobicy" not in kwargs["sources"] and "dice" not in kwargs["sources"]
         seen_locations.add(kwargs["location"])
     # base (None) plus the first two target locations - capped fan-out
@@ -186,6 +193,12 @@ async def test_discover_fans_out_locations_and_passes_hint():
     assert "Toronto, ON" in seen_locations
     assert "New York, NY" in seen_locations
     assert "London" not in seen_locations
+    # One deep Muse pull per occupation carrying the seeds' combined budget —
+    # per-seed calls re-fetch the same category pages, so they were removed.
+    assert len(muse_calls) == 1
+    muse_kwargs = muse_calls[0].kwargs
+    assert muse_kwargs["occupation_hint"] == "sales"
+    assert muse_kwargs["limit"] == job_service.DISCOVER_LIMIT_PER_SOURCE * len(seed_calls)
 
 
 # ---------------------------------------------------------------------------
@@ -395,11 +408,20 @@ async def test_discover_routes_nontech_to_broad_aggregators():
     ):
         await job_service.discover_jobs(db, uuid.uuid4())
 
-    # tech-only sources are gone; broad aggregators remain
-    for call in mock_search.await_args_list:
+    # tech-only sources are gone; broad aggregators remain on seed calls, and
+    # The Muse runs as its own single deep per-occupation pull.
+    muse_calls = [
+        c for c in mock_search.await_args_list if c.kwargs["sources"] == ["themuse"]
+    ]
+    seed_calls = [
+        c for c in mock_search.await_args_list if c.kwargs["sources"] != ["themuse"]
+    ]
+    for call in seed_calls:
         srcs = call.kwargs["sources"]
         assert "dice" not in srcs and "simplify" not in srcs and "jobicy" not in srcs
         assert "jsearch" in srcs and "adzuna" in srcs
+    assert len(muse_calls) == 1
+    assert muse_calls[0].kwargs["occupation_hint"] == "healthcare"
     # newgrad + the 100 tech ATS boards are skipped entirely for healthcare
     mock_newgrad.assert_not_awaited()
     mock_ats.assert_not_awaited()

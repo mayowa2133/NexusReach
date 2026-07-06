@@ -150,6 +150,16 @@ async def discover_jobs(
             resolved_occupations,
         )
 
+    # The Muse fetches by *category*, so on the occupation path every seed of the
+    # same occupation resolves to the same category tuple and re-fetches the
+    # identical first pages (measured: 4 marketing seeds -> 1 unique batch).
+    # Pull it once per occupation in step 1b with the occupation's combined seed
+    # budget instead of shallowly per seed.
+    occupation_muse_keys: list[str] = []
+    if not queries and resolved_occupations and "themuse" in discover_sources:
+        discover_sources.remove("themuse")
+        occupation_muse_keys = list(dict.fromkeys(resolved_occupations))
+
     for seed in expanded_seeds:
         try:
             stored = await search.search_jobs(
@@ -166,6 +176,29 @@ async def discover_jobs(
         except Exception:
             await db.rollback()
             logger.exception("Discover failed for query: %s", seed["query"])
+
+    # 1b. The Muse, once per occupation with the combined budget of that
+    #     occupation's seeds (category-fetch source — see step 1 note). The
+    #     deeper single pull harvests pages the per-seed calls never reached.
+    for occ in occupation_muse_keys:
+        seed_count = sum(1 for s in expanded_seeds if s.get("occupation") == occ) or 1
+        occ_query = next(
+            (s["query"] for s in search_list if s.get("occupation") == occ and s.get("query")),
+            occ.replace("_", " "),
+        )
+        try:
+            stored = await search.search_jobs(
+                db,
+                user_id,
+                query=occ_query,
+                sources=["themuse"],
+                limit=constants.DISCOVER_LIMIT_PER_SOURCE * seed_count,
+                occupation_hint=occ,
+            )
+            total_new += len(stored)
+        except Exception:
+            await db.rollback()
+            logger.exception("The Muse occupation discover failed for %s", occ)
 
     # 2. newgrad-jobs.com — tech/new-grad-leaning; only for engineering searches.
     if engineering_relevant:

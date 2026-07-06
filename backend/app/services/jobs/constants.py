@@ -147,7 +147,11 @@ OCCUPATION_VERTICALS: dict[str, frozenset[str]] = {
     "project_management": ALL_NONTECH_VERTICALS,
     "management_executive": ALL_NONTECH_VERTICALS,
     "legal_compliance": frozenset({"finance", "healthcare", "education"}),
-    "consulting": frozenset({"finance", "retail"}),
+    # Consulting's vertical home is the verified consultancy tenants (PwC,
+    # Accenture, Booz Allen, ...); finance kept for in-house strategy roles at
+    # banks. Retail dropped — retailers' "consultant" titles are sales-floor
+    # roles, not the consulting profession.
+    "consulting": frozenset({"consulting", "finance"}),
     "product_management": frozenset({"finance", "retail"}),
     "creatives_design": frozenset({"retail", "education", "healthcare"}),
     # Cross-industry roles concentrated in specific verticals.
@@ -160,7 +164,7 @@ OCCUPATION_VERTICALS: dict[str, frozenset[str]] = {
 # Which provider serves each vertical. Most are Workday curated employers;
 # federal government is served by USAJobs (the official federal board) instead,
 # since agencies don't post on the curated Workday tenants.
-WORKDAY_VERTICALS = frozenset({"healthcare", "education", "finance", "retail"})
+WORKDAY_VERTICALS = frozenset({"healthcare", "education", "finance", "retail", "consulting"})
 
 
 GOVERNMENT_VERTICAL = "government"

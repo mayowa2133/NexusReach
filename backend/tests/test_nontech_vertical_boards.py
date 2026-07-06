@@ -13,7 +13,7 @@ from app.services import job_service
 
 pytestmark = pytest.mark.asyncio
 
-_KNOWN_VERTICALS = {"healthcare", "education", "finance", "retail"}
+_KNOWN_VERTICALS = {"healthcare", "education", "finance", "retail", "consulting"}
 
 
 # ---------------------------------------------------------------------------

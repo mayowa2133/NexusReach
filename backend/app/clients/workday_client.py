@@ -126,6 +126,20 @@ WORKDAY_NONTECH_COMPANIES: list[dict[str, str]] = [
     {"label": "Meijer", "company": "meijer", "wd": "wd5", "site": "Meijer_Stores_Hourly", "vertical": "retail"},
     {"label": "Gap Inc", "company": "gapinc", "wd": "wd1", "site": "GAPINC", "vertical": "retail"},
     {"label": "Williams-Sonoma", "company": "williams", "wd": "wd5", "site": "External", "vertical": "retail"},
+    # Professional services / consulting (every config live-verified 2026-07-05).
+    # MBB and Deloitte post on bespoke ATSes, but these large consultancies run
+    # public Workday tenants — the curated substrate for the consulting
+    # occupation the way health systems are for healthcare. The Muse has no
+    # consulting category at all, so without these the category depends
+    # entirely on the paid aggregators. (Accenture is already in the tech
+    # WORKDAY_COMPANIES registry, so it's deliberately not repeated here.)
+    {"label": "PwC US", "company": "pwc", "wd": "wd3", "site": "Global_Experienced_Careers", "vertical": "consulting"},
+    {"label": "Booz Allen Hamilton", "company": "bah", "wd": "wd1", "site": "BAH_Jobs", "vertical": "consulting"},
+    {"label": "Marsh McLennan", "company": "mmc", "wd": "wd1", "site": "MMC", "vertical": "consulting"},
+    {"label": "Guidehouse", "company": "guidehouse", "wd": "wd1", "site": "External", "vertical": "consulting"},
+    {"label": "Gartner", "company": "gartner", "wd": "wd5", "site": "EXT", "vertical": "consulting"},
+    {"label": "ICF", "company": "icf", "wd": "wd5", "site": "ICFExternal_Career_Site", "vertical": "consulting"},
+    {"label": "Huron Consulting", "company": "huron", "wd": "wd1", "site": "huroncareers", "vertical": "consulting"},
 ]
 
 

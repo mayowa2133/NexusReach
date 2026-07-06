@@ -31,7 +31,11 @@ logger = logging.getLogger(__name__)
 
 _BASE_URL = "https://www.themuse.com/api/public/jobs"
 _PER_PAGE = 20  # The Muse returns 20 results per page (not configurable).
-_MAX_PAGES_HARD_CAP = 12  # Absolute page ceiling per (category, level) spec.
+# Absolute page ceiling per (category, level) spec. Muse categories are big
+# (Advertising and Marketing ~294 pages) and polluted — the relevance gate
+# rejects ~60% of raw titles on marketing (measured 2026-07-05) — so a shallow
+# ceiling starves the harvest long before the supply runs out.
+_MAX_PAGES_HARD_CAP = 30
 # Early-career roles to harvest per call when boost_early_career is set. The Muse
 # carries hundreds-to-thousands of entry-level/internship roles per non-tech
 # category (e.g. Healthcare ~3.6k internships, Marketing ~440), so this is the
@@ -260,12 +264,13 @@ async def _fetch_category(
 
     ``keep`` is applied per normalized job so we page deeper when a relevance
     gate is filtering hard, instead of returning a thin under-filled batch. The
-    page ceiling scales with ``max_results`` (×2 to absorb gate filtering) so a
-    deep early-career target genuinely harvests The Muse's depth.
+    page ceiling scales with ``max_results`` (×3: the gate rejects ~60% of raw
+    titles on polluted categories like marketing, so ×2 under-provisioned) so a
+    deep target genuinely harvests The Muse's depth.
     """
     max_pages = min(
         _MAX_PAGES_HARD_CAP,
-        max(1, (max_results * 2 + _PER_PAGE - 1) // _PER_PAGE),
+        max(1, (max_results * 3 + _PER_PAGE - 1) // _PER_PAGE),
     )
     collected: list[dict] = []
     for page in range(1, max_pages + 1):
