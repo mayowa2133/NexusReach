@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     dev_user_id: uuid.UUID = uuid.UUID("00000000-0000-0000-0000-000000000001")
     dev_user_email: str = "dev@nexusreach.local"
 
+    # Shared secret guarding the waitlist admin export endpoint
+    # (GET /api/waitlist). Unset => export is disabled (returns 404).
+    waitlist_admin_token: str = ""
+
     # External APIs (populated later per phase)
     apollo_api_key: str = ""
     apollo_master_api_key: str = ""

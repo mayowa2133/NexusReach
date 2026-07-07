@@ -209,6 +209,7 @@ NexusReach defaults to draft-first workflows. Users can optionally enable delaye
   - generated local connector commands for CDP or dedicated-profile browser sync
 - Settings includes Account Data controls for JSON export and permanent account deletion.
 - Public `/privacy` and `/terms` routes exist for launch compliance.
+- **Pre-launch waitlist.** The landing page is in pre-launch marketing mode: a top banner + every primary CTA ("Join the waitlist" in nav/hero/closer/footer) open `WaitlistModal` (`frontend/src/components/WaitlistModal.tsx`, styled with `.lp-wl-*` classes in `landing.css`), which collects name + email (required) and LinkedIn / current title / target role / note (optional) and POSTs to the **public, unauthenticated** `POST /api/waitlist` (rate-limited 10/min/IP, idempotent per lowercased email — resubmits upsert, never blank out prior fields). **Storage is switchable at build time via `VITE_WAITLIST_ENDPOINT`:** when set to a Google Apps Script `/exec` URL (see `frontend/waitlist-google-apps-script.gs`), the modal POSTs signups straight to a **Google Sheet** (no backend, no Supabase, no Railway — this is the pre-launch default so marketing runs with the app infra paused; submit uses `mode:'no-cors'` + `text/plain` to dodge the Apps Script CORS-preflight limitation, so it can't read the response and always optimistically confirms). When **unset** (local dev), it falls back to the app's own `POST /api/waitlist` → `waitlist_signups` table (`WaitlistSignup` model; RLS enabled deny-all in migration `057`, non-user-scoped by design since submitters have no account); export those via `GET /api/waitlist` with the `X-Admin-Token` header matching `NEXUSREACH_WAITLIST_ADMIN_TOKEN` (404 when unset). The backend path stays as a dormant, fully-working alternative for when Supabase is un-paused. NB: the DB column is `current_title`, **not** `current_role` (reserved SQL keyword); the LinkedIn input is `type="text"` (not `url`) so scheme-less `linkedin.com/in/...` paste isn't rejected by browser validation. To flip back to open signup, restore the `/signup` links on the CTAs.
 - Frontend Sentry and PostHog initialize only when configured. PostHog autocapture
   and session recording are disabled by default.
 
@@ -399,6 +400,10 @@ NEXUSREACH_AUTH_MODE=supabase
 NEXUSREACH_DEV_AUTH_BYPASS_ENABLED=false
 NEXUSREACH_DEV_USER_ID=00000000-0000-0000-0000-000000000001
 NEXUSREACH_DEV_USER_EMAIL=dev@nexusreach.local
+# Shared secret for the waitlist admin export (GET /api/waitlist, X-Admin-Token
+# header). Unset => export endpoint returns 404. Public POST /api/waitlist is
+# unauthenticated regardless.
+NEXUSREACH_WAITLIST_ADMIN_TOKEN=
 NEXUSREACH_APP_RELEASE=...
 NEXUSREACH_SENTRY_DSN=...
 NEXUSREACH_SENTRY_TRACES_SAMPLE_RATE=0.05
@@ -482,6 +487,11 @@ VITE_SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE=1
 VITE_POSTHOG_KEY=...
 VITE_POSTHOG_HOST=https://us.i.posthog.com
 VITE_ANALYTICS_ENABLED=true
+# Pre-launch waitlist sink. Set to a Google Apps Script /exec URL to send
+# signups straight to a Google Sheet (no backend/Supabase/Railway needed —
+# see frontend/waitlist-google-apps-script.gs). Unset => the modal falls back
+# to the app's own POST /api/waitlist.
+VITE_WAITLIST_ENDPOINT=
 ```
 
 ## Critical implementation truths

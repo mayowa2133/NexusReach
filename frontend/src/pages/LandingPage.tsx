@@ -1,9 +1,18 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { WaitlistModal } from '@/components/WaitlistModal';
 import './landing.css';
 
 export function LandingPage() {
   const [scrolled, setScrolled] = useState(false);
+  const [waitlistOpen, setWaitlistOpen] = useState(false);
+  const [waitlistSource, setWaitlistSource] = useState('landing');
+
+  const openWaitlist = useCallback((source: string) => {
+    setWaitlistSource(source);
+    setWaitlistOpen(true);
+  }, []);
+  const closeWaitlist = useCallback(() => setWaitlistOpen(false), []);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
@@ -22,7 +31,14 @@ export function LandingPage() {
   }, []);
 
   return (
-    <div className="lp">
+    <div className="lp has-banner">
+      <div className="lp-banner">
+        <b>NexusReach is launching soon.</b> Get early access before anyone else —
+        <button className="lp-banner-cta" onClick={() => openWaitlist('banner')}>
+          join the waitlist
+        </button>
+      </div>
+
       <nav className={scrolled ? 'lp-nav scrolled' : 'lp-nav'}>
         <div className="wrap nav-inner">
           <Link className="wordmark" to="/">
@@ -34,7 +50,9 @@ export function LandingPage() {
             <a className="nav-link" href="#trust">Trust</a>
             <a className="nav-link" href="#faq">FAQ</a>
             <Link className="nav-link" to="/login">Log in</Link>
-            <Link className="btn btn-primary" to="/signup">Join the beta</Link>
+            <button className="btn btn-primary" onClick={() => openWaitlist('nav')}>
+              Join the waitlist
+            </button>
           </div>
         </div>
       </nav>
@@ -53,12 +71,12 @@ export function LandingPage() {
               network, a safe email, and a drafted message. <strong>Nothing sends without you.</strong>
             </p>
             <div className="hero-ctas">
-              <Link className="btn btn-primary" to="/signup">
-                Join the beta <span className="arrow">→</span>
-              </Link>
+              <button className="btn btn-primary" onClick={() => openWaitlist('hero')}>
+                Join the waitlist <span className="arrow">→</span>
+              </button>
               <a className="btn btn-ghost" href="#how">See how it works</a>
             </div>
-            <p className="micro">FREE DURING BETA · NO CREDIT CARD · YOU APPROVE EVERY MESSAGE</p>
+            <p className="micro">LAUNCHING SOON · FREE AT LAUNCH · WAITLIST GETS FIRST ACCESS</p>
           </div>
 
           <div className="figure" style={{ paddingBottom: 34 }}>
@@ -747,19 +765,19 @@ export function LandingPage() {
       {/* ============================ FINAL CTA ============================ */}
       <section className="closer">
         <div className="wrap closer-inner">
-          <span className="mono-label">07 <span className="tick">·</span> Join the beta</span>
-          <h2 style={{ marginTop: 16 }}>The posting is public. The path isn't. Now it is.</h2>
+          <span className="mono-label">07 <span className="tick">·</span> Join the waitlist</span>
+          <h2 style={{ marginTop: 16 }}>The posting is public. The path isn't. Soon it will be.</h2>
           <p className="lede">
             Three right people per job. Evidence for every match. A draft worth sending — sent only
-            by you.
+            by you. Be first in line when NexusReach opens.
           </p>
           <div className="hero-ctas">
-            <Link className="btn btn-primary" to="/signup">
-              Join the beta <span className="arrow">→</span>
-            </Link>
+            <button className="btn btn-primary" onClick={() => openWaitlist('closer')}>
+              Join the waitlist <span className="arrow">→</span>
+            </button>
             <a className="btn btn-ghost" href="#how">See how it works</a>
           </div>
-          <p className="micro">FREE DURING BETA · NO CREDIT CARD · NOTHING SENDS WITHOUT YOUR APPROVAL</p>
+          <p className="micro">LAUNCHING SOON · FREE AT LAUNCH · NOTHING SENDS WITHOUT YOUR APPROVAL</p>
         </div>
       </section>
 
@@ -857,10 +875,14 @@ export function LandingPage() {
             <Link to="/privacy">Privacy</Link>
             <Link to="/terms">Terms</Link>
             <Link to="/login">Log in</Link>
-            <Link to="/signup">Join the beta</Link>
+            <button className="lp-foot-link-btn" onClick={() => openWaitlist('footer')}>
+              Join the waitlist
+            </button>
           </div>
         </div>
       </footer>
+
+      {waitlistOpen && <WaitlistModal onClose={closeWaitlist} source={waitlistSource} />}
     </div>
   );
 }

@@ -39,6 +39,7 @@ from app.routers import (
     triage,
     occupations,
     account,
+    waitlist,
 )
 
 logger = logging.getLogger(__name__)
@@ -111,6 +112,7 @@ app.include_router(interview_prep.router, prefix="/api")
 app.include_router(triage.router, prefix="/api")
 app.include_router(occupations.router, prefix="/api")
 app.include_router(account.router, prefix="/api")
+app.include_router(waitlist.router, prefix="/api")
 
 
 @app.get("/api/health")

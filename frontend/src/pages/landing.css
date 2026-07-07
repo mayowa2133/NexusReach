@@ -347,3 +347,102 @@
 .lp .foot-links { display: flex; gap: 24px; flex-wrap: wrap; }
 .lp .foot-links a { font-size: 13.5px; color: var(--lp-ink-55); text-decoration: none; }
 .lp .foot-links a:hover { color: var(--lp-ink); }
+.lp .foot-links .lp-foot-link-btn {
+  font-family: var(--lp-sans); font-size: 13.5px; color: var(--lp-ink-55);
+  background: none; border: none; padding: 0; cursor: pointer;
+}
+.lp .foot-links .lp-foot-link-btn:hover { color: var(--lp-ink); }
+
+/* ===================== pre-launch waitlist banner ===================== */
+.lp .lp-banner {
+  background: var(--lp-green); color: #fff;
+  font-family: var(--lp-mono); font-size: 11.5px; letter-spacing: 0.04em;
+  text-align: center; padding: 9px 16px; line-height: 1.5;
+}
+.lp .lp-banner b { font-weight: 600; }
+.lp .lp-banner .lp-banner-cta {
+  background: none; border: none; color: #fff; cursor: pointer;
+  font-family: inherit; font-size: inherit; letter-spacing: inherit;
+  text-decoration: underline; text-underline-offset: 2px; padding: 0 0 0 6px;
+}
+.lp .lp-banner .lp-banner-cta:hover { opacity: 0.82; }
+/* When the top banner is present, the fixed nav sits below it. */
+.lp.has-banner .lp-nav { top: 36px; }
+
+/* Reuse .btn as a button (not just a link) for CTAs that open the modal. */
+.lp button.btn { cursor: pointer; }
+
+/* ===================== waitlist modal ===================== */
+.lp-wl-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(27, 26, 23, 0.46);
+  backdrop-filter: blur(3px);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 40px 20px; overflow-y: auto;
+  font-family: var(--lp-sans); color: var(--lp-ink);
+  animation: lp-wl-fade 140ms ease-out;
+}
+@keyframes lp-wl-fade { from { opacity: 0; } to { opacity: 1; } }
+.lp-wl-modal {
+  position: relative; width: 100%; max-width: 480px; margin: auto;
+  background: var(--lp-card); border: 1px solid var(--lp-line);
+  border-radius: var(--lp-r-m); padding: 32px 30px 26px;
+  box-shadow: 0 24px 60px -20px rgba(27, 26, 23, 0.4);
+  animation: lp-wl-rise 180ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+@keyframes lp-wl-rise { from { transform: translateY(10px); opacity: 0; } to { transform: none; opacity: 1; } }
+.lp-wl-close {
+  position: absolute; top: 14px; right: 14px;
+  background: none; border: none; cursor: pointer;
+  font-size: 14px; color: var(--lp-ink-40); line-height: 1;
+  padding: 6px; border-radius: var(--lp-r-s);
+}
+.lp-wl-close:hover { color: var(--lp-ink); background: var(--lp-paper-2); }
+.lp-wl-head { margin-bottom: 20px; }
+.lp-wl-head .mono-label {
+  font-family: var(--lp-mono); font-size: 10.5px; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--lp-green); display: block;
+}
+.lp-wl-head h3 { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; margin: 8px 0 8px; }
+.lp-wl-head p { font-size: 14.5px; color: var(--lp-ink-70); line-height: 1.55; }
+.lp-wl-form { display: flex; flex-direction: column; gap: 14px; }
+.lp-wl-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.lp-wl-field { display: flex; flex-direction: column; gap: 6px; }
+.lp-wl-field > span { font-size: 12.5px; font-weight: 600; color: var(--lp-ink-70); }
+.lp-wl-field > span em { color: var(--lp-green); font-style: normal; }
+.lp-wl-field > span .opt {
+  font-family: var(--lp-mono); font-size: 10px; font-weight: 400;
+  color: var(--lp-ink-40); letter-spacing: 0.04em; margin-left: 4px;
+}
+.lp-wl-field input, .lp-wl-field textarea {
+  font-family: var(--lp-sans); font-size: 15px; color: var(--lp-ink);
+  background: var(--lp-paper); border: 1px solid var(--lp-line);
+  border-radius: var(--lp-r-s); padding: 10px 12px; width: 100%;
+  outline: none; transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.lp-wl-field textarea { resize: vertical; min-height: 44px; line-height: 1.5; }
+.lp-wl-field input:focus, .lp-wl-field textarea:focus {
+  border-color: var(--lp-green);
+  box-shadow: 0 0 0 3px var(--lp-green-tint);
+  background: var(--lp-card);
+}
+.lp-wl-field input::placeholder, .lp-wl-field textarea::placeholder { color: var(--lp-ink-40); }
+.lp-wl-error {
+  font-size: 13px; color: #9b1c1c; background: rgba(155, 28, 28, 0.08);
+  border: 1px solid rgba(155, 28, 28, 0.2); border-radius: var(--lp-r-s);
+  padding: 9px 12px;
+}
+.lp-wl-submit { justify-content: center; width: 100%; margin-top: 4px; }
+.lp-wl-submit:disabled { opacity: 0.6; cursor: default; }
+.lp-wl-fine {
+  font-family: var(--lp-mono); font-size: 10.5px; letter-spacing: 0.03em;
+  color: var(--lp-ink-40); text-align: center; margin-top: 2px;
+}
+.lp-wl-success { text-align: center; padding: 8px 4px 4px; }
+.lp-wl-success .stamp { display: inline-block; margin-bottom: 14px; }
+.lp-wl-success h3 { font-size: 23px; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 10px; }
+.lp-wl-success p { font-size: 15px; color: var(--lp-ink-70); line-height: 1.6; max-width: 40ch; margin: 0 auto 22px; }
+@media (max-width: 520px) {
+  .lp-wl-modal { padding: 28px 20px 22px; }
+  .lp-wl-row { grid-template-columns: 1fr; }
+}
