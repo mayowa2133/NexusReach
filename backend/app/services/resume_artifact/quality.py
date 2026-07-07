@@ -254,8 +254,25 @@ def select_quality_profile(parsed: dict[str, Any], job: object) -> QualityProfil
     return EARLY_CAREER_TECHNICAL if years < 3.0 else EXPERIENCED_TECHNICAL
 
 
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_HTML_ENTITY_RE = re.compile(r"&[#a-z0-9]+;", re.IGNORECASE)
+# Bare markup/CSS tokens that survive when a scrape strips the surrounding
+# `<...>` / `&...;` (e.g. "&nbsp;" -> "nbsp", "<span>" -> "span"). These are not
+# role requirements and must never become job terms a resume is scored against.
+_MARKUP_STOPWORDS = {
+    "nbsp", "span", "div", "href", "amp", "quot", "apos", "ldquo", "rdquo",
+    "rsquo", "lsquo", "ndash", "mdash", "bull", "middot", "hellip",
+    "strong", "colspan", "rowspan", "tbody", "thead", "nbs",
+    "min-height", "max-width", "min-width", "max-height", "font-size",
+    "line-height", "margin", "padding", "border", "width", "height",
+    "style", "class", "rgb", "rgba", "px", "em", "rem",
+}
+
+
 def _job_terms(job: object) -> list[str]:
-    description = _text(getattr(job, "description", ""))
+    raw_description = _text(getattr(job, "description", ""))
+    # Strip HTML tags and entities so scrape residue can't pollute the terms.
+    description = _HTML_ENTITY_RE.sub(" ", _HTML_TAG_RE.sub(" ", raw_description))
     extracted = extract_jd_must_surface(description).get("must_surface") or []
     ordered = [
         _text(term)
@@ -275,7 +292,7 @@ def _job_terms(job: object) -> list[str]:
     original: dict[str, str] = {}
     for token in body_tokens:
         key = token.lower().strip("./-")
-        if key in _JOB_STOPWORDS or len(key) < 4:
+        if key in _JOB_STOPWORDS or key in _MARKUP_STOPWORDS or len(key) < 4:
             continue
         counts[key] = counts.get(key, 0) + 1
         original.setdefault(key, token.strip("./-"))
@@ -283,6 +300,7 @@ def _job_terms(job: object) -> list[str]:
     title_candidates = [
         token for token in title_tokens
         if token.lower().strip("./-") not in _JOB_STOPWORDS
+        and token.lower().strip("./-") not in _MARKUP_STOPWORDS
     ]
     # Body candidates: repeated tokens (>= 2 = emphasized) OR longer domain nouns
     # seen once ("reconciliation", "compliance", "curriculum", "assessment").

@@ -550,3 +550,25 @@ def test_inferred_addition_supported_by_source_is_not_stripped():
     assert "GraphQL" in excluded
     # ...but the one the candidate actually lists is not stripped.
     assert "JavaScript" not in excluded
+
+
+def test_html_scrape_residue_never_becomes_a_job_term():
+    """Scraped JDs leave markup residue; it must not be scored against a resume.
+
+    Regression: a nursing JD scored a resume on whether it contained "span" and
+    "nbsp" (from stripped <span>/&nbsp;). Markup tokens are not role requirements.
+    """
+    job = SimpleNamespace(
+        title="Registered Nurse",
+        description=(
+            "<div><span>Provide direct patient care.</span></div>&nbsp;&nbsp; "
+            "Administer medications and monitor patient vital signs. nbsp span "
+            "Collaborate with physicians on care plans in the ICU."
+        ),
+        tags=["occupation:healthcare"],
+    )
+    terms = [t.lower() for t in _job_terms(job)]
+    for junk in ("span", "nbsp", "div", "href", "style"):
+        assert junk not in terms, f"{junk!r} leaked into {terms}"
+    # Real clinical terms still surface.
+    assert any(t in terms for t in ("patient", "medications", "care"))
