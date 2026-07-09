@@ -64,13 +64,13 @@ export function LandingPage() {
         <div className="wrap hero-grid">
           <div>
             <span className="mono-label">
-              For serious job seekers <span className="tick">·</span> draft-first, always
+              For serious job seekers <span className="tick">·</span> draft-first by default
             </span>
             <h1>Every job posting has people behind it. Solomon finds them.</h1>
             <p className="lede">
               For each job you're targeting: the recruiter, the likely hiring manager, and a peer
               on the team — with evidence for why they're right, a warm path from your own
-              network, a safe email, and a drafted message. <strong>Nothing sends without you.</strong>
+              network, a safe email, and a drafted message. <strong>You approve every send.</strong>
             </p>
             <div className="hero-ctas">
               <button className="btn btn-primary" onClick={() => openWaitlist('hero')}>
@@ -539,8 +539,8 @@ export function LandingPage() {
                 threaded straight into your draft where it belongs.
               </p>
               <p className="lede" style={{ fontSize: 17, marginTop: 18 }}>
-                <strong>The privacy line is absolute:</strong> your LinkedIn password, cookies, and
-                session never touch our servers. Only your normalized connection list is uploaded —
+                <strong>Your credentials stay yours:</strong> your LinkedIn password, cookies, and
+                session don't touch our servers. Only your normalized connection list is uploaded —
                 and one click deletes it.
               </p>
             </div>
@@ -735,8 +735,8 @@ export function LandingPage() {
           <span className="mono-label">07 <span className="tick">·</span> Join the waitlist</span>
           <h2 style={{ marginTop: 16 }}>The posting is public. The path isn't. Soon it will be.</h2>
           <p className="lede">
-            Three right people per job. Evidence for every match. A draft worth sending — sent only
-            by you. Be first in line when Solomon opens.
+            Three right people per job. Evidence for every match. A draft worth sending — on your
+            go-ahead. Be first in line when Solomon opens.
           </p>
           <div className="hero-ctas">
             <button className="btn btn-primary" onClick={() => openWaitlist('closer')}>
@@ -744,7 +744,7 @@ export function LandingPage() {
             </button>
             <a className="btn btn-ghost" href="#how">See how it works</a>
           </div>
-          <p className="micro">LAUNCHING SOON · FREE AT LAUNCH · NOTHING SENDS WITHOUT YOUR APPROVAL</p>
+          <p className="micro">LAUNCHING SOON · FREE AT LAUNCH · YOU APPROVE EVERY SEND</p>
         </div>
       </section>
 
@@ -757,11 +757,12 @@ export function LandingPage() {
           </div>
           <div className="faq-list">
             <details>
-              <summary>Is this a mass-email or auto-apply tool? <span className="ind">+</span></summary>
+              <summary>Is this a mass-email or spam tool? <span className="ind">+</span></summary>
               <div className="a">
                 No — deliberately. Solomon finds a small number of well-evidenced contacts per
-                job and drafts individual messages. Nothing sends without your approval, and there
-                is no bulk send. If you want to blast 500 strangers, this is the wrong tool.
+                job and drafts individual messages, not a spray list. Any sending automation is
+                opt-in and stays under your control. If you want to blast 500 strangers, this is
+                the wrong tool.
               </div>
             </details>
             <details>
@@ -776,10 +777,10 @@ export function LandingPage() {
             <details>
               <summary>Do you log into my LinkedIn? Is my account at risk? <span className="ind">+</span></summary>
               <div className="a">
-                No. We never ask for your LinkedIn password and never store cookies or sessions.
-                Connection import is either a CSV you export yourself from LinkedIn's official
-                data-export, or a small connector that runs on your own computer and uploads only
-                the normalized connection list. One click deletes it.
+                No. We don't ask for your LinkedIn password, and we don't store your cookies or
+                sessions. Connection import is either a CSV you export yourself from LinkedIn's
+                official data-export, or a small connector that runs on your own computer and
+                uploads only the normalized connection list. One click deletes it.
               </div>
             </details>
             <details>
