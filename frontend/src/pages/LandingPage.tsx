@@ -596,8 +596,7 @@ export function LandingPage() {
             <span className="mono-label">05 <span className="tick">·</span> Hard lines</span>
             <h2>What Solomon will never do.</h2>
             <p className="lede">
-              The fastest way to ruin networking is to automate the wrong half of it. So we drew
-              hard lines and built them into the product:
+              Trust comes down to what a tool refuses to do. These are the lines we won't cross:
             </p>
           </div>
 
@@ -606,45 +605,11 @@ export function LandingPage() {
               <div className="refusal">
                 <span className="x">✕</span>
                 <div>
-                  <div className="t">Never sends without you.</div>
-                  <div className="s">
-                    Every message is a draft until you approve it. Optional delayed send exists —
-                    with a cancel window — but the default is always your finger on the button.
-                  </div>
-                </div>
-              </div>
-              <div className="refusal">
-                <span className="x">✕</span>
-                <div>
-                  <div className="t">Never does volume.</div>
-                  <div className="s">
-                    A handful of evidenced contacts per job. There is no blast button, and there
-                    never will be.
-                  </div>
-                </div>
-              </div>
-              <div className="refusal">
-                <span className="x">✕</span>
-                <div>
                   <div className="t">Refuses bad emails.</div>
                   <div className="s">
                     Ambiguous domain? The guess is withheld and labeled — not handed to you to
                     bounce under your name.
                   </div>
-                </div>
-              </div>
-              <div className="refusal">
-                <span className="x">✕</span>
-                <div>
-                  <div className="t">Never auto-applies.</div>
-                  <div className="s">Your applications, your words, your name.</div>
-                </div>
-              </div>
-              <div className="refusal">
-                <span className="x">✕</span>
-                <div>
-                  <div className="t">Never touches your LinkedIn login.</div>
-                  <div className="s">No passwords, no cookies, no sessions — ever, by architecture.</div>
                 </div>
               </div>
               <div className="refusal">
