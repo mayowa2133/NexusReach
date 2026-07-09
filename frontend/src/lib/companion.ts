@@ -80,7 +80,7 @@ async function sendCompanionRequest<T>(
   return new Promise<T>((resolve, reject) => {
     const timer = window.setTimeout(() => {
       window.removeEventListener('message', onMessage);
-      reject(new Error('NexusReach Companion did not respond. Make sure the extension is installed.'));
+      reject(new Error('Solomon Companion did not respond. Make sure the extension is installed.'));
     }, timeoutMs);
 
     const onMessage = (event: MessageEvent<CompanionResponseEnvelope<T>>) => {
@@ -97,7 +97,7 @@ async function sendCompanionRequest<T>(
         return;
       }
 
-      reject(new Error(event.data.error || 'NexusReach Companion request failed.'));
+      reject(new Error(event.data.error || 'Solomon Companion request failed.'));
     };
 
     window.addEventListener('message', onMessage);

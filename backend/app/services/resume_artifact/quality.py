@@ -32,7 +32,7 @@ SOURCE_ATTRIBUTION = {
     "url": "https://github.com/interviewstreet/hiring-agent",
     "license": "MIT",
     "adaptation": (
-        "HackerRank-inspired early-career category balance with NexusReach "
+        "HackerRank-inspired early-career category balance with Solomon "
         "occupation-aware profiles, job-fit, parseability, and truthfulness gates."
     ),
 }

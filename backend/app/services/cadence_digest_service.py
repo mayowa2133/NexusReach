@@ -161,7 +161,7 @@ def _render_html(actions: list[NextAction], user_email: str) -> str:
   {body}
   <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0 12px">
   <p style="color:#9ca3af;font-size:12px;margin:0">
-    Sent by NexusReach weekly cadence digest. Turn off in Settings → Cadence Thresholds.
+    Sent by Solomon weekly cadence digest. Turn off in Settings → Cadence Thresholds.
   </p>
 </div>
 """
@@ -285,7 +285,7 @@ async def send_cadence_digest_for_user(
     if not user_email:
         return {"sent": False, "error": "no_user_email"}
 
-    subject = f"NexusReach: {len(actions)} outreach action{'s' if len(actions) != 1 else ''} this week"
+    subject = f"Solomon: {len(actions)} outreach action{'s' if len(actions) != 1 else ''} this week"
     html_body = _render_html(actions, user_email)
     text_body = _render_text(actions)
 

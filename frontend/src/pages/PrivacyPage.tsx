@@ -2,12 +2,12 @@ import { Link } from 'react-router-dom';
 
 const sections = [
   {
-    title: 'Data NexusReach Collects',
+    title: 'Data Solomon Collects',
     body: [
       'Account and authentication data, including your email address and Supabase user identifier.',
       'Profile, goals, resume content, stories, job preferences, saved jobs, saved companies, contacts, message drafts, outreach activity, notifications, and generated artifacts you create or import.',
       'Email integration metadata and encrypted Gmail or Outlook refresh tokens when you connect an inbox. OAuth refresh tokens are not included in account exports.',
-      'LinkedIn graph rows you upload or sync locally, limited to normalized first-degree connection data. NexusReach does not store LinkedIn cookies, credentials, or browser sessions.',
+      'LinkedIn graph rows you upload or sync locally, limited to normalized first-degree connection data. Solomon does not store LinkedIn cookies, credentials, or browser sessions.',
       'Usage, error, and performance events from the app and API so the product can be operated reliably.',
     ],
   },
@@ -22,8 +22,8 @@ const sections = [
   {
     title: 'Processors and Integrations',
     body: [
-      'NexusReach uses Supabase for authentication and hosted Postgres, Railway for backend services, Vercel for frontend hosting, Redis for queues and caching, Sentry for error monitoring, and PostHog for privacy-conscious product analytics.',
-      'When enabled or configured, NexusReach may call Gmail, Microsoft Graph, Apollo, SearXNG, Serper, Brave Search, Tavily, Proxycurl, Hunter, GitHub, Crawl4AI, Firecrawl, and supported job boards or ATS providers to deliver product features.',
+      'Solomon uses Supabase for authentication and hosted Postgres, Railway for backend services, Vercel for frontend hosting, Redis for queues and caching, Sentry for error monitoring, and PostHog for privacy-conscious product analytics.',
+      'When enabled or configured, Solomon may call Gmail, Microsoft Graph, Apollo, SearXNG, Serper, Brave Search, Tavily, Proxycurl, Hunter, GitHub, Crawl4AI, Firecrawl, and supported job boards or ATS providers to deliver product features.',
       'Third-party services receive only the data needed for the specific feature request, such as a company, job URL, search query, public profile URL, email candidate, or email draft action.',
     ],
   },
@@ -31,7 +31,7 @@ const sections = [
     title: 'User Controls',
     body: [
       'You can export your account data from Settings as JSON.',
-      'You can delete your account from Settings. Deletion removes your Supabase auth identity and app-owned NexusReach data, including encrypted email tokens and imported LinkedIn graph rows.',
+      'You can delete your account from Settings. Deletion removes your Supabase auth identity and app-owned Solomon data, including encrypted email tokens and imported LinkedIn graph rows.',
       'You can disconnect Gmail or Outlook, clear LinkedIn graph data, and cancel scheduled delayed sends before they go out.',
       'Some provider logs, backups, and security records may persist for a limited period when required for reliability, fraud prevention, billing, legal, or abuse-response reasons.',
     ],
@@ -41,7 +41,7 @@ const sections = [
     body: [
       'OAuth refresh tokens are encrypted at rest with versioned application keys.',
       'Production access requires Supabase authentication. Development bypasses must not be used for public deployment.',
-      'NexusReach keeps account data while your account is active and deletes app-owned data when you request account deletion, subject to backups and legally required retention.',
+      'Solomon keeps account data while your account is active and deletes app-owned data when you request account deletion, subject to backups and legally required retention.',
     ],
   },
 ];
@@ -52,14 +52,14 @@ export function PrivacyPage() {
       <div className="mx-auto max-w-3xl space-y-8">
         <header className="space-y-3">
           <Link to="/dashboard" className="text-sm font-medium text-primary underline-offset-4 hover:underline">
-            NexusReach
+            Solomon
           </Link>
           <div className="space-y-2">
             <h1 className="text-3xl font-semibold tracking-tight">Privacy Policy</h1>
             <p className="text-sm text-muted-foreground">Effective May 24, 2026</p>
           </div>
           <p className="text-muted-foreground">
-            NexusReach is a job-seeker networking assistant. This policy
+            Solomon is a job-seeker networking assistant. This policy
             explains what data the app collects, why it is used, and which
             controls are available to account holders.
           </p>
@@ -81,7 +81,7 @@ export function PrivacyPage() {
             <h2 className="text-xl font-semibold tracking-tight">Contact</h2>
             <p className="text-sm leading-6 text-muted-foreground">
               For privacy requests that cannot be completed in Settings, contact
-              the NexusReach operator using the support channel provided with
+              the Solomon operator using the support channel provided with
               your account or deployment.
             </p>
           </section>

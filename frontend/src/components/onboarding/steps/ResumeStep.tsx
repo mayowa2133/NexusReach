@@ -54,7 +54,7 @@ export function ResumeStep({ onNext, onSkip, isUploading = false }: ResumeStepPr
         </div>
         <h2 className="text-xl font-bold">Add your resume</h2>
         <p className="text-sm text-muted-foreground">
-          NexusReach will parse it for match scoring and profile autofill.
+          Solomon will parse it for match scoring and profile autofill.
         </p>
       </div>
 

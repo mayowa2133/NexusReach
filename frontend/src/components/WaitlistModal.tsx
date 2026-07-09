@@ -152,8 +152,8 @@ export function WaitlistModal({ onClose, source }: WaitlistModalProps) {
             </h3>
             <p>
               {alreadyOnList
-                ? "We've got your details — no need to sign up twice. We'll email you the moment NexusReach opens."
-                : "Thanks for joining. We'll email you the moment NexusReach opens — you'll be among the first invited."}
+                ? "We've got your details — no need to sign up twice. We'll email you the moment Solomon opens."
+                : "Thanks for joining. We'll email you the moment Solomon opens — you'll be among the first invited."}
             </p>
             <button className="btn btn-primary" onClick={onClose}>
               Done
@@ -165,7 +165,7 @@ export function WaitlistModal({ onClose, source }: WaitlistModalProps) {
               <span className="mono-label">Pre-launch · limited early access</span>
               <h3 id={titleId}>Join the waitlist</h3>
               <p>
-                NexusReach isn't open to everyone yet. Leave your details and we'll
+                Solomon isn't open to everyone yet. Leave your details and we'll
                 invite you at launch — first access goes to the waitlist.
               </p>
             </div>
@@ -254,7 +254,7 @@ export function WaitlistModal({ onClose, source }: WaitlistModalProps) {
                   onChange={update('note')}
                   maxLength={2000}
                   rows={2}
-                  placeholder="What you're hoping NexusReach helps you with…"
+                  placeholder="What you're hoping Solomon helps you with…"
                 />
               </label>
 

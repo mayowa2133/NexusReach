@@ -117,7 +117,7 @@ function ResumeAiAssistCard() {
           <div className="space-y-1">
             <div className="font-medium">Auto-use strong existing resumes</div>
             <p className="text-xs text-muted-foreground">
-              When on, NexusReach will reuse a saved resume instead of spending
+              When on, Solomon will reuse a saved resume instead of spending
               LLM tokens if it scores at least 80% for a new compatible posting.
               When off, you will be asked before reuse.
             </p>
@@ -239,7 +239,7 @@ export function SettingsPage() {
   const handleConnectCompanion = async () => {
     try {
       await connectCompanion.mutateAsync();
-      toast.success('NexusReach Companion connected');
+      toast.success('Solomon Companion connected');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to connect the companion');
     }
@@ -317,7 +317,7 @@ export function SettingsPage() {
           <CardTitle>Email Integrations</CardTitle>
           <CardDescription>
             Connect your email to stage AI-drafted messages as drafts in your inbox.
-            NexusReach is draft-first by default; delayed auto-send is optional
+            Solomon is draft-first by default; delayed auto-send is optional
             and can be cancelled before send.
           </CardDescription>
         </CardHeader>
@@ -396,7 +396,7 @@ export function SettingsPage() {
         <CardHeader>
           <CardTitle>LinkedIn Graph</CardTitle>
           <CardDescription>
-            Import your first-degree LinkedIn connections so NexusReach can surface warm paths
+            Import your first-degree LinkedIn connections so Solomon can surface warm paths
             during people search. The server stores only minimal graph match data.
           </CardDescription>
         </CardHeader>
@@ -527,7 +527,7 @@ export function SettingsPage() {
                 </div>
                 <div>
                   <p className="mb-1 font-sans text-muted-foreground">
-                    Dedicated NexusReach browser profile
+                    Dedicated Solomon browser profile
                   </p>
                   <code>{buildLinkedInProfileCommand(syncSession.session_token)}</code>
                 </div>

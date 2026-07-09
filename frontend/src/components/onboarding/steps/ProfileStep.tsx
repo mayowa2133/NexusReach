@@ -31,7 +31,7 @@ export function ProfileStep({ onNext, onSkip, isSaving = false }: ProfileStepPro
       <div className="space-y-2 text-center">
         <h2 className="text-xl font-bold">Tell us about yourself</h2>
         <p className="text-sm text-muted-foreground">
-          Add the basics NexusReach needs for profile-aware jobs and outreach.
+          Add the basics Solomon needs for profile-aware jobs and outreach.
         </p>
       </div>
 

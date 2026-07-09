@@ -75,7 +75,7 @@ export function useExportAccountData() {
       const link = document.createElement('a');
       const stamp = new Date().toISOString().slice(0, 10);
       link.href = url;
-      link.download = `nexusreach-export-${stamp}.json`;
+      link.download = `solomon-export-${stamp}.json`;
       document.body.appendChild(link);
       link.click();
       link.remove();

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { WaitlistModal } from '@/components/WaitlistModal';
+import { BrandMark } from '@/components/BrandLogo';
 import './landing.css';
 
 export function LandingPage() {
@@ -33,7 +34,7 @@ export function LandingPage() {
   return (
     <div className="lp has-banner">
       <div className="lp-banner">
-        <b>NexusReach is launching soon.</b> Get early access before anyone else —
+        <b>Solomon is launching soon.</b> Get early access before anyone else —
         <button className="lp-banner-cta" onClick={() => openWaitlist('banner')}>
           join the waitlist
         </button>
@@ -42,7 +43,8 @@ export function LandingPage() {
       <nav className={scrolled ? 'lp-nav scrolled' : 'lp-nav'}>
         <div className="wrap nav-inner">
           <Link className="wordmark" to="/">
-            NexusReach<span className="dot">.</span>
+            <BrandMark className="wordmark-mark" />
+            Solomon<span className="dot">.</span>
           </Link>
           <div className="nav-links">
             <a className="nav-link" href="#how">How it works</a>
@@ -64,7 +66,7 @@ export function LandingPage() {
             <span className="mono-label">
               For serious job seekers <span className="tick">·</span> draft-first, always
             </span>
-            <h1>Every job posting has people behind it. NexusReach finds them.</h1>
+            <h1>Every job posting has people behind it. Solomon finds them.</h1>
             <p className="lede">
               For each job you're targeting: the recruiter, the likely hiring manager, and a peer
               on the team — with evidence for why they're right, a warm path from your own
@@ -232,7 +234,7 @@ export function LandingPage() {
             <span className="mono-label">02 <span className="tick">·</span> The workflow</span>
             <h2>From posting to inbox, with proof at every step.</h2>
             <p className="lede">
-              NexusReach runs the workflow serious candidates already do by hand — and stops
+              Solomon runs the workflow serious candidates already do by hand — and stops
               exactly where a human should take over.
             </p>
           </div>
@@ -258,7 +260,7 @@ export function LandingPage() {
               <div>
                 <h3>Your jobs find you.</h3>
                 <p>
-                  Set target roles and locations once. NexusReach continuously indexes fresh
+                  Set target roles and locations once. Solomon continuously indexes fresh
                   openings from 1,000+ company career boards, aggregators, startup and government
                   sources — deduplicated, sorted by real posting date. Internships and new-grad
                   roles are first-class, not leftovers.
@@ -335,7 +337,7 @@ export function LandingPage() {
                 <p>
                   Found in the posting's own hiring team. On the company's team page. Active in the
                   team's repositories. Quoted by title in company press. Each source is named on
-                  the card — you see what NexusReach saw.
+                  the card — you see what Solomon saw.
                 </p>
               </div>
               <div className="step-fig">
@@ -418,7 +420,7 @@ export function LandingPage() {
             <span className="mono-label">03 <span className="tick">·</span> The evidence layer</span>
             <h2>Every contact comes with receipts.</h2>
             <p className="lede">
-              Other tools hand you a name and a title. NexusReach shows its work — because{' '}
+              Other tools hand you a name and a title. Solomon shows its work — because{' '}
               <strong>your</strong> name goes on the message. Four kinds of confidence, kept
               deliberately separate:
             </p>
@@ -529,7 +531,7 @@ export function LandingPage() {
           <div className="split">
             <div>
               <span className="mono-label">04 <span className="tick">·</span> Warm paths</span>
-              <h2 style={{ margin: '16px 0 18px' }}>You might already know someone. NexusReach checks.</h2>
+              <h2 style={{ margin: '16px 0 18px' }}>You might already know someone. Solomon checks.</h2>
               <p className="lede" style={{ fontSize: 17 }}>
                 Import your LinkedIn connections — an official CSV export, or a connector that runs
                 entirely on your own computer — and every job's company is cross-referenced against
@@ -592,7 +594,7 @@ export function LandingPage() {
         <div className="wrap">
           <div className="sec-head">
             <span className="mono-label">05 <span className="tick">·</span> Hard lines</span>
-            <h2>What NexusReach will never do.</h2>
+            <h2>What Solomon will never do.</h2>
             <p className="lede">
               The fastest way to ruin networking is to automate the wrong half of it. So we drew
               hard lines and built them into the product:
@@ -676,7 +678,7 @@ export function LandingPage() {
                     </div>
                     <div className="reply-snippet" style={{ marginTop: 14, borderLeftColor: 'var(--lp-gray)' }}>
                       Two companies share the "Atlas" brand and the domain evidence is ambiguous.
-                      NexusReach found a likely pattern — <strong>and is not showing it to you.</strong>{' '}
+                      Solomon found a likely pattern — <strong>and is not showing it to you.</strong>{' '}
                       A wrong guess costs you more than no guess.
                     </div>
                   </div>
@@ -696,7 +698,7 @@ export function LandingPage() {
               <span className="mono-label">06 <span className="tick">·</span> Tracked</span>
               <h2 style={{ margin: '16px 0 18px' }}>Out of your head. Off the spreadsheet.</h2>
               <p className="lede" style={{ fontSize: 17 }}>
-                Real outreach dies in the follow-up. NexusReach keeps the whole thread without data
+                Real outreach dies in the follow-up. Solomon keeps the whole thread without data
                 entry: drafts staged in your Gmail or Outlook,{' '}
                 <strong>sends and replies detected automatically</strong> — a reply flips the
                 contact to Responded, captures what they said, and your next draft becomes a reply,
@@ -769,7 +771,7 @@ export function LandingPage() {
           <h2 style={{ marginTop: 16 }}>The posting is public. The path isn't. Soon it will be.</h2>
           <p className="lede">
             Three right people per job. Evidence for every match. A draft worth sending — sent only
-            by you. Be first in line when NexusReach opens.
+            by you. Be first in line when Solomon opens.
           </p>
           <div className="hero-ctas">
             <button className="btn btn-primary" onClick={() => openWaitlist('closer')}>
@@ -792,7 +794,7 @@ export function LandingPage() {
             <details>
               <summary>Is this a mass-email or auto-apply tool? <span className="ind">+</span></summary>
               <div className="a">
-                No — deliberately. NexusReach finds a small number of well-evidenced contacts per
+                No — deliberately. Solomon finds a small number of well-evidenced contacts per
                 job and drafts individual messages. Nothing sends without your approval, and there
                 is no bulk send. If you want to blast 500 strangers, this is the wrong tool.
               </div>
@@ -818,7 +820,7 @@ export function LandingPage() {
             <details>
               <summary>How accurate are the emails? <span className="ind">+</span></summary>
               <div className="a">
-                NexusReach prefers verified addresses and stops when it finds one. It only offers a
+                Solomon prefers verified addresses and stops when it finds one. It only offers a
                 pattern-based best guess when the company's domain evidence supports it — and when
                 the evidence is ambiguous, it withholds the guess and tells you so, rather than
                 risking a bounce under your name. You always see which tier an email is.
@@ -829,7 +831,7 @@ export function LandingPage() {
               <div className="a">
                 A relevant, specific, individually written message to a recruiter or hiring manager
                 about a role they own is normal professional behavior — hearing from candidates is
-                literally a recruiter's job. What annoys people is generic volume. NexusReach is
+                literally a recruiter's job. What annoys people is generic volume. Solomon is
                 built to make your one message good, not your hundred messages possible.
               </div>
             </details>
@@ -867,7 +869,8 @@ export function LandingPage() {
         <div className="wrap foot-inner">
           <div className="foot-left">
             <Link className="wordmark" to="/">
-              NexusReach<span className="dot">.</span>
+              <BrandMark className="wordmark-mark" />
+              Solomon<span className="dot">.</span>
             </Link>
             <div className="foot-note">BUILT BY A JOB SEEKER, NOT A GROWTH TEAM · © 2026</div>
           </div>

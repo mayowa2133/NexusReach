@@ -188,7 +188,7 @@ def _render_digest_html(jobs: list[Job], user_email: str) -> str:
       {''.join(sections)}
       <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">
       <p style="color:#9ca3af;font-size:12px;margin:0">
-        Sent by NexusReach job alerts. Manage your alert preferences in Settings.
+        Sent by Solomon job alerts. Manage your alert preferences in Settings.
       </p>
     </div>
     """
@@ -210,7 +210,7 @@ def _render_digest_text(jobs: list[Job]) -> str:
             if job.url:
                 lines.append(f"    {job.url}")
 
-    lines.append("\n---\nSent by NexusReach job alerts. Manage in Settings.")
+    lines.append("\n---\nSent by Solomon job alerts. Manage in Settings.")
     return "\n".join(lines)
 
 
@@ -382,7 +382,7 @@ async def send_digest_for_user(
         return {"sent": False, "job_count": len(jobs), "provider": None, "error": "no_user_email"}
 
     # Render email content
-    subject = f"NexusReach: {len(jobs)} new job{'s' if len(jobs) != 1 else ''} from your watched companies"
+    subject = f"Solomon: {len(jobs)} new job{'s' if len(jobs) != 1 else ''} from your watched companies"
     html_body = _render_digest_html(jobs, user_email)
     text_body = _render_digest_text(jobs)
 

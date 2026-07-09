@@ -93,7 +93,8 @@
 }
 .lp .lp-nav.scrolled { border-bottom-color: var(--lp-line-soft); }
 .lp .nav-inner { display: flex; align-items: center; justify-content: space-between; height: 64px; }
-.lp .wordmark { font-weight: 700; font-size: 17px; letter-spacing: -0.02em; text-decoration: none; }
+.lp .wordmark { display: inline-flex; align-items: center; gap: 9px; font-weight: 700; font-size: 17px; letter-spacing: -0.02em; text-decoration: none; }
+.lp .wordmark .wordmark-mark { width: 22px; height: 22px; flex: 0 0 auto; }
 .lp .wordmark .dot { color: var(--lp-green); }
 .lp .nav-links { display: flex; align-items: center; gap: 28px; }
 .lp .nav-links a.nav-link {

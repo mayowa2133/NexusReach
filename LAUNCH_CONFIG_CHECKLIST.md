@@ -62,6 +62,25 @@ See the fill-in block at the bottom. Tiers:
 - [ ] Microsoft app: add the same redirect URIs
 - [ ] Note: after token-encryption migration, **all Gmail/Outlook users must reconnect**; don't enable email staging/auto-send until reconnect is QA'd
 
+## Phase 6.5 — Rebrand → Solomon
+The product is branded **Solomon** to users; the codebase/infra stays **NexusReach**
+internally on purpose (env prefix `NEXUSREACH_`, DB name, Celery/Redis names, `/docs`
+title — none of it is user-visible, so it is deliberately **not** renamed).
+
+- [x] **Done in code** — all user-facing UI strings say "Solomon" (nav/header, landing,
+  login, onboarding, Settings, Waitlist, Terms/Privacy, page `<title>`, favicon +
+  compass logo mark in `frontend/src/components/BrandLogo.tsx`).
+- [x] **Done in code** — user-facing *backend* strings say "Solomon": job-alert +
+  cadence-digest email subjects/footers, resume-quality attribution shown in Job
+  Detail, the LLM drafting persona, and the data-export download filename.
+- [ ] **OAuth consent-screen app name (MANUAL — the one user-visible item not in code):**
+  users see this on the Gmail/Outlook connect screen ("… wants to access your account").
+  - [ ] Google Cloud → OAuth consent screen → **App name** = `Solomon` (+ logo, support/dev contact email on the Solomon domain)
+  - [ ] Microsoft Entra → app registration → **Display name** / branding = `Solomon`
+- [ ] Confirm transactional email **From** name reads as Solomon to recipients — note:
+  alerts/digests send through the *user's own* Gmail/Outlook, so the sender is the user,
+  not a branded address (no action needed unless a dedicated sending domain is added later).
+
 ## Phase 7 — Deploy (in order — runbook §Release Order)
 - [ ] CI green on `main` ✅
 - [ ] Back up Supabase Postgres

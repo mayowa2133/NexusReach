@@ -27,7 +27,7 @@ async def export_account_data(
     """Export all user-scoped NexusReach data as JSON."""
     payload = await account_service.export_user_data(db, user_id)
     stamp = datetime.now(UTC).strftime("%Y%m%d")
-    filename = f"nexusreach-export-{stamp}-{user_id}.json"
+    filename = f"solomon-export-{stamp}-{user_id}.json"
     return JSONResponse(
         content=payload,
         headers={

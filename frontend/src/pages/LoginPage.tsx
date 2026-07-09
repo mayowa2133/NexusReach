@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { useAuthStore } from '@/stores/auth';
+import { BrandLockup } from '@/components/BrandLogo';
 import { toast } from 'sonner';
 
 export function LoginPage() {
@@ -44,10 +45,15 @@ export function LoginPage() {
     <div className="flex min-h-screen items-center justify-center px-4">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
+          <BrandLockup
+            className="mb-2 justify-center"
+            markClassName="h-7 w-7 text-primary"
+            wordmarkClassName="text-xl"
+          />
           <CardTitle className="text-2xl font-semibold tracking-tight">
             Welcome back
           </CardTitle>
-          <CardDescription>Sign in to NexusReach</CardDescription>
+          <CardDescription>Sign in to Solomon</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">

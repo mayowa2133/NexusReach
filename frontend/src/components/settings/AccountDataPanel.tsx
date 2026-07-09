@@ -47,7 +47,7 @@ export function AccountDataPanel() {
       <CardHeader>
         <CardTitle>Account Data</CardTitle>
         <CardDescription>
-          Export your data or permanently delete your NexusReach account.
+          Export your data or permanently delete your Solomon account.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -75,7 +75,7 @@ export function AccountDataPanel() {
           <div className="space-y-1">
             <div className="font-medium">Delete account</div>
             <p className="text-sm text-muted-foreground">
-              Permanently remove your auth identity and app-owned NexusReach
+              Permanently remove your auth identity and app-owned Solomon
               data, including encrypted email tokens and imported LinkedIn graph
               rows.
             </p>
@@ -97,7 +97,7 @@ export function AccountDataPanel() {
               <AlertDialogHeader>
                 <AlertDialogTitle>Delete your account?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  This permanently deletes your NexusReach account data. This
+                  This permanently deletes your Solomon account data. This
                   cannot be undone.
                 </AlertDialogDescription>
               </AlertDialogHeader>

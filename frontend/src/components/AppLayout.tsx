@@ -15,6 +15,7 @@ import { useThemeStore } from '@/stores/theme';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { NotificationBell } from '@/components/NotificationBell';
 import { cn } from '@/lib/utils';
+import { BrandLockup } from '@/components/BrandLogo';
 import { Menu, Moon, Sun } from 'lucide-react';
 
 const navItems = [
@@ -51,9 +52,7 @@ export function AppLayout() {
               <span className="sr-only">Toggle menu</span>
             </SheetTrigger>
             <SheetContent side="left" className="w-64">
-              <div className="mb-6 text-lg font-bold tracking-tight">
-                NexusReach<span className="text-primary">.</span>
-              </div>
+              <BrandLockup className="mb-6" wordmarkClassName="text-lg" markClassName="h-6 w-6 text-primary" />
               <nav className="flex flex-col gap-1">
                 {navItems.map((item) => (
                   <Link
@@ -103,8 +102,8 @@ export function AppLayout() {
             </SheetContent>
           </Sheet>
 
-          <Link to="/dashboard" className="mr-8 text-lg font-bold tracking-tight">
-            NexusReach<span className="text-primary">.</span>
+          <Link to="/dashboard" className="mr-8">
+            <BrandLockup wordmarkClassName="text-lg" markClassName="h-6 w-6 text-primary" />
           </Link>
 
           {/* Desktop nav — hidden on mobile */}
