@@ -21,6 +21,7 @@
   --lp-amber-tint: rgba(147, 97, 26, 0.10);
   --lp-gray: #75726A;
   --lp-gray-tint: rgba(117, 114, 106, 0.12);
+  --lp-on-green: #fff; /* text/icon color on green fills (buttons, banner) */
   --lp-r-s: 6px;
   --lp-r-m: 12px;
   --lp-sans: "General Sans", "Geist Variable", -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
@@ -35,10 +36,10 @@
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
-/* The landing page is a deliberately light-only "dossier". Opt the whole
-   document out of dark mode while it is mounted so a dark-mode visitor gets a
-   consistent light page and the dark app background never flashes through
-   overscroll / rubber-band areas. Scoped via :has(.lp) so it never touches
+/* The landing follows the visitor's OS color-scheme (light default, dark below).
+   Paint the document background to match .lp so the app background never flashes
+   through overscroll / rubber-band areas, and declare the scheme so native
+   controls/scrollbars match. Scoped via :has(.lp) so it never touches
    authenticated app routes. */
 html:has(.lp) { color-scheme: light; background: #FAF9F5; }
 body:has(.lp) { background: #FAF9F5; }
@@ -81,7 +82,7 @@ body:has(.lp) { background: #FAF9F5; }
   transition: background 140ms ease-out, border-color 140ms ease-out, color 140ms ease-out;
 }
 .lp .btn .arrow { font-family: var(--lp-mono); font-weight: 500; transition: transform 140ms ease-out; }
-.lp .btn-primary { background: var(--lp-green); color: #fff; }
+.lp .btn-primary { background: var(--lp-green); color: var(--lp-on-green); }
 .lp .btn-primary:hover { background: var(--lp-green-deep); }
 .lp .btn-primary:hover .arrow { transform: translateX(3px); }
 .lp .btn-ghost { background: transparent; color: var(--lp-ink); border-color: var(--lp-line); }
@@ -213,7 +214,7 @@ body:has(.lp) { background: #FAF9F5; }
   font-size: 12px; font-weight: 600; padding: 7px 12px; border-radius: var(--lp-r-s);
   border: 1px solid var(--lp-line); background: var(--lp-card); color: var(--lp-ink); cursor: default;
 }
-.lp .mini-btn.solid { background: var(--lp-green); border-color: var(--lp-green); color: #fff; }
+.lp .mini-btn.solid { background: var(--lp-green); border-color: var(--lp-green); color: var(--lp-on-green); }
 
 /* ---- credibility strip ---- */
 .lp .cred { border-top: 1px solid var(--lp-line-soft); border-bottom: 1px solid var(--lp-line-soft); margin-top: 96px; }
@@ -364,13 +365,13 @@ body:has(.lp) { background: #FAF9F5; }
 
 /* ===================== pre-launch waitlist banner ===================== */
 .lp .lp-banner {
-  background: var(--lp-green); color: #fff;
+  background: var(--lp-green); color: var(--lp-on-green);
   font-family: var(--lp-mono); font-size: 11.5px; letter-spacing: 0.04em;
   text-align: center; padding: 9px 16px; line-height: 1.5;
 }
 .lp .lp-banner b { font-weight: 600; }
 .lp .lp-banner .lp-banner-cta {
-  background: none; border: none; color: #fff; cursor: pointer;
+  background: none; border: none; color: var(--lp-on-green); cursor: pointer;
   font-family: inherit; font-size: inherit; letter-spacing: inherit;
   text-decoration: underline; text-underline-offset: 2px; padding: 0 0 0 6px;
 }
@@ -454,4 +455,49 @@ body:has(.lp) { background: #FAF9F5; }
 @media (max-width: 520px) {
   .lp-wl-modal { padding: 28px 20px 22px; }
   .lp-wl-row { grid-template-columns: 1fr; }
+}
+
+/* ===================== dark mode (follows OS preference) =====================
+   Keeps the "dossier" character in dark: warm near-black paper, off-white ink,
+   and a brighter emerald so green accents stay legible. Green fills (buttons,
+   banner) pair the bright green with dark text via --lp-on-green. Redefining
+   the tokens on .lp cascades to every tokenized element, including the modal;
+   the block below only patches the handful of hardcoded colors. */
+@media (prefers-color-scheme: dark) {
+  .lp {
+    --lp-paper: #15140F;
+    --lp-paper-2: #1C1A14;
+    --lp-card: #201E17;
+    --lp-ink: #F4F2EA;
+    --lp-ink-70: rgba(244, 242, 234, 0.72);
+    --lp-ink-55: rgba(244, 242, 234, 0.56);
+    --lp-ink-40: rgba(244, 242, 234, 0.40);
+    --lp-line: rgba(244, 242, 234, 0.16);
+    --lp-line-soft: rgba(244, 242, 234, 0.09);
+    --lp-green: #3ECF8E;
+    --lp-green-deep: #34BE81;
+    --lp-green-tint: rgba(62, 207, 142, 0.14);
+    --lp-amber: #D8A85B;
+    --lp-amber-tint: rgba(216, 168, 91, 0.15);
+    --lp-gray: #9C978B;
+    --lp-gray-tint: rgba(156, 151, 139, 0.15);
+    --lp-on-green: #08130D;
+  }
+
+  html:has(.lp) { color-scheme: dark; background: #15140F; }
+  body:has(.lp) { background: #15140F; }
+
+  /* patch hardcoded (non-token) colors */
+  .lp .lp-nav { background: rgba(21, 20, 15, 0.86); }
+  .lp .lp-nav.scrolled { background: rgba(21, 20, 15, 0.96); }
+  .lp .ledger-row:hover { background: rgba(255, 255, 255, 0.04); }
+  .lp .warm-strip { border-color: rgba(62, 207, 142, 0.22); }
+  .lp .chip-green { border-color: rgba(62, 207, 142, 0.38); }
+  .lp .chip-amber { border-color: rgba(216, 168, 91, 0.38); }
+  .lp .pipe-t.pipe-t-final { border-color: rgba(62, 207, 142, 0.42); }
+  .lp-wl-error {
+    color: #f2a6a6;
+    background: rgba(220, 90, 90, 0.12);
+    border-color: rgba(220, 90, 90, 0.30);
+  }
 }
