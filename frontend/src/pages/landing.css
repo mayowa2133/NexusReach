@@ -35,6 +35,14 @@
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
+/* The landing page is a deliberately light-only "dossier". Opt the whole
+   document out of dark mode while it is mounted so a dark-mode visitor gets a
+   consistent light page and the dark app background never flashes through
+   overscroll / rubber-band areas. Scoped via :has(.lp) so it never touches
+   authenticated app routes. */
+html:has(.lp) { color-scheme: light; background: #FAF9F5; }
+body:has(.lp) { background: #FAF9F5; }
+
 .lp *, .lp *::before, .lp *::after { box-sizing: border-box; }
 @media (prefers-reduced-motion: reduce) {
   .lp *, .lp *::before, .lp *::after { animation: none !important; transition: none !important; }
