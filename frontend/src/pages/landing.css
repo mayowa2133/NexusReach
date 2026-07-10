@@ -91,7 +91,7 @@
   border-bottom: 1px solid transparent;
   transition: border-color 200ms ease;
 }
-.lp .lp-nav.scrolled { border-bottom-color: var(--lp-line-soft); }
+.lp .lp-nav.scrolled { background: rgba(250, 249, 245, 0.97); border-bottom-color: var(--lp-line-soft); }
 .lp .nav-inner { display: flex; align-items: center; justify-content: space-between; height: 64px; }
 .lp .wordmark { display: inline-flex; align-items: center; gap: 9px; font-weight: 700; font-size: 17px; letter-spacing: -0.02em; text-decoration: none; }
 .lp .wordmark .wordmark-mark { width: 22px; height: 22px; flex: 0 0 auto; }
@@ -367,8 +367,8 @@
   text-decoration: underline; text-underline-offset: 2px; padding: 0 0 0 6px;
 }
 .lp .lp-banner .lp-banner-cta:hover { opacity: 0.82; }
-/* When the top banner is present, the fixed nav sits below it. */
-.lp.has-banner .lp-nav { top: 36px; }
+/* The banner scrolls away with the page (static), so the sticky nav pins to
+   the very top; at scroll 0 it already sits below the in-flow banner. */
 
 /* Reuse .btn as a button (not just a link) for CTAs that open the modal. */
 .lp button.btn { cursor: pointer; }
