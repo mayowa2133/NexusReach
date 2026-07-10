@@ -8,7 +8,8 @@ import re
 import httpx
 
 from app.clients import crawl4ai_client, firecrawl_client
-from app.utils.url_safety import safe_get
+from app.config import settings
+from app.utils.url_safety import is_safe_public_url_async, safe_get
 
 TITLE_RE = re.compile(r"<title>(.*?)</title>", flags=re.IGNORECASE | re.DOTALL)
 SCRIPT_STYLE_RE = re.compile(r"<(?:script|style)[^>]*>.*?</(?:script|style)>", flags=re.IGNORECASE | re.DOTALL)
@@ -128,11 +129,22 @@ async def fetch_page(
     allow_firecrawl: bool = True,
 ) -> dict | None:
     """Fetch a public page using free-first retrieval with optional Firecrawl fallback."""
+    # Crawl4AI and Firecrawl perform their own network requests. Admit the URL
+    # once before any provider is allowed to see it, including fallback paths.
+    if not await is_safe_public_url_async(url):
+        return None
+
     direct_page = None
     if include_direct:
         direct_page = await fetch_direct_page(url, timeout_seconds=timeout_seconds)
         if _is_page_sufficient(direct_page):
             return direct_page
+
+    # These renderers do not expose a connection-level IP pinning hook. Do not
+    # enable their separate fetch stacks until infrastructure has an egress
+    # policy that denies private, link-local, and metadata address ranges.
+    if not settings.rendered_page_fetch_enabled:
+        return direct_page
 
     crawl4ai_page = await crawl4ai_client.fetch_url(
         url,

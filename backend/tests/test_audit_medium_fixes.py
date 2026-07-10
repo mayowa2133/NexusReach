@@ -303,6 +303,7 @@ def _prod_settings(**overrides):
     base = dict(
         environment="production",
         auth_mode="supabase",
+        dev_auth_bypass_enabled=False,
         database_url="postgresql+asyncpg://db.example/app",
         redis_url="redis://redis.example:6379/0",
         supabase_url="https://proj.supabase.co",

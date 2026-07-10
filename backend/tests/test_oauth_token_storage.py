@@ -50,6 +50,7 @@ async def test_connect_gmail_encrypts_refresh_token(monkeypatch: pytest.MonkeyPa
             user_id,
             code="oauth-code",
             redirect_uri="http://localhost/callback",
+            code_verifier="pkce-verifier",
         )
 
     assert connected is True
@@ -76,6 +77,7 @@ async def test_connect_outlook_encrypts_refresh_token(monkeypatch: pytest.Monkey
             user_id,
             code="oauth-code",
             redirect_uri="http://localhost/callback",
+            code_verifier="pkce-verifier",
         )
 
     assert connected is True

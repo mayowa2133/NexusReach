@@ -7,6 +7,8 @@ PDF and DOCX files using text extraction plus resume-specific heuristics.
 import io
 import re
 
+from app.config import settings
+
 
 MONTH_PATTERN = (
     r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|"
@@ -35,13 +37,21 @@ def extract_text_from_pdf(file_bytes: bytes) -> str:
     """Extract text from a PDF file using PyPDF2."""
     from pypdf import PdfReader
 
-    reader = PdfReader(io.BytesIO(file_bytes))
-    text = ""
+    # Strict parsing rejects malformed cross-reference structures rather than
+    # attempting costly recovery on attacker-controlled input.
+    reader = PdfReader(io.BytesIO(file_bytes), strict=True)
+    if len(reader.pages) > settings.max_resume_pdf_pages:
+        raise ValueError("Resume PDF has too many pages.")
+    text_parts: list[str] = []
+    total_chars = 0
     for page in reader.pages:
         page_text = page.extract_text()
         if page_text:
-            text += page_text + "\n"
-    return text
+            total_chars += len(page_text)
+            if total_chars > settings.max_resume_extracted_text_chars:
+                raise ValueError("Resume PDF contains too much extractable text.")
+            text_parts.append(page_text)
+    return "\n".join(text_parts)
 
 
 def extract_text_from_docx(file_bytes: bytes) -> str:

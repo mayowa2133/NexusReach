@@ -67,9 +67,8 @@ vi.mock('@/hooks/useSettings', () => ({
 
 vi.mock('@/hooks/useEmail', () => ({
   useEmailConnectionStatus: () => mockEmailStatus,
-  useConnectGmail: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useCompleteOAuthConnect: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDisconnectGmail: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  useConnectOutlook: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDisconnectOutlook: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useGmailAuthUrl: () => ({ data: { auth_url: 'https://example.com' } }),
   useOutlookAuthUrl: () => ({ data: { auth_url: 'https://example.com' } }),

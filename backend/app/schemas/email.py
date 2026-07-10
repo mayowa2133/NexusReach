@@ -3,11 +3,12 @@ from pydantic import BaseModel
 
 class OAuthCallbackRequest(BaseModel):
     code: str
-    redirect_uri: str
+    state: str
 
 
 class OAuthUrlResponse(BaseModel):
     auth_url: str
+    provider: str
 
 
 class EmailSuggestion(BaseModel):

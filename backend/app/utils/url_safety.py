@@ -40,7 +40,10 @@ def is_safe_public_url(url: str | None) -> bool:
 
     Rejects non-http(s) schemes, missing hosts, IP literals in private/loopback/
     link-local/reserved/multicast ranges, blocked metadata hostnames, and any
-    hostname that fails to resolve or resolves to a blocked IP.
+    hostname that resolves to a blocked IP. Hosts that cannot be resolved in
+    the current process are allowed here so normal direct HTTP fetching can
+    perform its own resolution; higher-risk rendered fetchers are disabled by
+    default and require network-level egress controls when enabled.
     """
     try:
         parsed = urlparse((url or "").strip())
@@ -63,10 +66,9 @@ def is_safe_public_url(url: str | None) -> bool:
         pass
 
     # Hostname — resolve and block if it points at a private/internal address
-    # (catches internal hostnames and DNS that resolves to private IPs). If the
-    # host can't be resolved we ALLOW it: an unresolvable host can't be fetched,
-    # so it poses no SSRF risk, and failing closed would break legitimate public
-    # imports in DNS-restricted environments.
+    # (catches internal hostnames and DNS that resolves to private IPs). Direct
+    # clients will resolve again when connecting; rendered fetchers are opt-in
+    # and must be protected by outbound network policy.
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
     try:
         infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)

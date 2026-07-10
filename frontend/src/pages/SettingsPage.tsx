@@ -6,9 +6,8 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import {
   useEmailConnectionStatus,
-  useConnectGmail,
+  useCompleteOAuthConnect,
   useDisconnectGmail,
-  useConnectOutlook,
   useDisconnectOutlook,
   useGmailAuthUrl,
   useOutlookAuthUrl,
@@ -153,9 +152,8 @@ function ResumeAiAssistCard() {
 export function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: emailStatus, isLoading } = useEmailConnectionStatus();
-  const connectGmail = useConnectGmail();
+  const completeOAuthConnect = useCompleteOAuthConnect();
   const disconnectGmail = useDisconnectGmail();
-  const connectOutlook = useConnectOutlook();
   const disconnectOutlook = useDisconnectOutlook();
   const { data: gmailAuth } = useGmailAuthUrl(REDIRECT_URI);
   const { data: outlookAuth } = useOutlookAuthUrl(REDIRECT_URI);
@@ -177,13 +175,8 @@ export function SettingsPage() {
     if (code && state) {
       const handler = async () => {
         try {
-          if (state === 'gmail') {
-            await connectGmail.mutateAsync({ code, redirect_uri: REDIRECT_URI });
-            toast.success('Gmail connected successfully');
-          } else if (state === 'outlook') {
-            await connectOutlook.mutateAsync({ code, redirect_uri: REDIRECT_URI });
-            toast.success('Outlook connected successfully');
-          }
+          const result = await completeOAuthConnect.mutateAsync({ code, state });
+          toast.success(`${result.provider === 'gmail' ? 'Gmail' : 'Outlook'} connected successfully`);
         } catch (err) {
           toast.error(err instanceof Error ? err.message : 'Connection failed');
         }
@@ -192,19 +185,17 @@ export function SettingsPage() {
       };
       handler();
     }
-  }, [searchParams, setSearchParams, connectGmail, connectOutlook]);
+  }, [searchParams, setSearchParams, completeOAuthConnect]);
 
   const handleConnectGmail = () => {
     if (gmailAuth?.auth_url) {
-      const url = `${gmailAuth.auth_url}&state=gmail`;
-      window.location.href = url;
+      window.location.href = gmailAuth.auth_url;
     }
   };
 
   const handleConnectOutlook = () => {
     if (outlookAuth?.auth_url) {
-      const url = `${outlookAuth.auth_url}&state=outlook`;
-      window.location.href = url;
+      window.location.href = outlookAuth.auth_url;
     }
   };
 

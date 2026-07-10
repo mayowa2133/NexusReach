@@ -29,6 +29,7 @@ from app.schemas.email import (
 from app.services.oauth_token_crypto import is_encrypted_refresh_token
 from app.services.email_lookup_service import lookup_email
 from app.services import gmail_service, outlook_service
+from app.services import oauth_transaction_service
 from app.services.draft_staging_service import (
     stage_message_draft,
     stage_message_drafts,
@@ -145,27 +146,53 @@ async def connection_status(
 
 @router.get("/gmail/auth-url", response_model=OAuthUrlResponse)
 async def gmail_auth_url(
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     redirect_uri: str = Query(...),
 ):
     """Get the Gmail OAuth consent URL."""
-    url = gmail_service.get_auth_url(_validate_redirect_uri(redirect_uri))
-    return OAuthUrlResponse(auth_url=url)
+    safe_redirect_uri = _validate_redirect_uri(redirect_uri)
+    try:
+        state, challenge = await oauth_transaction_service.create_transaction(
+            user_id=user_id, provider="gmail", redirect_uri=safe_redirect_uri
+        )
+    except oauth_transaction_service.OAuthTransactionUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    url = gmail_service.get_auth_url(safe_redirect_uri, state=state, code_challenge=challenge)
+    return OAuthUrlResponse(auth_url=url, provider="gmail")
 
 
-@router.post("/gmail/connect")
-async def gmail_connect(
+@router.post("/oauth/connect")
+async def complete_oauth_connect(
     body: OAuthCallbackRequest,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Complete Gmail OAuth — exchange code for tokens."""
+    """Consume a one-time OAuth transaction and connect its bound provider."""
     try:
-        await gmail_service.connect_gmail(
-            db, user_id, body.code, _validate_redirect_uri(body.redirect_uri)
+        transaction = await oauth_transaction_service.consume_transaction(
+            state=body.state, user_id=user_id
         )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    return {"status": "connected", "provider": "gmail"}
+    except oauth_transaction_service.OAuthTransactionInvalidError:
+        raise HTTPException(status_code=400, detail="Invalid, expired, or already used OAuth state.")
+    except oauth_transaction_service.OAuthTransactionUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    try:
+        if transaction.provider == "gmail":
+            await gmail_service.connect_gmail(
+                db, user_id, body.code, transaction.redirect_uri,
+                code_verifier=transaction.code_verifier,
+            )
+        elif transaction.provider == "outlook":
+            await outlook_service.connect_outlook(
+                db, user_id, body.code, transaction.redirect_uri,
+                code_verifier=transaction.code_verifier,
+            )
+        else:  # Defensive guard for corrupted transaction data.
+            raise ValueError("Unsupported OAuth provider.")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "connected", "provider": transaction.provider}
 
 
 @router.post("/gmail/disconnect")
@@ -180,27 +207,19 @@ async def gmail_disconnect(
 
 @router.get("/outlook/auth-url", response_model=OAuthUrlResponse)
 async def outlook_auth_url(
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     redirect_uri: str = Query(...),
 ):
     """Get the Outlook OAuth consent URL."""
-    url = outlook_service.get_auth_url(_validate_redirect_uri(redirect_uri))
-    return OAuthUrlResponse(auth_url=url)
-
-
-@router.post("/outlook/connect")
-async def outlook_connect(
-    body: OAuthCallbackRequest,
-    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-):
-    """Complete Outlook OAuth — exchange code for tokens."""
+    safe_redirect_uri = _validate_redirect_uri(redirect_uri)
     try:
-        await outlook_service.connect_outlook(
-            db, user_id, body.code, _validate_redirect_uri(body.redirect_uri)
+        state, challenge = await oauth_transaction_service.create_transaction(
+            user_id=user_id, provider="outlook", redirect_uri=safe_redirect_uri
         )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    return {"status": "connected", "provider": "outlook"}
+    except oauth_transaction_service.OAuthTransactionUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    url = outlook_service.get_auth_url(safe_redirect_uri, state=state, code_challenge=challenge)
+    return OAuthUrlResponse(auth_url=url, provider="outlook")
 
 
 @router.post("/outlook/disconnect")

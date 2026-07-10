@@ -57,7 +57,7 @@ def _body_to_html(body: str) -> str:
     return f"<p>{formatted}</p>"
 
 
-def get_auth_url(redirect_uri: str, state: str = "") -> str:
+def get_auth_url(redirect_uri: str, *, state: str, code_challenge: str) -> str:
     """Generate the Google OAuth consent URL."""
     params = {
         "client_id": settings.google_client_id,
@@ -67,11 +67,13 @@ def get_auth_url(redirect_uri: str, state: str = "") -> str:
         "access_type": "offline",
         "prompt": "consent",
         "state": state,
+        "code_challenge": code_challenge,
+        "code_challenge_method": "S256",
     }
     return f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
 
 
-async def exchange_code(code: str, redirect_uri: str) -> dict:
+async def exchange_code(code: str, redirect_uri: str, *, code_verifier: str) -> dict:
     """Exchange an authorization code for tokens."""
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.post(
@@ -82,6 +84,7 @@ async def exchange_code(code: str, redirect_uri: str) -> dict:
                 "code": code,
                 "grant_type": "authorization_code",
                 "redirect_uri": redirect_uri,
+                "code_verifier": code_verifier,
             },
         )
         resp.raise_for_status()
@@ -192,9 +195,11 @@ async def connect_gmail(
     user_id: uuid.UUID,
     code: str,
     redirect_uri: str,
+    *,
+    code_verifier: str,
 ) -> bool:
     """Complete Gmail OAuth — exchange code and store refresh token."""
-    tokens = await exchange_code(code, redirect_uri)
+    tokens = await exchange_code(code, redirect_uri, code_verifier=code_verifier)
     refresh_token = tokens.get("refresh_token")
     if not refresh_token:
         raise ValueError("No refresh token received. Please re-authorize with consent.")

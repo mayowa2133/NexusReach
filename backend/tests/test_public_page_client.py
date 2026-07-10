@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.clients import public_page_client
+from app.config import settings
 
 pytestmark = pytest.mark.asyncio
 
@@ -50,8 +51,9 @@ async def test_fetch_direct_page_extracts_title_and_text():
     html = "<html><head><title>Zip</title></head><body><h1>Alicia Zhou</h1><p>Engineering Manager at Zip</p></body></html>"
 
     with patch(
-        "app.clients.public_page_client.httpx.AsyncClient",
-        return_value=_Client(response=_Response(text=html, url="https://theorg.com/org/ziphq")),
+        "app.clients.public_page_client.safe_get",
+        new_callable=AsyncMock,
+        return_value=_Response(text=html, url="https://theorg.com/org/ziphq"),
     ):
         page = await public_page_client.fetch_direct_page("https://theorg.com/org/ziphq")
 
@@ -63,6 +65,7 @@ async def test_fetch_direct_page_extracts_title_and_text():
 
 async def test_fetch_page_falls_back_to_crawl4ai_when_direct_fails():
     with (
+        patch.object(settings, "rendered_page_fetch_enabled", True),
         patch(
             "app.clients.public_page_client.fetch_direct_page",
             new_callable=AsyncMock,
@@ -81,6 +84,11 @@ async def test_fetch_page_falls_back_to_crawl4ai_when_direct_fails():
             },
         ) as mock_crawl4ai,
         patch(
+            "app.clients.public_page_client.is_safe_public_url_async",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch(
             "app.clients.public_page_client.firecrawl_client.scrape_url",
             new_callable=AsyncMock,
         ) as mock_firecrawl,
@@ -93,12 +101,32 @@ async def test_fetch_page_falls_back_to_crawl4ai_when_direct_fails():
     mock_firecrawl.assert_not_awaited()
 
 
+async def test_fetch_page_does_not_hand_unsafe_url_to_fallback_crawlers():
+    with (
+        patch("app.clients.public_page_client.is_safe_public_url_async", new_callable=AsyncMock) as safe,
+        patch("app.clients.public_page_client.crawl4ai_client.fetch_url", new_callable=AsyncMock) as crawl,
+        patch("app.clients.public_page_client.firecrawl_client.scrape_url", new_callable=AsyncMock) as firecrawl,
+    ):
+        safe.return_value = False
+        page = await public_page_client.fetch_page("http://127.0.0.1/internal")
+
+    assert page is None
+    crawl.assert_not_awaited()
+    firecrawl.assert_not_awaited()
+
+
 async def test_fetch_page_uses_firecrawl_as_optional_last_fallback():
     with (
+        patch.object(settings, "rendered_page_fetch_enabled", True),
         patch(
             "app.clients.public_page_client.fetch_direct_page",
             new_callable=AsyncMock,
             return_value=None,
+        ),
+        patch(
+            "app.clients.public_page_client.is_safe_public_url_async",
+            new_callable=AsyncMock,
+            return_value=True,
         ),
         patch(
             "app.clients.public_page_client.crawl4ai_client.fetch_url",
@@ -140,6 +168,11 @@ async def test_fetch_page_returns_direct_result_when_fallbacks_fail():
             "app.clients.public_page_client.fetch_direct_page",
             new_callable=AsyncMock,
             return_value=direct_page,
+        ),
+        patch(
+            "app.clients.public_page_client.is_safe_public_url_async",
+            new_callable=AsyncMock,
+            return_value=True,
         ),
         patch(
             "app.clients.public_page_client.crawl4ai_client.fetch_url",

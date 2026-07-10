@@ -65,6 +65,14 @@ async def check_discovery_rate_limit(
     except HTTPException:
         raise
     except Exception:
-        # If Redis is unavailable, log and allow the request through
-        # rather than blocking all discovery.
-        logger.warning("Discovery rate-limit check failed; allowing request", exc_info=True)
+        # Discovery invokes paid/external providers. Failing open during a Redis
+        # outage turns an infrastructure incident into an unbounded-cost event
+        # in production. Local development and test environments retain the
+        # existing no-Redis workflow.
+        logger.error("Discovery rate-limit backend unavailable", exc_info=True)
+        if settings.environment != "production":
+            return
+        raise HTTPException(
+            status_code=503,
+            detail="Discovery is temporarily unavailable. Please try again shortly.",
+        )

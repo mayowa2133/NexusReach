@@ -83,9 +83,13 @@ async def test_email_status(client, mock_user_id):
     assert data["outlook_connected"] is False
 
 
-async def test_gmail_auth_url(client):
+async def test_gmail_auth_url(client, mock_user_id):
     """GET /api/email/gmail/auth-url returns OAuth URL."""
-    with patch("app.routers.email.gmail_service") as mock_gmail:
+    with (
+        patch("app.routers.email.gmail_service") as mock_gmail,
+        patch("app.routers.email.oauth_transaction_service.create_transaction", new_callable=AsyncMock) as mock_transaction,
+    ):
+        mock_transaction.return_value = ("state", "challenge")
         mock_gmail.get_auth_url.return_value = "https://accounts.google.com/oauth?..."
         resp = await client.get(
             "/api/email/gmail/auth-url",
@@ -94,6 +98,7 @@ async def test_gmail_auth_url(client):
 
     assert resp.status_code == 200
     assert "auth_url" in resp.json()
+    assert resp.json()["provider"] == "gmail"
 
 
 async def test_verify_email(client, mock_user_id):

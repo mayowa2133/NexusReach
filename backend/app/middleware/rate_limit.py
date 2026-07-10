@@ -49,6 +49,8 @@ def _build_limiter() -> Limiter:
             r.ping()
             return Limiter(key_func=_get_user_key, storage_uri=settings.redis_url)
         except Exception:
+            if settings.environment == "production":
+                raise RuntimeError("Redis is required for production rate limiting")
             logger.warning("Redis unavailable for rate limiting, using in-memory storage")
     return Limiter(key_func=_get_user_key, storage_uri="memory://")
 

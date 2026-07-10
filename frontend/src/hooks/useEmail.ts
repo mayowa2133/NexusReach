@@ -52,12 +52,12 @@ export function useVerifyEmail() {
   });
 }
 
-export function useConnectGmail() {
+export function useCompleteOAuthConnect() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (params: { code: string; redirect_uri: string }) =>
-      api.post('/api/email/gmail/connect', params),
+    mutationFn: (params: { code: string; state: string }) =>
+      api.post<{ status: string; provider: 'gmail' | 'outlook' }>('/api/email/oauth/connect', params),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['email-status'] });
     },
@@ -69,18 +69,6 @@ export function useDisconnectGmail() {
 
   return useMutation({
     mutationFn: () => api.post('/api/email/gmail/disconnect'),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['email-status'] });
-    },
-  });
-}
-
-export function useConnectOutlook() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (params: { code: string; redirect_uri: string }) =>
-      api.post('/api/email/outlook/connect', params),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['email-status'] });
     },
@@ -148,7 +136,7 @@ export function useGmailAuthUrl(redirectUri: string) {
   return useQuery({
     queryKey: ['gmail-auth-url', redirectUri],
     queryFn: () =>
-      api.get<{ auth_url: string }>(`/api/email/gmail/auth-url?redirect_uri=${encodeURIComponent(redirectUri)}`),
+      api.get<{ auth_url: string; provider: 'gmail' }>(`/api/email/gmail/auth-url?redirect_uri=${encodeURIComponent(redirectUri)}`),
     enabled: !!redirectUri,
   });
 }
@@ -157,7 +145,7 @@ export function useOutlookAuthUrl(redirectUri: string) {
   return useQuery({
     queryKey: ['outlook-auth-url', redirectUri],
     queryFn: () =>
-      api.get<{ auth_url: string }>(`/api/email/outlook/auth-url?redirect_uri=${encodeURIComponent(redirectUri)}`),
+      api.get<{ auth_url: string; provider: 'outlook' }>(`/api/email/outlook/auth-url?redirect_uri=${encodeURIComponent(redirectUri)}`),
     enabled: !!redirectUri,
   });
 }

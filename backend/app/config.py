@@ -80,6 +80,9 @@ class Settings(BaseSettings):
     # `site:linkedin.com/in` recall. Falls back to google_cse_id when unset.
     google_linkedin_cse_id: str = ""
     searxng_base_url: str = "http://localhost:8888"
+    # Browser/remote renderers do their own DNS and network connections. Keep
+    # them off by default until production egress policy blocks private ranges.
+    rendered_page_fetch_enabled: bool = False
     search_cache_ttl_seconds: int = 86_400
     # Provider order defaults. SearXNG is intentionally NOT in the defaults:
     # self-hosted SearXNG on a cloud/datacenter IP gets its scraping engines
@@ -156,8 +159,14 @@ class Settings(BaseSettings):
     # Upload size limits (audit H2). Bound in-memory upload reads so a single
     # request can't OOM the worker; the ZIP cap bounds decompressed size.
     max_resume_upload_bytes: int = 10 * 1024 * 1024  # 10 MiB
+    # Base64 JSON adds roughly 33% overhead to a 10 MiB resume.
+    max_resume_json_request_bytes: int = 14 * 1024 * 1024  # 14 MiB
     max_linkedin_upload_bytes: int = 25 * 1024 * 1024  # 25 MiB
     max_linkedin_zip_decompressed_bytes: int = 50 * 1024 * 1024  # 50 MiB
+    max_request_body_bytes: int = 1 * 1024 * 1024  # 1 MiB for ordinary JSON
+    oauth_transaction_ttl_seconds: int = 600
+    max_resume_pdf_pages: int = 25
+    max_resume_extracted_text_chars: int = 1_000_000
 
     @model_validator(mode="after")
     def _validate_production_config(self) -> "Settings":

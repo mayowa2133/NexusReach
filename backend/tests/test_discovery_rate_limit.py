@@ -81,8 +81,8 @@ async def test_blocks_request_over_limit(mock_redis):
 
 
 @pytest.mark.asyncio()
-async def test_allows_request_when_redis_unavailable():
-    """If Redis is down, requests should still be allowed."""
+async def test_blocks_costly_discovery_when_redis_unavailable():
+    """A Redis outage must not remove the budget for paid provider calls."""
     with (
         patch("app.utils.discovery_rate_limit.aioredis") as mock_aioredis,
         patch("app.utils.discovery_rate_limit.settings") as mock_settings,
@@ -93,11 +93,13 @@ async def test_allows_request_when_redis_unavailable():
         mock_aioredis.from_url.return_value = broken_redis
         mock_settings.redis_url = "redis://localhost:6379/0"
         mock_settings.discovery_daily_limit = 100
+        mock_settings.environment = "production"
 
-        # Should not raise — graceful degradation
-        await check_discovery_rate_limit(
-            user_id="00000000-0000-0000-0000-000000000001"
-        )
+        with pytest.raises(HTTPException) as exc_info:
+            await check_discovery_rate_limit(
+                user_id="00000000-0000-0000-0000-000000000001"
+            )
+    assert exc_info.value.status_code == 503
 
 
 @pytest.mark.asyncio()

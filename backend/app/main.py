@@ -17,6 +17,7 @@ from app.middleware.error_handler import (
     unhandled_exception_handler,
 )
 from app.middleware.rate_limit import limiter
+from app.middleware.request_size import RequestSizeLimitMiddleware
 from app.routers import (
     auth,
     profile,
@@ -75,6 +76,7 @@ app.state.limiter = limiter
 # GZip is added before CORS so CORS ends up outermost (last-added wraps first)
 # and error responses keep their CORS headers. Text JSON compresses ~10x.
 app.add_middleware(GZipMiddleware, minimum_size=1024)
+app.add_middleware(RequestSizeLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),
