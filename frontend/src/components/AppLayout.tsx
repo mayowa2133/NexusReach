@@ -102,7 +102,7 @@ export function AppLayout() {
             </SheetContent>
           </Sheet>
 
-          <Link to="/dashboard" className="mr-8">
+          <Link to="/dashboard" className="mr-8 flex items-center">
             <BrandLockup wordmarkClassName="text-lg" markClassName="h-6 w-6 text-primary" />
           </Link>
 

@@ -220,7 +220,8 @@ body:has(.lp) { background: #FAF9F5; }
 .lp .cred { border-top: 1px solid var(--lp-line-soft); border-bottom: 1px solid var(--lp-line-soft); margin-top: 96px; }
 .lp .cred-inner {
   display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
-  padding: 18px 0;
+  /* padding-block only — the shorthand would clobber .wrap's 24px side padding */
+  padding-block: 18px;
 }
 .lp .cred .mono-label { font-size: 10.5px; }
 @media (max-width: 760px) { .lp .cred-inner { flex-direction: column; gap: 10px; } }
@@ -328,7 +329,7 @@ body:has(.lp) { background: #FAF9F5; }
 
 /* final CTA */
 .lp .closer { margin-top: 120px; background: var(--lp-paper-2); border-top: 1px solid var(--lp-line-soft); }
-.lp .closer-inner { padding: 110px 0; text-align: left; }
+.lp .closer-inner { padding-block: 110px; text-align: left; }
 .lp .closer h2 { font-size: clamp(34px, 4.4vw, 54px); max-width: 20ch; }
 .lp .closer .lede { margin-top: 20px; max-width: 52ch; }
 
@@ -350,9 +351,10 @@ body:has(.lp) { background: #FAF9F5; }
 .lp .lp-footer { margin-top: 104px; border-top: 1px solid var(--lp-line); }
 .lp .foot-inner {
   display: flex; justify-content: space-between; gap: 24px; flex-wrap: wrap;
-  padding: 40px 0 48px;
+  padding-block: 40px 48px;
 }
 .lp .foot-left .wordmark { font-size: 15px; }
+.lp .foot-left .wordmark .wordmark-mark { width: 19px; height: 19px; }
 .lp .foot-note { font-family: var(--lp-mono); font-size: 10.5px; color: var(--lp-ink-40); margin-top: 10px; letter-spacing: 0.04em; }
 .lp .foot-links { display: flex; gap: 24px; flex-wrap: wrap; }
 .lp .foot-links a { font-size: 13.5px; color: var(--lp-ink-55); text-decoration: none; }
