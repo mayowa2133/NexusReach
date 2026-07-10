@@ -797,8 +797,9 @@ export function LandingPage() {
               <div className="a">
                 A relevant, specific, individually written message to a recruiter or hiring manager
                 about a role they own is normal professional behavior — hearing from candidates is
-                literally a recruiter's job. What annoys people is generic volume. Solomon is
-                built to make your one message good, not your hundred messages possible.
+                literally a recruiter's job. What annoys people is generic, mass-produced outreach.
+                Solomon is built to make each message specific and relevant — worth sending, and
+                worth reading.
               </div>
             </details>
             <details>
