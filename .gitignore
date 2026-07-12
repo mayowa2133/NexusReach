@@ -44,9 +44,7 @@ backend/.venv312/
 graphify-out/
 
 # Local caches and generated artifacts
-# (output/playwright/ has old tracked debug shots — scope to the generated dirs)
 .pnpm-store/
-output/pdf/
-output/resume_quality/
+output/
 e2e/dump.rdb
 posthog-setup-report.md
