@@ -356,7 +356,9 @@ body:has(.lp) { background: #FAF9F5; }
 .lp .foot-left .wordmark { font-size: 15px; }
 .lp .foot-left .wordmark .wordmark-mark { width: 19px; height: 19px; }
 .lp .foot-note { font-family: var(--lp-mono); font-size: 10.5px; color: var(--lp-ink-40); margin-top: 10px; letter-spacing: 0.04em; }
-.lp .foot-links { display: flex; gap: 24px; flex-wrap: wrap; }
+/* flex-start (not the stretch default): the anchors are blocks with top-flowing
+   text but the button centers its label, so stretched items misalign by ~17px. */
+.lp .foot-links { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
 .lp .foot-links a { font-size: 13.5px; color: var(--lp-ink-55); text-decoration: none; }
 .lp .foot-links a:hover { color: var(--lp-ink); }
 .lp .foot-links .lp-foot-link-btn {
