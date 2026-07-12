@@ -17,8 +17,8 @@ from app.models.linkedin_graph import (
     LinkedInGraphFollow,
     LinkedInGraphSyncRun,
 )
-from app.services.linkedin_graph.parsing import parse_linkedin_connections_file
 from app.services.linkedin_graph.store import _connection_count, _follow_counts, _get_or_create_user_settings, _token_hash, _upsert_connections, _upsert_follows, _utcnow
+from app.utils.sandboxed_process import run_in_sandbox_async
 from app.services.linkedin_graph.store import graph_freshness_metadata
 
 logger = logging.getLogger(__name__)
@@ -266,7 +266,16 @@ async def import_file(
     await db.flush()
 
     try:
-        rows = parse_linkedin_connections_file(filename, file_bytes)
+        rows = await run_in_sandbox_async(
+            "app.services.linkedin_graph.parsing",
+            "parse_linkedin_connections_file",
+            filename,
+            file_bytes,
+            timeout_seconds=settings.parser_sandbox_timeout_seconds,
+            memory_bytes=settings.parser_sandbox_memory_bytes,
+            cpu_seconds=settings.parser_sandbox_cpu_seconds,
+            output_bytes=settings.parser_sandbox_output_bytes,
+        )
         stats = await _upsert_connections(db, user_id, rows, source="manual_import")
     except ValueError as exc:
         sync_run.status = SYNC_STATUS_FAILED

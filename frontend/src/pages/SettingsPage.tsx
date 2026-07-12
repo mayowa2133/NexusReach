@@ -36,6 +36,7 @@ import { JobAlertsPanel } from '@/components/settings/JobAlertsPanel';
 import { AccountDataPanel } from '@/components/settings/AccountDataPanel';
 import { toast } from 'sonner';
 import type { LinkedInGraphSyncSession } from '@/types';
+import { consumePendingOAuthCallback } from '@/lib/observability';
 
 const REDIRECT_URI = `${window.location.origin}/settings`;
 const LINKEDIN_CONNECTOR_PROFILE_DIR = '~/.nexusreach/linkedin-graph-browser';
@@ -166,13 +167,20 @@ export function SettingsPage() {
   const clearLinkedInGraph = useClearLinkedInGraph();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [syncSession, setSyncSession] = useState<LinkedInGraphSyncSession | null>(null);
+  const pendingOAuthRef = useRef(consumePendingOAuthCallback());
 
   // Handle OAuth callback
   useEffect(() => {
-    const code = searchParams.get('code');
-    const state = searchParams.get('state');
+    const pending = pendingOAuthRef.current;
+    pendingOAuthRef.current = null;
+    const code = pending?.code || searchParams.get('code');
+    const state = pending?.state || searchParams.get('state');
 
     if (code && state) {
+      // Clear fallback callback parameters before any network exchange or toast.
+      if (searchParams.has('code') || searchParams.has('state')) {
+        setSearchParams({}, { replace: true });
+      }
       const handler = async () => {
         try {
           const result = await completeOAuthConnect.mutateAsync({ code, state });
@@ -180,8 +188,6 @@ export function SettingsPage() {
         } catch (err) {
           toast.error(err instanceof Error ? err.message : 'Connection failed');
         }
-        // Clean up URL params
-        setSearchParams({});
       };
       handler();
     }

@@ -5,7 +5,7 @@ Uses IP literals / localhost so the checks are deterministic and DNS-independent
 
 import pytest
 
-from app.utils.url_safety import is_safe_public_url
+from app.utils.url_safety import is_safe_public_url, is_safe_url_syntax
 
 
 @pytest.mark.parametrize(
@@ -36,13 +36,11 @@ def test_p4_blocks_unsafe_targets(url):
     "url",
     [
         "https://boards.greenhouse.io/acme/jobs/123",
-        "https://careers.example.com/jobs/platform-engineer",
         "http://93.184.216.34/",  # a public IP literal
     ],
 )
 def test_p4_allows_public_targets(url):
-    # Public hosts are allowed. (Unresolvable hosts are allowed too — they can't
-    # be fetched anyway — but public IP literals prove the allow path explicitly.)
+    # Public hosts and public IP literals pass the admission check.
     assert is_safe_public_url(url) is True
 
 
@@ -55,12 +53,29 @@ async def test_p4_generic_exact_url_rejected_at_parse():
     assert ats_client.parse_ats_job_url("http://127.0.0.1:6379/") is None
     assert ats_client.parse_ats_job_url("http://169.254.169.254/latest/meta-data/") is None
     # A normal public exact-job URL still parses.
-    parsed = ats_client.parse_ats_job_url("https://careers.example.com/jobs/eng")
+    parsed = ats_client.parse_ats_job_url("http://93.184.216.34/jobs/eng")
     assert parsed is not None and parsed.ats_type == "generic_exact"
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://greenhouse.io.attacker.example/acme/jobs/1",
+        "https://evil-lever.co/acme/1",
+        "https://apply.workable.com.attacker.example/acme/j/1",
+        "https://jobs.ashbyhq.com.attacker.example/acme/1",
+        "https://evil-icims.com/jobs/1",
+    ],
+)
+def test_provider_url_parsers_reject_lookalike_hosts(url):
+    from app.clients import ats_client
+
+    parsed = ats_client.parse_ats_job_url(url)
+    assert parsed is None or parsed.ats_type == "generic_exact"
+
+
 @pytest.mark.asyncio
-async def test_p4_safe_get_refuses_redirect_to_internal():
+async def test_p4_safe_get_refuses_redirect_to_internal(monkeypatch):
     """A public response that 302s to an internal host must not be followed."""
     import httpx
 
@@ -81,8 +96,57 @@ async def test_p4_safe_get_refuses_redirect_to_internal():
             # First (public) hop redirects to a loopback target.
             return _Resp(302, location="http://127.0.0.1:9999/secret")
 
+    def _resolve(url):
+        if "127.0.0.1" in url:
+            return None
+        return ("public.example.com", "93.184.216.34")
+
+    monkeypatch.setattr(url_safety, "_resolve_public_address", _resolve)
+
     # Pretend the initial public host is safe; the redirect target is loopback.
     resp = await url_safety.safe_get("https://public.example.com/", client=_Client())
     assert resp is None  # refused before fetching the internal redirect target
     # Only the first public hop was requested; the internal target was never fetched.
     assert hops == ["https://public.example.com/"]
+
+
+def test_p4_unresolvable_host_fails_closed(monkeypatch):
+    import socket
+    from app.utils import url_safety
+
+    def _fail(*_args, **_kwargs):
+        raise OSError("no DNS answer")
+
+    monkeypatch.setattr(socket, "getaddrinfo", _fail)
+    assert url_safety.is_safe_public_url("https://does-not-resolve.invalid/x") is False
+    assert is_safe_url_syntax("https://does-not-resolve.invalid/x") is True
+
+
+@pytest.mark.asyncio
+async def test_p4_safe_get_pins_connection_to_vetted_ip(monkeypatch):
+    import httpx
+    from app.utils import url_safety
+
+    seen = {}
+
+    async def handler(request):
+        seen["url"] = str(request.url)
+        seen["host"] = request.headers.get("host")
+        seen["sni"] = request.extensions.get("sni_hostname")
+        return httpx.Response(200, text="ok", request=request)
+
+    monkeypatch.setattr(
+        url_safety,
+        "_resolve_public_address",
+        lambda _url: ("public.example.com", "93.184.216.34"),
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        response = await url_safety.safe_get("https://public.example.com/path", client=client)
+
+    assert response is not None
+    assert seen == {
+        "url": "https://93.184.216.34/path",
+        "host": "public.example.com",
+        "sni": "public.example.com",
+    }
+    assert str(response.url) == "https://public.example.com/path"

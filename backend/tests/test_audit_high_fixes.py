@@ -7,10 +7,10 @@ H4 — the global known-people cache must not share work_email across users.
 """
 
 import io
-import threading
 import uuid
 import zipfile
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException
@@ -29,41 +29,29 @@ from app.utils.uploads import read_upload_capped
 
 
 async def test_render_pdf_async_runs_off_event_loop(monkeypatch):
-    """render_resume_artifact_pdf_async must execute the blocking render in a
-    worker thread, never inline on the event loop thread."""
-    main_thread = threading.get_ident()
-    seen: dict[str, int] = {}
-
-    def fake_render(content: str) -> bytes:
-        seen["thread"] = threading.get_ident()
-        return b"%PDF-fake"
+    """PDF rendering must cross the killable sandbox boundary."""
 
     from app.services.resume_artifact import latex
 
-    monkeypatch.setattr(latex, "render_resume_artifact_pdf", fake_render)
+    sandbox = AsyncMock(return_value=b"%PDF-fake")
+    monkeypatch.setattr(latex, "run_in_sandbox_async", sandbox)
 
     result = await resume_artifact_service.render_resume_artifact_pdf_async("hello")
 
     assert result == b"%PDF-fake"
-    assert seen["thread"] != main_thread
+    assert sandbox.await_args.args[:3] == (
+        "app.services.resume_artifact.latex",
+        "render_resume_artifact_pdf",
+        "hello",
+    )
 
 
 async def test_render_redline_pdf_async_forwards_args(monkeypatch):
     """The redline async wrapper must forward all args to the sync renderer."""
-    captured: dict[str, object] = {}
-
-    def fake_redline(content, rewrites, decisions, *, auto_accept_inferred=False):
-        captured.update(
-            content=content,
-            rewrites=rewrites,
-            decisions=decisions,
-            auto_accept_inferred=auto_accept_inferred,
-        )
-        return b"%PDF-redline"
-
     from app.services.resume_artifact import redline
 
-    monkeypatch.setattr(redline, "render_resume_artifact_redline_pdf", fake_redline)
+    sandbox = AsyncMock(return_value=b"%PDF-redline")
+    monkeypatch.setattr(redline, "run_in_sandbox_async", sandbox)
 
     result = await resume_artifact_service.render_resume_artifact_redline_pdf_async(
         "body",
@@ -73,17 +61,38 @@ async def test_render_redline_pdf_async_forwards_args(monkeypatch):
     )
 
     assert result == b"%PDF-redline"
-    assert captured == {
-        "content": "body",
-        "rewrites": [{"id": "r1"}],
-        "decisions": {"r1": "accepted"},
-        "auto_accept_inferred": True,
-    }
+    assert sandbox.await_args.args[:5] == (
+        "app.services.resume_artifact.redline",
+        "render_resume_artifact_redline_pdf",
+        "body",
+        [{"id": "r1"}],
+        {"r1": "accepted"},
+    )
+    assert sandbox.await_args.kwargs["auto_accept_inferred"] is True
 
 
 async def test_pdf_render_concurrency_is_bounded():
     """The module must cap concurrent pdflatex compilations (audit H1)."""
     assert resume_artifact_service._PDF_RENDER_SEMAPHORE._value <= 2
+
+
+async def test_production_render_dispatches_to_isolated_queue(monkeypatch):
+    from app.config import settings
+    from app.services.resume_artifact import latex
+    from app.tasks import render
+
+    task = SimpleNamespace(
+        get=lambda **_kwargs: b"%PDF-remote",
+        revoke=lambda **_kwargs: None,
+    )
+    apply_async = MagicMock(return_value=task)
+    monkeypatch.setattr(settings, "render_remote_enabled", True)
+    monkeypatch.setattr(render.render_pdf, "apply_async", apply_async)
+
+    result = await latex.render_resume_artifact_pdf_async("hello")
+
+    assert result == b"%PDF-remote"
+    assert apply_async.call_args.kwargs["queue"] == "render"
 
 
 # ---------------------------------------------------------------------------

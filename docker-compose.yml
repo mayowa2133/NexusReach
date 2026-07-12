@@ -1,9 +1,19 @@
 services:
   searxng:
-    image: searxng/searxng
+    build:
+      context: ./deploy/searxng
+      dockerfile: Dockerfile
+    image: nexusreach-searxng:2026.7.11
     container_name: nexusreach-searxng
     ports:
       - "8888:8080"
     volumes:
-      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+      - ./deploy/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+      - /var/cache:size=32m,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: ["ALL"]
     restart: unless-stopped

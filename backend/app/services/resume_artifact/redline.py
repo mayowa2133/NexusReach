@@ -11,6 +11,8 @@ from typing import Any
 from app.services.resume_artifact.latex import _PDF_RENDER_SEMAPHORE, _latex_escape_preserving_spacing, render_resume_artifact_pdf
 from app.services.resume_artifact.rewrites import _rewrite_is_rendered_in_current_artifact
 from app.services.resume_artifact.textnorm import _clean, _latex_plain_text, _quantifiable_measure_spans
+from app.config import settings
+from app.utils.sandboxed_process import run_in_sandbox_async
 
 logger = logging.getLogger(__name__)
 
@@ -286,10 +288,36 @@ async def render_resume_artifact_redline_pdf_async(
 ) -> bytes:
     """Async wrapper around ``render_resume_artifact_redline_pdf`` (audit H1)."""
     async with _PDF_RENDER_SEMAPHORE:
-        return await asyncio.to_thread(
-            render_resume_artifact_redline_pdf,
+        if settings.render_remote_enabled:
+            from app.tasks.render import render_redline_pdf
+
+            task = render_redline_pdf.apply_async(
+                args=[content, rewrites, decisions, auto_accept_inferred],
+                queue="render",
+            )
+            try:
+                result = await asyncio.to_thread(
+                    task.get,
+                    timeout=settings.render_task_timeout_seconds,
+                    propagate=True,
+                )
+            except Exception as exc:
+                task.revoke(terminate=True)
+                raise ValueError("Remote redline rendering failed safely.") from exc
+            if not isinstance(result, bytes) or not result.startswith(b"%PDF"):
+                raise ValueError("Remote renderer returned an invalid PDF.")
+            if len(result) > settings.parser_sandbox_output_bytes:
+                raise ValueError("Remote renderer returned an oversized PDF.")
+            return result
+        return await run_in_sandbox_async(
+            "app.services.resume_artifact.redline",
+            "render_resume_artifact_redline_pdf",
             content,
             rewrites,
             decisions,
+            timeout_seconds=settings.latex_render_timeout_seconds + 3,
+            memory_bytes=settings.parser_sandbox_memory_bytes,
+            cpu_seconds=settings.parser_sandbox_cpu_seconds,
+            output_bytes=settings.parser_sandbox_output_bytes,
             auto_accept_inferred=auto_accept_inferred,
         )

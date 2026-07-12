@@ -1,6 +1,6 @@
 """Regression tests for the Medium/Low launch-hardening audit fixes.
 
-M1 — rate-limit key only trusts a signature-verified JWT sub.
+M1 — rate-limit key performs no JWT parsing or network access.
 M2 — JWT verification uses PyJWT (valid accepted, forged/expired rejected).
 M4 — health endpoint does not leak raw exception detail.
 M5 — SMTP lookup rejects domains whose MX resolves to private IPs.
@@ -11,6 +11,7 @@ L4 — production config fails closed for dev-auth bypass.
 
 import uuid
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import jwt as pyjwt
 import pytest
@@ -135,24 +136,26 @@ async def test_non_uuid_sub_is_rejected_as_401(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# M1 — rate-limit key trusts only verified tokens
+# M1 — rate-limit key is network-free and IP-based
 # ---------------------------------------------------------------------------
 
 
-def test_rate_limit_key_trusts_verified_sub(monkeypatch):
-    monkeypatch.setattr(settings, "supabase_jwt_secret", "real-secret")
+def test_rate_limit_key_does_not_decode_valid_token(monkeypatch):
     sub = str(uuid.uuid4())
     token = pyjwt.encode(
         {"sub": sub, "aud": "authenticated"}, "real-secret", algorithm="HS256"
     )
 
+    decode = MagicMock(side_effect=AssertionError("limiter must not decode JWTs"))
+    monkeypatch.setattr(auth_tokens, "decode_supabase_token", decode)
+
     key = _get_user_key(_fake_request(f"Bearer {token}"))
 
-    assert key == f"user:{sub}"
+    assert key == "203.0.113.7"
+    decode.assert_not_called()
 
 
-def test_rate_limit_key_trusts_verified_es256_sub(monkeypatch):
-    monkeypatch.setattr(settings, "supabase_url", "https://project.supabase.co")
+def test_rate_limit_key_does_not_fetch_jwks_for_es256(monkeypatch):
     private_key = ec.generate_private_key(ec.SECP256R1())
     sub = str(uuid.uuid4())
     token = pyjwt.encode(
@@ -161,16 +164,13 @@ def test_rate_limit_key_trusts_verified_es256_sub(monkeypatch):
         algorithm="ES256",
         headers={"kid": "test-key"},
     )
-    jwks_client = SimpleNamespace(
-        get_signing_key_from_jwt=lambda _token: SimpleNamespace(
-            key=private_key.public_key()
-        )
-    )
-    monkeypatch.setattr(auth_tokens, "_get_jwks_client", lambda _url: jwks_client)
+    get_client = MagicMock(side_effect=AssertionError("limiter must not fetch JWKS"))
+    monkeypatch.setattr(auth_tokens, "_get_jwks_client", get_client)
 
     key = _get_user_key(_fake_request(f"Bearer {token}"))
 
-    assert key == f"user:{sub}"
+    assert key == "203.0.113.7"
+    get_client.assert_not_called()
 
 
 def test_rate_limit_key_ignores_forged_sub(monkeypatch):
@@ -183,7 +183,7 @@ def test_rate_limit_key_ignores_forged_sub(monkeypatch):
 
     key = _get_user_key(_fake_request(f"Bearer {forged}", ip="198.51.100.4"))
 
-    # Forged token can't pin a per-user bucket — falls back to client IP.
+    # The outer budget is always keyed by peer IP and never parses the token.
     assert key == "198.51.100.4"
     assert key != "user:attacker"
 
@@ -207,8 +207,8 @@ def test_redirect_allowlist_drops_localhost_in_production(monkeypatch):
     monkeypatch.setattr(settings, "companion_extension_origins", [])
 
     assert (
-        _validate_redirect_uri("https://app.nexusreach.com/oauth/callback")
-        == "https://app.nexusreach.com/oauth/callback"
+        _validate_redirect_uri("https://app.nexusreach.com/settings")
+        == "https://app.nexusreach.com/settings"
     )
     with pytest.raises(HTTPException) as exc:
         _validate_redirect_uri("http://localhost:5173/oauth/callback")
@@ -223,7 +223,9 @@ def test_redirect_allowlist_allows_localhost_in_dev(monkeypatch):
     monkeypatch.setattr(settings, "cors_origins", ["http://localhost:5173"])
     monkeypatch.setattr(settings, "companion_extension_origins", [])
 
-    assert _validate_redirect_uri("http://localhost:5173/x") == "http://localhost:5173/x"
+    assert _validate_redirect_uri("http://localhost:5173/settings") == "http://localhost:5173/settings"
+    with pytest.raises(HTTPException):
+        _validate_redirect_uri("http://localhost:5173/other")
 
 
 # ---------------------------------------------------------------------------
@@ -313,6 +315,7 @@ def _prod_settings(**overrides):
         sentry_dsn="https://x@sentry.io/1",
         token_encryption_primary_version="v1",
         token_encryption_keys={"v1": Fernet.generate_key().decode()},
+        render_remote_enabled=True,
     )
     base.update(overrides)
     return Settings(**base)
@@ -331,3 +334,29 @@ def test_production_rejects_dev_auth_mode():
 def test_production_rejects_dev_auth_bypass_enabled():
     with pytest.raises(ValueError, match="DEV_AUTH_BYPASS_ENABLED must not be true"):
         _prod_settings(dev_auth_bypass_enabled=True)
+
+
+def test_production_api_requires_isolated_remote_renderer():
+    with pytest.raises(ValueError, match="RENDER_REMOTE_ENABLED"):
+        _prod_settings(render_remote_enabled=False)
+
+
+def test_renderer_role_rejects_application_credentials():
+    from app.config import Settings
+
+    with pytest.raises(ValueError, match="must not be provided to the renderer"):
+        Settings(
+            _env_file=None,
+            environment="production",
+            service_role="renderer",
+            redis_url="redis://redis.example:6379/0",
+            supabase_service_role_key="must-not-be-here",
+        )
+
+    renderer = Settings(
+        _env_file=None,
+        environment="production",
+        service_role="renderer",
+        redis_url="redis://redis.example:6379/0",
+    )
+    assert renderer.service_role == "renderer"

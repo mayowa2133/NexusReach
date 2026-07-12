@@ -28,7 +28,12 @@ class _ScalarResult:
 async def test_get_or_create_user_uses_jwt_email_for_new_user():
     auth_user = AuthenticatedUser(user_id=uuid.uuid4(), email="person@example.com")
     db = MagicMock()
-    db.execute = AsyncMock(return_value=_ScalarResult(None))
+    db.execute = AsyncMock(
+        side_effect=[
+            _ScalarResult(None),  # advisory lock
+            _ScalarResult(None),  # user lookup
+        ]
+    )
     db.add = MagicMock()
     db.commit = AsyncMock()
     db.refresh = AsyncMock()
@@ -45,6 +50,7 @@ async def test_get_or_create_user_backfills_blank_email_and_defaults():
     db = MagicMock()
     db.execute = AsyncMock(
         side_effect=[
+            _ScalarResult(None),
             _ScalarResult(existing_user),
             _ScalarResult(None),
             _ScalarResult(None),

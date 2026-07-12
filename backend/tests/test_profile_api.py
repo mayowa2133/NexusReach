@@ -113,13 +113,15 @@ async def test_upload_resume_json_success(client, mock_user_id):
         "file_base64": base64.b64encode(b"%PDF-sample").decode("ascii"),
     }
 
-    with patch("app.routers.profile.extract_text", return_value="Jane Doe\nSkills\nPython"), \
-         patch("app.routers.profile.parse_resume_text", return_value={
-             "contact": {
-                 "name": "Jane Doe",
-                 "urls": ["https://linkedin.com/in/janedoe", "https://github.com/janedoe"],
+    with patch("app.routers.profile.run_in_sandbox_async", new_callable=AsyncMock, return_value={
+             "raw_text": "Jane Doe\nSkills\nPython",
+             "parsed": {
+                 "contact": {
+                     "name": "Jane Doe",
+                     "urls": ["https://linkedin.com/in/janedoe", "https://github.com/janedoe"],
+                 },
+                 "skills": ["Python"],
              },
-             "skills": ["Python"],
          }), \
          patch("app.tasks.jobs.rescore_user_jobs.delay") as mock_delay:
         resp = await client.post("/api/profile/resume-json", json=payload)

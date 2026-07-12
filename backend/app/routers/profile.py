@@ -1,4 +1,3 @@
-import asyncio
 import base64
 import binascii
 import uuid
@@ -20,7 +19,7 @@ from app.schemas.profile import (
     ProfileUpdate,
     ResumeUploadJsonRequest,
 )
-from app.services.resume_parser import extract_text, parse_resume_text
+from app.utils.sandboxed_process import run_in_sandbox_async
 from app.utils.uploads import read_upload_capped
 
 router = APIRouter(prefix="/profile", tags=["profile"])
@@ -152,13 +151,23 @@ async def _parse_and_store_resume(
     file_bytes: bytes,
     content_type: str,
 ) -> Profile:
-    # pypdf / python-docx parsing is synchronous CPU work; run it off the event
-    # loop so a large or complex resume can't freeze other requests (audit H1).
+    # Parsing runs in a fresh, killable process with no network and OS resource
+    # limits. A parser hang/OOM cannot consume the API worker.
     try:
-        raw_text = await asyncio.to_thread(extract_text, file_bytes, content_type)
-        parsed = await asyncio.to_thread(parse_resume_text, raw_text)
+        result = await run_in_sandbox_async(
+            "app.services.resume_parser",
+            "parse_resume_document",
+            file_bytes,
+            content_type,
+            timeout_seconds=settings.parser_sandbox_timeout_seconds,
+            memory_bytes=settings.parser_sandbox_memory_bytes,
+            cpu_seconds=settings.parser_sandbox_cpu_seconds,
+            output_bytes=settings.parser_sandbox_output_bytes,
+        )
+        raw_text = result["raw_text"]
+        parsed = result["parsed"]
     except Exception as e:
-        raise HTTPException(status_code=422, detail=f"Failed to parse resume: {e}")
+        raise HTTPException(status_code=422, detail="Failed to parse resume safely.") from e
 
     profile.resume_raw = raw_text
     profile.resume_parsed = parsed

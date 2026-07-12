@@ -59,26 +59,34 @@ async def create_transaction(
     *, user_id: uuid.UUID, provider: str, redirect_uri: str
 ) -> tuple[str, str]:
     """Create a one-time state transaction and return ``(state, challenge)``."""
-    state = secrets.token_urlsafe(32)
-    verifier = secrets.token_urlsafe(64)
-    payload = json.dumps(
-        {
-            "user_id": str(user_id),
-            "provider": provider,
-            "redirect_uri": redirect_uri,
-            "code_verifier": verifier,
-        },
-        separators=(",", ":"),
-    )
     try:
-        await _client().set(
-            _state_key(state), payload, ex=settings.oauth_transaction_ttl_seconds, nx=True
-        )
+        for _ in range(3):
+            state = secrets.token_urlsafe(32)
+            verifier = secrets.token_urlsafe(64)
+            payload = json.dumps(
+                {
+                    "user_id": str(user_id),
+                    "provider": provider,
+                    "redirect_uri": redirect_uri,
+                    "code_verifier": verifier,
+                },
+                separators=(",", ":"),
+            )
+            created = await _client().set(
+                _state_key(state),
+                payload,
+                ex=settings.oauth_transaction_ttl_seconds,
+                nx=True,
+            )
+            if created:
+                return state, _pkce_challenge(verifier)
     except Exception as exc:
         raise OAuthTransactionUnavailableError(
             "OAuth connection is temporarily unavailable. Please try again."
         ) from exc
-    return state, _pkce_challenge(verifier)
+    raise OAuthTransactionUnavailableError(
+        "OAuth connection is temporarily unavailable. Please try again."
+    )
 
 
 async def consume_transaction(

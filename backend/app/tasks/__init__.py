@@ -113,6 +113,8 @@ celery_app.conf.update(
         "app.tasks.auto_prospect.prewarm_job_people": {"queue": "prewarm"},
         "app.tasks.auto_prospect.prewarm_job_people_batch": {"queue": "prewarm"},
         "app.tasks.auto_prospect.refresh_job_research_snapshot": {"queue": "prewarm"},
+        "app.tasks.render.render_pdf": {"queue": "render"},
+        "app.tasks.render.render_redline_pdf": {"queue": "render"},
     },
     beat_schedule={
         "refresh-job-feeds": {
@@ -187,5 +189,6 @@ for module_name in (
     "app.tasks.linkedin_graph",
     "app.tasks.outreach_reconcile",
     "app.tasks.reverify",
+    "app.tasks.render",
 ):
     import_module(module_name)

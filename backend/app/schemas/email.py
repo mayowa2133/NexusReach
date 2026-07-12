@@ -1,9 +1,9 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class OAuthCallbackRequest(BaseModel):
-    code: str
-    state: str
+    code: str = Field(min_length=1, max_length=4096)
+    state: str = Field(min_length=32, max_length=512)
 
 
 class OAuthUrlResponse(BaseModel):
@@ -51,8 +51,8 @@ class EmailVerifyResponse(BaseModel):
 
 
 class StageDraftRequest(BaseModel):
-    message_id: str
-    provider: str  # gmail | outlook
+    message_id: str = Field(min_length=1, max_length=64)
+    provider: str = Field(pattern="^(gmail|outlook)$")
 
 
 class StageDraftResponse(BaseModel):
@@ -62,8 +62,8 @@ class StageDraftResponse(BaseModel):
 
 
 class StageDraftsRequest(BaseModel):
-    message_ids: list[str]
-    provider: str  # gmail | outlook
+    message_ids: list[str] = Field(min_length=1, max_length=50)
+    provider: str = Field(pattern="^(gmail|outlook)$")
 
 
 class StageDraftsItem(BaseModel):
@@ -84,8 +84,8 @@ class StageDraftsResponse(BaseModel):
 
 
 class SendMessageRequest(BaseModel):
-    message_id: str
-    provider: str | None = None  # gmail | outlook — auto-detected if omitted
+    message_id: str = Field(min_length=1, max_length=64)
+    provider: str | None = Field(default=None, pattern="^(gmail|outlook)$")
 
 
 class SendMessageResponse(BaseModel):
@@ -105,11 +105,11 @@ class EmailConnectionStatus(BaseModel):
 
 
 class EmailLookupRequest(BaseModel):
-    linkedin_url: str | None = None
-    first_name: str | None = None
-    last_name: str | None = None
-    company_name: str | None = None
-    company_domain: str | None = None
+    linkedin_url: str | None = Field(default=None, max_length=2048)
+    first_name: str | None = Field(default=None, max_length=100)
+    last_name: str | None = Field(default=None, max_length=100)
+    company_name: str | None = Field(default=None, max_length=255)
+    company_domain: str | None = Field(default=None, max_length=253)
 
 
 class EmailLookupResponse(BaseModel):

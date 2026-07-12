@@ -83,6 +83,9 @@ class Settings(BaseSettings):
     # Browser/remote renderers do their own DNS and network connections. Keep
     # them off by default until production egress policy blocks private ranges.
     rendered_page_fetch_enabled: bool = False
+    # Renderers resolve/connect outside safe_get. They require an outbound
+    # firewall that denies private, link-local, loopback, and metadata networks.
+    rendered_page_egress_policy_enforced: bool = False
     search_cache_ttl_seconds: int = 86_400
     # Provider order defaults. SearXNG is intentionally NOT in the defaults:
     # self-hosted SearXNG on a cloud/datacenter IP gets its scraping engines
@@ -117,6 +120,7 @@ class Settings(BaseSettings):
 
     # App
     environment: str = "development"
+    service_role: str = "api"  # api | worker | beat | renderer
     app_release: str = ""
     frontend_url: str = "http://localhost:5173"
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
@@ -142,6 +146,11 @@ class Settings(BaseSettings):
     # Discovery rate limiting
     discovery_rate_limit: str = "10/minute"
     discovery_daily_limit: int = 100
+    ats_search_daily_limit: int = 20
+    email_verify_daily_limit: int = 25
+    oauth_transaction_daily_limit: int = 30
+    logo_cache_max_entries: int = 10_000
+    readiness_token: str = ""
 
     # LinkedIn graph sync
     linkedin_graph_sync_session_ttl_seconds: int = 900
@@ -167,6 +176,20 @@ class Settings(BaseSettings):
     oauth_transaction_ttl_seconds: int = 600
     max_resume_pdf_pages: int = 25
     max_resume_extracted_text_chars: int = 1_000_000
+    parser_sandbox_timeout_seconds: int = 15
+    parser_sandbox_memory_bytes: int = 512 * 1024 * 1024
+    parser_sandbox_cpu_seconds: int = 10
+    parser_sandbox_output_bytes: int = 16 * 1024 * 1024
+    latex_render_timeout_seconds: int = 15
+    render_remote_enabled: bool = False
+    render_task_timeout_seconds: int = 30
+    max_docx_entries: int = 200
+    max_docx_uncompressed_bytes: int = 50 * 1024 * 1024
+    max_archive_compression_ratio: int = 100
+    max_linkedin_csv_rows: int = 50_000
+    max_linkedin_csv_columns: int = 50
+    max_linkedin_csv_cell_chars: int = 10_000
+    max_linkedin_zip_entries: int = 2_000
 
     @model_validator(mode="after")
     def _validate_production_config(self) -> "Settings":
@@ -174,10 +197,33 @@ class Settings(BaseSettings):
         if self.environment != "production":
             return self
         errors: list[str] = []
-        if "localhost" in self.database_url:
-            errors.append("NEXUSREACH_DATABASE_URL still points at localhost")
+        if self.service_role not in {"api", "worker", "beat", "renderer"}:
+            errors.append("NEXUSREACH_SERVICE_ROLE is invalid")
         if "localhost" in self.redis_url:
             errors.append("NEXUSREACH_REDIS_URL still points at localhost")
+        if self.service_role == "renderer":
+            forbidden = {
+                "NEXUSREACH_SUPABASE_SERVICE_ROLE_KEY": self.supabase_service_role_key,
+                "NEXUSREACH_SUPABASE_JWT_SECRET": self.supabase_jwt_secret,
+                "NEXUSREACH_GOOGLE_CLIENT_SECRET": self.google_client_secret,
+                "NEXUSREACH_MICROSOFT_CLIENT_SECRET": self.microsoft_client_secret,
+                "NEXUSREACH_OPENAI_API_KEY": self.openai_api_key,
+                "NEXUSREACH_ANTHROPIC_API_KEY": self.anthropic_api_key,
+                "NEXUSREACH_HUNTER_API_KEY": self.hunter_api_key,
+            }
+            for name, value in forbidden.items():
+                if value:
+                    errors.append(f"{name} must not be provided to the renderer")
+            if self.token_encryption_keys:
+                errors.append("NEXUSREACH_TOKEN_ENCRYPTION_KEYS must not be provided to the renderer")
+            if errors:
+                raise ValueError(
+                    "Production configuration errors:\n  - " + "\n  - ".join(errors)
+                )
+            return self
+
+        if "localhost" in self.database_url:
+            errors.append("NEXUSREACH_DATABASE_URL still points at localhost")
         if not self.supabase_url:
             errors.append("NEXUSREACH_SUPABASE_URL is empty")
         if not self.supabase_key:
@@ -190,6 +236,8 @@ class Settings(BaseSettings):
             errors.append("NEXUSREACH_AUTH_MODE=dev must not be used in production")
         if self.dev_auth_bypass_enabled:
             errors.append("NEXUSREACH_DEV_AUTH_BYPASS_ENABLED must not be true in production")
+        if self.service_role == "api" and not self.render_remote_enabled:
+            errors.append("NEXUSREACH_RENDER_REMOTE_ENABLED must be true for the production API")
         if not self.sentry_dsn:
             errors.append("NEXUSREACH_SENTRY_DSN is empty")
         if not self.token_encryption_keys:

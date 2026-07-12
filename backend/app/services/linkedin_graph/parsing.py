@@ -7,6 +7,7 @@ import io
 import logging
 import re
 import zipfile
+from itertools import chain
 from pathlib import PurePosixPath
 from typing import Any
 from urllib.parse import urlparse
@@ -309,14 +310,33 @@ def _find_csv_header_index(lines: list[list[str]]) -> int | None:
 
 def parse_linkedin_connections_csv(file_bytes: bytes) -> list[dict[str, Any]]:
     decoded = file_bytes.decode("utf-8-sig", errors="replace")
-    csv_rows = list(csv.reader(io.StringIO(decoded)))
-    header_index = _find_csv_header_index(csv_rows)
+    reader = csv.reader(io.StringIO(decoded))
+    prefix: list[list[str]] = []
+    header_index = None
+    for _ in range(25):
+        try:
+            row = next(reader)
+        except StopIteration:
+            break
+        prefix.append(row)
+        header_index = _find_csv_header_index(prefix)
+        if header_index is not None:
+            break
     if header_index is None:
         raise ValueError("Could not find a LinkedIn connections CSV header.")
 
-    header = csv_rows[header_index]
+    header = prefix[header_index]
+    if not header or len(header) > settings.max_linkedin_csv_columns:
+        raise ValueError("LinkedIn CSV has too many columns.")
     payload_rows: list[dict[str, Any]] = []
-    for row in csv_rows[header_index + 1:]:
+    rows = chain(prefix[header_index + 1:], reader)
+    for row_number, row in enumerate(rows, start=1):
+        if row_number > settings.max_linkedin_csv_rows:
+            raise ValueError("LinkedIn CSV has too many rows.")
+        if len(row) > settings.max_linkedin_csv_columns:
+            raise ValueError("LinkedIn CSV has too many columns.")
+        if any(len(value) > settings.max_linkedin_csv_cell_chars for value in row):
+            raise ValueError("LinkedIn CSV contains an oversized cell.")
         if not any(_clean_text(value) for value in row):
             continue
         payload_rows.append(
@@ -363,7 +383,22 @@ def parse_linkedin_connections_zip(
         raise ValueError("Invalid LinkedIn data export ZIP.") from exc
 
     with archive:
-        candidates = _zip_connection_candidates(archive.namelist())
+        infos = archive.infolist()
+        if len(infos) > settings.max_linkedin_zip_entries:
+            raise ValueError("LinkedIn export contains too many archive entries.")
+        total_expanded = 0
+        for entry in infos:
+            path = PurePosixPath(entry.filename)
+            if path.is_absolute() or ".." in path.parts or entry.flag_bits & 0x1:
+                raise ValueError("LinkedIn export contains an unsafe archive entry.")
+            if entry.filename.lower().endswith((".zip", ".jar")):
+                raise ValueError("Nested archives are not allowed in LinkedIn exports.")
+            total_expanded += entry.file_size
+            if total_expanded > cap:
+                raise ValueError("LinkedIn export is too large after decompression.")
+            if entry.file_size and entry.file_size / max(1, entry.compress_size) > settings.max_archive_compression_ratio:
+                raise ValueError("LinkedIn export compression ratio is unsafe.")
+        candidates = _zip_connection_candidates([entry.filename for entry in infos])
         if not candidates:
             raise ValueError("No LinkedIn connections CSV was found in the ZIP export.")
         info = archive.getinfo(candidates[0])

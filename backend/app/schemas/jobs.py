@@ -16,16 +16,16 @@ VALID_OFFER_STATUSES = {"pending", "accepted", "declined", "expired"}
 
 
 class JobSearchRequest(BaseModel):
-    query: str
-    location: str | None = None
+    query: str = Field(min_length=1, max_length=200)
+    location: str | None = Field(default=None, max_length=200)
     remote_only: bool = False
-    sources: list[str] | None = None
+    sources: list[str] | None = Field(default=None, max_length=20)
 
 
 class ATSSearchRequest(BaseModel):
-    company_slug: str | None = None
-    ats_type: str | None = None  # board-backed ATS type when not using job_url
-    job_url: str | None = None
+    company_slug: str | None = Field(default=None, max_length=255)
+    ats_type: str | None = Field(default=None, max_length=50)
+    job_url: str | None = Field(default=None, max_length=2048)
 
 
 class JobStageUpdate(BaseModel):
@@ -154,8 +154,8 @@ class SearchPreferenceToggle(BaseModel):
 
 
 class DiscoverRequest(BaseModel):
-    queries: list[str] | None = None
-    occupations: list[str] | None = None
+    queries: list[str] | None = Field(default=None, max_length=20)
+    occupations: list[str] | None = Field(default=None, max_length=50)
     mode: Literal["default", "startup"] = "default"
 
 
@@ -175,7 +175,7 @@ class EnsureFreshResponse(BaseModel):
 class DiscoverOccupationsRequest(BaseModel):
     """Chip-driven discovery: the occupations the user has selected on Jobs."""
 
-    occupations: list[str] = []
+    occupations: list[str] = Field(default_factory=list, max_length=50)
 
 
 class JobSourceRunResponse(BaseModel):

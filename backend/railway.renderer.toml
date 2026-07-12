@@ -1,0 +1,8 @@
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile.renderer"
+
+[deploy]
+startCommand = "celery -A app.tasks worker --loglevel=info --concurrency=1 -Q render"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10

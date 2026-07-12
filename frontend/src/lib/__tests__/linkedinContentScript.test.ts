@@ -9,6 +9,7 @@ type LinkedInContentHooks = {
   scrapeFollows: (entityType: 'person' | 'company') => Array<Record<string, unknown>>;
   captureHiringTeam: () => { members: Array<Record<string, unknown>>; reason?: string };
   captureJobPoster: () => Record<string, unknown> | null;
+  normalizeLinkedInUrl: (url: string) => string | null;
 };
 
 declare global {
@@ -65,6 +66,44 @@ describe('LinkedIn companion content script', () => {
     expect(hooks.matchesControlLabel('Connected', 'connect')).toBe(false);
     expect(hooks.matchesControlLabel('1st-degree connection', 'connect')).toBe(false);
     expect(hooks.matchesControlLabel('Disconnect', 'connect')).toBe(false);
+  });
+
+  it('rejects LinkedIn lookalike hosts', () => {
+    const hooks = loadContentScript();
+
+    expect(hooks.normalizeLinkedInUrl('https://www.linkedin.com/in/real')).toBe(
+      'https://www.linkedin.com/in/real',
+    );
+    expect(hooks.normalizeLinkedInUrl('https://linkedin.com.attacker.example/in/fake')).toBeNull();
+    expect(hooks.normalizeLinkedInUrl('https://evil-linkedin.com/in/fake')).toBeNull();
+  });
+
+  it('renders external companion context as text rather than markup', async () => {
+    document.body.innerHTML = `
+      <main>
+        <h1>Avery Target</h1>
+        <button type="button" aria-label="Message Avery Target">Message</button>
+        <div role="textbox" contenteditable="true" aria-label="Write a message"></div>
+      </main>
+    `;
+    const hooks = loadContentScript();
+
+    await hooks.runAssist({
+      action: 'linkedin_message',
+      draftText: 'Safe draft',
+      personName: '<img data-attacker src=x onerror=alert(1)>',
+      companyName: '<a data-attacker href="javascript:alert(1)">Acme</a>',
+      jobTitle: '</div><form data-attacker>phish</form>',
+      warmPath: { reason: '<iframe data-attacker></iframe>' },
+      linkedinSignal: { reason: '<svg data-attacker onload=alert(1)>' },
+      linkedinUrl: 'https://www.linkedin.com/in/avery-target',
+    });
+
+    const panel = document.getElementById('nexusreach-companion-panel');
+    expect(panel).not.toBeNull();
+    expect(panel?.querySelector('[data-attacker]')).toBeNull();
+    expect(panel).toHaveTextContent('<img data-attacker src=x onerror=alert(1)>');
+    expect(panel).toHaveTextContent('<a data-attacker href="javascript:alert(1)">Acme</a>');
   });
 
   it('scrapes followed companies from company and showcase links', () => {

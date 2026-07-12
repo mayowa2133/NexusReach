@@ -17,6 +17,7 @@ import re
 import httpx
 
 from app.clients import search_cache_client
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,36 @@ _GLOBE_SIG_KEY = "logo:globe-signature"
 _GLOBE_SENTINEL_DOMAIN = "nonexistent-company-zzzqq-000.com"
 _MISS_MARKER = "MISS"
 _DOMAIN_RE = re.compile(r"^(?!-)[a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63})+$")
+_CACHE_INDEX_KEY = "logo:index"
+_CAP_CACHE_LUA = """
+redis.call('ZADD', KEYS[1], ARGV[1], KEYS[2])
+local count = redis.call('ZCARD', KEYS[1])
+local overflow = count - tonumber(ARGV[2])
+if overflow > 0 then
+  local victims = redis.call('ZRANGE', KEYS[1], 0, overflow - 1)
+  for _, victim in ipairs(victims) do redis.call('DEL', victim) end
+  redis.call('ZREM', KEYS[1], unpack(victims))
+end
+return count
+"""
+
+
+async def _track_bounded_cache_key(key: str) -> None:
+    """Keep arbitrary-domain logo cache cardinality within a hard ceiling."""
+    try:
+        import time
+
+        await search_cache_client._client().eval(
+            _CAP_CACHE_LUA,
+            2,
+            _CACHE_INDEX_KEY,
+            key,
+            time.time(),
+            settings.logo_cache_max_entries,
+        )
+    except Exception:
+        # Caching is optional; request limits still bound outbound work.
+        logger.debug("logo cache index update failed", exc_info=True)
 
 
 def is_valid_domain(domain: str) -> bool:
@@ -109,6 +140,7 @@ async def get_logo_png(domain: str) -> bytes | None:
             await search_cache_client._client().set(
                 key, _MISS_MARKER, ex=_MISS_TTL_SECONDS
             )
+        await _track_bounded_cache_key(key)
     except Exception:
         pass
     return data

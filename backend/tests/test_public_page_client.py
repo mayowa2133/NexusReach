@@ -66,6 +66,7 @@ async def test_fetch_direct_page_extracts_title_and_text():
 async def test_fetch_page_falls_back_to_crawl4ai_when_direct_fails():
     with (
         patch.object(settings, "rendered_page_fetch_enabled", True),
+        patch.object(settings, "rendered_page_egress_policy_enforced", True),
         patch(
             "app.clients.public_page_client.fetch_direct_page",
             new_callable=AsyncMock,
@@ -118,6 +119,7 @@ async def test_fetch_page_does_not_hand_unsafe_url_to_fallback_crawlers():
 async def test_fetch_page_uses_firecrawl_as_optional_last_fallback():
     with (
         patch.object(settings, "rendered_page_fetch_enabled", True),
+        patch.object(settings, "rendered_page_egress_policy_enforced", True),
         patch(
             "app.clients.public_page_client.fetch_direct_page",
             new_callable=AsyncMock,

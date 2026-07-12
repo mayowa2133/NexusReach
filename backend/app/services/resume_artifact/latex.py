@@ -17,6 +17,8 @@ from app.models.job import Job
 from app.models.profile import Profile
 from app.models.tailored_resume import TailoredResume
 from app.models.user import User
+from app.config import settings
+from app.utils.sandboxed_process import run_in_sandbox_async
 from app.services.resume_artifact.parsed import _derive_project_url, _extract_resume_data, _find_contact_url, _is_valid_project_name
 from app.services.resume_artifact.plan import _default_artifact_plan, _emphasis_terms, _layout_profile, _preferred_bullet_indices, _preferred_section_limits, _preferred_skills_focus, _rank_projects
 from app.services.resume_artifact.rewrites import _apply_bullet_rewrites, _filter_rewrites_by_decisions, _index_rewrites
@@ -507,19 +509,29 @@ def render_resume_artifact_pdf(content: str) -> bytes:
         # they only block absolute/`..` user file access, not kpathsea package
         # loads, so standard resume packages still compile.
         env = {**os.environ, "openin_any": "p", "openout_any": "p"}
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            check=False,
-            cwd=str(tmp_path),
-            env=env,
-        )
-        if result.returncode != 0 or not pdf_path.exists():
-            raise ValueError(
-                "Failed to compile LaTeX resume artifact to PDF."
-                f"\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=False,
+                cwd=str(tmp_path),
+                env=env,
+                timeout=settings.latex_render_timeout_seconds,
+                start_new_session=True,
             )
+        except subprocess.TimeoutExpired as exc:
+            raise ValueError("LaTeX rendering timed out safely.") from exc
+        if result.returncode != 0 or not pdf_path.exists():
+            logger.warning(
+                "LaTeX compilation failed",
+                extra={
+                    "returncode": result.returncode,
+                    "stdout_tail": result.stdout[-1000:],
+                    "stderr_tail": result.stderr[-1000:],
+                },
+            )
+            raise ValueError("Failed to compile LaTeX resume artifact to PDF.")
 
         return pdf_path.read_bytes()
 
@@ -534,7 +546,33 @@ async def render_resume_artifact_pdf_async(content: str) -> bytes:
     freezes the event loop, and caps concurrent compilations.
     """
     async with _PDF_RENDER_SEMAPHORE:
-        return await asyncio.to_thread(render_resume_artifact_pdf, content)
+        if settings.render_remote_enabled:
+            from app.tasks.render import render_pdf
+
+            task = render_pdf.apply_async(args=[content], queue="render")
+            try:
+                result = await asyncio.to_thread(
+                    task.get,
+                    timeout=settings.render_task_timeout_seconds,
+                    propagate=True,
+                )
+            except Exception as exc:
+                task.revoke(terminate=True)
+                raise ValueError("Remote PDF rendering failed safely.") from exc
+            if not isinstance(result, bytes) or not result.startswith(b"%PDF"):
+                raise ValueError("Remote renderer returned an invalid PDF.")
+            if len(result) > settings.parser_sandbox_output_bytes:
+                raise ValueError("Remote renderer returned an oversized PDF.")
+            return result
+        return await run_in_sandbox_async(
+            "app.services.resume_artifact.latex",
+            "render_resume_artifact_pdf",
+            content,
+            timeout_seconds=settings.latex_render_timeout_seconds + 3,
+            memory_bytes=settings.parser_sandbox_memory_bytes,
+            cpu_seconds=settings.parser_sandbox_cpu_seconds,
+            output_bytes=settings.parser_sandbox_output_bytes,
+        )
 
 
 def _latex_escape_preserving_spacing(value: str | None) -> str:

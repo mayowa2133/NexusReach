@@ -8,7 +8,7 @@ import httpx
 
 from app.clients import crawl4ai_client, firecrawl_client
 from app.config import settings
-from app.utils.url_safety import is_safe_public_url, is_safe_public_url_async, safe_get
+from app.utils.url_safety import is_safe_public_url_async, safe_get
 from app.clients.ats.boards import search_workable
 from app.clients.ats.html import _extract_title
 from app.clients.ats.normalize import _job_richness_score, _normalize_apple_job, _normalize_exact_page, _normalize_generic_exact_job, _normalize_icims_job, _normalize_workday_job, _workday_page_matches
@@ -81,7 +81,11 @@ async def _fetch_exact_page_candidates(
     # rebound/internal host that safe_get would refuse could still be reached
     # through these fetchers (SSRF). This narrows the DNS-rebinding TOCTOU window
     # to the same level as the direct path.
-    if settings.rendered_page_fetch_enabled and await is_safe_public_url_async(url):
+    if (
+        settings.rendered_page_fetch_enabled
+        and settings.rendered_page_egress_policy_enforced
+        and await is_safe_public_url_async(url)
+    ):
         crawl4ai_page = await crawl4ai_client.fetch_url(url, timeout_seconds=20)
         if crawl4ai_page:
             crawl4ai_page["fallback_used"] = bool(pages)
@@ -97,8 +101,6 @@ async def _fetch_exact_page_candidates(
 
 async def _probe_workday_job_redirect(parsed: ParsedATSJobURL) -> str | None:
     url = parsed.canonical_url or ""
-    if not is_safe_public_url(url):  # SSRF guard (audit pass-2 P4)
-        return None
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -108,8 +110,11 @@ async def _probe_workday_job_redirect(parsed: ParsedATSJobURL) -> str | None:
 
     try:
         async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
-            resp = await client.get(url, headers=headers)
+            resp = await safe_get(url, headers=headers, max_redirects=0, client=client)
     except httpx.HTTPError:
+        return None
+
+    if resp is None:
         return None
 
     if resp.status_code not in {301, 302, 303, 307, 308}:

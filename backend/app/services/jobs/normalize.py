@@ -54,7 +54,7 @@ def _fingerprint(company_name: str | None, title: str | None, location: str | No
         f"{(title or '').lower().strip()}|"
         f"{(location or '').lower().strip()}"
     )
-    return hashlib.md5(raw.encode()).hexdigest()
+    return hashlib.md5(raw.encode(), usedforsecurity=False).hexdigest()
 
 
 def _normalized_pref_location(location: str | None) -> str:

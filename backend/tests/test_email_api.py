@@ -93,7 +93,7 @@ async def test_gmail_auth_url(client, mock_user_id):
         mock_gmail.get_auth_url.return_value = "https://accounts.google.com/oauth?..."
         resp = await client.get(
             "/api/email/gmail/auth-url",
-            params={"redirect_uri": "http://localhost:5173/callback"},
+            params={"redirect_uri": "http://localhost:5173/settings"},
         )
 
     assert resp.status_code == 200

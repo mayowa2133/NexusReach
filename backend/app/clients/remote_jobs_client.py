@@ -342,7 +342,7 @@ def _strip_simplify_marker(company: str) -> str:
 
 def _simplify_external_id(company: str, title: str, url: str) -> str:
     raw = f"{company.lower().strip()}|{title.lower().strip()}|{url.strip()}"
-    return f"simplify_{hashlib.sha1(raw.encode()).hexdigest()[:16]}"
+    return f"simplify_{hashlib.sha1(raw.encode(), usedforsecurity=False).hexdigest()[:16]}"
 
 
 def _simplify_apply_url(cell: Tag) -> str:

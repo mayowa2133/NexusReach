@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.config import settings
 from app.dependencies import get_current_user_id
 from app.middleware.rate_limit import limiter
 from app.observability import capture_event
@@ -77,6 +78,7 @@ from app.models.profile import Profile
 from app.models.job_refresh_run import JobRefreshRun, JobSourceRun
 from app.models.resume_artifact import ResumeArtifact
 from app.models.tailored_resume import TailoredResume
+from app.utils.action_budget import enforce_action_budget
 
 
 def _compute_body_ats_score(tex: str, job_description: str) -> float | None:
@@ -268,12 +270,19 @@ async def search(
 
 
 @router.post("/search/ats", response_model=list[JobResponse])
+@limiter.limit("5/minute")
 async def search_ats(
+    request: Request,
     body: ATSSearchRequest,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Search a supported job board or ingest an exact job posting URL."""
+    await enforce_action_budget(
+        user_id,
+        action="ats_search",
+        limit=settings.ats_search_daily_limit,
+    )
     if not body.job_url and (not body.company_slug or not body.ats_type):
         raise HTTPException(
             status_code=400,

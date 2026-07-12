@@ -1,0 +1,21 @@
+rules:
+  - id: nexusreach-python-eval-exec
+    languages: [python]
+    severity: ERROR
+    message: Dynamic code execution is forbidden.
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: exec(...)
+  - id: nexusreach-shell-true
+    languages: [python]
+    severity: ERROR
+    message: subprocess shell=True is forbidden.
+    pattern: subprocess.$FUNC(..., shell=True, ...)
+  - id: nexusreach-extension-innerhtml
+    languages: [javascript]
+    severity: ERROR
+    message: Extension content scripts must construct DOM with textContent.
+    paths:
+      include:
+        - extension/linkedin-content.js
+    pattern: $NODE.innerHTML = $VALUE

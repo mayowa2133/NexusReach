@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from urllib.parse import parse_qsl, urlencode
 
 import posthog
 import sentry_sdk
@@ -14,6 +15,39 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 _initialized = False
+_SENSITIVE_KEYS = {
+    "authorization", "code", "state", "token", "access_token",
+    "refresh_token", "session_token", "client_secret", "api_key",
+}
+
+
+def _scrub_mapping(value):
+    if isinstance(value, dict):
+        return {
+            key: ("[Filtered]" if str(key).lower() in _SENSITIVE_KEYS else _scrub_mapping(item))
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_scrub_mapping(item) for item in value]
+    return value
+
+
+def _before_send(event, _hint):
+    event = _scrub_mapping(event)
+    request = event.get("request") if isinstance(event, dict) else None
+    if isinstance(request, dict):
+        query = request.get("query_string")
+        if isinstance(query, str):
+            request["query_string"] = urlencode(
+                [
+                    (key, "[Filtered]" if key.lower() in _SENSITIVE_KEYS else val)
+                    for key, val in parse_qsl(query, keep_blank_values=True)
+                ]
+            )
+        url = str(request.get("url") or "")
+        if "/api/email/oauth/connect" in url:
+            request["data"] = "[Filtered OAuth callback body]"
+    return event
 
 
 def capture_event(
@@ -64,6 +98,8 @@ def init_sentry(service_name: str) -> None:
         traces_sample_rate=settings.sentry_traces_sample_rate,
         profiles_sample_rate=settings.sentry_profiles_sample_rate,
         send_default_pii=False,
+        max_request_body_size="never",
+        before_send=_before_send,
         integrations=[
             FastApiIntegration(),
             StarletteIntegration(),

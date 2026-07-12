@@ -399,6 +399,7 @@ async def _auto_draft_for_job(user_id: uuid.UUID, job_id: uuid.UUID) -> dict:
         "scheduled_send_count": 0,
         "skipped": 0,
         "errors": 0,
+        "quarantined_count": 0,
     }
 
     async with async_session() as db:
@@ -493,6 +494,15 @@ async def _auto_draft_for_job(user_id: uuid.UUID, job_id: uuid.UUID) -> dict:
                         )
                         msg_obj = msg_result.scalar_one_or_none()
                         if msg_obj:
+                            snapshot = (
+                                msg_obj.context_snapshot
+                                if isinstance(msg_obj.context_snapshot, dict)
+                                else {}
+                            )
+                            review = snapshot.get("security_review") or {}
+                            if not review.get("safe_for_automatic_send"):
+                                stats["quarantined_count"] += 1
+                                continue
                             msg_obj.scheduled_send_at = datetime.now(timezone.utc) + timedelta(
                                 minutes=send_delay
                             )
@@ -639,6 +649,23 @@ async def _process_pending_sends() -> dict:
                         stats["cancelled"] += await _cancel_queue(db, uid)
                         await db.commit()
                         break
+
+                    message_result = await db.execute(
+                        select(Message).where(Message.id == msg_id, Message.user_id == uid)
+                    )
+                    message = message_result.scalar_one_or_none()
+                    snapshot = (
+                        message.context_snapshot
+                        if message and isinstance(message.context_snapshot, dict)
+                        else {}
+                    )
+                    review = snapshot.get("security_review") or {}
+                    if not review.get("safe_for_automatic_send"):
+                        if message:
+                            message.scheduled_send_at = None
+                        stats["cancelled"] += 1
+                        await db.commit()
+                        continue
 
                     provider = await resolve_connected_provider(db, uid)
                     if not provider:

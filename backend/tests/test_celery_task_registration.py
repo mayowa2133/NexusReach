@@ -45,6 +45,8 @@ def test_worker_runtime_defaults_limit_prefetch_and_child_reuse():
     assert routes["app.tasks.auto_prospect.prewarm_job_people"] == {"queue": "prewarm"}
     assert routes["app.tasks.auto_prospect.prewarm_job_people_batch"] == {"queue": "prewarm"}
     assert routes["app.tasks.auto_prospect.refresh_job_research_snapshot"] == {"queue": "prewarm"}
+    assert routes["app.tasks.render.render_pdf"] == {"queue": "render"}
+    assert routes["app.tasks.render.render_redline_pdf"] == {"queue": "render"}
     assert Settings.model_fields["reverify_batch_size"].default == 5
 
 

@@ -11,7 +11,8 @@
     if (!url) return null;
     try {
       const parsed = new URL(url, window.location.origin);
-      if (!parsed.hostname.includes("linkedin.com")) return null;
+      const hostname = parsed.hostname.toLowerCase().replace(/\.$/, "");
+      if (hostname !== "linkedin.com" && !hostname.endsWith(".linkedin.com")) return null;
       parsed.search = "";
       parsed.hash = "";
       return parsed.toString().replace(/\/+$/, "");
@@ -74,28 +75,57 @@
 
   function renderPanel(context, status) {
     const root = panel();
-    const warmPath = context.warmPath?.reason
-      ? `<div style="margin-top:6px;color:#475569;"><strong>Warm path:</strong> ${context.warmPath.reason}</div>`
-      : "";
-    const linkedinSignal = context.linkedinSignal?.reason
-      ? `<div style="margin-top:6px;color:#475569;"><strong>LinkedIn signal:</strong> ${context.linkedinSignal.reason}</div>`
-      : "";
-    root.innerHTML = `
-      <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">
-        <div>
-          <div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#0369a1;">NexusReach Companion</div>
-          <div style="margin-top:4px;font-size:14px;font-weight:700;color:#0f172a;">${context.personName || "LinkedIn assist"}</div>
-          ${context.companyName ? `<div style="margin-top:2px;color:#475569;">${context.companyName}</div>` : ""}
-          ${context.jobTitle ? `<div style="margin-top:2px;color:#64748b;">${context.jobTitle}</div>` : ""}
-        </div>
-        <div style="padding:4px 8px;border-radius:999px;background:#e0f2fe;color:#075985;font-weight:600;">Manual send only</div>
-      </div>
-      ${warmPath}
-      ${linkedinSignal}
-      <div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(148, 163, 184, 0.25);color:#334155;">
-        ${status}
-      </div>
-    `;
+    // Context may originate in a job posting, public profile, or API response.
+    // Text nodes keep those values from becoming markup on linkedin.com.
+    root.replaceChildren();
+
+    const header = document.createElement("div");
+    header.style.cssText = "display:flex;justify-content:space-between;gap:12px;align-items:flex-start;";
+    const identity = document.createElement("div");
+    const eyebrow = document.createElement("div");
+    eyebrow.style.cssText = "font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#0369a1;";
+    eyebrow.textContent = "NexusReach Companion";
+    identity.appendChild(eyebrow);
+
+    const person = document.createElement("div");
+    person.style.cssText = "margin-top:4px;font-size:14px;font-weight:700;color:#0f172a;";
+    person.textContent = String(context.personName || "LinkedIn assist");
+    identity.appendChild(person);
+
+    for (const [value, style] of [
+      [context.companyName, "margin-top:2px;color:#475569;"],
+      [context.jobTitle, "margin-top:2px;color:#64748b;"],
+    ]) {
+      if (!value) continue;
+      const line = document.createElement("div");
+      line.style.cssText = style;
+      line.textContent = String(value);
+      identity.appendChild(line);
+    }
+    header.appendChild(identity);
+
+    const badge = document.createElement("div");
+    badge.style.cssText = "padding:4px 8px;border-radius:999px;background:#e0f2fe;color:#075985;font-weight:600;";
+    badge.textContent = "Manual send only";
+    header.appendChild(badge);
+    root.appendChild(header);
+
+    function appendReason(label, value) {
+      if (!value) return;
+      const line = document.createElement("div");
+      line.style.cssText = "margin-top:6px;color:#475569;";
+      const strong = document.createElement("strong");
+      strong.textContent = `${label}: `;
+      line.append(strong, document.createTextNode(String(value)));
+      root.appendChild(line);
+    }
+    appendReason("Warm path", context.warmPath?.reason);
+    appendReason("LinkedIn signal", context.linkedinSignal?.reason);
+
+    const statusLine = document.createElement("div");
+    statusLine.style.cssText = "margin-top:10px;padding-top:10px;border-top:1px solid rgba(148, 163, 184, 0.25);color:#334155;";
+    statusLine.textContent = String(status || "");
+    root.appendChild(statusLine);
   }
 
   function detectBlockedState() {

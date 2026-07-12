@@ -1,7 +1,8 @@
+import hmac
 import logging
 
 import posthog
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -46,6 +47,10 @@ from app.routers import (
 logger = logging.getLogger(__name__)
 init_sentry("api")
 
+
+def _production_optional_path(path: str) -> str | None:
+    return None if settings.environment == "production" else path
+
 app = FastAPI(
     title="NexusReach API",
     description="Smart personal networking assistant",
@@ -53,6 +58,9 @@ app = FastAPI(
     # orjson renders large JSON payloads (e.g. the jobs feed) several times
     # faster than the stdlib encoder.
     default_response_class=ORJSONResponse,
+    openapi_url=_production_optional_path("/openapi.json"),
+    docs_url=_production_optional_path("/docs"),
+    redoc_url=_production_optional_path("/redoc"),
 )
 
 
@@ -118,13 +126,24 @@ app.include_router(waitlist.router, prefix="/api")
 
 
 @app.get("/api/health")
-async def health():
-    """Health check that verifies core dependencies.
+@limiter.limit("60/minute")
+async def health(request: Request):
+    """Cheap public liveness check; never fans out to dependencies."""
+    return {"status": "ok"}
 
-    Returns only a coarse ok/error per check (audit M4). This endpoint is
-    unauthenticated, so raw exception detail (which can leak DB host/driver
-    internals) is logged server-side rather than returned to the caller.
-    """
+
+@app.get("/api/ready")
+@limiter.limit("30/minute")
+async def readiness(
+    request: Request,
+    x_readiness_token: str | None = Header(default=None),
+):
+    """Token-protected dependency readiness check for internal deployment use."""
+    if not settings.readiness_token or not x_readiness_token or not hmac.compare_digest(
+        x_readiness_token, settings.readiness_token
+    ):
+        raise HTTPException(status_code=404, detail="Not found")
+
     checks: dict[str, str] = {}
 
     # Postgres

@@ -125,12 +125,13 @@ def test_p15_redirect_uri_rejects_foreign_origin():
     from app.routers.email import _validate_redirect_uri
 
     # Default allowed origins include http://localhost:5173.
-    assert _validate_redirect_uri("http://localhost:5173/callback") == "http://localhost:5173/callback"
+    assert _validate_redirect_uri("http://localhost:5173/settings") == "http://localhost:5173/settings"
     for bad in [
         "https://evil.example.com/steal",
         "javascript:alert(1)",
         "not-a-url",
         "ftp://localhost:5173/",
+        "http://localhost:5173/settings?next=evil",
     ]:
         with pytest.raises(HTTPException):
             _validate_redirect_uri(bad)

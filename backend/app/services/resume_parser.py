@@ -6,6 +6,8 @@ PDF and DOCX files using text extraction plus resume-specific heuristics.
 
 import io
 import re
+import zipfile
+from pathlib import PurePosixPath
 
 from app.config import settings
 
@@ -33,6 +35,33 @@ LOCATION_BOUNDARY_STOPWORDS = {
 }
 
 
+def _validate_docx_archive(file_bytes: bytes) -> None:
+    """Reject hostile OOXML containers before python-docx expands/parses XML."""
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(file_bytes))
+    except zipfile.BadZipFile as exc:
+        raise ValueError("Invalid DOCX archive.") from exc
+    with archive:
+        infos = archive.infolist()
+        if not infos or len(infos) > settings.max_docx_entries:
+            raise ValueError("DOCX contains too many archive entries.")
+        names = {info.filename for info in infos}
+        if "[Content_Types].xml" not in names or "word/document.xml" not in names:
+            raise ValueError("DOCX is missing required document entries.")
+        expanded = 0
+        for info in infos:
+            path = PurePosixPath(info.filename)
+            if path.is_absolute() or ".." in path.parts or info.flag_bits & 0x1:
+                raise ValueError("DOCX contains an unsafe archive entry.")
+            if info.filename.lower().endswith((".zip", ".jar")):
+                raise ValueError("Nested archives are not allowed in DOCX files.")
+            expanded += info.file_size
+            if expanded > settings.max_docx_uncompressed_bytes:
+                raise ValueError("DOCX expands beyond the allowed size.")
+            if info.file_size and info.file_size / max(1, info.compress_size) > settings.max_archive_compression_ratio:
+                raise ValueError("DOCX archive compression ratio is unsafe.")
+
+
 def extract_text_from_pdf(file_bytes: bytes) -> str:
     """Extract text from a PDF file using PyPDF2."""
     from pypdf import PdfReader
@@ -58,6 +87,7 @@ def extract_text_from_docx(file_bytes: bytes) -> str:
     """Extract text from a DOCX file using python-docx."""
     import docx
 
+    _validate_docx_archive(file_bytes)
     doc = docx.Document(io.BytesIO(file_bytes))
     return "\n".join(paragraph.text for paragraph in doc.paragraphs)
 
@@ -552,3 +582,9 @@ def parse_resume(file_bytes: bytes, content_type: str) -> dict:
     """Parse a resume file and return structured data."""
     text = extract_text(file_bytes, content_type)
     return parse_resume_text(text)
+
+
+def parse_resume_document(file_bytes: bytes, content_type: str) -> dict:
+    """Sandbox entrypoint returning both bounded text and structured content."""
+    text = extract_text(file_bytes, content_type)
+    return {"raw_text": text, "parsed": parse_resume_text(text)}

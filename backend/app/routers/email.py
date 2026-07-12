@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.config import settings
 from app.dependencies import get_current_user_id
 from app.middleware.rate_limit import limiter
 from app.observability import capture_event
@@ -37,6 +38,7 @@ from app.services.draft_staging_service import (
 )
 from app.services.email_finder_service import find_email_for_person, verify_person_email
 from app.utils.origins import allowed_frontend_origins, origin_of
+from app.utils.action_budget import enforce_action_budget
 
 router = APIRouter(prefix="/email", tags=["email"])
 
@@ -52,7 +54,10 @@ def _validate_redirect_uri(redirect_uri: str) -> str:
     allowed = allowed_frontend_origins()
     if not origin or (allowed and origin not in allowed):
         raise HTTPException(status_code=400, detail="redirect_uri is not allowed.")
-    return redirect_uri
+    expected = f"{origin}/settings"
+    if redirect_uri != expected:
+        raise HTTPException(status_code=400, detail="redirect_uri must match the registered callback.")
+    return expected
 
 
 # --- Email Finding ---
@@ -82,12 +87,19 @@ async def find_email(
 
 
 @router.post("/verify/{person_id}", response_model=EmailVerifyResponse)
+@limiter.limit("5/minute")
 async def verify_email(
+    request: Request,
     person_id: str,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Verify an existing stored email address via Hunter.io."""
+    await enforce_action_budget(
+        user_id,
+        action="email_verify",
+        limit=settings.email_verify_daily_limit,
+    )
     try:
         result = await verify_person_email(db, user_id, uuid.UUID(person_id))
     except ValueError as e:
@@ -145,12 +157,19 @@ async def connection_status(
 
 
 @router.get("/gmail/auth-url", response_model=OAuthUrlResponse)
+@limiter.limit("5/minute")
 async def gmail_auth_url(
+    request: Request,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     redirect_uri: str = Query(...),
 ):
     """Get the Gmail OAuth consent URL."""
     safe_redirect_uri = _validate_redirect_uri(redirect_uri)
+    await enforce_action_budget(
+        user_id,
+        action="oauth_transaction",
+        limit=settings.oauth_transaction_daily_limit,
+    )
     try:
         state, challenge = await oauth_transaction_service.create_transaction(
             user_id=user_id, provider="gmail", redirect_uri=safe_redirect_uri
@@ -206,12 +225,19 @@ async def gmail_disconnect(
 
 
 @router.get("/outlook/auth-url", response_model=OAuthUrlResponse)
+@limiter.limit("5/minute")
 async def outlook_auth_url(
+    request: Request,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     redirect_uri: str = Query(...),
 ):
     """Get the Outlook OAuth consent URL."""
     safe_redirect_uri = _validate_redirect_uri(redirect_uri)
+    await enforce_action_budget(
+        user_id,
+        action="oauth_transaction",
+        limit=settings.oauth_transaction_daily_limit,
+    )
     try:
         state, challenge = await oauth_transaction_service.create_transaction(
             user_id=user_id, provider="outlook", redirect_uri=safe_redirect_uri

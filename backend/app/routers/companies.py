@@ -1,7 +1,7 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -9,12 +9,17 @@ from app.dependencies import get_current_user_id
 from app.schemas.companies import CompanyResponse, CompanyStarToggle
 from app.services import company_logo_service
 from app.services.company_service import get_companies, get_company, toggle_company_starred
+from app.middleware.rate_limit import limiter
 
 router = APIRouter(prefix="/companies", tags=["companies"])
 
 
 @router.get("/logo")
-async def company_logo(domain: Annotated[str, Query(max_length=253)]) -> Response:
+@limiter.limit("30/minute")
+async def company_logo(
+    request: Request,
+    domain: Annotated[str, Query(max_length=253)],
+) -> Response:
     """Public, cached favicon proxy for a company domain.
 
     Unauthenticated so it can back an ``<img src>`` tag. Returns 404 when no real

@@ -3,6 +3,6 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "celery -A app.tasks beat --loglevel=info"
+startCommand = "sh -c 'export NEXUSREACH_SERVICE_ROLE=beat; exec celery -A app.tasks beat --loglevel=info'"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10

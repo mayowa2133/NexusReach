@@ -6,7 +6,7 @@ from typing import Annotated
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import auth_tokens
@@ -84,6 +84,13 @@ async def get_or_create_user(
     """Get the user record, creating it on first login."""
     user_id = auth_user.user_id
     desired_email = auth_user.email or _fallback_email(user_id)
+
+    # Serialize first-login bootstrap for this identity. Browsers issue several
+    # authenticated requests immediately after sign-in; without this
+    # transaction-scoped lock they can all observe a missing row and race the
+    # primary/unique keys. PostgreSQL releases the lock on commit or rollback.
+    lock_key = int.from_bytes(user_id.bytes[:8], byteorder="big", signed=True)
+    await db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
 
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()

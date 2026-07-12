@@ -35,15 +35,33 @@ def _ip_is_blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     )
 
 
+def is_safe_url_syntax(url: str | None) -> bool:
+    """Cheap admission check; fetch-time DNS validation remains mandatory."""
+    try:
+        parsed = urlparse((url or "").strip())
+        host = (parsed.hostname or "").lower().rstrip(".")
+        _ = parsed.port  # force malformed-port validation
+    except ValueError:
+        return False
+    if parsed.scheme not in {"http", "https"} or not host or parsed.username or parsed.password:
+        return False
+    if host in _BLOCKED_HOSTNAMES:
+        return False
+    try:
+        return not _ip_is_blocked(ipaddress.ip_address(host))
+    except ValueError:
+        # Public hostnames have at least one label boundary. DNS is resolved and
+        # pinned only at connection time so parsing remains deterministic.
+        return "." in host
+
+
 def is_safe_public_url(url: str | None) -> bool:
     """Return True only for an http(s) URL whose host resolves to public IPs.
 
     Rejects non-http(s) schemes, missing hosts, IP literals in private/loopback/
     link-local/reserved/multicast ranges, blocked metadata hostnames, and any
-    hostname that resolves to a blocked IP. Hosts that cannot be resolved in
-    the current process are allowed here so normal direct HTTP fetching can
-    perform its own resolution; higher-risk rendered fetchers are disabled by
-    default and require network-level egress controls when enabled.
+    hostname that resolves to a blocked IP. Hosts that cannot be resolved fail
+    closed.
     """
     try:
         parsed = urlparse((url or "").strip())
@@ -73,22 +91,66 @@ def is_safe_public_url(url: str | None) -> bool:
     try:
         infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
     except OSError:
-        return True
+        return False
+    saw_address = False
     for info in infos:
         addr = info[4][0]
         try:
             ip = ipaddress.ip_address(addr.split("%")[0])
         except ValueError:
             continue
+        saw_address = True
         if _ip_is_blocked(ip):
             return False
-    return True
+    return saw_address
 
 
 async def is_safe_public_url_async(url: str | None) -> bool:
     """Async wrapper that runs the (DNS-resolving) check off the event loop."""
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, is_safe_public_url, url)
+
+
+def _resolve_public_address(url: str) -> tuple[str, str] | None:
+    """Resolve once and return the original hostname plus a vetted public IP."""
+    try:
+        parsed = urlparse(url.strip())
+    except ValueError:
+        return None
+    host = parsed.hostname
+    if parsed.scheme not in {"http", "https"} or not host:
+        return None
+    if host.lower() in _BLOCKED_HOSTNAMES:
+        return None
+    try:
+        literal = ipaddress.ip_address(host)
+        return None if _ip_is_blocked(literal) else (host, str(literal))
+    except ValueError:
+        pass
+
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+    except OSError:
+        return None
+    addresses: list[str] = []
+    for info in infos:
+        raw = info[4][0].split("%")[0]
+        try:
+            ip = ipaddress.ip_address(raw)
+        except ValueError:
+            return None
+        if _ip_is_blocked(ip):
+            return None
+        normalized = str(ip)
+        if normalized not in addresses:
+            addresses.append(normalized)
+    return (host, addresses[0]) if addresses else None
+
+
+async def _resolve_public_address_async(url: str) -> tuple[str, str] | None:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _resolve_public_address, url)
 
 
 def is_safe_public_host(host: str | None) -> bool:
@@ -156,17 +218,31 @@ async def safe_get(
     try:
         current = url
         for _ in range(max_redirects + 1):
-            if not await is_safe_public_url_async(current):
+            resolved = await _resolve_public_address_async(current)
+            if not resolved:
                 return None
+            original_host, resolved_ip = resolved
             try:
-                resp = await client.get(current, headers=headers)
+                if isinstance(client, httpx.AsyncClient):
+                    original_url = httpx.URL(current)
+                    connect_url = original_url.copy_with(host=resolved_ip)
+                    request_headers = dict(headers or {})
+                    request_headers["Host"] = original_url.netloc.decode("ascii")
+                    request_headers["Connection"] = "close"
+                    request = client.build_request("GET", connect_url, headers=request_headers)
+                    request.extensions["sni_hostname"] = original_host
+                    resp = await client.send(request)
+                    request.url = original_url
+                else:
+                    # Test doubles do not open a socket and keep a small .get API.
+                    resp = await client.get(current, headers=headers)
             except httpx.HTTPError:
                 return None
             if resp.status_code in {301, 302, 303, 307, 308}:
                 location = resp.headers.get("location")
                 if not location:
                     return resp
-                current = str(resp.url.join(location))
+                current = str(httpx.URL(current).join(location))
                 continue
             return resp
         return None

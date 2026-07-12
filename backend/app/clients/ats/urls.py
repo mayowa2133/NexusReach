@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from urllib.parse import parse_qs, urlparse
 
 
-from app.utils.url_safety import is_safe_public_url
+from app.utils.url_safety import is_safe_url_syntax
 from app.clients.ats.html import WORKDAY_JOB_TOKEN_RE, _clean_url, _domain_root, _workday_company_slug
 
 
@@ -22,10 +22,16 @@ class ParsedATSJobURL:
     exact_url_only: bool = False
 
 
+def _is_host_or_subdomain(host: str, domain: str) -> bool:
+    normalized = host.split(":", 1)[0].lower().rstrip(".")
+    domain = domain.lower().rstrip(".")
+    return normalized == domain or normalized.endswith(f".{domain}")
+
+
 def _parse_greenhouse_url(job_url: str) -> ParsedATSJobURL | None:
     parsed = urlparse((job_url or "").strip())
     host = parsed.netloc.lower()
-    if "greenhouse.io" not in host:
+    if not _is_host_or_subdomain(host, "greenhouse.io"):
         return None
 
     path_parts = [part for part in parsed.path.split("/") if part]
@@ -74,7 +80,7 @@ def _parse_greenhouse_url(job_url: str) -> ParsedATSJobURL | None:
 def _parse_lever_url(job_url: str) -> ParsedATSJobURL | None:
     parsed = urlparse((job_url or "").strip())
     host = parsed.netloc.lower()
-    if "lever.co" not in host:
+    if not _is_host_or_subdomain(host, "lever.co"):
         return None
     path_parts = [part for part in parsed.path.split("/") if part]
     if not path_parts:
@@ -93,7 +99,7 @@ def _parse_lever_url(job_url: str) -> ParsedATSJobURL | None:
 def _parse_ashby_url(job_url: str) -> ParsedATSJobURL | None:
     parsed = urlparse((job_url or "").strip())
     host = parsed.netloc.lower()
-    if "ashbyhq.com" not in host or not host.startswith("jobs."):
+    if not _is_host_or_subdomain(host, "ashbyhq.com") or not host.startswith("jobs."):
         return None
     path_parts = [part for part in parsed.path.split("/") if part]
     if not path_parts:
@@ -112,7 +118,7 @@ def _parse_ashby_url(job_url: str) -> ParsedATSJobURL | None:
 def _parse_workable_url(job_url: str) -> ParsedATSJobURL | None:
     parsed = urlparse((job_url or "").strip())
     host = parsed.netloc.lower()
-    if "apply.workable.com" not in host:
+    if not _is_host_or_subdomain(host, "apply.workable.com"):
         return None
     path_parts = [part for part in parsed.path.split("/") if part]
     if len(path_parts) < 3 or path_parts[1] != "j":
@@ -180,7 +186,7 @@ def _parse_icims_url(job_url: str) -> ParsedATSJobURL | None:
     """Parse iCIMS job URLs like university-uber.icims.com/jobs/158009/job."""
     parsed = urlparse((job_url or "").strip())
     host = parsed.netloc.lower()
-    if ".icims.com" not in host:
+    if not _is_host_or_subdomain(host, "icims.com"):
         return None
     # Extract company slug from subdomain: "university-uber.icims.com" → "uber"
     subdomain = host.replace(".icims.com", "")
@@ -213,7 +219,7 @@ def _parse_generic_exact_url(job_url: str) -> ParsedATSJobURL | None:
     # Block SSRF at the user entry point: the generic adapter accepts arbitrary
     # hosts, so reject private/loopback/link-local/metadata targets before the
     # server ever fetches them (audit pass-2 P4).
-    if not is_safe_public_url(job_url):
+    if not is_safe_url_syntax(job_url):
         return None
     return ParsedATSJobURL(
         ats_type="generic_exact",

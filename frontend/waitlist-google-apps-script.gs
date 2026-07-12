@@ -46,9 +46,22 @@ function doPost(e) {
     }
 
     var name = String(data.name || '').trim();
-    var email = String(data.email || '').trim();
-    if (!name || !email) {
+    var email = String(data.email || '').trim().toLowerCase();
+    if (!name || !_validEmail(email)) {
       return _json({ ok: false, error: 'name and email are required' });
+    }
+    if (name.length > 120 || email.length > 254 ||
+        String(data.linkedin_url || '').length > 500 ||
+        String(data.current_title || '').length > 200 ||
+        String(data.target_role || '').length > 200 ||
+        String(data.note || '').length > 2000) {
+      return _json({ ok: false, error: 'input is too long' });
+    }
+
+    // Apps Script does not expose a trustworthy client IP. Enforce global
+    // minute/day ceilings under the script lock so anonymous abuse is bounded.
+    if (!_consumeQuota()) {
+      return _json({ ok: false, error: 'rate limit exceeded' });
     }
 
     var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -58,39 +71,89 @@ function doPost(e) {
     if (sheet.getLastRow() === 0) {
       sheet.appendRow([
         'Timestamp', 'Name', 'Email', 'LinkedIn',
-        'Current role', 'Looking for', 'Note', 'Source',
+        'Current role', 'Looking for', 'Note', 'Source', 'Email hash',
       ]);
+    } else if (!sheet.getRange(1, 9).getValue()) {
+      sheet.getRange(1, 9).setValue('Email hash');
     }
 
-    // De-dupe by email (column 3) so a repeat submit doesn't add a second row.
-    var emailKey = email.toLowerCase();
-    var lastRow = sheet.getLastRow();
-    if (lastRow > 1) {
-      var existing = sheet.getRange(2, 3, lastRow - 1, 1).getValues();
-      for (var i = 0; i < existing.length; i++) {
-        if (String(existing[i][0]).trim().toLowerCase() === emailKey) {
-          return _json({ ok: true, already: true });
-        }
-      }
+    // Hash-index new submissions in a dedicated column. For rows created by an
+    // older deployment, fall back to a server-side exact email search.
+    var emailHash = _emailHash(email);
+    var hashMatch = sheet.getRange('I:I').createTextFinder(emailHash)
+      .matchCase(true).matchEntireCell(true).findNext();
+    if (hashMatch) {
+      return _json({ ok: true, already: true });
+    }
+    var existing = sheet.getRange('C:C').createTextFinder(email)
+      .matchCase(false).matchEntireCell(true).findNext();
+    if (existing) {
+      return _json({ ok: true, already: true });
     }
 
     sheet.appendRow([
       new Date(),
-      name,
-      email,
-      String(data.linkedin_url || ''),
-      String(data.current_title || ''),
-      String(data.target_role || ''),
-      String(data.note || ''),
-      String(data.source || ''),
+      _sheetText(name),
+      _sheetText(email),
+      _sheetText(data.linkedin_url),
+      _sheetText(data.current_title),
+      _sheetText(data.target_role),
+      _sheetText(data.note),
+      _sheetText(data.source),
+      emailHash,
     ]);
 
     return _json({ ok: true });
   } catch (err) {
-    return _json({ ok: false, error: String(err) });
+    console.error('waitlist submission failed', err);
+    return _json({ ok: false, error: 'submission failed' });
   } finally {
     lock.releaseLock();
   }
+}
+
+function _sheetText(value) {
+  var text = String(value || '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '');
+  // Neutralize spreadsheet formulas in every user-controlled cell.
+  if (/^[\s]*[=+\-@]/.test(text)) text = "'" + text;
+  return text;
+}
+
+function _validEmail(email) {
+  return /^[^\s@]{1,64}@[^\s@]{1,189}\.[^\s@]{2,63}$/.test(email);
+}
+
+function _emailHash(email) {
+  var digest = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    email,
+    Utilities.Charset.UTF_8
+  );
+  return digest.map(function (b) {
+    var value = (b + 256) % 256;
+    return ('0' + value.toString(16)).slice(-2);
+  }).join('');
+}
+
+function _consumeQuota() {
+  var properties = PropertiesService.getScriptProperties();
+  var now = new Date();
+  var minuteKey = 'quota:minute:' + Utilities.formatDate(now, 'UTC', 'yyyyMMddHHmm');
+  var dayKey = 'quota:day:' + Utilities.formatDate(now, 'UTC', 'yyyyMMdd');
+  var minuteCount = Number(properties.getProperty(minuteKey) || '0');
+  var dayCount = Number(properties.getProperty(dayKey) || '0');
+  if (minuteCount >= 30 || dayCount >= 1000) return false;
+  properties.setProperty(minuteKey, String(minuteCount + 1));
+  properties.setProperty(dayKey, String(dayCount + 1));
+
+  // Keep only current quota counters; email hashes are deliberately retained.
+  var all = properties.getProperties();
+  Object.keys(all).forEach(function (key) {
+    if (key.indexOf('quota:') === 0 && key !== minuteKey && key !== dayKey) {
+      properties.deleteProperty(key);
+    }
+  });
+  return true;
 }
 
 // A GET on the URL just confirms the endpoint is live (handy to sanity-check

@@ -143,7 +143,10 @@ async def fetch_page(
     # These renderers do not expose a connection-level IP pinning hook. Do not
     # enable their separate fetch stacks until infrastructure has an egress
     # policy that denies private, link-local, and metadata address ranges.
-    if not settings.rendered_page_fetch_enabled:
+    if not (
+        settings.rendered_page_fetch_enabled
+        and settings.rendered_page_egress_policy_enforced
+    ):
         return direct_page
 
     crawl4ai_page = await crawl4ai_client.fetch_url(

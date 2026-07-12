@@ -22,7 +22,9 @@ async def check_gravatar(email: str) -> bool:
     if not email or "@" not in email:
         return False
 
-    email_hash = hashlib.md5(email.strip().lower().encode()).hexdigest()
+    email_hash = hashlib.md5(
+        email.strip().lower().encode(), usedforsecurity=False
+    ).hexdigest()
     url = f"{GRAVATAR_BASE_URL}/{email_hash}"
 
     try:
