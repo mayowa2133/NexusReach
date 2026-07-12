@@ -143,8 +143,14 @@ corrected.
   `no-new-privileges`.
 
 The GitHub runs for the initial remediation commit failed on the now-corrected
-checklist false positive and stale E2E product name. A follow-up run is required
-to establish green remote CI for these corrections.
+checklist false positive and stale E2E product name. The definitive Node 24
+follow-up passed in full on commit `7006fe7a`: [CI run
+29193300391](https://github.com/mayowa2133/NexusReach/actions/runs/29193300391)
+completed the backend, frontend, production build, and real-browser jobs; and
+[Security gates run
+29193300395](https://github.com/mayowa2133/NexusReach/actions/runs/29193300395)
+completed dependency audits, SAST, full-history Gitleaks, migrated RLS, both
+runtime image policy/scanning gates, and CycloneDX SBOM validation.
 
 ## Original findings overview
 
