@@ -17,5 +17,5 @@ rules:
     message: Extension content scripts must construct DOM with textContent.
     paths:
       include:
-        - extension/linkedin-content.js
+        - /extension/linkedin-content.js
     pattern: $NODE.innerHTML = $VALUE

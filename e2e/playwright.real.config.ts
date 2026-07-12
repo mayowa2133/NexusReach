@@ -29,6 +29,9 @@ const backendEnv = {
   NEXUSREACH_TOKEN_ENCRYPTION_PRIMARY_VERSION: 'v1',
   NEXUSREACH_TOKEN_ENCRYPTION_KEYS:
     '{"v1":"6nlS0wM_Tx8DqJmB1Hj3g2GJw6i1sp0S5L6XprNeWDQ="}',
+  // Never inherit real telemetry credentials from a developer shell/.env.
+  NEXUSREACH_POSTHOG_API_KEY: '',
+  NEXUSREACH_SENTRY_DSN: '',
 };
 
 const frontendEnv = {

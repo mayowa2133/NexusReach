@@ -21,6 +21,16 @@ _SENSITIVE_KEYS = {
 }
 
 
+def telemetry_enabled() -> bool:
+    """Return whether this process may emit telemetry externally.
+
+    Test runners often inherit a developer shell and load ``backend/.env``.
+    Environment isolation, not merely an empty key, must therefore guarantee
+    that unit and end-to-end fixtures can never reach a real telemetry project.
+    """
+    return settings.environment not in {"test", "e2e"}
+
+
 def _scrub_mapping(value):
     if isinstance(value, dict):
         return {
@@ -63,7 +73,7 @@ def capture_event(
     keeps capture calls safe and uniform across routers, and never lets a
     telemetry failure surface to the user.
     """
-    if not settings.posthog_api_key:
+    if not telemetry_enabled() or not settings.posthog_api_key:
         return
     try:
         posthog.capture(distinct_id, event, properties=properties or {})
@@ -77,7 +87,7 @@ def identify_user(distinct_id: str, properties: dict | None = None) -> None:
     Mirrors ``capture_event``: guarded and exception-safe so identifying a user
     can never break the request that triggered it.
     """
-    if not settings.posthog_api_key:
+    if not telemetry_enabled() or not settings.posthog_api_key:
         return
     try:
         posthog.set(distinct_id, properties or {})
@@ -88,7 +98,7 @@ def identify_user(distinct_id: str, properties: dict | None = None) -> None:
 def init_sentry(service_name: str) -> None:
     """Initialize Sentry once when a DSN is configured."""
     global _initialized
-    if _initialized or not settings.sentry_dsn:
+    if _initialized or not telemetry_enabled() or not settings.sentry_dsn:
         return
 
     sentry_sdk.init(

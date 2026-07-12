@@ -236,6 +236,35 @@ def test_capture_event_noop_when_unconfigured(monkeypatch):
     observability.capture_event("user-1", "evt", properties={"a": 1})
 
 
+def test_capture_event_noop_in_e2e_even_when_real_key_is_inherited(monkeypatch):
+    import posthog as posthog_mod
+
+    from app import observability
+
+    monkeypatch.setattr(observability.settings, "environment", "e2e")
+    monkeypatch.setattr(observability.settings, "posthog_api_key", "inherited-real-key")
+
+    def _boom(*_a, **_k):
+        raise AssertionError("e2e must never emit telemetry")
+
+    monkeypatch.setattr(posthog_mod, "capture", _boom)
+    observability.capture_event("user-1", "evt")
+
+
+def test_sentry_noop_in_test_even_when_real_dsn_is_inherited(monkeypatch):
+    from app import observability
+
+    monkeypatch.setattr(observability.settings, "environment", "test")
+    monkeypatch.setattr(observability.settings, "sentry_dsn", "https://public@example.com/1")
+    monkeypatch.setattr(observability, "_initialized", False)
+
+    def _boom(*_a, **_k):
+        raise AssertionError("tests must never initialize external Sentry")
+
+    monkeypatch.setattr(observability.sentry_sdk, "init", _boom)
+    observability.init_sentry("test")
+
+
 def test_capture_event_swallows_posthog_errors(monkeypatch):
     import posthog as posthog_mod
 

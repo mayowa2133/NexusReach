@@ -97,6 +97,52 @@ scanning, and isolated runtime testing, plus the limits of that evidence.
 The detailed sections below preserve the original evidence and remediation
 recommendations for traceability; the table above records the post-fix state.
 
+### Post-remediation verification — 2026-07-12
+
+The remediation was revalidated from a clean Docker runtime after the initial
+implementation commit. The verification found and fixed four integration gaps:
+the RLS script's direct invocation could not import the application package,
+Redis-backed limiting made liveness/readiness fail with HTTP 500 during a Redis
+outage, Compose omitted the required SearXNG secret, and E2E processes could
+inherit real telemetry credentials from a developer `.env`. The stale real-E2E
+brand assertion and a Gitleaks false positive in the launch checklist were also
+corrected.
+
+- Backend: **1,556 tests passed**; Ruff passed.
+- Frontend: **214 tests passed**; ESLint and the production TypeScript/Vite
+  build passed.
+- Real browser E2E: the authenticated onboarding/profile persistence flow
+  passed against fresh Dockerized PostgreSQL and Redis, with telemetry disabled
+  by environment even when local credentials exist.
+- Dependency gates: `pip-audit` on the hash-locked Python graph and production
+  `npm audit` for both frontend and E2E reported zero known vulnerabilities.
+- Static analysis: Bandit High-only and the repository Semgrep rules completed
+  with zero findings.
+- Secrets: Gitleaks found no leak in the current tracked tree. Full-history
+  scanning still finds the two historical Dice-key revisions (plus an old
+  checklist false positive), which is why NR-12 remains open.
+- Images: both the API and credential-free renderer built successfully from the
+  lock file, run as the non-root `nexusreach` user, and reported **zero fixable
+  High/Critical findings** in Trivy 0.72.0. The API runtime contains neither a
+  compiler nor TeX; the renderer contains TeX and rejects production startup if
+  application/provider credentials are injected.
+- Render boundary: a real Celery task crossed Redis into the isolated render
+  worker and returned a valid, bounded PDF.
+- Database/runtime: all migrations applied; every application table had RLS;
+  48 concurrent first-login requests all returned 200 and produced exactly one
+  user, profile, and settings row; a 1.2 MiB chunked request returned 413.
+- Operations: production API discovery paths returned 404 and unauthenticated
+  API access returned 401. With PostgreSQL and Redis stopped, liveness remained
+  200 in approximately 5 ms, hidden readiness remained 404, and authorized
+  readiness returned 503 before recovering to 200 when dependencies returned.
+- SearXNG: the pinned image starts healthy with a required runtime secret,
+  non-root UID/GID, read-only root filesystem, all capabilities dropped, and
+  `no-new-privileges`.
+
+The GitHub runs for the initial remediation commit failed on the now-corrected
+checklist false positive and stale E2E product name. A follow-up run is required
+to establish green remote CI for these corrections.
+
 ## Original findings overview
 
 | ID | Severity | Confidence | Finding |
@@ -441,16 +487,20 @@ pin it by digest, verify its runtime user, add a healthcheck, and scan it.
 
 | Prior ID | Status | Current assessment |
 |---|---|---|
-| NR-01 OAuth state/PKCE | Remediated | Authenticated server-side transactions bind user/provider/redirect URI, use PKCE, expire, and are consumed once. Exact callback matching and telemetry scrubbing remain NR-20/NR-16. |
+| NR-01 OAuth state/PKCE | Remediated | Authenticated server-side transactions bind user/provider/redirect URI, use PKCE, expire, and are consumed once. Exact callback matching and telemetry scrubbing are now implemented. |
 | NR-02 body limits | Remediated | ASGI limit handles declared and chunked bodies; Docker validation returned 413 for an oversized chunked request. Edge limits are still recommended. |
-| NR-03 multipart CVEs | Remediated | Current `python-multipart` audit is clean. Parser isolation remains NR-11. |
-| NR-04 pypdf CVEs | Partially remediated | Current dependency is clean; strict parsing and caps exist. Pre-cap parser work is still unisolated under NR-11. |
-| NR-05 SSRF | Partially remediated | Rendered fetch is default-off and prevalidated; DNS failure and rebind TOCTOU remain NR-13. |
-| NR-06 fail-open limits | Remediated | Production startup now requires Redis for SlowAPI. Limiter keying and route coverage remain NR-10/NR-14. |
+| NR-03 multipart CVEs | Remediated | Current `python-multipart` audit is clean and untrusted parsing is resource-isolated. |
+| NR-04 pypdf CVEs | Remediated | Current dependency is clean; strict parsing/caps and a killable parser subprocess bound pre-cap work. |
+| NR-05 SSRF | Remediated | DNS fails closed and validated public IPs are pinned through connect and redirect handling; rendered fetch requires attested egress policy. |
+| NR-06 fail-open limits | Remediated | Production requires Redis for protected application limits; pre-auth keying is network-free and per-user action budgets are atomic. Operational probes deliberately bypass Redis so they report outages correctly. |
 | NR-07 frontend advisories | Remediated | Current frontend production audit is clean. |
-| NR-08 container root/build | Partially remediated | Base digest and non-root user are implemented. Runtime package surface and build/runtime separation remain NR-17. |
+| NR-08 container root/build | Remediated | Digest-pinned multi-stage API and renderer images run non-root; compilers/TeX are absent from the API, and both images pass the High/Critical gate. |
 
-## Prioritized remediation plan
+## Original prioritized remediation plan
+
+This plan is retained for traceability. Every implementation item below is
+complete and verified except NR-12's credential-owner revocation and coordinated
+public-history rewrite.
 
 ### Phase 0 — immediate containment (0–48 hours)
 

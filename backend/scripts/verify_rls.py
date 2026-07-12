@@ -3,10 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import sys
+from pathlib import Path
 
-from sqlalchemy import text
+# ``python scripts/verify_rls.py`` makes ``scripts/`` the first import root,
+# not the backend directory.  Add the repository's backend root explicitly so
+# the exact command used by CI and operators can import the application package.
+_BACKEND_ROOT = Path(__file__).resolve().parents[1]
+if str(_BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(_BACKEND_ROOT))
 
-from app.database import async_session
+from sqlalchemy import text  # noqa: E402
+
+from app.database import async_session  # noqa: E402
 
 
 async def main() -> None:

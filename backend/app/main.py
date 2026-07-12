@@ -2,7 +2,7 @@ import hmac
 import logging
 
 import posthog
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -11,7 +11,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from app.config import settings
-from app.observability import init_sentry
+from app.observability import init_sentry, telemetry_enabled
 from app.middleware.error_handler import (
     http_exception_handler,
     validation_exception_handler,
@@ -126,19 +126,28 @@ app.include_router(waitlist.router, prefix="/api")
 
 
 @app.get("/api/health")
-@limiter.limit("60/minute")
-async def health(request: Request):
-    """Cheap public liveness check; never fans out to dependencies."""
+async def health():
+    """Cheap public liveness check; never fans out to dependencies.
+
+    Do not attach the Redis-backed application limiter here.  A liveness probe
+    must continue to answer while Redis is unavailable so the orchestrator can
+    distinguish a live-but-unready process from a dead one.  Edge/proxy limits
+    can protect this constant-cost endpoint without coupling it to app state.
+    """
     return {"status": "ok"}
 
 
 @app.get("/api/ready")
-@limiter.limit("30/minute")
 async def readiness(
-    request: Request,
     x_readiness_token: str | None = Header(default=None),
 ):
-    """Token-protected dependency readiness check for internal deployment use."""
+    """Token-protected dependency readiness check for internal deployment use.
+
+    This endpoint deliberately bypasses the Redis-backed limiter: Redis is one
+    of the dependencies it must report as unavailable.  The non-empty internal
+    token and constant-time comparison keep the expensive checks inaccessible
+    to unauthenticated public callers.
+    """
     if not settings.readiness_token or not x_readiness_token or not hmac.compare_digest(
         x_readiness_token, settings.readiness_token
     ):
@@ -180,7 +189,7 @@ async def readiness(
 
 @app.on_event("startup")
 async def init_posthog() -> None:
-    if settings.posthog_api_key:
+    if telemetry_enabled() and settings.posthog_api_key:
         posthog.api_key = settings.posthog_api_key
         posthog.host = settings.posthog_host
         posthog.debug = settings.environment != "production"
@@ -188,7 +197,7 @@ async def init_posthog() -> None:
 
 @app.on_event("shutdown")
 async def shutdown_posthog() -> None:
-    if settings.posthog_api_key:
+    if telemetry_enabled() and settings.posthog_api_key:
         posthog.flush()
 
 

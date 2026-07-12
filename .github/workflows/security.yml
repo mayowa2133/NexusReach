@@ -47,6 +47,7 @@ jobs:
       - name: Dependency audits
         run: |
           pip-audit --no-deps --disable-pip -r backend/requirements.lock
+          pip-audit --no-deps --disable-pip --format cyclonedx-json --output backend-python.cdx.json -r backend/requirements.lock
           npm audit --omit=dev --prefix frontend
           npm audit --omit=dev --prefix e2e
 
@@ -68,12 +69,44 @@ jobs:
           python -m alembic upgrade head
           python scripts/verify_rls.py
 
-      - name: Build minimal API image
-        run: docker build -t nexusreach-api:security ./backend
+      - name: Build hardened runtime images
+        run: |
+          docker build -t nexusreach-api:security ./backend
+          docker build -f backend/Dockerfile.renderer -t nexusreach-renderer:security backend
 
-      - name: Scan API runtime image
+      - name: Verify runtime container policy
+        run: |
+          docker run --rm nexusreach-api:security sh -c \
+            'test "$(id -u)" != 0 && ! command -v gcc && ! command -v pdflatex'
+          docker run --rm --entrypoint sh nexusreach-renderer:security -c \
+            'test "$(id -u)" != 0 && command -v pdflatex >/dev/null'
+
+      - name: Scan runtime images
         run: |
           curl -fsSLO https://github.com/aquasecurity/trivy/releases/download/v0.72.0/trivy_0.72.0_Linux-64bit.tar.gz
           curl -fsSL https://github.com/aquasecurity/trivy/releases/download/v0.72.0/trivy_0.72.0_checksums.txt | grep 'trivy_0.72.0_Linux-64bit.tar.gz' | sha256sum -c -
           tar -xzf trivy_0.72.0_Linux-64bit.tar.gz trivy
-          ./trivy image --ignore-unfixed --severity HIGH,CRITICAL --exit-code 1 nexusreach-api:security
+          # Python dependencies are audited above; image scans gate the OS
+          # package surface without downloading unrelated Java advisory data.
+          ./trivy image --scanners vuln --pkg-types os --ignore-unfixed --severity HIGH,CRITICAL --exit-code 1 nexusreach-api:security
+          ./trivy image --scanners vuln --pkg-types os --ignore-unfixed --severity HIGH,CRITICAL --exit-code 1 nexusreach-renderer:security
+
+      - name: Generate and validate CycloneDX SBOMs
+        run: |
+          # The lock-derived SBOM covers Python libraries. OS-only image SBOMs
+          # avoid Trivy's unrelated 900 MB Java advisory DB for TeX support JARs.
+          ./trivy image --offline-scan --pkg-types os --format cyclonedx --output nexusreach-api.cdx.json nexusreach-api:security
+          ./trivy image --offline-scan --pkg-types os --format cyclonedx --output nexusreach-renderer.cdx.json nexusreach-renderer:security
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          for name in (
+              "backend-python.cdx.json",
+              "nexusreach-api.cdx.json",
+              "nexusreach-renderer.cdx.json",
+          ):
+              document = json.loads(Path(name).read_text())
+              assert document.get("bomFormat") == "CycloneDX", name
+              assert document.get("components"), name
+          PY

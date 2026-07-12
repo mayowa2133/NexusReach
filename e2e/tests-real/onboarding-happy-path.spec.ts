@@ -13,7 +13,7 @@ test('authenticated user completes onboarding and persists profile data through 
 
   await page.goto('/dashboard');
 
-  await expect(page.getByRole('heading', { name: 'Welcome to NexusReach' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Welcome to Solomon' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Get started' }).click();
 
