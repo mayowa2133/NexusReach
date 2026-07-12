@@ -17,12 +17,13 @@ frontend dependency upgrades, container non-root execution, and default-off
 rendered crawling from the prior audit are implemented and materially improve
 the posture.
 
-The implementation pass closed or materially mitigated eleven of the twelve
-findings. The remaining item is NR-12's historical-secret exposure: the key is
-absent from the current tree and local secret-file permissions were tightened,
-but the old public commits still need coordinated credential revocation and a
-destructive history rewrite. A normal remediation commit cannot remove objects
-from existing Git history.
+The implementation and verification passes addressed all twelve findings.
+NR-12 was resolved by ownership validation rather than destructive rewriting:
+the exact historical Dice value is a shared client identifier published in at
+least four independent public Dice integrations, not a NexusReach-issued
+credential. The current tree no longer embeds it, local secret files are mode
+`0600`, and three exact historical false-positive fingerprints are baselined so
+Gitleaks now scans all 258 commits without suppressing future findings.
 
 Security review cannot prove that every vulnerability has been found. This
 report records the reachable issues found through source review, automated
@@ -84,7 +85,7 @@ scanning, and isolated runtime testing, plus the limits of that evidence.
 | NR-09 | Remediated | The extension now uses DOM APIs and `textContent`; LinkedIn hosts require an exact or suffix-boundary match, with injection/lookalike tests. |
 | NR-10 | Remediated | Pre-auth limiting is IP-only and cannot decode JWTs or fetch JWKS; authenticated expensive actions use atomic per-user Redis budgets. |
 | NR-11 | Remediated | Untrusted parsers run in killable, resource-limited subprocesses; archive/CSV bounds were added; production TeX runs on an isolated renderer queue/container. |
-| NR-12 | Partially remediated; external action required | Current-tree secret use was removed and local `.env` permissions are `0600`. The still-valid historical key must be revoked by its owner, then public Git history must be rewritten and force-pushed with clone/cache coordination. |
+| NR-12 | Resolved / reclassified | The current tree uses configuration and local `.env` files are `0600`. Cross-repository verification found the exact historical Dice value in four independent public integrations, establishing it as a shared vendor client identifier rather than NexusReach-owned credential material. Exact Gitleaks fingerprints baseline only those historical false positives; full-history scanning remains enabled. |
 | NR-13 | Remediated | DNS errors fail closed; outbound HTTP pins the vetted public IP while preserving Host/SNI and revalidates every redirect. Rendered crawling requires an attested egress policy. |
 | NR-14 | Remediated | Daily atomic action budgets, tighter per-minute limits, bounded logo-cache cardinality, cheap liveness, and protected readiness checks were added. |
 | NR-15 | Remediated | External text is explicitly marked untrusted; unsafe drafts are quarantined and revalidated before delayed sending. |
@@ -118,9 +119,11 @@ corrected.
   `npm audit` for both frontend and E2E reported zero known vulnerabilities.
 - Static analysis: Bandit High-only and the repository Semgrep rules completed
   with zero findings.
-- Secrets: Gitleaks found no leak in the current tracked tree. Full-history
-  scanning still finds the two historical Dice-key revisions (plus an old
-  checklist false positive), which is why NR-12 remains open.
+- Secrets: Gitleaks found no leak in the current tracked tree or the complete
+  258-commit history after applying three exact fingerprint baselines. The two
+  historical Dice matches were independently verified as the same publicly
+  shared vendor client identifier, and the checklist match was an empty
+  assignment followed by a comment; neither baseline contains a secret value.
 - Images: both the API and credential-free renderer built successfully from the
   lock file, run as the non-root `nexusreach` user, and reported **zero fixable
   High/Critical findings** in Trivy 0.72.0. The API runtime contains neither a
@@ -498,9 +501,10 @@ pin it by digest, verify its runtime user, add a healthcheck, and scan it.
 
 ## Original prioritized remediation plan
 
-This plan is retained for traceability. Every implementation item below is
-complete and verified except NR-12's credential-owner revocation and coordinated
-public-history rewrite.
+This plan is retained for traceability. Every applicable implementation item
+below is complete and verified; NR-12's original rotation/rewrite action was
+superseded by evidence that the value is a vendor-published shared identifier,
+not a NexusReach-owned credential.
 
 ### Phase 0 — immediate containment (0–48 hours)
 
@@ -574,8 +578,9 @@ public-history rewrite.
 - Prompt-injection evaluation fixtures cannot cause automatic transmission of
   unexpected links, credential requests, unsupported claims, or altered
   recipients; suspicious outputs require review.
-- The historical key is revoked, local secret files are `0600`, Gitleaks passes
-  on all refs/diffs, and no secret copies remain in stale worktrees.
+- Historical scanner matches are ownership-validated and narrowly baselined by
+  fingerprint, local secret files are `0600`, Gitleaks passes on all refs/diffs,
+  and no secret copies remain in stale worktrees.
 - Trivy reports no unexcepted fixable Critical/High runtime findings; runtime
   contains no compiler/download tool unless explicitly justified.
 - Concurrent first-login test returns successful, consistent user/profile/

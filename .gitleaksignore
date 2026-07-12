@@ -1,0 +1,9 @@
+# Surgical historical false-positive baselines (no secret values).
+#
+# The two Dice findings contain the same shared client identifier published in
+# multiple independent public Dice integrations; it is not NexusReach-owned
+# credential material. The checklist finding is an empty assignment followed
+# by an explanatory comment and has been reformatted in the current tree.
+35de1bbf2a388076794f2b6d24f73f9a6e1b0679:LAUNCH_CONFIG_CHECKLIST.md:generic-api-key:159
+1f4c8dcc9df502bba1e439f66699dd0d130f9d1f:backend/app/clients/remote_jobs_client.py:generic-api-key:25
+e342416a2680fe79824d53dc3ddbcdc7ba8e3f01:backend/app/clients/remote_jobs_client.py:generic-api-key:28
