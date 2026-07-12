@@ -40,4 +40,13 @@ backend/.venv312/
 
 # Claude Code agent scratch (worktree copies — never commit)
 .claude/worktrees/
+.claude/skills/
 graphify-out/
+
+# Local caches and generated artifacts
+# (output/playwright/ has old tracked debug shots — scope to the generated dirs)
+.pnpm-store/
+output/pdf/
+output/resume_quality/
+e2e/dump.rdb
+posthog-setup-report.md
