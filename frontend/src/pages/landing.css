@@ -459,6 +459,86 @@ body:has(.lp) { background: #FAF9F5; }
   .lp-wl-row { grid-template-columns: 1fr; }
 }
 
+/* ===================== motion =====================
+   Linear-style restraint: content rises a few px and fades in, once, on first
+   view. Hidden state is gated on [data-anim-ready] (set by the reveal effect in
+   LandingPage.tsx) so nothing is ever hidden without JS, and the global
+   prefers-reduced-motion rule above kills every transition/animation. */
+.lp[data-anim-ready] [data-reveal] {
+  opacity: 0; transform: translateY(16px);
+  transition: opacity 640ms cubic-bezier(0.2, 0.7, 0.2, 1), transform 640ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.lp[data-anim-ready] [data-reveal].is-in { opacity: 1; transform: none; }
+
+/* Group reveals: the container stays put, children stagger in. */
+.lp[data-anim-ready] [data-reveal-group] > * {
+  opacity: 0; transform: translateY(14px);
+  transition: opacity 560ms cubic-bezier(0.2, 0.7, 0.2, 1), transform 560ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.lp[data-anim-ready] [data-reveal-group].is-in > * { opacity: 1; transform: none; }
+.lp[data-anim-ready] [data-reveal-group].is-in > :nth-child(2) { transition-delay: 70ms; }
+.lp[data-anim-ready] [data-reveal-group].is-in > :nth-child(3) { transition-delay: 140ms; }
+.lp[data-anim-ready] [data-reveal-group].is-in > :nth-child(4) { transition-delay: 210ms; }
+.lp[data-anim-ready] [data-reveal-group].is-in > :nth-child(5) { transition-delay: 280ms; }
+.lp[data-anim-ready] [data-reveal-group].is-in > :nth-child(6) { transition-delay: 350ms; }
+.lp[data-anim-ready] [data-reveal-group].is-in > :nth-child(7) { transition-delay: 420ms; }
+.lp[data-anim-ready] [data-reveal-group].is-in > :nth-child(8) { transition-delay: 490ms; }
+
+/* Pipeline: tokens light up left-to-right when the strip scrolls in. */
+.lp[data-anim-ready] .pipeline > * { opacity: 0.18; transition: opacity 360ms ease; }
+.lp[data-anim-ready] .pipeline.is-in > * { opacity: 1; }
+.lp[data-anim-ready] .pipeline.is-in > :nth-child(2)  { transition-delay: 80ms; }
+.lp[data-anim-ready] .pipeline.is-in > :nth-child(3)  { transition-delay: 160ms; }
+.lp[data-anim-ready] .pipeline.is-in > :nth-child(4)  { transition-delay: 240ms; }
+.lp[data-anim-ready] .pipeline.is-in > :nth-child(5)  { transition-delay: 320ms; }
+.lp[data-anim-ready] .pipeline.is-in > :nth-child(6)  { transition-delay: 400ms; }
+.lp[data-anim-ready] .pipeline.is-in > :nth-child(7)  { transition-delay: 480ms; }
+.lp[data-anim-ready] .pipeline.is-in > :nth-child(8)  { transition-delay: 560ms; }
+.lp[data-anim-ready] .pipeline.is-in > :nth-child(9)  { transition-delay: 640ms; }
+.lp[data-anim-ready] .pipeline.is-in > :nth-child(10) { transition-delay: 720ms; }
+.lp[data-anim-ready] .pipeline.is-in > :nth-child(11) { transition-delay: 800ms; }
+.lp[data-anim-ready] .pipeline.is-in > :nth-child(12) { transition-delay: 880ms; }
+.lp[data-anim-ready] .pipeline.is-in > :nth-child(13) { transition-delay: 960ms; }
+
+/* Hero entrance: the dossier "plays" on load — window first, then each
+   person card, then the draft slides in. Pure CSS, killed by reduced-motion. */
+@keyframes lp-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+.lp .hero .mono-label { animation: lp-rise 520ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.lp .hero h1 { animation: lp-rise 560ms cubic-bezier(0.2, 0.7, 0.2, 1) both 80ms; }
+.lp .hero .lede { animation: lp-rise 560ms cubic-bezier(0.2, 0.7, 0.2, 1) both 170ms; }
+.lp .hero .hero-ctas { animation: lp-rise 560ms cubic-bezier(0.2, 0.7, 0.2, 1) both 260ms; }
+.lp .hero .micro { animation: lp-rise 560ms cubic-bezier(0.2, 0.7, 0.2, 1) both 340ms; }
+.lp .hero .figure .window { animation: lp-rise 640ms cubic-bezier(0.2, 0.7, 0.2, 1) both 240ms; }
+.lp .hero .window .warm-strip { animation: lp-rise 480ms cubic-bezier(0.2, 0.7, 0.2, 1) both 480ms; }
+/* .warm-strip is the first div in .window-body, so the person cards are
+   the 2nd–4th divs of their type. */
+.lp .hero .window .person:nth-of-type(2) { animation: lp-rise 480ms cubic-bezier(0.2, 0.7, 0.2, 1) both 620ms; }
+.lp .hero .window .person:nth-of-type(3) { animation: lp-rise 480ms cubic-bezier(0.2, 0.7, 0.2, 1) both 760ms; }
+.lp .hero .window .person:nth-of-type(4) { animation: lp-rise 480ms cubic-bezier(0.2, 0.7, 0.2, 1) both 900ms; }
+.lp .hero .draft-card { animation: lp-rise 620ms cubic-bezier(0.2, 0.7, 0.2, 1) both 1150ms; }
+.lp .hero .figcap { animation: lp-rise 480ms cubic-bezier(0.2, 0.7, 0.2, 1) both 1350ms; }
+
+/* Hover feedback: quiet lifts, token-colored so dark mode inherits. */
+.lp .figure .window,
+.lp .draft-card { transition: transform 220ms ease, box-shadow 220ms ease; }
+.lp .figure .window:hover,
+.lp .draft-card:hover { transform: translateY(-3px); box-shadow: 0 16px 36px rgba(0, 0, 0, 0.09); }
+.lp .person,
+.lp .row-line,
+.lp .crm-row,
+.lp .ledger-row,
+.lp .refusal { transition: background-color 160ms ease, border-color 160ms ease; }
+.lp .person:hover { border-color: var(--lp-line); background: var(--lp-green-tint); }
+.lp .row-line:hover,
+.lp .crm-row:hover { background: var(--lp-paper-2); }
+.lp .ledger-row:hover .t,
+.lp .refusal:hover .t { color: var(--lp-green); }
+.lp .ledger-row .t,
+.lp .refusal .t { transition: color 160ms ease; }
+.lp .faq summary { transition: color 160ms ease; }
+.lp .faq summary:hover { color: var(--lp-green); }
+.lp .faq details[open] .a { animation: lp-rise 320ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+
 /* ===================== dark mode (follows OS preference) =====================
    Keeps the "dossier" character in dark: warm near-black paper, off-white ink,
    and a brighter emerald so green accents stay legible. Green fills (buttons,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { WaitlistModal } from '@/components/WaitlistModal';
 import { BrandMark } from '@/components/BrandLogo';
@@ -8,6 +8,7 @@ export function LandingPage() {
   const [scrolled, setScrolled] = useState(false);
   const [waitlistOpen, setWaitlistOpen] = useState(false);
   const [waitlistSource, setWaitlistSource] = useState('landing');
+  const rootRef = useRef<HTMLDivElement>(null);
 
   const openWaitlist = useCallback((source: string) => {
     setWaitlistSource(source);
@@ -31,8 +32,34 @@ export function LandingPage() {
     };
   }, []);
 
+  // Scroll-triggered reveals. The hidden initial state is gated on
+  // data-anim-ready (set here), so content is never hidden if this effect
+  // doesn't run; prefers-reduced-motion kills the transitions globally.
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    root.setAttribute('data-anim-ready', '');
+    const targets = root.querySelectorAll('[data-reveal], [data-reveal-group]');
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('is-in');
+            io.unobserve(entry.target);
+          }
+        }
+      },
+      { threshold: 0.12, rootMargin: '0px 0px -8% 0px' }
+    );
+    targets.forEach((el) => io.observe(el));
+    return () => {
+      io.disconnect();
+      root.removeAttribute('data-anim-ready');
+    };
+  }, []);
+
   return (
-    <div className="lp has-banner">
+    <div className="lp has-banner" ref={rootRef}>
       <div className="lp-banner">
         <b>Solomon is launching soon.</b> Get early access before anyone else —
         <button className="lp-banner-cta" onClick={() => openWaitlist('banner')}>
@@ -68,9 +95,9 @@ export function LandingPage() {
             </span>
             <h1>Every job posting has people behind it. Solomon finds them.</h1>
             <p className="lede">
-              For each job you're targeting: the recruiter, the likely hiring manager, and a peer
-              on the team — with evidence for why they're right, a warm path from your own
-              network, a safe email, and a drafted message. <strong>You approve every send.</strong>
+              For every job you target: the recruiter, the hiring manager, and a peer — with
+              evidence, a warm path, a safe email, and a draft.{' '}
+              <strong>You approve every send.</strong>
             </p>
             <div className="hero-ctas">
               <button className="btn btn-primary" onClick={() => openWaitlist('hero')}>
@@ -159,7 +186,7 @@ export function LandingPage() {
         </div>
 
         <div className="cred">
-          <div className="wrap cred-inner">
+          <div className="wrap cred-inner" data-reveal-group>
             <span className="mono-label">Indexing 1,117 verified company career boards</span>
             <span className="mono-label">People cross-checked across independent public sources</span>
             <span className="mono-label">Built by a job seeker, not a growth team</span>
@@ -170,12 +197,12 @@ export function LandingPage() {
       {/* ============================ 01 PROBLEM ============================ */}
       <section className="block">
         <div className="wrap">
-          <div className="sec-head">
+          <div className="sec-head" data-reveal>
             <span className="mono-label">01 <span className="tick">·</span> The problem</span>
             <h2>You already know networking works. Here's why you're not doing it.</h2>
             <p className="lede">You find a great posting. Then the real work starts — and it looks like this:</p>
           </div>
-          <div className="ledger">
+          <div className="ledger" data-reveal-group>
             <div className="ledger-row">
               <span className="n">/01</span>
               <div>
@@ -219,10 +246,10 @@ export function LandingPage() {
               </div>
             </div>
           </div>
-          <p className="lede" style={{ marginTop: 40, maxWidth: '60ch' }}>
-            So most people do the rational thing: skip all of it and just apply. Into a pile of 200
-            resumes. <strong>The problem was never your willingness to reach out — it's 45 minutes
-            of research per company, times the forty companies on your list.</strong>
+          <p className="lede" style={{ marginTop: 40, maxWidth: '60ch' }} data-reveal>
+            So most people skip it and just apply — into a pile of 200 resumes.{' '}
+            <strong>The problem isn't willingness. It's 45 minutes of research, times forty
+            companies.</strong>
           </p>
         </div>
       </section>
@@ -230,12 +257,12 @@ export function LandingPage() {
       {/* ============================ 02 WORKFLOW ============================ */}
       <section className="block" id="how">
         <div className="wrap">
-          <div className="sec-head">
+          <div className="sec-head" data-reveal>
             <span className="mono-label">02 <span className="tick">·</span> The workflow</span>
             <h2>From posting to inbox, with proof at every step.</h2>
             <p className="lede">
-              Solomon runs the workflow serious candidates already do by hand — and stops
-              exactly where a human should take over.
+              The workflow serious candidates do by hand — automated up to the exact point a
+              human should take over.
             </p>
           </div>
 
@@ -243,6 +270,7 @@ export function LandingPage() {
             className="pipeline"
             role="img"
             aria-label="Pipeline: job, people, evidence, warm path, safe email, draft, tracked"
+            data-reveal
           >
             <span className="pipe-t">JOB</span><span className="pipe-a">→</span>
             <span className="pipe-t">PEOPLE</span><span className="pipe-a">→</span>
@@ -255,15 +283,13 @@ export function LandingPage() {
           <p className="figcap">Fig. 02 — The full path. Automation ends at the send button.</p>
 
           <div className="steps">
-            <div className="step">
+            <div className="step" data-reveal>
               <span className="n">1</span>
               <div>
                 <h3>Your jobs find you.</h3>
                 <p>
-                  Set target roles and locations once. Solomon continuously indexes fresh
-                  openings from 1,000+ company career boards, aggregators, startup and government
-                  sources — deduplicated, sorted by real posting date. Internships and new-grad
-                  roles are first-class, not leftovers.
+                  Set target roles once. Solomon indexes 1,000+ career boards continuously —
+                  deduplicated, sorted by real posting date. Internships are first-class.
                 </p>
               </div>
               <div className="step-fig">
@@ -293,14 +319,13 @@ export function LandingPage() {
               </div>
             </div>
 
-            <div className="step">
+            <div className="step" data-reveal>
               <span className="n">2</span>
               <div>
                 <h3>Every job gets its people.</h3>
                 <p>
-                  Behind each posting: the recruiter who likely handles the req, the hiring manager
-                  who likely owns it, and a peer you'd work beside. Research runs in the background
-                  — the people are usually ready before you click.
+                  The recruiter who handles the req. The manager who owns it. A peer you'd work
+                  beside. Ready before you click.
                 </p>
               </div>
               <div className="step-fig">
@@ -330,14 +355,13 @@ export function LandingPage() {
               </div>
             </div>
 
-            <div className="step">
+            <div className="step" data-reveal>
               <span className="n">3</span>
               <div>
                 <h3>Every person comes with evidence.</h3>
                 <p>
-                  Found in the posting's own hiring team. On the company's team page. Active in the
-                  team's repositories. Quoted by title in company press. Each source is named on
-                  the card — you see what Solomon saw.
+                  The posting's hiring team. The company's team page. The team's repositories.
+                  Every source is named on the card.
                 </p>
               </div>
               <div className="step-fig">
@@ -352,14 +376,13 @@ export function LandingPage() {
               </div>
             </div>
 
-            <div className="step">
+            <div className="step" data-reveal>
               <span className="n">4</span>
               <div>
                 <h3>Warm paths and safe emails.</h3>
                 <p>
-                  Your imported connections are checked for anyone who could introduce you. Emails
-                  follow a strict ladder: verified first; best-guess only with domain evidence;
-                  withheld — and labeled withheld — when the evidence is ambiguous.
+                  Your connections are checked for a warm intro. Emails: verified first,
+                  best-guess only with evidence, withheld when ambiguous.
                 </p>
               </div>
               <div className="step-fig">
@@ -380,14 +403,13 @@ export function LandingPage() {
               </div>
             </div>
 
-            <div className="step">
+            <div className="step" data-reveal>
               <span className="n">5</span>
               <div>
                 <h3>You send. It tracks.</h3>
                 <p>
-                  Drafts are written from the posting, the person, the evidence, and your background
-                  — then staged in your Gmail or Outlook. You edit and send from your own address.
-                  Replies are detected automatically; follow-ups surface themselves.
+                  Drafts written from the posting, the person, and your background — staged in
+                  your own Gmail or Outlook. Replies detected. Follow-ups surface themselves.
                 </p>
               </div>
               <div className="step-fig">
@@ -416,18 +438,17 @@ export function LandingPage() {
       {/* ============================ 03 EVIDENCE ============================ */}
       <section className="block" id="evidence">
         <div className="wrap">
-          <div className="sec-head">
+          <div className="sec-head" data-reveal>
             <span className="mono-label">03 <span className="tick">·</span> The evidence layer</span>
             <h2>Every contact comes with receipts.</h2>
             <p className="lede">
-              Other tools hand you a name and a title. Solomon shows its work — because{' '}
-              <strong>your</strong> name goes on the message. Four kinds of confidence, kept
-              deliberately separate:
+              Other tools hand you a name. Solomon shows its work — because{' '}
+              <strong>your</strong> name goes on the message.
             </p>
           </div>
 
           <div className="split" style={{ marginTop: 48 }}>
-            <div className="figure">
+            <div className="figure" data-reveal>
               <div className="window">
                 <div className="window-head">
                   <span className="crumb">People / <b>Marcus Chen</b></span>
@@ -472,7 +493,7 @@ export function LandingPage() {
               <p className="figcap">Fig. 03 — One contact, four independent confidence axes.</p>
             </div>
 
-            <div>
+            <div data-reveal>
               <div className="ledger" style={{ marginTop: 0 }}>
                 <div className="ledger-row">
                   <span className="n">A</span>
@@ -516,9 +537,8 @@ export function LandingPage() {
                 </div>
               </div>
               <p className="lede" style={{ fontSize: 16, marginTop: 28 }}>
-                A perfect role match at the wrong company is worthless. A verified employee can
-                still have an unverifiable email. These never blend into one fuzzy score — you see
-                each axis before you reach out.
+                A perfect match at the wrong company is worthless. The axes never blend into one
+                fuzzy score.
               </p>
             </div>
           </div>
@@ -529,22 +549,19 @@ export function LandingPage() {
       <section className="block">
         <div className="wrap">
           <div className="split">
-            <div>
+            <div data-reveal>
               <span className="mono-label">04 <span className="tick">·</span> Warm paths</span>
               <h2 style={{ margin: '16px 0 18px' }}>You might already know someone. Solomon checks.</h2>
               <p className="lede" style={{ fontSize: 17 }}>
-                Import your LinkedIn connections — an official CSV export, or a connector that runs
-                entirely on your own computer — and every job's company is cross-referenced against
-                your actual network. Shared schools and former employers surface as warm context,
-                threaded straight into your draft where it belongs.
+                Import your LinkedIn connections and every company is checked against your actual
+                network. Warm context lands straight in your draft.
               </p>
               <p className="lede" style={{ fontSize: 17, marginTop: 18 }}>
-                <strong>Your credentials stay yours:</strong> your LinkedIn password, cookies, and
-                session don't touch our servers. Only your normalized connection list is uploaded —
-                and one click deletes it.
+                <strong>Your credentials stay yours</strong> — password, cookies, and session
+                don't touch our servers. One click deletes the rest.
               </p>
             </div>
-            <div className="figure">
+            <div className="figure" data-reveal>
               <div className="window">
                 <div className="window-head">
                   <span className="crumb">People / Meridian / <b>Warm paths</b></span>
@@ -592,7 +609,7 @@ export function LandingPage() {
       {/* ============================ 05 TRUST ============================ */}
       <section className="block" id="trust">
         <div className="wrap">
-          <div className="sec-head">
+          <div className="sec-head" data-reveal>
             <span className="mono-label">05 <span className="tick">·</span> Hard lines</span>
             <h2>What Solomon will never do.</h2>
             <p className="lede">
@@ -601,7 +618,7 @@ export function LandingPage() {
           </div>
 
           <div className="split" style={{ marginTop: 48, alignItems: 'start' }}>
-            <div className="refusals" style={{ marginTop: 0 }}>
+            <div className="refusals" style={{ marginTop: 0 }} data-reveal-group>
               <div className="refusal">
                 <span className="x">✕</span>
                 <div>
@@ -624,7 +641,7 @@ export function LandingPage() {
               </div>
             </div>
 
-            <div className="figure">
+            <div className="figure" data-reveal>
               <div className="window">
                 <div className="window-head">
                   <span className="crumb">People / <b>Jordan Lee</b> · Atlas</span>
@@ -659,21 +676,19 @@ export function LandingPage() {
       <section className="block">
         <div className="wrap">
           <div className="split">
-            <div>
+            <div data-reveal>
               <span className="mono-label">06 <span className="tick">·</span> Tracked</span>
               <h2 style={{ margin: '16px 0 18px' }}>Out of your head. Off the spreadsheet.</h2>
               <p className="lede" style={{ fontSize: 17 }}>
-                Real outreach dies in the follow-up. Solomon keeps the whole thread without data
-                entry: drafts staged in your Gmail or Outlook,{' '}
-                <strong>sends and replies detected automatically</strong> — a reply flips the
-                contact to Responded, captures what they said, and your next draft becomes a reply,
-                not a re-introduction.
+                Real outreach dies in the follow-up.{' '}
+                <strong>Sends and replies are detected automatically</strong> — your next draft
+                becomes a reply, not a re-introduction.
               </p>
               <p className="lede" style={{ fontSize: 17, marginTop: 18 }}>
-                Follow-ups surface on schedule, pre-drafted if you want. Sent only if you say so.
+                Follow-ups surface on schedule. Sent only if you say so.
               </p>
             </div>
-            <div className="figure">
+            <div className="figure" data-reveal>
               <div className="window">
                 <div className="window-head">
                   <span className="crumb"><b>Outreach</b> / all companies</span>
@@ -731,12 +746,12 @@ export function LandingPage() {
 
       {/* ============================ FINAL CTA ============================ */}
       <section className="closer">
-        <div className="wrap closer-inner">
+        <div className="wrap closer-inner" data-reveal-group>
           <span className="mono-label">07 <span className="tick">·</span> Join the waitlist</span>
           <h2 style={{ marginTop: 16 }}>The posting is public. The path isn't. Soon it will be.</h2>
           <p className="lede">
-            Three right people per job. Evidence for every match. A draft worth sending — on your
-            go-ahead. Be first in line when Solomon opens.
+            Three right people per job. Evidence for every match. A draft worth sending. Be
+            first in line.
           </p>
           <div className="hero-ctas">
             <button className="btn btn-primary" onClick={() => openWaitlist('closer')}>
@@ -751,11 +766,11 @@ export function LandingPage() {
       {/* ============================ FAQ ============================ */}
       <section className="faq" id="faq">
         <div className="wrap">
-          <div className="sec-head">
+          <div className="sec-head" data-reveal>
             <span className="mono-label">08 <span className="tick">·</span> Questions</span>
             <h2>Fair questions, straight answers.</h2>
           </div>
-          <div className="faq-list">
+          <div className="faq-list" data-reveal-group>
             <details>
               <summary>Is this a mass-email or spam tool? <span className="ind">+</span></summary>
               <div className="a">
