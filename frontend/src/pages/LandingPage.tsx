@@ -4,6 +4,32 @@ import { WaitlistModal } from '@/components/WaitlistModal';
 import { BrandMark } from '@/components/BrandLogo';
 import './landing.css';
 
+// The product inbox doesn't exist yet. Set this to the real address (e.g.
+// "hello@<solomon-domain>") when it's created — the contact cards switch from
+// the "inbox opening soon" fallback to live mailto links automatically.
+const CONTACT_EMAIL: string | null = null;
+
+const CONTACT_CARDS = [
+  {
+    key: 'general',
+    label: 'General',
+    line: 'Product questions, feedback, ideas.',
+    subject: 'Hello Solomon',
+  },
+  {
+    key: 'press',
+    label: 'Press',
+    line: "Writing about Solomon? We'll talk.",
+    subject: 'Press inquiry',
+  },
+  {
+    key: 'security',
+    label: 'Security',
+    line: 'Found a vulnerability? Tell us privately.',
+    subject: 'Security disclosure',
+  },
+];
+
 export function LandingPage() {
   const [scrolled, setScrolled] = useState(false);
   const [waitlistOpen, setWaitlistOpen] = useState(false);
@@ -78,6 +104,7 @@ export function LandingPage() {
             <a className="nav-link" href="#evidence">Evidence</a>
             <a className="nav-link" href="#trust">Trust</a>
             <a className="nav-link" href="#faq">FAQ</a>
+            <a className="nav-link" href="#contact">Contact</a>
             <Link className="nav-link" to="/login">Log in</Link>
             <button className="btn btn-primary" onClick={() => openWaitlist('nav')}>
               Join the waitlist
@@ -846,6 +873,46 @@ export function LandingPage() {
         </div>
       </section>
 
+      {/* ============================ 09 CONTACT ============================ */}
+      <section className="block" id="contact">
+        <div className="wrap">
+          <div className="sec-head" data-reveal>
+            <span className="mono-label">09 <span className="tick">·</span> Contact</span>
+            <h2>Questions? Talk to a human.</h2>
+            <p className="lede">No ticket queue. A founder reads every message.</p>
+          </div>
+
+          <div className="contact-grid" data-reveal-group>
+            {CONTACT_CARDS.map((card) => (
+              <div className="contact-card" key={card.key}>
+                <span className="mono-label">{card.label}</span>
+                <p>{card.line}</p>
+                {CONTACT_EMAIL ? (
+                  <a
+                    className="contact-mail"
+                    href={`mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(card.subject)}`}
+                  >
+                    {CONTACT_EMAIL}
+                  </a>
+                ) : (
+                  <span className="contact-soon">INBOX OPENING SOON</span>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {!CONTACT_EMAIL && (
+            <p className="contact-fallback" data-reveal>
+              Until the inbox opens, the waitlist is the fastest way to reach us —{' '}
+              <button className="contact-fallback-btn" onClick={() => openWaitlist('contact')}>
+                join it here
+              </button>
+              . Replies come from a human.
+            </p>
+          )}
+        </div>
+      </section>
+
       {/* ============================ FOOTER ============================ */}
       <footer className="lp-footer">
         <div className="wrap foot-inner">
@@ -857,6 +924,7 @@ export function LandingPage() {
             <div className="foot-note">BUILT BY A JOB SEEKER, NOT A GROWTH TEAM · © 2026</div>
           </div>
           <div className="foot-links">
+            <a href="#contact">Contact</a>
             <Link to="/privacy">Privacy</Link>
             <Link to="/terms">Terms</Link>
             <Link to="/login">Log in</Link>
