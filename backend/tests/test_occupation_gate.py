@@ -8,6 +8,7 @@ from app.services.people.candidates import _prepare_candidates
 from app.services.people.occupation_gate import (
     job_function_group,
     occupation_conflict,
+    occupation_function_distance,
     title_function_group,
 )
 from app.utils.job_context import extract_job_context
@@ -50,6 +51,24 @@ def test_occupation_conflict_is_conservative():
     assert occupation_conflict(["sales"], "sales", "Manager") is False
     # unknown job group -> never conflicts
     assert occupation_conflict([], None, "Engineering Manager") is False
+
+
+def test_hierarchical_function_distance_distinguishes_adjacent_from_same_group():
+    assert occupation_function_distance(
+        ["sales"], "sales", "Account Executive"
+    ) == (0, "exact_occupation")
+    assert occupation_function_distance(
+        ["sales"], "sales", "Marketing Manager"
+    ) == (1, "adjacent_occupation")
+    assert occupation_function_distance(
+        ["sales"], "sales", "Customer Success Manager"
+    ) == (1, "adjacent_occupation")
+    assert occupation_function_distance(
+        ["sales"], "sales", "Software Engineer"
+    ) == (3, "cross_function")
+    assert occupation_function_distance(
+        ["sales"], "sales", "Manager"
+    ) == (4, "unknown")
 
 
 def test_gate_rejects_offfunction_keeps_same_function():

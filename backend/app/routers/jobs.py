@@ -837,7 +837,12 @@ async def tailor_resume_endpoint(
     from app.models.profile import Profile  # noqa: PLC0415
     from app.models.tailored_resume import TailoredResume  # noqa: PLC0415
     from app.services.match_scoring import score_job  # noqa: PLC0415
-    from app.services.resume_tailor import tailor_resume  # noqa: PLC0415
+    from app.services.resume_tailor import (  # noqa: PLC0415
+        TAILORING_PROMPT_VERSION,
+        tailor_resume,
+    )
+    from app.services.resume_artifact.quality import RUBRIC_VERSION  # noqa: PLC0415
+    from app.services.resume_artifact.service import tailoring_input_hash  # noqa: PLC0415
 
     job = await get_job(db, user_id, uuid.UUID(job_id))
     if not job:
@@ -881,6 +886,9 @@ async def tailor_resume_endpoint(
         overall_strategy=suggestions.get("overall_strategy"),
         model=suggestions.get("model"),
         provider=suggestions.get("provider"),
+        input_hash=tailoring_input_hash(profile=profile, job=job),
+        prompt_version=TAILORING_PROMPT_VERSION,
+        rubric_version=RUBRIC_VERSION,
     )
     db.add(tailored)
     await db.commit()

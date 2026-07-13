@@ -18,6 +18,7 @@ from sqlalchemy import func as sa_func
 from datetime import timezone
 from urllib.parse import urlparse
 from urllib.parse import urlunparse
+from app.utils.company_identity import normalize_company_name
 
 logger = logging.getLogger(__name__)
 
@@ -48,12 +49,25 @@ EARTH_RADIUS_KM = 6371.0
 
 
 def _fingerprint(company_name: str | None, title: str | None, location: str | None) -> str:
-    """Create a fingerprint for deduplication based on company + title + location."""
-    raw = (
-        f"{(company_name or '').lower().strip()}|"
-        f"{(title or '').lower().strip()}|"
-        f"{(location or '').lower().strip()}"
-    )
+    """Create a cross-source cluster key from normalized posting identity.
+
+    This intentionally removes company legal suffixes and harmless title
+    punctuation/seniority abbreviations so syndicated copies such as
+    ``Acme, Inc. / Sr. FP&A Analyst`` and ``ACME / Senior FP&A Analyst``
+    converge. Location remains part of the key to avoid collapsing distinct
+    openings at different offices.
+    """
+    company = normalize_company_name(company_name)
+    title_text = re.sub(r"\bsr\.?\b", "senior", (title or "").lower())
+    title_text = re.sub(r"\bjr\.?\b", "junior", title_text)
+    title_text = re.sub(r"\b(?:remote|hybrid)\b", " ", title_text)
+    normalized_title = " ".join(re.findall(r"[a-z0-9]+", title_text))
+    raw_location = (location or "").strip()
+    if re.search(r"\bremote\b", raw_location, re.IGNORECASE):
+        normalized_location = "remote"
+    else:
+        normalized_location = _normalized_pref_location(raw_location)
+    raw = f"{company}|{normalized_title}|{normalized_location}"
     return hashlib.md5(raw.encode(), usedforsecurity=False).hexdigest()
 
 

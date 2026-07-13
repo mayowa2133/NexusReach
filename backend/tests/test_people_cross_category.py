@@ -81,6 +81,32 @@ def test_final_peer_sort_respects_nontechnical_context():
     ]
 
 
+def test_final_peer_set_diversifies_within_same_trust_tier():
+    context = _build_roles_context(["Registered Nurse"])
+    first = _peer("A Nurse", "Registered Nurse")
+    duplicate = _peer("B Nurse", "Registered Nurse")
+    distinct = _peer("C Specialist", "Clinical Nurse Specialist")
+    first.source = "google_cse"
+    duplicate.source = "google_cse"
+    distinct.source = "company_site"
+
+    result = _finalize_bucketed(
+        {
+            "recruiters": [],
+            "hiring_managers": [],
+            "peers": [first, duplicate, distinct],
+        },
+        target_count_per_bucket=3,
+        context=context,
+    )
+
+    assert [person.full_name for person in result["peers"]] == [
+        "A Nurse",
+        "C Specialist",
+        "B Nurse",
+    ]
+
+
 def test_cache_hit_must_pass_company_employment_and_bucket_preflight():
     base = {
         "full_name": "Nia Nurse",

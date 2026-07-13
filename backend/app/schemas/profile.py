@@ -1,11 +1,44 @@
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 _MAX_URL_LEN = 500
 # Chars that never legitimately appear in a URL but carry meaning downstream
 # (LaTeX argument delimiters / control sequences, HTML angle brackets, quotes).
 _UNSAFE_URL_CHARS = frozenset('<>{}\\"\'` ')
+
+
+class JobPreferences(BaseModel):
+    work_authorization_countries: list[str] = Field(default_factory=list)
+    requires_sponsorship: bool | None = None
+    languages: list[str] = Field(default_factory=list)
+    licenses: list[str] = Field(default_factory=list)
+    clearances: list[str] = Field(default_factory=list)
+    allowed_schedules: list[str] = Field(default_factory=list)
+    max_travel_percent: int | None = Field(default=None, ge=0, le=100)
+    excluded_employers: list[str] = Field(default_factory=list)
+    blocked_keywords: list[str] = Field(default_factory=list)
+
+    @field_validator(
+        "work_authorization_countries",
+        "languages",
+        "licenses",
+        "clearances",
+        "allowed_schedules",
+        "excluded_employers",
+        "blocked_keywords",
+    )
+    @classmethod
+    def _normalize_lists(cls, values: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for value in values[:50]:
+            cleaned = " ".join(str(value).split()).strip()[:100]
+            key = cleaned.casefold()
+            if cleaned and key not in seen:
+                seen.add(key)
+                normalized.append(cleaned)
+        return normalized
 
 
 def _validate_optional_url(value: str | None) -> str | None:
@@ -44,6 +77,7 @@ class ProfileResponse(BaseModel):
     target_roles: list[str] | None
     target_occupations: list[str] | None = None
     target_locations: list[str] | None
+    job_preferences: JobPreferences = Field(default_factory=JobPreferences)
     linkedin_url: str | None
     github_url: str | None
     portfolio_url: str | None
@@ -82,6 +116,7 @@ class ProfileUpdate(BaseModel):
     target_roles: list[str] | None = None
     target_occupations: list[str] | None = None
     target_locations: list[str] | None = None
+    job_preferences: JobPreferences | None = None
     linkedin_url: str | None = None
     github_url: str | None = None
     portfolio_url: str | None = None

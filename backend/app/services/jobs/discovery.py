@@ -151,9 +151,14 @@ async def discover_jobs(
     # 1. Standard job search (JSearch, Dice, Remotive — newgrad excluded here)
     #    newgrad is scraped once unfiltered below instead of 7× with keyword filters
     #    that would discard most results.
-    target_locations = [
-        loc for loc in ((profile.target_locations if profile else None) or []) if loc
-    ][:constants.DISCOVER_LOCATION_FANOUT]
+    # Preserve the user's explicit location priority order and search every
+    # distinct target. The old two-location slice silently ignored the rest of
+    # a multi-region search profile.
+    target_locations = list(dict.fromkeys(
+        loc.strip()
+        for loc in ((profile.target_locations if profile else None) or [])
+        if isinstance(loc, str) and loc.strip()
+    ))
     expanded_seeds: list[dict] = []
     for seed in search_list:
         expanded_seeds.append(seed)
@@ -177,6 +182,20 @@ async def discover_jobs(
             resolved_occupations,
         )
 
+    try:
+        source_factors = await storage.load_source_budget_factors(
+            db,
+            occupation_keys=resolved_occupations,
+        )
+    except Exception:
+        logger.debug("Source usefulness history unavailable; using exploration budgets", exc_info=True)
+        source_factors = {}
+    adaptive_source_limits = storage.source_limits_for_budget(
+        discover_sources,
+        base_limit=constants.DISCOVER_LIMIT_PER_SOURCE,
+        factors=source_factors,
+    )
+
     # The Muse fetches by *category*, so on the occupation path every seed of the
     # same occupation resolves to the same category tuple and re-fetches the
     # identical first pages (measured: 4 marketing seeds -> 1 unique batch).
@@ -198,6 +217,7 @@ async def discover_jobs(
                 sources=discover_sources,
                 limit=constants.DISCOVER_LIMIT_PER_SOURCE,
                 occupation_hint=seed.get("occupation"),
+                source_limits=adaptive_source_limits,
             )
             total_new += _new_match_count(stored)
         except Exception:
@@ -221,6 +241,11 @@ async def discover_jobs(
                 sources=["themuse"],
                 limit=constants.DISCOVER_LIMIT_PER_SOURCE * seed_count,
                 occupation_hint=occ,
+                source_limits=storage.source_limits_for_budget(
+                    ["themuse"],
+                    base_limit=constants.DISCOVER_LIMIT_PER_SOURCE * seed_count,
+                    factors=source_factors,
+                ),
             )
             total_new += _new_match_count(stored)
         except Exception:
@@ -244,12 +269,16 @@ async def discover_jobs(
             else:
                 logger.exception("newgrad-jobs discover failed")
 
-    # 3. Curated ATS boards are all tech companies — only for engineering searches.
-    #    (Non-engineering roles at these employers still reach the feed via the
-    #    hourly global board crawl, tagged by title classification.)
-    if engineering_relevant:
+    # 3. The curated ATS registry spans every function. Targeted runs filter
+    #    each posting by independent occupation evidence before persistence, so
+    #    non-engineering users gain direct-employer coverage without tech noise.
+    if engineering_relevant or resolved_occupations:
         try:
-            ats_new = await curated_boards._discover_ats_boards(db, user_id)
+            ats_new = await curated_boards._discover_ats_boards(
+                db,
+                user_id,
+                occupation_keys=resolved_occupations,
+            )
             total_new += ats_new
         except Exception:
             await db.rollback()

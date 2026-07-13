@@ -170,7 +170,23 @@ export interface ResumeQualityEvaluation {
   truthfulness: {
     unverified_inferred_additions_excluded: number;
     excluded_phrases: string[];
+    ledger?: {
+      version: number;
+      status: 'passed' | 'failed';
+      rendered_entry_count: number;
+      violations: Array<Record<string, unknown>>;
+    };
   } | null;
+  render_qa?: {
+    status: 'passed';
+    version: number;
+    page_count: number;
+    pypdf_text_retention: number;
+    poppler_text_retention: number;
+    parser_agreement: number;
+    section_order: string[];
+    metric_count: number;
+  };
   disclaimer: string;
   reason: string | null;
 }

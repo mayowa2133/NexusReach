@@ -18,6 +18,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+TAILORING_PROMPT_VERSION = "resume_tailor_v2"
+
 # ---------------------------------------------------------------------------
 # Prompt construction
 # ---------------------------------------------------------------------------

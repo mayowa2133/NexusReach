@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -20,11 +21,183 @@ from app.models.user import User
 from app.config import settings
 from app.utils.sandboxed_process import run_in_sandbox_async
 from app.services.resume_artifact.parsed import _derive_project_url, _extract_resume_data, _find_contact_url, _is_valid_project_name
-from app.services.resume_artifact.plan import _default_artifact_plan, _emphasis_terms, _layout_profile, _preferred_bullet_indices, _preferred_section_limits, _preferred_skills_focus, _rank_projects
+from app.services.resume_artifact.plan import _default_artifact_plan, _emphasis_terms, _layout_profile, _preferred_bullet_indices, _preferred_section_limits, _preferred_skills_focus, _rank_projects, artifact_section_policy
 from app.services.resume_artifact.rewrites import _apply_bullet_rewrites, _filter_rewrites_by_decisions, _index_rewrites
-from app.services.resume_artifact.textnorm import _clean, _extract_phone, _merge_unique, _quantifiable_measure_spans, _split_description_bullets, _split_project_bullets
+from app.services.resume_artifact.textnorm import _clean, _extract_phone, _latex_plain_text, _merge_unique, _metric_tokens, _quantifiable_measure_spans, _split_description_bullets, _split_project_bullets
 
 logger = logging.getLogger(__name__)
+
+
+_CANONICAL_SECTION_BY_LABEL = {
+    "Education": "education",
+    "Experience": "experience",
+    "Projects": "projects",
+    "Technical Skills": "skills",
+    "Certificates": "certificates",
+}
+
+
+def _apply_artifact_section_policy(content: str, job: Job) -> str:
+    """Reorder and relabel complete LaTeX section blocks deterministically."""
+    policy = artifact_section_policy(job)
+    first_section = content.find(r"\subsection*")
+    footer_marker = "\\vspace{-0.05in}\n\\end{document}"
+    footer_start = content.rfind(footer_marker)
+    if first_section < 0 or footer_start < first_section:
+        return content
+
+    header = content[:first_section]
+    body = content[first_section:footer_start]
+    footer = content[footer_start:]
+    section_pattern = re.compile(
+        r"((?:\\vspace\{[^\n]+\}\n)*\\subsection\*\{([^}]+)\}.*?)(?="
+        r"(?:\\vspace\{[^\n]+\}\n)*\\subsection\*\{|\Z)",
+        re.DOTALL,
+    )
+    blocks: dict[str, str] = {}
+    unknown: list[str] = []
+    for match in section_pattern.finditer(body):
+        block, label = match.group(1), match.group(2)
+        canonical = _CANONICAL_SECTION_BY_LABEL.get(label)
+        if canonical is None:
+            unknown.append(block)
+            continue
+        configured_label = policy.labels.get(canonical, label)
+        escaped_label = _latex_escape(configured_label)
+        blocks[canonical] = block.replace(
+            rf"\subsection*{{{label}}}",
+            rf"\subsection*{{{escaped_label}}}",
+            1,
+        )
+
+    ordered = [blocks[key] for key in policy.section_order if key in blocks]
+    ordered.extend(unknown)
+    return header + "".join(ordered) + footer
+
+
+_PDF_QA_STOPWORDS = {
+    "article", "begin", "document", "end", "fontsize", "href", "item",
+    "itemize", "leftmargin", "linespread", "selectfont", "small", "textbf",
+    "textit", "url", "vspace",
+}
+
+
+def _pdf_qa_tokens(text: str) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"[a-z0-9+#.]+", text.lower())
+        if len(token) >= 3 and token not in _PDF_QA_STOPWORDS
+    }
+
+
+def _intended_metric_tokens(content: str) -> set[str]:
+    body = content.split(r"\begin{document}", 1)[-1]
+    body = re.sub(
+        r"\\(?:fontsize|linespread|setlength|vspace)\{[^}]*\}(?:\{[^}]*\})?",
+        " ",
+        body,
+    )
+    return set(_metric_tokens(_latex_plain_text(body)))
+
+
+def verify_rendered_resume_pdf(
+    pdf_bytes: bytes,
+    content: str,
+    *,
+    require_one_page: bool = True,
+) -> dict[str, Any]:
+    """Fail closed on page overflow, parser disagreement, or text/glyph loss."""
+    if not pdf_bytes.startswith(b"%PDF"):
+        raise ValueError("Rendered resume is not a valid PDF.")
+
+    from pypdf import PdfReader  # noqa: PLC0415
+
+    reader = PdfReader(BytesIO(pdf_bytes))
+    page_count = len(reader.pages)
+    if require_one_page and page_count != 1:
+        raise ValueError(
+            f"Rendered resume must be one page; produced {page_count} pages."
+        )
+    pypdf_text = "\n".join(page.extract_text() or "" for page in reader.pages)
+    if not pypdf_text.strip():
+        raise ValueError("Rendered resume text could not be extracted with pypdf.")
+
+    pdftotext = shutil.which("pdftotext")
+    if not pdftotext:
+        raise ValueError("Independent PDF verification requires pdftotext.")
+    with tempfile.TemporaryDirectory(prefix="resume-pdf-qa-") as tmp_dir:
+        pdf_path = Path(tmp_dir) / "resume.pdf"
+        text_path = Path(tmp_dir) / "resume.txt"
+        pdf_path.write_bytes(pdf_bytes)
+        result = subprocess.run(
+            [pdftotext, "-layout", str(pdf_path), str(text_path)],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+            start_new_session=True,
+        )
+        if result.returncode != 0 or not text_path.exists():
+            raise ValueError("Rendered resume failed independent text extraction.")
+        poppler_text = text_path.read_text(encoding="utf-8", errors="replace")
+    if not poppler_text.strip():
+        raise ValueError("Rendered resume text could not be extracted with Poppler.")
+
+    if any(marker in pypdf_text or marker in poppler_text for marker in ("\ufffd", "\x00")):
+        raise ValueError("Rendered resume contains missing or invalid glyphs.")
+
+    expected_text = _latex_plain_text(content)
+    expected_tokens = _pdf_qa_tokens(expected_text)
+    pypdf_tokens = _pdf_qa_tokens(pypdf_text)
+    poppler_tokens = _pdf_qa_tokens(poppler_text)
+    if not expected_tokens:
+        raise ValueError("Rendered resume has no verifiable source text.")
+    pypdf_retention = len(expected_tokens & pypdf_tokens) / len(expected_tokens)
+    poppler_retention = len(expected_tokens & poppler_tokens) / len(expected_tokens)
+    parser_union = pypdf_tokens | poppler_tokens
+    parser_agreement = (
+        len(pypdf_tokens & poppler_tokens) / len(parser_union)
+        if parser_union
+        else 0.0
+    )
+    if min(pypdf_retention, poppler_retention) < 0.78:
+        raise ValueError("Rendered resume lost too much intended text during PDF extraction.")
+    if parser_agreement < 0.85:
+        raise ValueError("Independent PDF parsers disagree on the rendered resume text.")
+
+    section_labels = [
+        _latex_plain_text(label)
+        for label in re.findall(r"\\subsection\*\{([^}]+)\}", content)
+    ]
+    for extracted_text, parser_name in (
+        (pypdf_text, "pypdf"),
+        (poppler_text, "Poppler"),
+    ):
+        positions = [extracted_text.casefold().find(label.casefold()) for label in section_labels]
+        if any(position < 0 for position in positions):
+            raise ValueError(f"{parser_name} extraction lost a resume section heading.")
+        if positions != sorted(positions):
+            raise ValueError(f"{parser_name} extraction changed resume section order.")
+
+    expected_metrics = _intended_metric_tokens(content)
+    missing_metrics = [
+        metric
+        for metric in expected_metrics
+        if metric not in pypdf_text or metric not in poppler_text
+    ]
+    if missing_metrics:
+        raise ValueError("Rendered resume lost metric text during extraction.")
+
+    return {
+        "status": "passed",
+        "version": 1,
+        "page_count": page_count,
+        "pypdf_text_retention": round(pypdf_retention, 4),
+        "poppler_text_retention": round(poppler_retention, 4),
+        "parser_agreement": round(parser_agreement, 4),
+        "section_order": section_labels,
+        "metric_count": len(expected_metrics),
+    }
 
 
 def _ordered_skills(
@@ -260,6 +433,7 @@ def _render_resume_latex(
     github_url = _find_contact_url(profile, contact, "github.com")
     portfolio_url = profile.portfolio_url
     emphasis_terms = _emphasis_terms(job, tailored)
+    section_policy = artifact_section_policy(job)
     emphasis_terms = _merge_unique([*(artifact_plan.get("bold_phrases") or []), *emphasis_terms])
 
     active_rewrites = _filter_rewrites_by_decisions(
@@ -291,7 +465,7 @@ def _render_resume_latex(
 
     experience_limits, project_limits = _preferred_section_limits(parsed, job)
     planned_experience: list[dict[str, Any]] = []
-    for idx, item in enumerate(experience[:4]):
+    for idx, item in enumerate(experience[:section_policy.max_experience]):
         original_bullets = item.get("bullets") or _split_description_bullets(item.get("description"))
         budget_default = experience_limits[idx] if idx < len(experience_limits) else 1
         fallback_indices = _preferred_bullet_indices(
@@ -329,7 +503,9 @@ def _render_resume_latex(
 
     planned_projects: list[dict[str, Any]] = []
     for idx in project_order:
-        if len(planned_projects) >= 3:
+        if not section_policy.include_projects:
+            break
+        if len(planned_projects) >= section_policy.max_projects:
             break
         project = projects[idx]
         if not _is_valid_project_name(project.get("name")):
@@ -519,7 +695,7 @@ def _render_resume_latex(
         r"\end{document}",
     ])
 
-    return "\n".join(lines) + "\n"
+    return _apply_artifact_section_policy("\n".join(lines) + "\n", job)
 
 
 def render_resume_artifact_pdf(content: str) -> bytes:
@@ -575,7 +751,9 @@ def render_resume_artifact_pdf(content: str) -> bytes:
             )
             raise ValueError("Failed to compile LaTeX resume artifact to PDF.")
 
-        return pdf_path.read_bytes()
+        pdf_bytes = pdf_path.read_bytes()
+        verify_rendered_resume_pdf(pdf_bytes, content)
+        return pdf_bytes
 
 
 _PDF_RENDER_SEMAPHORE = asyncio.Semaphore(2)

@@ -35,6 +35,9 @@ class TailoredResume(Base):
     # Metadata
     model: Mapped[str | None] = mapped_column(String(100))
     provider: Mapped[str | None] = mapped_column(String(50))
+    input_hash: Mapped[str | None] = mapped_column(String(64), index=True)
+    prompt_version: Mapped[str | None] = mapped_column(String(64))
+    rubric_version: Mapped[str | None] = mapped_column(String(64))
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

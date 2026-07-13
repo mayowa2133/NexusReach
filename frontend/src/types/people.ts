@@ -191,4 +191,11 @@ export interface LinkedInGraphSyncSession {
   max_batch_size: number;
 }
 
-export type PersonFeedback = 'wrong_person' | 'not_at_company' | 'helpful';
+export type PersonFeedback =
+  | 'wrong_person'
+  | 'not_at_company'
+  | 'wrong_function'
+  | 'wrong_seniority'
+  | 'duplicate'
+  | 'not_useful'
+  | 'helpful';

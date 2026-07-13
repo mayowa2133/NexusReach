@@ -1,5 +1,6 @@
 import logging
 import uuid
+from datetime import datetime, timezone
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -281,7 +282,15 @@ async def search_history(
 
 
 class PersonFeedbackRequest(BaseModel):
-    feedback: Literal["wrong_person", "not_at_company", "helpful"]
+    feedback: Literal[
+        "wrong_person",
+        "not_at_company",
+        "wrong_function",
+        "wrong_seniority",
+        "duplicate",
+        "not_useful",
+        "helpful",
+    ]
 
 
 @router.post("/{person_id}/feedback")
@@ -303,10 +312,20 @@ async def submit_person_feedback(
 
     profile_data = dict(person.profile_data or {})
     profile_data["user_feedback"] = body.feedback
+    history = [
+        item for item in (profile_data.get("feedback_history") or [])
+        if isinstance(item, dict)
+    ]
+    history.append({
+        "feedback": body.feedback,
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+    })
+    profile_data["feedback_history"] = history[-20:]
     person.profile_data = profile_data
 
     evicted = False
     snapshots_updated = 0
+    negative_feedback = body.feedback != "helpful"
     if body.feedback in ("wrong_person", "not_at_company"):
         if body.feedback == "not_at_company":
             person.current_company_verified = False
@@ -318,6 +337,7 @@ async def submit_person_feedback(
                 )
             except Exception:
                 logger.warning("known-people eviction failed", exc_info=True)
+    if negative_feedback:
         try:
             snapshots_updated = await evict_person_from_job_research_snapshots(
                 db, user_id=user_id, person_id=person.id
@@ -332,6 +352,9 @@ async def submit_person_feedback(
             "feedback": body.feedback,
             "cache_evicted": evicted,
             "snapshots_updated": snapshots_updated,
+            "person_type": person.person_type,
+            "source": person.source,
+            "company_confidence": profile_data.get("company_match_confidence"),
         },
     )
     return {

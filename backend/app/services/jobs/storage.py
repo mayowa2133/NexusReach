@@ -13,7 +13,10 @@ from app.utils.startup_jobs import has_startup_tag
 from app.utils.startup_jobs import merge_startup_tags
 from app.utils.startup_jobs import merge_tags
 from app.utils.job_metadata import normalize_job_metadata
-from app.services.occupation_taxonomy import classify_title, occupation_tags_for_job
+from app.services.occupation_taxonomy import (
+    infer_job_occupations,
+    occupation_tags_for_job,
+)
 from sqlalchemy import func as sa_func
 from sqlalchemy import select
 from sqlalchemy import tuple_
@@ -38,6 +41,37 @@ PREWARM_MAX_JOBS_PER_BATCH = 300
 # resolution and cache hits, but one task must stay comfortably inside its
 # time budget (auto_prospect.PREWARM_BATCH_TIME_BUDGET_SECONDS).
 PREWARM_COMPANY_BATCH_MAX = 5
+
+
+def _metadata_with_source_provenance(
+    existing: dict | None,
+    data: dict,
+) -> dict:
+    """Merge every observed source onto a deduplicated winning job record."""
+    metadata = dict(existing or {})
+    incoming = data.get("metadata_provenance")
+    if isinstance(incoming, dict):
+        metadata.update(incoming)
+    observations = [
+        dict(item)
+        for item in (metadata.get("source_provenance") or [])
+        if isinstance(item, dict)
+    ]
+    observation = {
+        "source": data.get("source") or data.get("ats") or "unknown",
+        "ats": data.get("ats"),
+        "ats_slug": data.get("ats_slug"),
+        "external_id": str(data.get("external_id")) if data.get("external_id") else None,
+        "url": normalize._canonical_job_url(data.get("url")),
+    }
+    identity = tuple(observation.get(key) for key in ("source", "external_id", "url"))
+    if not any(
+        tuple(item.get(key) for key in ("source", "external_id", "url")) == identity
+        for item in observations
+    ):
+        observations.append(observation)
+    metadata["source_provenance"] = observations[-20:]
+    return metadata
 
 
 def _refresh_existing_job(
@@ -125,7 +159,10 @@ def _refresh_existing_job(
         job.tags = merged
     job.experience_level = experience_level
     job.experience_level_confidence = data.get("experience_level_confidence")
-    job.metadata_provenance = data.get("metadata_provenance")
+    job.metadata_provenance = _metadata_with_source_provenance(
+        job.metadata_provenance,
+        data,
+    )
 
 
 def _build_job(
@@ -176,7 +213,7 @@ def _build_job(
         scored_at=datetime.now(timezone.utc) if score is not None else None,
         fingerprint=fingerprint,
         tags=data.get("tags"),
-        metadata_provenance=data.get("metadata_provenance"),
+        metadata_provenance=_metadata_with_source_provenance(None, data),
         department=data.get("department"),
         source_status="active",
         last_seen_at=normalize._utcnow(),
@@ -197,7 +234,6 @@ def _build_job(
 _DEDUP_DEFER_OPTIONS = (
     defer(Job.description),
     defer(Job.score_breakdown),
-    defer(Job.metadata_provenance),
     defer(Job.locations),
     defer(Job.offer_details),
     defer(Job.interview_rounds),
@@ -448,6 +484,33 @@ def _score_job(job_data: dict, profile: Profile | None) -> tuple[float | None, d
     return score_job(job_data, profile)
 
 
+def hard_eligibility_decision(job_data: dict, profile: Profile | None) -> dict:
+    """Evaluate only explicit hard eligibility and negative preferences."""
+    from app.services.job_requirements import (  # noqa: PLC0415
+        evaluate_job_eligibility,
+        extract_job_requirements,
+    )
+    from app.services.match_scoring import _resume_evidence_text  # noqa: PLC0415
+
+    parsed = (
+        profile.resume_parsed
+        if profile is not None and isinstance(profile.resume_parsed, dict)
+        else {}
+    )
+    decision = evaluate_job_eligibility(
+        job_data=job_data,
+        requirements=extract_job_requirements(job_data.get("description")),
+        evidence_text=_resume_evidence_text(parsed),
+        preferences=(
+            profile.job_preferences
+            if profile is not None and isinstance(profile.job_preferences, dict)
+            else {}
+        ),
+        evidence_available=bool(parsed),
+    )
+    return decision.as_dict()
+
+
 async def load_profile_for_scoring(
     db: AsyncSession, user_id: uuid.UUID
 ) -> Profile | None:
@@ -533,6 +596,109 @@ def classify_source_health(
             }
         )
     return results
+
+
+def compute_source_budget_factors(
+    rows: list[dict],
+    *,
+    occupation_keys: list[str] | None = None,
+    min_evaluated: int = 20,
+    min_runs: int = 3,
+) -> dict[str, float]:
+    """Convert recent usefulness observations into bounded fetch multipliers.
+
+    Availability-only health is insufficient for discovery routing. This uses
+    accepted/rejected relevance and metadata completeness, scoped to the target
+    occupation when observations carry that label. Sources without enough
+    evidence retain a 1.0 exploration budget rather than being prematurely
+    suppressed.
+    """
+    targets = set(occupation_keys or [])
+    grouped: dict[str, dict[str, float]] = {}
+    for row in rows:
+        source = str(row.get("source") or "").strip()
+        details = row.get("details") if isinstance(row.get("details"), dict) else {}
+        observed_target = details.get("requested_occupation")
+        observed_targets = set(details.get("requested_occupations") or [])
+        if targets and observed_target and observed_target not in targets:
+            continue
+        if targets and observed_targets and targets.isdisjoint(observed_targets):
+            continue
+        accepted = float(details.get("accepted_count") or details.get("occupation_accepted_count") or 0)
+        rejected = float(details.get("occupation_rejected_count") or 0)
+        evaluated = accepted + rejected
+        if not source or evaluated <= 0:
+            continue
+        bucket = grouped.setdefault(source, {
+            "runs": 0.0,
+            "accepted": 0.0,
+            "rejected": 0.0,
+            "metadata_hits": 0.0,
+        })
+        bucket["runs"] += 1
+        bucket["accepted"] += accepted
+        bucket["rejected"] += rejected
+        for field in (
+            "with_description",
+            "with_direct_apply",
+            "with_posted_date",
+            "with_salary",
+            "with_location",
+        ):
+            bucket["metadata_hits"] += float(details.get(field) or 0)
+
+    factors: dict[str, float] = {}
+    for source, bucket in grouped.items():
+        evaluated = bucket["accepted"] + bucket["rejected"]
+        if bucket["runs"] < min_runs or evaluated < min_evaluated:
+            factors[source] = 1.0
+            continue
+        precision = bucket["accepted"] / evaluated
+        metadata = (
+            bucket["metadata_hits"] / (bucket["accepted"] * 5)
+            if bucket["accepted"]
+            else 0.0
+        )
+        # Relevance dominates; metadata quality breaks ties. Keep a meaningful
+        # exploration floor and a conservative ceiling to avoid feedback loops.
+        factors[source] = round(max(0.6, min(1.5, 0.45 + precision * 0.8 + metadata * 0.25)), 2)
+    return factors
+
+
+async def load_source_budget_factors(
+    db: AsyncSession,
+    *,
+    occupation_keys: list[str] | None = None,
+    window_days: int = 30,
+    max_rows: int = 1000,
+) -> dict[str, float]:
+    """Load recent source usefulness and return routing multipliers."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=window_days)
+    result = await db.execute(
+        select(JobSourceRun.source, JobSourceRun.details)
+        .where(JobSourceRun.created_at >= cutoff)
+        .order_by(JobSourceRun.created_at.desc())
+        .limit(max_rows)
+    )
+    rows = [
+        {"source": row.source, "details": row.details}
+        for row in result.all()
+    ]
+    return compute_source_budget_factors(rows, occupation_keys=occupation_keys)
+
+
+def source_limits_for_budget(
+    sources: list[str],
+    *,
+    base_limit: int,
+    factors: dict[str, float] | None = None,
+) -> dict[str, int]:
+    """Allocate bounded per-source limits while retaining exploration."""
+    factors = factors or {}
+    return {
+        source: max(5, int(round(base_limit * factors.get(source, 1.0))))
+        for source in sources
+    }
 
 
 async def evaluate_source_health(
@@ -640,39 +806,21 @@ def _infer_occupation_tags_for_job(data: dict) -> None:
         if isinstance(tag, str) and tag.startswith(OCCUPATION_TAG_PREFIX):
             explicit_keys.append(tag[len(OCCUPATION_TAG_PREFIX):])
 
-    title_keys = classify_title(data.get("title"))
-    content_keys = title_keys or classify_title(
-        data.get("title"), data.get("description")
-    )
-
-    inferred = occupation_tags_for_job(
+    inference = infer_job_occupations(
         title=data.get("title"),
         description=data.get("description"),
         explicit_keys=explicit_keys or None,
-        fallback_keys=[hint] if isinstance(hint, str) and hint else None,
+        query_hint=hint if isinstance(hint, str) else None,
     )
+    inferred = [f"{OCCUPATION_TAG_PREFIX}{key}" for key in inference.keys]
     if inferred:
         data["tags"] = merge_tags(existing, inferred)
-        if explicit_keys:
-            source, confidence = "explicit_source_tag", 1.0
-        elif title_keys:
-            source, confidence = "title_classifier", 0.95
-        elif content_keys:
-            source, confidence = "description_classifier", 0.75
-        else:
-            source, confidence = "query_hint", 0.25
         provenance = (
             dict(data.get("metadata_provenance"))
             if isinstance(data.get("metadata_provenance"), dict)
             else {}
         )
-        provenance["occupation_classification"] = {
-            "version": 1,
-            "keys": [tag[len(OCCUPATION_TAG_PREFIX):] for tag in inferred],
-            "source": source,
-            "confidence": confidence,
-            "query_hint": hint if isinstance(hint, str) else None,
-        }
+        provenance["occupation_classification"] = inference.as_dict()
         data["metadata_provenance"] = provenance
 
 
@@ -723,6 +871,16 @@ async def _store_raw_jobs(
         _infer_startup_tags_for_job(data, known_startup_companies)
         _infer_occupation_tags_for_job(data)
         data = normalize_job_metadata(data)
+        eligibility = hard_eligibility_decision(data, profile)
+        provenance = (
+            dict(data.get("metadata_provenance"))
+            if isinstance(data.get("metadata_provenance"), dict)
+            else {}
+        )
+        provenance["eligibility"] = eligibility
+        data["metadata_provenance"] = provenance
+        if eligibility.get("eligible") is False:
+            continue
         fp = normalize._fingerprint(data.get("company_name", ""), data.get("title", ""), data.get("location", ""))
         job_key = normalize._job_identity_key(data, fingerprint=fp)
         if job_key in seen_job_keys:

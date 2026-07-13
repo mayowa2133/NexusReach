@@ -228,11 +228,11 @@ async def test_discover_fans_out_locations_and_passes_hint():
         assert "themuse" not in kwargs["sources"]
         assert "jobicy" not in kwargs["sources"] and "dice" not in kwargs["sources"]
         seen_locations.add(kwargs["location"])
-    # base (None) plus the first two target locations - capped fan-out
+    # base (None) plus every explicitly prioritized target location
     assert None in seen_locations
     assert "Toronto, ON" in seen_locations
     assert "New York, NY" in seen_locations
-    assert "London" not in seen_locations
+    assert "London" in seen_locations
     # One deep Muse pull per occupation carrying the seeds' combined budget —
     # per-seed calls re-fetch the same category pages, so they were removed.
     assert len(muse_calls) == 1
@@ -462,6 +462,8 @@ async def test_discover_routes_nontech_to_broad_aggregators():
         assert "jsearch" in srcs and "adzuna" in srcs
     assert len(muse_calls) == 1
     assert muse_calls[0].kwargs["occupation_hint"] == "healthcare"
-    # newgrad + the 100 tech ATS boards are skipped entirely for healthcare
+    # Newgrad remains engineering-only. The now cross-industry ATS registry is
+    # queried and independently filtered to healthcare before persistence.
     mock_newgrad.assert_not_awaited()
-    mock_ats.assert_not_awaited()
+    mock_ats.assert_awaited_once()
+    assert mock_ats.await_args.kwargs["occupation_keys"] == ["healthcare"]

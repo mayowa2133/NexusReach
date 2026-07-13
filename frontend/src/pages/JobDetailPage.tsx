@@ -1546,6 +1546,40 @@ export function JobDetailPage() {
               );
             })()}
 
+            {/* Explicit hard constraints and unknown eligibility facts */}
+            {(() => {
+              const breakdown = job.score_breakdown as Record<string, unknown>;
+              const eligibility = breakdown.eligibility as {
+                eligible?: boolean | null;
+                hard_failures?: Array<{ display_text?: string }>;
+                unknown_constraints?: Array<{ display_text?: string }>;
+                excluded_by?: string[];
+              } | undefined;
+              if (!eligibility) return null;
+              const failures = [
+                ...(eligibility.hard_failures ?? []).map((item) => item.display_text ?? 'Required constraint'),
+                ...(eligibility.excluded_by ?? []).map((item) => item.replace(/^[^:]+:/, '').replace(/_/g, ' ')),
+              ];
+              const unknown = (eligibility.unknown_constraints ?? [])
+                .map((item) => item.display_text)
+                .filter((item): item is string => Boolean(item));
+              if (failures.length === 0 && unknown.length === 0) return null;
+              return (
+                <div className="space-y-1 rounded-md border p-3 text-xs">
+                  {failures.length > 0 && (
+                    <div className="text-destructive">
+                      Hard constraint mismatch: {failures.join(', ')}
+                    </div>
+                  )}
+                  {unknown.length > 0 && (
+                    <div className="text-muted-foreground">
+                      Confirm before applying: {unknown.join(', ')}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
             {/* AI Analysis results */}
             {matchAnalysis && (
               <div className="space-y-2 pt-2 border-t">

@@ -5,16 +5,15 @@ from __future__ import annotations
 import json
 import logging
 import re
+from dataclasses import dataclass
 from typing import Any
 
 
 from app.models.job import Job
 from app.models.tailored_resume import TailoredResume
 from app.clients.llm_client import generate_message
-from app.services.resume_tailor import (
-    extract_jd_must_surface,
-)
 from app.services.resume_artifact.textnorm import _clean, _latex_plain_text, _merge_unique, _metric_tokens, _resume_body_contains_term, _split_description_bullets, _split_project_bullets
+from app.services.occupation_taxonomy import classify_title, occupation_keys_from_tags
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +47,139 @@ FULLSTACK_RELEVANT_SKILLS = [
     "component-based architecture", "testing", "debugging", "telemetry", "CI/CD",
     "Git", "cross-functional collaboration",
 ]
+
+
+@dataclass(frozen=True)
+class ArtifactSectionPolicy:
+    key: str
+    section_order: tuple[str, ...]
+    labels: dict[str, str]
+    include_projects: bool = True
+    max_experience: int = 4
+    max_projects: int = 3
+
+
+_DEFAULT_SECTION_LABELS = {
+    "education": "Education",
+    "experience": "Experience",
+    "projects": "Projects",
+    "skills": "Technical Skills",
+    "certificates": "Certificates",
+}
+
+
+def _job_occupation_keys(job: Job) -> list[str]:
+    tagged = occupation_keys_from_tags(
+        getattr(job, "tags", None)
+        if isinstance(getattr(job, "tags", None), list)
+        else None
+    )
+    return tagged or classify_title(job.title, job.description)
+
+
+def artifact_section_policy(job: Job) -> ArtifactSectionPolicy:
+    """Return deterministic occupation-aware section order and labels."""
+    keys = set(_job_occupation_keys(job))
+    labels = dict(_DEFAULT_SECTION_LABELS)
+
+    if "healthcare" in keys:
+        labels.update({
+            "certificates": "Licenses & Certifications",
+            "experience": "Clinical Experience",
+            "skills": "Clinical Skills",
+        })
+        return ArtifactSectionPolicy(
+            key="healthcare_v1",
+            section_order=("certificates", "experience", "education", "skills"),
+            labels=labels,
+            include_projects=False,
+        )
+    if "legal_compliance" in keys:
+        labels.update({
+            "experience": "Legal Experience",
+            "certificates": "Bar Admissions & Credentials",
+            "skills": "Core Competencies",
+        })
+        return ArtifactSectionPolicy(
+            key="legal_v1",
+            section_order=("experience", "education", "certificates", "skills"),
+            labels=labels,
+            include_projects=False,
+        )
+    if "education_training" in keys:
+        labels.update({
+            "experience": "Teaching & Training Experience",
+            "certificates": "Teaching Certifications",
+            "skills": "Instructional Skills",
+        })
+        return ArtifactSectionPolicy(
+            key="education_v1",
+            section_order=("education", "experience", "certificates", "skills", "projects"),
+            labels=labels,
+            max_projects=1,
+        )
+    if "accounting_finance" in keys:
+        labels.update({
+            "experience": "Finance & Accounting Experience",
+            "skills": "Finance & Technical Skills",
+            "certificates": "Certifications",
+        })
+        return ArtifactSectionPolicy(
+            key="finance_v1",
+            section_order=("certificates", "experience", "education", "skills"),
+            labels=labels,
+            include_projects=False,
+        )
+    if keys & {"marketing", "creatives_design", "arts_entertainment"}:
+        labels.update({
+            "projects": "Campaign & Portfolio Highlights",
+            "skills": "Skills & Tools",
+        })
+        return ArtifactSectionPolicy(
+            key="portfolio_v1",
+            section_order=("experience", "projects", "skills", "education", "certificates"),
+            labels=labels,
+        )
+    if keys & {"sales", "customer_service_support"}:
+        labels.update({
+            "experience": "Revenue & Customer Experience",
+            "skills": "Sales & Customer Skills",
+        })
+        return ArtifactSectionPolicy(
+            key="revenue_v1",
+            section_order=("experience", "skills", "education", "certificates"),
+            labels=labels,
+            include_projects=False,
+        )
+    if "cybersecurity" in keys:
+        labels.update({"certificates": "Security Certifications"})
+        return ArtifactSectionPolicy(
+            key="security_v1",
+            section_order=("certificates", "experience", "projects", "skills", "education"),
+            labels=labels,
+        )
+    if keys and not any(
+        key in {
+            "software_engineering",
+            "data_engineer",
+            "machine_learning_ai",
+            "engineering_development",
+            "data_analyst",
+        }
+        for key in keys
+    ):
+        labels["skills"] = "Professional Skills"
+        return ArtifactSectionPolicy(
+            key="general_professional_v1",
+            section_order=("experience", "education", "skills", "certificates", "projects"),
+            labels=labels,
+            max_projects=1,
+        )
+    return ArtifactSectionPolicy(
+        key="technical_v1",
+        section_order=("education", "experience", "projects", "skills", "certificates"),
+        labels=labels,
+    )
 
 
 ARTIFACT_PLAN_SYSTEM_PROMPT = """\
@@ -85,7 +217,8 @@ def _job_family(job: Job) -> str:
     text = " ".join([job.title or "", job.description or ""]).lower()
     if any(term in text for term in FULLSTACK_ROLE_TERMS):
         return "frontend_fullstack"
-    return "general"
+    keys = _job_occupation_keys(job)
+    return keys[0] if len(keys) == 1 else ("multi_occupation" if keys else "general")
 
 
 def _job_keywords(job: Job) -> set[str]:
@@ -140,7 +273,13 @@ def _preferred_section_limits(parsed: dict[str, Any], job: Job) -> tuple[list[in
     projects = parsed.get("projects", []) or []
     if _job_family(job) == "frontend_fullstack" and len(experience) >= 3 and len(projects) >= 3:
         return [3, 3, 3], [3, 2, 2]
-    return [2, 2, 1, 1], [3, 2, 2]
+    policy = artifact_section_policy(job)
+    if not policy.include_projects:
+        return [4, 4, 3, 3][:policy.max_experience], []
+    if policy.max_projects == 1:
+        return [3, 3, 2, 2][:policy.max_experience], [3]
+    project_limits = [3, 2, 2][:policy.max_projects]
+    return [2, 2, 1, 1][:policy.max_experience], project_limits
 
 
 def _preferred_bullet_indices(bullets: list[str], limit: int, *, job: Job, section: str) -> list[int]:
@@ -446,15 +585,16 @@ def score_resume_content_against_job(content: str, job: Job) -> float | None:
     """Deterministically score rendered resume content against a job description."""
     if not content or not (job.description or ""):
         return None
-    jd = extract_jd_must_surface(job.description or "")
-    terms = jd.get("must_surface") or []
+    from app.services.resume_artifact.quality import _job_terms  # noqa: PLC0415
+
+    terms = _job_terms(job)
     if not terms:
         return None
-
     body_content = re.split(
-        r"\\subsection\*\{Technical Skills\}",
+        r"\\subsection\*\{[^}]*?(?:Skills|Competencies)[^}]*\}",
         content,
         maxsplit=1,
+        flags=re.IGNORECASE,
     )[0]
     body = _latex_plain_text(body_content).lower()
     hits = sum(1 for term in terms if _resume_body_contains_term(body, str(term)))

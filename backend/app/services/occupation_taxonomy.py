@@ -17,6 +17,7 @@ import re
 from dataclasses import dataclass
 
 OCCUPATION_TAG_PREFIX = "occupation:"
+OCCUPATION_INFERENCE_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,49 @@ class Occupation:
     # the message in the recipient's professional vocabulary. Keep these to
     # 1–3 sentences; the rest of the system prompt handles tone & structure.
     outreach_playbook: str | None = None
+
+
+@dataclass(frozen=True)
+class OccupationInference:
+    """Versioned, evidence-bearing occupation classification for a job.
+
+    ``query_hint`` is deliberately retained as provenance but receives the
+    lowest confidence and is never sufficient to pass a targeted-search
+    relevance gate on its own.
+    """
+
+    keys: tuple[str, ...]
+    confidence: float
+    source: str
+    evidence: tuple[str, ...]
+    query_hint: str | None = None
+    version: int = OCCUPATION_INFERENCE_VERSION
+
+    def as_dict(self) -> dict:
+        return {
+            "version": self.version,
+            "keys": list(self.keys),
+            "confidence": self.confidence,
+            "source": self.source,
+            "evidence": list(self.evidence),
+            "query_hint": self.query_hint,
+        }
+
+
+@dataclass(frozen=True)
+class OccupationRelevanceDecision:
+    accepted: bool
+    reason: str
+    requested_keys: tuple[str, ...]
+    inference: OccupationInference
+
+    def as_dict(self) -> dict:
+        return {
+            "accepted": self.accepted,
+            "reason": self.reason,
+            "requested_keys": list(self.requested_keys),
+            "inference": self.inference.as_dict(),
+        }
 
 
 # v1: mirror the 23 categories surfaced on newgrad-jobs.com.
@@ -1412,6 +1456,126 @@ def classify_title(title: str | None, description: str | None = None) -> list[st
     return matched
 
 
+def infer_job_occupations(
+    *,
+    title: str | None,
+    description: str | None = None,
+    explicit_keys: list[str] | None = None,
+    query_hint: str | None = None,
+) -> OccupationInference:
+    """Classify a job once and retain the signal that produced the result.
+
+    Signal strength is ordered intentionally: a provider's verified category,
+    title aliases, bounded responsibility-text evidence for generic titles,
+    then the search query as provenance-only fallback. Unknown and stale keys
+    are discarded rather than being persisted as facts.
+    """
+    valid_explicit = tuple(
+        occupation.key for occupation in occupations_for_keys(explicit_keys)
+    )
+    if valid_explicit:
+        return OccupationInference(
+            keys=valid_explicit,
+            confidence=1.0,
+            source="explicit_source_tag",
+            evidence=tuple(f"source_category:{key}" for key in valid_explicit),
+            query_hint=query_hint if occupation_by_key(query_hint or "") else None,
+        )
+
+    title_keys = tuple(classify_title(title))
+    if title_keys:
+        return OccupationInference(
+            keys=title_keys,
+            confidence=0.95,
+            source="title_classifier",
+            evidence=(f"title:{(title or '').strip()[:500]}",),
+            query_hint=query_hint if occupation_by_key(query_hint or "") else None,
+        )
+
+    content_keys = tuple(classify_title(title, description))
+    if content_keys:
+        return OccupationInference(
+            keys=content_keys,
+            confidence=0.75,
+            source="description_classifier",
+            evidence=("description_lead",),
+            query_hint=query_hint if occupation_by_key(query_hint or "") else None,
+        )
+
+    valid_hint = occupation_by_key(query_hint or "")
+    if valid_hint is not None:
+        return OccupationInference(
+            keys=(valid_hint.key,),
+            confidence=0.25,
+            source="query_hint",
+            evidence=(f"query_hint:{valid_hint.key}",),
+            query_hint=valid_hint.key,
+        )
+
+    return OccupationInference(
+        keys=(),
+        confidence=0.0,
+        source="unclassified",
+        evidence=(),
+        query_hint=None,
+    )
+
+
+def decide_job_occupation_relevance(
+    *,
+    title: str | None,
+    description: str | None = None,
+    tags: list[str] | None = None,
+    requested_keys: list[str] | None = None,
+    query_hint: str | None = None,
+) -> OccupationRelevanceDecision:
+    """Return a fail-closed relevance decision for targeted discovery.
+
+    An untargeted crawl accepts every row. A targeted crawl requires a trusted
+    source category or independent title/responsibility evidence matching at
+    least one requested occupation; a query hint by itself is not evidence.
+    """
+    supplied = tuple(dict.fromkeys(requested_keys or []))
+    valid_requested = tuple(
+        occupation.key for occupation in occupations_for_keys(list(supplied))
+    )
+    inference = infer_job_occupations(
+        title=title,
+        description=description,
+        explicit_keys=occupation_keys_from_tags(tags),
+        query_hint=query_hint,
+    )
+    if not supplied:
+        return OccupationRelevanceDecision(
+            accepted=True,
+            reason="untargeted",
+            requested_keys=(),
+            inference=inference,
+        )
+    if not valid_requested:
+        return OccupationRelevanceDecision(
+            accepted=False,
+            reason="invalid_requested_occupation",
+            requested_keys=(),
+            inference=inference,
+        )
+    independently_classified = inference.source != "query_hint"
+    if independently_classified and set(valid_requested) & set(inference.keys):
+        return OccupationRelevanceDecision(
+            accepted=True,
+            reason=inference.source,
+            requested_keys=valid_requested,
+            inference=inference,
+        )
+    reason = "off_category" if independently_classified and inference.keys else "unclassified"
+    return OccupationRelevanceDecision(
+        accepted=False,
+        reason=reason,
+        requested_keys=valid_requested,
+        inference=inference,
+    )
+
+
 def occupation_tags_for_job(
     *,
     title: str | None,
@@ -1428,25 +1592,14 @@ def occupation_tags_for_job(
       surfaced the job). Used only when both stronger signals produced nothing,
       so query noise can never override a confident title classification.
     """
-    keys: list[str] = []
-    seen: set[str] = set()
-    for key in (explicit_keys or []):
-        occ = occupation_by_key(key)
-        if occ and occ.key not in seen:
-            seen.add(occ.key)
-            keys.append(occ.key)
-    if not keys:
-        for key in classify_title(title, description):
-            if key not in seen:
-                seen.add(key)
-                keys.append(key)
-    if not keys:
-        for key in (fallback_keys or []):
-            occ = occupation_by_key(key)
-            if occ and occ.key not in seen:
-                seen.add(occ.key)
-                keys.append(occ.key)
-    return [occupation_tag(key) for key in keys]
+    hint = next(iter(fallback_keys or []), None)
+    inference = infer_job_occupations(
+        title=title,
+        description=description,
+        explicit_keys=explicit_keys,
+        query_hint=hint,
+    )
+    return [occupation_tag(key) for key in inference.keys]
 
 
 # --- People discovery helpers ------------------------------------------------

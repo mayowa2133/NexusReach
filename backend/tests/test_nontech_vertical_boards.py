@@ -190,9 +190,10 @@ async def test_discover_jobs_routes_healthcare_to_vertical_boards():
     ):
         await job_service.discover_jobs(_mock_db(profile), uuid.uuid4())
 
-    # tech ATS boards skipped (healthcare is industry-bound non-tech) ...
-    mock_ats.assert_not_awaited()
-    # ... but the healthcare vertical boards are pulled
+    # The broad ATS registry is filtered to healthcare before persistence, and
+    # the healthcare-specific vertical boards are pulled additively.
+    mock_ats.assert_awaited_once()
+    assert mock_ats.await_args.kwargs["occupation_keys"] == ["healthcare"]
     mock_vert.assert_awaited_once()
     assert mock_vert.await_args.args[2] == {"healthcare"}
 
@@ -232,11 +233,11 @@ async def test_discover_jobs_finance_skips_eng_boards_and_adds_finance_vertical(
     ):
         await job_service.discover_jobs(_mock_db(profile), uuid.uuid4())
 
-    # finance is non-engineering: the engineering-only ATS crawl is skipped (those
-    # finance roles still reach the feed via the hourly board crawl), but the
-    # curated verticals ARE added. Accounting/finance staff exist at every large
+    # Finance now gets independently filtered direct-ATS roles plus the curated
+    # verticals. Accounting/finance staff exist at every large
     # employer, so it pulls all four (the third positional arg is the vertical set).
-    mock_ats.assert_not_awaited()
+    mock_ats.assert_awaited_once()
+    assert mock_ats.await_args.kwargs["occupation_keys"] == ["accounting_finance"]
     mock_vert.assert_awaited_once()
     assert mock_vert.await_args.args[2] == {"finance", "healthcare", "education", "retail"}
 
@@ -257,9 +258,9 @@ async def test_discover_jobs_routes_government_to_usajobs():
     ):
         await job_service.discover_jobs(_mock_db(profile), uuid.uuid4())
 
-    # government is industry-bound non-tech: tech boards suppressed ...
-    mock_ats.assert_not_awaited()
-    # ... no Workday vertical (gov has no curated tenant) ...
+    # Government also gets any independently classified registry roles, then
+    # the official USAJobs source. There is no Workday government tenant.
+    mock_ats.assert_awaited_once()
     mock_vert.assert_not_awaited()
     # ... and USAJobs is queried
     mock_gov.assert_awaited_once()

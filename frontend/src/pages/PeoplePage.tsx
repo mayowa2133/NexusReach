@@ -6,6 +6,12 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { usePeopleSearch, useEnrichPerson, useSavedPeople, useSendPersonFeedback, useVerifyCurrentCompany, useSearchHistory } from '@/hooks/usePeople';
 import { useFindEmail, useVerifyEmail } from '@/hooks/useEmail';
 import { useDraftMessage } from '@/hooks/useMessages';
@@ -26,8 +32,18 @@ import {
 import { useKnownPeopleCount } from '@/hooks/useKnownPeople';
 import { PeopleSearchDebugPanel } from '@/components/people/PeopleSearchDebugPanel';
 import { getPeopleSearchDebugEnabled, setPeopleSearchDebugEnabled } from '@/lib/peopleSearchDebug';
+import { trackEvent } from '@/lib/observability';
 import { toast } from 'sonner';
-import type { EmailFindResult, LinkedInGraphConnection, Person, PeopleSearchResult } from '@/types';
+import type { EmailFindResult, LinkedInGraphConnection, Person, PersonFeedback, PeopleSearchResult } from '@/types';
+
+const CONTACT_FEEDBACK_REASONS: Array<{ value: PersonFeedback; label: string }> = [
+  { value: 'not_at_company', label: 'No longer at this company' },
+  { value: 'wrong_function', label: 'Wrong function or team' },
+  { value: 'wrong_seniority', label: 'Wrong seniority' },
+  { value: 'wrong_person', label: 'Wrong identity' },
+  { value: 'duplicate', label: 'Duplicate contact' },
+  { value: 'not_useful', label: 'Not useful for this role' },
+];
 
 function formatFailureReason(reason: string): string {
   return reason.replace(/_/g, ' ');
@@ -647,10 +663,12 @@ export function PeoplePage() {
                   <Badge variant="outline">{group.people.length}</Badge>
                 </div>
                 <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                  {group.people.map((person) => (
+                  {group.people.map((person, index) => (
                     <PersonCard
                       key={person.id}
                       person={person}
+                      rank={index + 1}
+                      surface="saved_contacts"
                       selected={selectedPersonIdSet.has(person.id)}
                       onToggleSelect={togglePersonSelection}
                     />
@@ -815,10 +833,12 @@ function PersonSection({
         </div>
       ) : (
         <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-          {people.map((person) => (
+          {people.map((person, index) => (
             <PersonCard
               key={person.id}
               person={person}
+              rank={index + 1}
+              surface="search_results"
               selected={selectedPersonIdSet.has(person.id)}
               onToggleSelect={onToggleSelect}
             />
@@ -831,10 +851,14 @@ function PersonSection({
 
 function PersonCard({
   person,
+  rank,
+  surface,
   selected = false,
   onToggleSelect,
 }: {
   person: Person;
+  rank: number;
+  surface: 'search_results' | 'saved_contacts';
   selected?: boolean;
   onToggleSelect?: (personId: string) => void;
 }) {
@@ -857,11 +881,35 @@ function PersonCard({
     current_company_verification_evidence: person.current_company_verification_evidence ?? null,
     current_company_verified_at: person.current_company_verified_at ?? null,
   });
+  const analyticsProperties = useMemo(() => ({
+    surface,
+    rank,
+    source: person.source ?? 'unknown',
+    person_type: person.person_type ?? 'unknown',
+    match_quality: person.match_quality ?? 'unknown',
+    company_match_confidence: person.company_match_confidence ?? 'unknown',
+    has_warm_path: Boolean(person.warm_path_type),
+    corroborated: (person.corroborated_by?.length ?? 0) >= 2,
+  }), [person, rank, surface]);
+
+  useEffect(() => {
+    trackEvent('people_result_impression', analyticsProperties);
+  }, [analyticsProperties]);
+
+  const trackPersonAction = (action: string, properties?: Record<string, unknown>) => {
+    trackEvent('people_result_action', {
+      ...analyticsProperties,
+      action,
+      ...properties,
+    });
+  };
 
   const handleGetEmail = async () => {
+    trackPersonAction('get_email');
     setEmailStatus('loading');
     try {
       const result = await findEmail.mutateAsync(person.id);
+      trackPersonAction('get_email_result', { found: Boolean(result.email) });
       setEmailResult(result);
       if (!result.email) {
         setEmailStatus('not_found');
@@ -875,6 +923,7 @@ function PersonCard({
   };
 
   const handleVerifyEmail = async () => {
+    trackPersonAction('verify_email');
     try {
       const result = await verifyEmail.mutateAsync(person.id);
       const verified = result.status === 'valid';
@@ -913,6 +962,7 @@ function PersonCard({
   };
 
   const handleVerifyCurrentCompany = async () => {
+    trackPersonAction('verify_company');
     try {
       const result = await verifyCurrentCompany.mutateAsync(person.id);
       setCompanyVerification({
@@ -977,6 +1027,7 @@ function PersonCard({
     }
 
     try {
+      trackPersonAction('open_linkedin_companion');
       const result = await linkedinAssist.mutateAsync({
         action: 'open_profile',
         personId: person.id,
@@ -999,6 +1050,7 @@ function PersonCard({
     const goal = person.person_type === 'peer' ? 'warm_intro' : 'interview';
 
     try {
+      trackPersonAction('draft_linkedin');
       const drafted = await draftMessage.mutateAsync({
         person_id: person.id,
         channel: 'linkedin_note',
@@ -1114,22 +1166,35 @@ function PersonCard({
           </Button>
         )}
 
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-muted-foreground"
-          disabled={sendFeedback.isPending}
-          onClick={async () => {
-            try {
-              await sendFeedback.mutateAsync({ personId: person.id, feedback: 'wrong_person' });
-              toast.success('Thanks - we will not suggest this contact again');
-            } catch {
-              toast.error('Failed to record feedback');
-            }
-          }}
-        >
-          Not the right person?
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            className="inline-flex h-8 items-center justify-center rounded-md px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+            disabled={sendFeedback.isPending}
+          >
+            Not the right person?
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            {CONTACT_FEEDBACK_REASONS.map((reason) => (
+              <DropdownMenuItem
+                key={reason.value}
+                onSelect={async () => {
+                  try {
+                    trackPersonAction('feedback', { feedback: reason.value });
+                    await sendFeedback.mutateAsync({
+                      personId: person.id,
+                      feedback: reason.value,
+                    });
+                    toast.success('Thanks — this feedback will improve future suggestions');
+                  } catch {
+                    toast.error('Failed to record feedback');
+                  }
+                }}
+              >
+                {reason.label}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         <ContactProof
           rows={[
@@ -1248,6 +1313,7 @@ function PersonCard({
               target="_blank"
               rel="noopener noreferrer"
               className="text-xs text-primary hover:underline"
+              onClick={() => trackPersonAction('open_linkedin_web')}
             >
               LinkedIn
             </a>

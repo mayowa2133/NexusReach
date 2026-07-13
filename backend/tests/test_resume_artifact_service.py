@@ -13,6 +13,7 @@ from app.services.resume_artifact_service import (
     _render_resume_latex,
     score_resume_content_against_job,
 )
+from app.services.resume_artifact.plan import artifact_section_policy
 
 
 def _make_profile():
@@ -136,6 +137,89 @@ def _make_profile():
             ],
         },
     )
+
+
+def test_every_occupation_resolves_to_a_complete_section_policy():
+    from app.services.occupation_taxonomy import OCCUPATIONS
+
+    for occupation in OCCUPATIONS:
+        job = SimpleNamespace(
+            title=occupation.default_search_queries[0],
+            description="",
+            tags=[f"occupation:{occupation.key}"],
+        )
+        policy = artifact_section_policy(job)
+        assert "experience" in policy.section_order
+        assert "skills" in policy.section_order
+        assert set(policy.section_order).issubset(policy.labels)
+        if not occupation.engineering_flavored and occupation.key not in {
+            "data_analyst",
+            "engineering_development",
+        }:
+            assert policy.labels["skills"] != "Technical Skills"
+
+
+def test_healthcare_artifact_puts_credentials_first_and_omits_projects():
+    profile = _make_profile()
+    user = SimpleNamespace(email="candidate@example.com")
+    job = SimpleNamespace(
+        title="Registered Nurse",
+        company_name="Northbridge Health",
+        description="Provide patient care. Active RN license required.",
+        tags=["occupation:healthcare"],
+    )
+    tailored = SimpleNamespace(
+        skills_to_emphasize=[],
+        skills_to_add=[],
+        keywords_to_add=[],
+        bullet_rewrites=[],
+    )
+
+    latex = _render_resume_latex(
+        profile=profile,
+        user=user,
+        job=job,
+        tailored=tailored,
+    )
+
+    assert r"\subsection*{Licenses \& Certifications}" in latex
+    assert r"\subsection*{Clinical Experience}" in latex
+    assert r"\subsection*{Clinical Skills}" in latex
+    assert r"\subsection*{Projects}" not in latex
+    assert r"\subsection*{Technical Skills}" not in latex
+    assert latex.index(r"\subsection*{Licenses \& Certifications}") < latex.index(
+        r"\subsection*{Clinical Experience}"
+    ) < latex.index(r"\subsection*{Education}")
+
+
+def test_marketing_artifact_prioritizes_portfolio_before_education():
+    profile = _make_profile()
+    user = SimpleNamespace(email="candidate@example.com")
+    job = SimpleNamespace(
+        title="Marketing Manager",
+        company_name="Acme",
+        description="Own brand campaigns, content strategy, and SEO.",
+        tags=["occupation:marketing"],
+    )
+    tailored = SimpleNamespace(
+        skills_to_emphasize=[],
+        skills_to_add=[],
+        keywords_to_add=[],
+        bullet_rewrites=[],
+    )
+
+    latex = _render_resume_latex(
+        profile=profile,
+        user=user,
+        job=job,
+        tailored=tailored,
+    )
+
+    assert r"\subsection*{Campaign \& Portfolio Highlights}" in latex
+    assert r"\subsection*{Skills \& Tools}" in latex
+    assert latex.index(r"\subsection*{Experience}") < latex.index(
+        r"\subsection*{Campaign \& Portfolio Highlights}"
+    ) < latex.index(r"\subsection*{Education}")
 
 
 def test_render_resume_latex_preserves_resume_structure_and_metrics():
@@ -740,6 +824,60 @@ def test_build_resume_reuse_candidate_requires_high_body_match():
     assert candidate is not None
     assert candidate["score"] >= 80.0
     assert candidate["job_family"] == "frontend_fullstack"
+
+
+def test_resume_reuse_rejects_incompatible_seniority():
+    artifact = SimpleNamespace(
+        content=r"\begin{document}\section*{Experience}Built Python APIs.\end{document}"
+    )
+    source_job = SimpleNamespace(
+        title="Software Engineer Intern",
+        description="Build Python APIs.",
+        experience_level="intern",
+        tags=["occupation:software_engineering"],
+    )
+    target_job = SimpleNamespace(
+        title="Senior Software Engineer",
+        description="Lead Python API architecture.",
+        experience_level="senior",
+        tags=["occupation:software_engineering"],
+    )
+
+    assert _build_resume_reuse_candidate(
+        artifact=artifact,
+        source_job=source_job,
+        target_job=target_job,
+        threshold=0,
+    ) is None
+
+
+def test_resume_reuse_rejects_missing_target_critical_credential():
+    artifact = SimpleNamespace(
+        content=(
+            r"\begin{document}\section*{Experience}"
+            r"Owned financial reporting, forecasting, audit, and month-end close."
+            r"\end{document}"
+        )
+    )
+    source_job = SimpleNamespace(
+        title="Financial Analyst",
+        description="Own financial reporting and forecasting.",
+        experience_level="mid",
+        tags=["occupation:accounting_finance"],
+    )
+    target_job = SimpleNamespace(
+        title="Senior Financial Analyst",
+        description="Requirements\nCPA required. Own financial reporting and audit.",
+        experience_level="senior",
+        tags=["occupation:accounting_finance"],
+    )
+
+    assert _build_resume_reuse_candidate(
+        artifact=artifact,
+        source_job=source_job,
+        target_job=target_job,
+        threshold=0,
+    ) is None
 
 
 def test_build_resume_reuse_candidate_requires_quality_gate_when_requested():

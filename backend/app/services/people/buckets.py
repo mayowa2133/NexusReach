@@ -151,6 +151,95 @@ def _dedupe_bucket_assignments(bucketed: dict[str, list[Person]]) -> dict[str, l
     return deduped
 
 
+def _diversify_people(people: list[Person]) -> list[Person]:
+    """Greedily diversify equally trusted results without lowering trust.
+
+    Re-ranking is confined to the same company-confidence and match-quality
+    tier, so a weak result can never leapfrog a verified direct match. Within a
+    tier it favors distinct titles, sources, org levels, offices, and warm-path
+    connections over a stack of near-identical profiles.
+    """
+    tiers: dict[tuple[str | None, str | None], list[tuple[int, Person]]] = {}
+    for index, person in enumerate(people):
+        tier = (
+            getattr(person, "company_match_confidence", None),
+            getattr(person, "match_quality", None),
+        )
+        tiers.setdefault(tier, []).append((index, person))
+
+    diversified: list[Person] = []
+    for candidates in tiers.values():
+        seen_titles: set[str] = set()
+        seen_sources: set[str] = set()
+        seen_levels: set[str] = set()
+        seen_locations: set[str] = set()
+        seen_paths: set[str] = set()
+        remaining = list(candidates)
+        while remaining:
+            def diversity_key(item: tuple[int, Person]) -> tuple[int, int]:
+                index, person = item
+                profile_data = getattr(person, "profile_data", None)
+                profile = profile_data if isinstance(profile_data, dict) else {}
+                title = _normalize_identity(getattr(person, "title", None))
+                source = str(getattr(person, "source", None) or profile.get("source") or "").lower()
+                level = str(
+                    getattr(person, "org_level", None)
+                    or getattr(person, "seniority", None)
+                    or ""
+                ).lower()
+                location = _normalize_identity(
+                    str(profile.get("location") or profile.get("current_location") or "")
+                )
+                path = _normalize_identity(str(
+                    getattr(person, "warm_path_type", None)
+                    or profile.get("warm_path_connection")
+                    or ""
+                ))
+                penalty = (
+                    (4 if title and title in seen_titles else 0)
+                    + (2 if source and source in seen_sources else 0)
+                    + (1 if level and level in seen_levels else 0)
+                    + (1 if location and location in seen_locations else 0)
+                    + (1 if path and path in seen_paths else 0)
+                )
+                return penalty, index
+
+            chosen = min(remaining, key=diversity_key)
+            remaining.remove(chosen)
+            _, person = chosen
+            profile_data = getattr(person, "profile_data", None)
+            profile = profile_data if isinstance(profile_data, dict) else {}
+            title = _normalize_identity(getattr(person, "title", None))
+            source = str(
+                getattr(person, "source", None) or profile.get("source") or ""
+            ).lower()
+            level = str(
+                getattr(person, "org_level", None)
+                or getattr(person, "seniority", None)
+                or ""
+            ).lower()
+            location = _normalize_identity(
+                str(profile.get("location") or profile.get("current_location") or "")
+            )
+            path = _normalize_identity(str(
+                getattr(person, "warm_path_type", None)
+                or profile.get("warm_path_connection")
+                or ""
+            ))
+            if title:
+                seen_titles.add(title)
+            if source:
+                seen_sources.add(source)
+            if level:
+                seen_levels.add(level)
+            if location:
+                seen_locations.add(location)
+            if path:
+                seen_paths.add(path)
+            diversified.append(person)
+    return diversified
+
+
 def _finalize_bucketed(
     bucketed: dict[str, list[Person]],
     *,
@@ -201,7 +290,7 @@ def _finalize_bucketed(
         finalized[bucket] = ordered
     deduped = _dedupe_bucket_assignments(finalized)
     return {
-        bucket: people[:target_count_per_bucket]
+        bucket: _diversify_people(people)[:target_count_per_bucket]
         for bucket, people in deduped.items()
     }
 

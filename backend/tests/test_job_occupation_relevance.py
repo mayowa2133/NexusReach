@@ -2,6 +2,7 @@
 
 from app.services.jobs.search import _occupation_relevance, _record_accepted_job_quality
 from app.services.jobs.storage import _infer_occupation_tags_for_job
+from app.services.occupation_taxonomy import decide_job_occupation_relevance
 
 
 def test_targeted_job_accepts_matching_content_classification():
@@ -66,13 +67,39 @@ def test_occupation_classification_persists_confidence_and_provenance():
 
     assert "occupation:healthcare" in data["tags"]
     classification = data["metadata_provenance"]["occupation_classification"]
-    assert classification == {
-        "version": 1,
-        "keys": ["healthcare"],
-        "source": "description_classifier",
-        "confidence": 0.75,
-        "query_hint": None,
-    }
+    assert classification["version"] == 2
+    assert classification["keys"] == ["healthcare"]
+    assert classification["source"] == "description_classifier"
+    assert classification["confidence"] == 0.75
+    assert classification["evidence"] == ["description_lead"]
+    assert classification["query_hint"] is None
+
+
+def test_query_hint_is_provenance_but_never_targeted_relevance_evidence():
+    decision = decide_job_occupation_relevance(
+        title="Associate II",
+        description="Join our growing team.",
+        requested_keys=["marketing"],
+        query_hint="marketing",
+    )
+
+    assert decision.accepted is False
+    assert decision.reason == "unclassified"
+    assert decision.inference.source == "query_hint"
+    assert decision.inference.keys == ("marketing",)
+    assert decision.inference.confidence == 0.25
+
+
+def test_multi_occupation_relevance_accepts_any_independent_match():
+    decision = decide_job_occupation_relevance(
+        title="Financial Analyst",
+        description="Build forecasts and budgets.",
+        requested_keys=["marketing", "accounting_finance"],
+    )
+
+    assert decision.accepted is True
+    assert decision.requested_keys == ("marketing", "accounting_finance")
+    assert decision.inference.keys == ("accounting_finance",)
 
 
 def test_source_quality_stats_measure_accepted_metadata_yield():

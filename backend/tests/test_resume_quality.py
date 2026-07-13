@@ -8,7 +8,6 @@ import pytest
 from app.services.resume_artifact.quality import (
     EARLY_CAREER_TECHNICAL,
     EXPERIENCED_TECHNICAL,
-    GENERAL_PROFESSIONAL,
     _job_terms,
     _term_present,
     evaluate_resume_quality,
@@ -114,7 +113,8 @@ def test_profile_selection_is_occupation_and_seniority_aware():
     )
 
     assert senior is EXPERIENCED_TECHNICAL
-    assert nontechnical is GENERAL_PROFESSIONAL
+    assert nontechnical.key == "sales_professional_v1"
+    assert nontechnical.label == "Sales professional"
     assert all(category.key != "open_source" for category in nontechnical.categories)
 
 
@@ -426,6 +426,69 @@ def test_nontech_job_terms_are_role_relevant_not_just_title_words():
         assert required in terms, f"expected {required!r} in {terms}"
     # ...and the seniority word is never a job term.
     assert "senior" not in terms
+
+
+def test_irrelevant_supporting_evidence_category_is_explicitly_not_applicable():
+    job = _general_job(
+        "Account Executive",
+        "Own enterprise sales relationships and exceed quota.",
+        ["occupation:sales"],
+    )
+    parsed = {
+        "experience": [{
+            "title": "Account Executive",
+            "company": "Acme",
+            "bullets": ["Exceeded annual quota by 120%."],
+        }],
+        "skills": ["Salesforce", "CRM"],
+    }
+
+    evaluation = evaluate_resume_quality(
+        parsed=parsed,
+        content=_render_general(parsed),
+        job=job,
+    )
+    support = next(
+        item for item in evaluation["categories"]
+        if item["key"] == "supporting_evidence"
+    )
+
+    assert evaluation["profile"] == "sales_professional_v1"
+    assert support["applicable"] is False
+    assert support["max"] == 0
+    assert "Not applicable" in support["evidence"][0]
+
+
+def test_required_healthcare_license_activates_credential_module():
+    job = _general_job(
+        "Registered Nurse",
+        "Requirements\nActive RN license required. Provide patient care.",
+        ["occupation:healthcare"],
+    )
+    parsed = {
+        "experience": [{
+            "title": "Registered Nurse",
+            "company": "Hospital",
+            "bullets": ["Provided patient care for 20 patients per shift."],
+        }],
+        "skills": ["Patient care"],
+        "certificates": ["Active RN license"],
+    }
+    content = _render_general(parsed).replace(
+        r"\end{document}",
+        r"\subsection*{Licenses & Certifications}Active RN license\end{document}",
+    )
+
+    evaluation = evaluate_resume_quality(parsed=parsed, content=content, job=job)
+    support = next(
+        item for item in evaluation["categories"]
+        if item["key"] == "supporting_evidence"
+    )
+
+    assert evaluation["profile"] == "healthcare_professional_v1"
+    assert support["applicable"] is True
+    assert support["max"] == 25
+    assert support["score"] > 0
 
 
 def test_surviving_method_hint_does_not_discard_real_role_terms():

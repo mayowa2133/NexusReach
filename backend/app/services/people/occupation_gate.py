@@ -76,6 +76,53 @@ _BUCKET_TO_GROUP: dict[str, str] = {
     "education": "domain",
 }
 
+_ADJACENT_OCCUPATION_CLUSTERS: tuple[frozenset[str], ...] = (
+    frozenset({"software_engineering", "data_engineer", "machine_learning_ai", "cybersecurity"}),
+    frozenset({"data_analyst", "business_analyst", "accounting_finance"}),
+    frozenset({"product_management", "project_management", "business_analyst"}),
+    frozenset({"sales", "marketing", "customer_service_support"}),
+    frozenset({"creatives_design", "arts_entertainment"}),
+    frozenset({"human_resources", "management_executive"}),
+    frozenset({"supply_chain_logistics", "project_management"}),
+)
+
+
+def occupation_function_distance(
+    occupation_keys: list[str] | None,
+    department: str | None,
+    candidate_title: str | None,
+) -> tuple[int, str]:
+    """Return hierarchical function distance for contextual ranking.
+
+    Distances are exact occupation (0), explicitly adjacent occupation (1),
+    same coarse function group (2), known cross-group conflict (3), and unknown
+    (4). Unknown remains ungated; it is distinct from evidence of a mismatch.
+    """
+    from app.services.occupation_taxonomy import classify_title, occupation_by_key
+
+    requested = {
+        occupation.key
+        for key in occupation_keys or []
+        if (occupation := occupation_by_key(key)) is not None
+    }
+    candidate = set(classify_title(candidate_title))
+    if requested and candidate:
+        if requested & candidate:
+            return 0, "exact_occupation"
+        if any(
+            requested & cluster and candidate & cluster
+            for cluster in _ADJACENT_OCCUPATION_CLUSTERS
+        ):
+            return 1, "adjacent_occupation"
+
+    job_group = job_function_group(list(requested), department)
+    candidate_group = title_function_group(candidate_title)
+    if job_group and candidate_group:
+        if job_group == candidate_group:
+            return 2, "same_function_group"
+        return 3, "cross_function"
+    return 4, "unknown"
+
 
 def title_function_group(title: str | None) -> str | None:
     """Coarse function group of a person's title, or None if unrecognized.
@@ -135,10 +182,9 @@ def occupation_conflict(
     group are confidently known and different. Ambiguous titles (generic
     "Manager", recruiters) never conflict.
     """
-    job_group = job_function_group(occupation_keys, department)
-    if job_group is None:
-        return False
-    cand_group = title_function_group(candidate_title)
-    if cand_group is None:
-        return False
-    return cand_group != job_group
+    distance, _ = occupation_function_distance(
+        occupation_keys,
+        department,
+        candidate_title,
+    )
+    return distance == 3

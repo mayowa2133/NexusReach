@@ -26,6 +26,9 @@ class Profile(Base):
     target_roles: Mapped[list[str] | None] = mapped_column(ARRAY(String))
     target_occupations: Mapped[list[str] | None] = mapped_column(ARRAY(String))
     target_locations: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+    job_preferences: Mapped[dict | None] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default="{}"
+    )
     linkedin_url: Mapped[str | None] = mapped_column(String(500))
     github_url: Mapped[str | None] = mapped_column(String(500))
     portfolio_url: Mapped[str | None] = mapped_column(String(500))

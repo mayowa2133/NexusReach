@@ -16,6 +16,7 @@ export interface Profile {
   target_roles: string[];
   target_occupations?: string[];
   target_locations: string[];
+  job_preferences?: JobPreferences;
   linkedin_url: string;
   github_url: string;
   portfolio_url: string;
@@ -24,6 +25,18 @@ export interface Profile {
   resume_auto_accept_inferred?: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface JobPreferences {
+  work_authorization_countries: string[];
+  requires_sponsorship: boolean | null;
+  languages: string[];
+  licenses: string[];
+  clearances: string[];
+  allowed_schedules: string[];
+  max_travel_percent: number | null;
+  excluded_employers: string[];
+  blocked_keywords: string[];
 }
 
 export interface ResumeParsed {

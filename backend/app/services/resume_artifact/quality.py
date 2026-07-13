@@ -17,12 +17,17 @@ from typing import Any, Iterable
 
 from app.services.match_scoring import _estimate_user_years
 from app.services.occupation_taxonomy import (
+    all_occupations,
     classify_title,
     is_engineering_flavored,
     occupation_keys_from_tags,
 )
 from app.services.resume_artifact.textnorm import _latex_plain_text, _metric_tokens
 from app.services.resume_tailor import extract_jd_must_surface
+from app.services.job_requirements import (
+    extract_job_requirements,
+    requirement_terms,
+)
 
 
 RUBRIC_VERSION = "nexusreach_resume_quality_v1"
@@ -90,6 +95,52 @@ GENERAL_PROFESSIONAL = QualityProfile(
     ),
 )
 
+
+_PROFESSIONAL_WEIGHTS: dict[str, tuple[int, int, int, int]] = {
+    "healthcare": (25, 35, 15, 25),
+    "legal_compliance": (25, 40, 15, 20),
+    "accounting_finance": (30, 35, 20, 15),
+    "sales": (40, 30, 20, 10),
+    "marketing": (35, 30, 20, 15),
+    "creatives_design": (30, 25, 20, 25),
+    "arts_entertainment": (30, 25, 20, 25),
+    "education_training": (25, 35, 20, 20),
+    "public_sector_government": (20, 40, 20, 20),
+    "cybersecurity": (25, 35, 20, 20),
+}
+
+
+def _build_occupation_quality_profiles() -> dict[str, QualityProfile]:
+    profiles: dict[str, QualityProfile] = {}
+    for occupation in all_occupations():
+        if occupation.engineering_flavored and occupation.key != "cybersecurity":
+            continue
+        weights = _PROFESSIONAL_WEIGHTS.get(occupation.key, (35, 35, 20, 10))
+        outcome_max, experience_max, capabilities_max, support_max = weights
+        support_label = {
+            "healthcare": "Licensure & clinical evidence",
+            "legal_compliance": "Admissions & matter evidence",
+            "accounting_finance": "Credentials & controls evidence",
+            "creatives_design": "Portfolio evidence",
+            "arts_entertainment": "Portfolio & production evidence",
+            "education_training": "Teaching credentials & learner evidence",
+            "cybersecurity": "Security credentials & controls evidence",
+        }.get(occupation.key, "Supporting evidence")
+        profiles[occupation.key] = QualityProfile(
+            key=f"{occupation.key}_professional_v1",
+            label=f"{occupation.label} professional",
+            categories=(
+                QualityCategoryDefinition("outcomes", f"{occupation.label} outcomes", outcome_max),
+                QualityCategoryDefinition("role_experience", "Role-relevant experience", experience_max),
+                QualityCategoryDefinition("capabilities", "Supported capabilities", capabilities_max),
+                QualityCategoryDefinition("supporting_evidence", support_label, support_max),
+            ),
+        )
+    return profiles
+
+
+OCCUPATION_QUALITY_PROFILES = _build_occupation_quality_profiles()
+
 QUALITY_PROFILES: dict[str, QualityProfile] = {
     profile.key: profile
     for profile in (
@@ -97,6 +148,14 @@ QUALITY_PROFILES: dict[str, QualityProfile] = {
         EXPERIENCED_TECHNICAL,
         GENERAL_PROFESSIONAL,
     )
+}
+QUALITY_PROFILES.update({
+    profile.key: profile for profile in OCCUPATION_QUALITY_PROFILES.values()
+})
+
+_TECHNICAL_PROFILE_KEYS = {
+    EARLY_CAREER_TECHNICAL.key,
+    EXPERIENCED_TECHNICAL.key,
 }
 
 
@@ -234,6 +293,8 @@ def select_quality_profile(parsed: dict[str, Any], job: object) -> QualityProfil
     """Select a deterministic occupation/seniority rubric for one job."""
     keys = _occupation_keys(job)
     department = _text(getattr(job, "department", "")) or None
+    if len(keys) == 1 and keys[0] in OCCUPATION_QUALITY_PROFILES:
+        return OCCUPATION_QUALITY_PROFILES[keys[0]]
     if not is_engineering_flavored(keys, department=department):
         return GENERAL_PROFESSIONAL
 
@@ -273,6 +334,7 @@ def _job_terms(job: object) -> list[str]:
     raw_description = _text(getattr(job, "description", ""))
     # Strip HTML tags and entities so scrape residue can't pollute the terms.
     description = _HTML_ENTITY_RE.sub(" ", _HTML_TAG_RE.sub(" ", raw_description))
+    structured = requirement_terms(extract_job_requirements(description))
     extracted = extract_jd_must_surface(description).get("must_surface") or []
     ordered = [
         _text(term)
@@ -327,7 +389,7 @@ def _job_terms(job: object) -> list[str]:
         )
         if len(key) >= 3 or original[key].isupper()
     ]
-    candidates = [*ordered, *title_candidates, *body_candidates]
+    candidates = [*ordered, *structured, *title_candidates, *body_candidates]
 
     result: list[str] = []
     seen: set[str] = set()
@@ -346,8 +408,8 @@ def _job_terms(job: object) -> list[str]:
     #   the signal — returning only the hints used to collapse finance/legal/
     #   nursing to their title words and discard every real requirement.
     if len(ordered) >= 3:
-        return ordered[:14]
-    return result[:14]
+        return list(dict.fromkeys(ordered))[:14]
+    return result[:20]
 
 
 def _term_present(text: str, term: str) -> bool:
@@ -527,14 +589,21 @@ def _category(
     score: float,
     evidence: list[str],
     improvements: list[str],
+    *,
+    applicable: bool = True,
 ) -> dict[str, Any]:
     return {
         "key": definition.key,
         "label": definition.label,
-        "score": _bounded(score, definition.maximum),
-        "max": definition.maximum,
-        "evidence": evidence or ["No supported evidence was found in the rendered artifact."],
-        "improvements": improvements[:3],
+        "score": _bounded(score, definition.maximum) if applicable else 0.0,
+        "max": definition.maximum if applicable else 0,
+        "applicable": applicable,
+        "evidence": (
+            evidence or ["No supported evidence was found in the rendered artifact."]
+            if applicable
+            else ["Not applicable to the target job's stated requirements."]
+        ),
+        "improvements": improvements[:3] if applicable else [],
     }
 
 
@@ -628,6 +697,7 @@ def _general_categories(
     rendered_text: str,
     raw_content: str,
     job_terms: list[str],
+    requirements: list | None = None,
 ) -> list[dict[str, Any]]:
     production = _production_signal(parsed, rendered_text)
     projects = _project_signal(parsed, rendered_text, raw_content)
@@ -649,6 +719,17 @@ def _general_categories(
         if _OUTCOME_RE.search(bullet) and _metric_tokens(bullet)
     ]
     urls = _URL_RE.findall(raw_content)
+    visible_certificates = [
+        _text(certificate)
+        for certificate in _list(parsed.get("certificates"))
+        if _text(certificate) and _text(certificate).lower() in rendered_text.lower()
+    ]
+    visible_education = len(_visible_entries(parsed, rendered_text, "education"))
+    required_support_types = {
+        getattr(requirement, "evidence_type", None)
+        for requirement in requirements or []
+        if getattr(requirement, "kind", None) in {"mandatory", "preferred"}
+    } & {"credential", "license", "clearance", "portfolio", "education"}
 
     results: list[dict[str, Any]] = []
     for definition in profile.categories:
@@ -674,15 +755,28 @@ def _general_categories(
                 "Surface the professional capabilities already demonstrated by the candidate's work."
             ]
         else:
-            evidence_count = len(urls) + production["with_metrics"] + projects["linked"]
+            applicable = bool(required_support_types)
+            evidence_count = (
+                len(urls)
+                + production["with_metrics"]
+                + projects["linked"]
+                + len(visible_certificates) * 2
+                + visible_education
+            )
             score = min(definition.maximum, evidence_count * 2)
             evidence = [
-                f"The artifact contains {len(urls)} link(s), {production['with_metrics']} measured work entrie(s), and {projects['linked']} linked project(s)."
+                f"The artifact contains {len(visible_certificates)} credential(s), {visible_education} education entrie(s), {len(urls)} link(s), and {production['with_metrics']} measured work entrie(s)."
             ]
             improvements = [] if evidence_count else [
                 "Add verifiable links, credentials, or measurable evidence where the source resume supports them."
             ]
-        results.append(_category(definition, score, evidence, improvements))
+        results.append(_category(
+            definition,
+            score,
+            evidence,
+            improvements,
+            applicable=(applicable if definition.key == "supporting_evidence" else True),
+        ))
     return results
 
 
@@ -813,20 +907,35 @@ def evaluate_resume_quality(
     rendered_text = _latex_plain_text(scorable_content)
     supported_text = "\n".join([supported_base, *confirmed_additions])
     terms = _job_terms(job)
+    requirements = extract_job_requirements(_text(getattr(job, "description", "")))
     categories = (
         _technical_categories(profile, parsed, rendered_text, scorable_content, terms)
-        if profile is not GENERAL_PROFESSIONAL
-        else _general_categories(profile, parsed, rendered_text, scorable_content, terms)
+        if profile.key in _TECHNICAL_PROFILE_KEYS
+        else _general_categories(
+            profile,
+            parsed,
+            rendered_text,
+            scorable_content,
+            terms,
+            requirements,
+        )
     )
 
-    evidence_score = 100 * sum(float(item["score"]) for item in categories) / sum(
-        float(item["max"]) for item in categories
+    category_max = sum(float(item["max"]) for item in categories)
+    evidence_score = (
+        100 * sum(float(item["score"]) for item in categories) / category_max
+        if category_max
+        else 0.0
     )
     axes = {
         "job_fit": _job_fit_axis(rendered_text, supported_text, terms),
         "evidence_quality": _axis(
             evidence_score,
-            [f"The {profile.label} rubric scored {sum(float(item['score']) for item in categories):.1f}/100 category points."],
+            [
+                f"The {profile.label} rubric scored "
+                f"{sum(float(item['score']) for item in categories):.1f}/"
+                f"{category_max:.1f} applicable category points."
+            ],
             [improvement for item in categories for improvement in item["improvements"]][:3],
         ),
         "parseability": _parseability_axis(scorable_content, rendered_text, parsed),

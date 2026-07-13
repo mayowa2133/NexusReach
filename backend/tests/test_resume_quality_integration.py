@@ -9,6 +9,7 @@ import pytest
 from app.services.resume_artifact.service import (
     generate_resume_artifact_for_job,
     reuse_resume_artifact_for_job,
+    tailoring_input_hash,
 )
 
 
@@ -26,6 +27,42 @@ def _ready_evaluation(score: float) -> dict:
         "profile": "early_career_technical_v1",
         "improvements": [],
     }
+
+
+_RENDER_QA = {
+    "status": "passed",
+    "page_count": 1,
+    "parser_agreement": 1.0,
+}
+
+
+def test_tailoring_input_hash_is_stable_and_changes_with_inputs():
+    profile = SimpleNamespace(
+        resume_parsed={"skills": ["Python"]},
+        resume_raw="ignored when parsed exists",
+    )
+    job = SimpleNamespace(
+        title="Software Engineer",
+        company_name="Acme",
+        description="Build Python services.",
+        experience_level="mid",
+        tags=["occupation:software_engineering"],
+    )
+
+    first = tailoring_input_hash(profile=profile, job=job)
+    second = tailoring_input_hash(profile=profile, job=job)
+    changed_profile = SimpleNamespace(
+        resume_parsed={"skills": ["Python", "SQL"]},
+        resume_raw="",
+    )
+
+    assert first == second
+    assert len(first) == 64
+    assert tailoring_input_hash(profile=changed_profile, job=job) != first
+    assert tailoring_input_hash(
+        profile=profile,
+        job=SimpleNamespace(**{**job.__dict__, "description": "Build Go services."}),
+    ) != first
 
 
 @pytest.mark.asyncio
@@ -87,7 +124,7 @@ async def test_generation_uses_source_guidance_and_persists_final_artifact_evalu
         "app.services.resume_artifact.service._load_or_generate_tailoring",
         new_callable=AsyncMock,
         return_value=tailored,
-    ), patch(
+    ) as load_tailoring, patch(
         "app.services.resume_artifact.service.evaluate_resume_quality",
         side_effect=[source_evaluation, final_evaluation],
     ) as evaluate, patch(
@@ -100,6 +137,10 @@ async def test_generation_uses_source_guidance_and_persists_final_artifact_evalu
     ) as build_plan, patch(
         "app.services.resume_artifact.service._render_resume_latex",
         return_value="FINAL_RENDERED_LATEX",
+    ), patch(
+        "app.services.resume_artifact.service._render_qa",
+        new_callable=AsyncMock,
+        return_value=_RENDER_QA,
     ):
         result = await generate_resume_artifact_for_job(
             db,
@@ -111,11 +152,12 @@ async def test_generation_uses_source_guidance_and_persists_final_artifact_evalu
     assert result is artifact
     assert artifact.content == "FINAL_RENDERED_LATEX"
     assert artifact.quality_score == 84.0
-    assert artifact.quality_evaluation == final_evaluation
+    assert artifact.quality_evaluation["render_qa"] == _RENDER_QA
     assert build_plan.await_args.kwargs["quality_guidance"] == (
         '{"priorities":["keep measurable evidence"]}'
     )
     assert evaluate.call_count == 2
+    assert load_tailoring.await_args.kwargs["prefer_existing"] is True
     assert evaluate.call_args_list[1].kwargs["content"] == "FINAL_RENDERED_LATEX"
     db.commit.assert_awaited_once()
 
@@ -179,6 +221,10 @@ async def test_generation_fails_soft_when_quality_evaluation_errors():
     ), patch(
         "app.services.resume_artifact.service._render_resume_latex",
         return_value="VALID_ARTIFACT",
+    ), patch(
+        "app.services.resume_artifact.service._render_qa",
+        new_callable=AsyncMock,
+        return_value=_RENDER_QA,
     ):
         result = await generate_resume_artifact_for_job(
             db,
@@ -249,7 +295,11 @@ async def test_reuse_recomputes_quality_for_target_job_instead_of_copying_stale_
     ), patch(
         "app.services.resume_artifact.service.evaluate_resume_quality",
         return_value=target_evaluation,
-    ) as evaluate:
+    ) as evaluate, patch(
+        "app.services.resume_artifact.service._render_qa",
+        new_callable=AsyncMock,
+        return_value=_RENDER_QA,
+    ):
         result, returned_source = await reuse_resume_artifact_for_job(
             db,
             user_id=user_id,
@@ -260,5 +310,5 @@ async def test_reuse_recomputes_quality_for_target_job_instead_of_copying_stale_
     assert returned_source is source_job
     assert result.content == "SOURCE_LATEX"
     assert result.quality_score == 72.0
-    assert result.quality_evaluation == target_evaluation
+    assert result.quality_evaluation["render_qa"] == _RENDER_QA
     assert evaluate.call_args.kwargs["job"] is target_job

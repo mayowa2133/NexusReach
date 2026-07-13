@@ -20,7 +20,7 @@ from app.services.people.affinity import affinity_rank
 from app.services.people.github_team_rank import github_team_rank
 from app.services.people.context import _location_match_rank
 from app.services.people.outcome_priors import outcome_prior_rank
-from app.services.people.occupation_gate import occupation_conflict
+from app.services.people.occupation_gate import occupation_function_distance
 from app.services.occupation_taxonomy import peer_title_seeds_for
 logger = logging.getLogger(__name__)
 
@@ -326,10 +326,17 @@ def _peer_title_alignment_rank(data: dict, *, context: JobContext | None) -> int
         ):
             return 0
 
-    if occupation_conflict(
-        context.occupation_keys, context.department, title
-    ):
+    function_distance, _ = occupation_function_distance(
+        context.occupation_keys,
+        context.department,
+        title,
+    )
+    if function_distance == 1:
+        return 1
+    if function_distance == 2:
         return 2
+    if function_distance == 3:
+        return 3
 
     stop = {
         "senior", "junior", "staff", "principal", "lead", "associate",
@@ -350,7 +357,9 @@ def _peer_title_alignment_rank(data: dict, *, context: JobContext | None) -> int
                 best_overlap,
                 len(candidate_tokens & requested_tokens) / len(requested_tokens),
             )
-    return 1 if best_overlap >= 0.5 else 2
+    if best_overlap >= 0.5:
+        return 1
+    return 2 if function_distance == 4 else function_distance
 
 
 

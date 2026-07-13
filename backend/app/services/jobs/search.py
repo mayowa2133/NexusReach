@@ -24,9 +24,7 @@ from app.services.jobs import constants
 from app.services.jobs import normalize
 from app.services.jobs import storage
 from app.services.occupation_taxonomy import (
-    classify_title,
-    occupation_by_key,
-    occupation_keys_from_tags,
+    decide_job_occupation_relevance,
 )
 
 
@@ -41,23 +39,28 @@ def _occupation_relevance(
     Query text is provenance, not evidence. A result must be supported by a
     trusted explicit source tag or by title/description classification.
     """
-    if not occupation_hint:
-        return True, "untargeted", []
-    requested = occupation_by_key(occupation_hint)
-    if requested is None:
-        return False, "invalid_requested_occupation", []
-
-    raw_tags = data.get("tags") if isinstance(data.get("tags"), list) else []
-    explicit = occupation_keys_from_tags(raw_tags)
-    if requested.key in explicit:
-        return True, "explicit_source_tag", explicit
-
-    classified = classify_title(data.get("title"), data.get("description"))
-    if requested.key in classified:
-        return True, "content_classification", classified
-    if classified:
-        return False, "off_category", classified
-    return False, "unclassified", []
+    decision = decide_job_occupation_relevance(
+        title=data.get("title"),
+        description=data.get("description"),
+        tags=data.get("tags") if isinstance(data.get("tags"), list) else None,
+        requested_keys=[occupation_hint] if occupation_hint else None,
+        query_hint=occupation_hint,
+    )
+    reason = (
+        "content_classification"
+        if decision.reason in {"title_classifier", "description_classifier"}
+        else decision.reason
+    )
+    classified_keys = (
+        []
+        if decision.reason in {"invalid_requested_occupation", "unclassified"}
+        else list(decision.inference.keys)
+    )
+    return (
+        decision.accepted,
+        reason,
+        classified_keys,
+    )
 
 
 def _record_accepted_job_quality(stat: dict, data: dict) -> None:
@@ -212,6 +215,7 @@ async def search_jobs(
     refresh_run_id: uuid.UUID | None = None,
     source_stats: list[dict] | None = None,
     occupation_hint: str | None = None,
+    source_limits: dict[str, int] | None = None,
 ) -> list[Job]:
     """Search for jobs across all sources, deduplicate, score, and store.
 
@@ -249,7 +253,7 @@ async def search_jobs(
                 query=query,
                 location=location,
                 remote_only=remote_only,
-                limit=limit,
+                limit=(source_limits or {}).get(source, limit),
                 occupation=occupation_hint,
             )
             for source in all_sources
@@ -258,6 +262,11 @@ async def search_jobs(
     raw_jobs = [job for jobs, _ in fetch_results for job in jobs]
     local_source_stats = [stat for _, stat in fetch_results]
     stats_by_source = {stat["source"]: stat for stat in local_source_stats}
+    if occupation_hint:
+        for stat in local_source_stats:
+            details = dict(stat.get("details") or {})
+            details["requested_occupation"] = occupation_hint
+            stat["details"] = details
 
     # Deduplicate and store
     stored_jobs: list[Job] = []
@@ -295,6 +304,18 @@ async def search_jobs(
         data = normalize_job_metadata(data)
         if not normalize._job_matches_refresh_filters(data, location=location, remote_only=remote_only):
             stat["skipped_count"] += 1
+            continue
+        eligibility = storage.hard_eligibility_decision(data, profile)
+        provenance = dict(data.get("metadata_provenance") or {})
+        provenance["eligibility"] = eligibility
+        data["metadata_provenance"] = provenance
+        if eligibility.get("eligible") is False:
+            stat["skipped_count"] += 1
+            details = dict(stat.get("details") or {})
+            details["hard_constraint_rejected_count"] = int(
+                details.get("hard_constraint_rejected_count") or 0
+            ) + 1
+            stat["details"] = details
             continue
         _record_accepted_job_quality(stat, data)
         fp = normalize._fingerprint(

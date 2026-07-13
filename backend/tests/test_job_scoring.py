@@ -343,6 +343,16 @@ class TestFingerprint:
         fp2 = _fingerprint("Acme", "Designer", "NYC")
         assert fp1 != fp2
 
+    def test_company_suffix_and_title_punctuation_variants_cluster(self):
+        fp1 = _fingerprint("Acme, Inc.", "Sr. FP&A Analyst", "Toronto, ON")
+        fp2 = _fingerprint("ACME", "Senior FP&A Analyst", "Toronto, ON")
+        assert fp1 == fp2
+
+    def test_remote_location_variants_cluster(self):
+        fp1 = _fingerprint("Acme", "Marketing Manager (Remote)", "Remote - Canada")
+        fp2 = _fingerprint("Acme Corp", "Marketing Manager", "Remote")
+        assert fp1 == fp2
+
     def test_returns_hex_string(self):
         fp = _fingerprint("Company", "Title", "Location")
         assert isinstance(fp, str)

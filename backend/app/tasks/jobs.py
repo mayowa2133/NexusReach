@@ -726,7 +726,7 @@ async def _rescore_user_jobs(user_id: uuid.UUID) -> dict:
             select(Profile).where(Profile.user_id == user_id)
         )
         profile = result.scalar_one_or_none()
-        if not profile or not profile.resume_parsed:
+        if not profile:
             return stats
 
         profile_updated = profile.updated_at
@@ -759,8 +759,21 @@ async def _rescore_user_jobs(user_id: uuid.UUID) -> dict:
                     "description": job.description,
                     "remote": job.remote,
                     "experience_level": job.experience_level,
+                    "country_codes": job.country_codes,
+                    "tags": job.tags,
                 }
-                new_score, new_breakdown = score_job(job_data, profile)
+                if profile.resume_parsed:
+                    new_score, new_breakdown = score_job(job_data, profile)
+                else:
+                    from app.services.jobs.storage import hard_eligibility_decision  # noqa: PLC0415
+
+                    new_score = None
+                    new_breakdown = {
+                        "resume_missing": True,
+                        "resume_not_uploaded": True,
+                        "max_possible": 100,
+                        "eligibility": hard_eligibility_decision(job_data, profile),
+                    }
                 job.match_score = new_score
                 job.score_breakdown = new_breakdown
                 job.scored_at = datetime.now(timezone.utc)

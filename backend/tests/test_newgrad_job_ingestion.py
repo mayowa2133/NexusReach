@@ -13,8 +13,34 @@ from app.services.job_service import (
     store_curated_ats_payloads_for_user,
 )
 from app.services.newgrad_jobs_backfill_service import backfill_newgrad_jobs
+from app.services.jobs.storage import _metadata_with_source_provenance
 
 pytestmark = pytest.mark.asyncio
+
+
+async def test_cross_source_provenance_is_preserved_on_clustered_record():
+    first = {
+        "source": "jsearch",
+        "external_id": "agg-1",
+        "url": "https://aggregator.example/jobs/1?tracking=x",
+        "metadata_provenance": {"occupation_classification": {"version": 2}},
+    }
+    second = {
+        "source": "greenhouse",
+        "ats": "greenhouse",
+        "ats_slug": "acme",
+        "external_id": "direct-1",
+        "url": "https://boards.greenhouse.io/acme/jobs/123",
+    }
+
+    metadata = _metadata_with_source_provenance(None, first)
+    metadata = _metadata_with_source_provenance(metadata, second)
+
+    assert [item["source"] for item in metadata["source_provenance"]] == [
+        "jsearch",
+        "greenhouse",
+    ]
+    assert metadata["occupation_classification"]["version"] == 2
 
 
 class _ScalarResult:
@@ -281,6 +307,63 @@ async def test_store_curated_ats_payloads_filters_by_saved_search_before_store()
     assert source_run.source == "greenhouse:shopify"
     assert source_run.raw_count == 1
     assert source_run.new_count == 1
+
+
+async def test_store_curated_ats_payloads_filters_nontech_occupation_before_store():
+    user_id = uuid.uuid4()
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=_ScalarResult(_make_profile()))
+    payloads = {
+        "greenhouse:example": [
+            {
+                "external_id": "mkt-1",
+                "title": "Brand Marketing Manager",
+                "company_name": "Example",
+                "description": "Own campaigns and brand strategy.",
+                "source": "greenhouse",
+                "ats": "greenhouse",
+                "ats_slug": "example",
+            },
+            {
+                "external_id": "eng-1",
+                "title": "Senior Software Engineer",
+                "company_name": "Example",
+                "description": "Build distributed systems.",
+                "source": "greenhouse",
+                "ats": "greenhouse",
+                "ats_slug": "example",
+            },
+        ]
+    }
+    stats = [{
+        "source": "greenhouse:example",
+        "status": "success",
+        "raw_count": 2,
+        "new_count": 0,
+        "existing_count": 0,
+        "duplicate_count": 0,
+        "skipped_count": 0,
+        "details": None,
+    }]
+
+    with patch(
+        "app.services.jobs.storage._store_raw_jobs",
+        new_callable=AsyncMock,
+        return_value=[],
+    ) as store_mock:
+        await store_curated_ats_payloads_for_user(
+            db,
+            user_id,
+            source_payloads=payloads,
+            source_stats=stats,
+            occupation_keys=["marketing"],
+        )
+
+    filtered_jobs = store_mock.await_args.args[2]
+    assert [job["external_id"] for job in filtered_jobs] == ["mkt-1"]
+    relevance = filtered_jobs[0]["metadata_provenance"]["occupation_relevance"]
+    assert relevance["accepted"] is True
+    assert relevance["inference"]["source"] == "title_classifier"
 
 
 async def test_find_existing_job_prefers_source_and_external_id():

@@ -188,6 +188,67 @@ async def test_classify_handles_zero_attempts():
     assert out[0]["degraded"] is False
 
 
+async def test_usefulness_budget_favors_relevant_complete_source():
+    rows = []
+    for _ in range(3):
+        rows.extend([
+            {
+                "source": "strong",
+                "details": {
+                    "requested_occupation": "marketing",
+                    "accepted_count": 10,
+                    "occupation_rejected_count": 1,
+                    "with_description": 10,
+                    "with_direct_apply": 10,
+                    "with_posted_date": 9,
+                    "with_salary": 5,
+                    "with_location": 10,
+                },
+            },
+            {
+                "source": "noisy",
+                "details": {
+                    "requested_occupation": "marketing",
+                    "accepted_count": 2,
+                    "occupation_rejected_count": 8,
+                    "with_description": 2,
+                    "with_direct_apply": 0,
+                    "with_posted_date": 0,
+                    "with_salary": 0,
+                    "with_location": 1,
+                },
+            },
+        ])
+
+    factors = storage.compute_source_budget_factors(
+        rows, occupation_keys=["marketing"]
+    )
+    limits = storage.source_limits_for_budget(
+        ["strong", "noisy", "unseen"], base_limit=20, factors=factors
+    )
+
+    assert factors["strong"] > 1.0
+    assert factors["noisy"] < 1.0
+    assert limits["strong"] > limits["unseen"] > limits["noisy"]
+
+
+async def test_usefulness_budget_keeps_exploration_until_sample_is_sufficient():
+    rows = [{
+        "source": "new_source",
+        "details": {
+            "requested_occupation": "healthcare",
+            "accepted_count": 1,
+            "occupation_rejected_count": 19,
+        },
+    }]
+
+    factors = storage.compute_source_budget_factors(
+        rows, occupation_keys=["healthcare"]
+    )
+
+    assert factors["new_source"] == 1.0
+
+
 async def test_thread_exhaustion_is_transient():
     """Worker thread-pool exhaustion is operational, not a paged bug (PYTHON-1D/1E)."""
     assert normalize.is_transient_fetch_error(RuntimeError("can't start new thread"))

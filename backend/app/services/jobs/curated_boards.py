@@ -24,6 +24,7 @@ from app.services.jobs import constants
 from app.services.jobs import discovered_boards
 from app.services.jobs import normalize
 from app.services.jobs import storage
+from app.services.occupation_taxonomy import decide_job_occupation_relevance
 
 
 logger = logging.getLogger(__name__)
@@ -34,8 +35,16 @@ async def _discover_ats_boards(
     user_id: uuid.UUID,
     limit_per_board: int = 50,
     refresh_run_id: uuid.UUID | None = None,
+    occupation_keys: list[str] | None = None,
 ) -> int:
-    """Pull jobs from curated Greenhouse, Ashby, Lever, and Workday boards."""
+    """Pull jobs from the broad curated ATS registry for any occupation.
+
+    On targeted runs, every posting must independently classify into one of the
+    requested occupations before it can be persisted. This lets non-technical
+    users benefit from marketing, finance, media, legal-tech, and consumer
+    employers in the registry without inheriting their unrelated engineering
+    openings.
+    """
     source_payloads, source_stats = await fetch_curated_ats_source_payloads(
         limit_per_board=limit_per_board
     )
@@ -46,6 +55,7 @@ async def _discover_ats_boards(
         source_stats=source_stats,
         preferences=None,
         refresh_run_id=refresh_run_id,
+        occupation_keys=occupation_keys,
     )
 
 
@@ -278,6 +288,7 @@ async def store_curated_ats_payloads_for_user(
     source_stats: list[dict],
     preferences=None,
     refresh_run_id: uuid.UUID | None = None,
+    occupation_keys: list[str] | None = None,
 ) -> int:
     """Store one global ATS crawl for a user after saved-search filtering."""
     result = await db.execute(select(Profile).where(Profile.user_id == user_id))
@@ -285,11 +296,30 @@ async def store_curated_ats_payloads_for_user(
 
     filtered_jobs: list[dict] = []
     matched_counts_by_source: dict[str, int] = {}
+    rejected_counts_by_source: dict[str, int] = {}
     for source_key, jobs in source_payloads.items():
         for raw_job in jobs:
             if preferences is not None and not job_matches_refresh_preferences(raw_job, preferences):
                 continue
             matched = dict(raw_job)
+            decision = decide_job_occupation_relevance(
+                title=matched.get("title"),
+                description=matched.get("description"),
+                tags=matched.get("tags") if isinstance(matched.get("tags"), list) else None,
+                requested_keys=occupation_keys,
+            )
+            provenance = (
+                dict(matched.get("metadata_provenance"))
+                if isinstance(matched.get("metadata_provenance"), dict)
+                else {}
+            )
+            provenance["occupation_relevance"] = decision.as_dict()
+            matched["metadata_provenance"] = provenance
+            if not decision.accepted:
+                rejected_counts_by_source[source_key] = (
+                    rejected_counts_by_source.get(source_key, 0) + 1
+                )
+                continue
             matched["_source_run_key"] = source_key
             filtered_jobs.append(matched)
             matched_counts_by_source[source_key] = matched_counts_by_source.get(source_key, 0) + 1
@@ -307,6 +337,15 @@ async def store_curated_ats_payloads_for_user(
         if user_stat.get("status") == "success":
             user_stat["raw_count"] = matched_counts_by_source.get(source_key, 0)
         user_stat["new_count"] = stored_counts_by_source.get(source_key, 0)
+        rejected = rejected_counts_by_source.get(source_key, 0)
+        if rejected:
+            user_stat["skipped_count"] = int(user_stat.get("skipped_count") or 0) + rejected
+        details = dict(user_stat.get("details") or {})
+        details["occupation_accepted_count"] = matched_counts_by_source.get(source_key, 0)
+        details["occupation_rejected_count"] = rejected
+        if occupation_keys:
+            details["requested_occupations"] = list(occupation_keys)
+        user_stat["details"] = details
         user_source_stats.append(user_stat)
 
     await storage._record_source_runs(

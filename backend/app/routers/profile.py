@@ -37,6 +37,11 @@ def _serialize_profile(profile: Profile) -> ProfileResponse:
         target_roles=profile.target_roles,
         target_occupations=profile.target_occupations,
         target_locations=profile.target_locations,
+        job_preferences=(
+            profile.job_preferences
+            if isinstance(profile.job_preferences, dict)
+            else {}
+        ),
         linkedin_url=profile.linkedin_url,
         github_url=profile.github_url,
         portfolio_url=profile.portfolio_url,
@@ -317,6 +322,7 @@ async def update_profile(
     # Re-score jobs if scoring-relevant fields changed
     scoring_fields = {
         "target_roles", "target_locations", "target_industries", "target_occupations",
+        "job_preferences",
     }
     if scoring_fields & set(update_data.keys()):
         from app.tasks.jobs import rescore_user_jobs  # noqa: PLC0415

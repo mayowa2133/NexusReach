@@ -63,6 +63,22 @@ const evaluation: ResumeQualityEvaluation = {
   truthfulness: {
     unverified_inferred_additions_excluded: 1,
     excluded_phrases: ['Kubernetes'],
+    ledger: {
+      version: 1,
+      status: 'passed',
+      rendered_entry_count: 12,
+      violations: [],
+    },
+  },
+  render_qa: {
+    status: 'passed',
+    version: 1,
+    page_count: 1,
+    pypdf_text_retention: 0.98,
+    poppler_text_retention: 0.99,
+    parser_agreement: 0.97,
+    section_order: ['Experience', 'Projects', 'Technical Skills'],
+    metric_count: 4,
   },
   disclaimer: 'This is an explainable screening simulation, not an employer decision.',
   reason: null,
@@ -74,8 +90,8 @@ describe('ResumeQualityPanel', () => {
     render(<ResumeQualityPanel evaluation={evaluation} />);
 
     expect(screen.getByText('Resume quality gate')).toBeInTheDocument();
-    expect(screen.getByText('Quality 82%')).toBeInTheDocument();
-    expect(screen.getByText('Competitive')).toBeInTheDocument();
+    expect(screen.getByText('Internal quality 82%')).toBeInTheDocument();
+    expect(screen.getByText('Internal readiness: Competitive')).toBeInTheDocument();
     expect(screen.getByText(/Early-career technical/)).toBeInTheDocument();
     expect(screen.getByText('Job fit')).toBeInTheDocument();
     expect(screen.getByText('Evidence quality')).toBeInTheDocument();
@@ -84,6 +100,8 @@ describe('ResumeQualityPanel', () => {
     expect(screen.getByText('20.0/35')).toBeInTheDocument();
     expect(screen.getByText(/Inspired by HackerRank Hiring Agent \(MIT\)/)).toBeInTheDocument();
     expect(screen.getByText(/Excluded 1 unconfirmed inferred claim/)).toBeInTheDocument();
+    expect(screen.getByText(/PDF verified · 1 page · 2 parsers/)).toBeInTheDocument();
+    expect(screen.getByText('Evidence ledger passed')).toBeInTheDocument();
     expect(screen.getByText(/not an employer decision/)).toBeInTheDocument();
   });
 

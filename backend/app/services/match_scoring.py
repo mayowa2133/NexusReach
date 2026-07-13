@@ -12,6 +12,11 @@ from types import SimpleNamespace
 
 from app.models.profile import Profile
 from app.services.occupation_taxonomy import classify_title
+from app.services.job_requirements import (
+    evaluate_job_eligibility,
+    extract_job_requirements,
+    requirement_terms as structured_requirement_terms,
+)
 
 # ---------------------------------------------------------------------------
 # Skill synonyms — map common aliases to a canonical form
@@ -337,17 +342,6 @@ def _resume_evidence_text(parsed: dict) -> str:
     return "\n".join(parts)
 
 
-_CRITICAL_CREDENTIAL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("CPA", re.compile(r"\bCPA\b", re.I)),
-    ("registered-nurse license", re.compile(r"\b(?:RN|registered nurse)\s+(?:license|licen[cs]ure)\b", re.I)),
-    ("bar admission", re.compile(r"\b(?:bar admission|admitted to the bar)\b", re.I)),
-    ("security clearance", re.compile(r"\b(?:security|secret|top secret)\s+clearance\b", re.I)),
-    ("PMP", re.compile(r"\bPMP\b", re.I)),
-    ("CISSP", re.compile(r"\bCISSP\b", re.I)),
-    ("driver's license", re.compile(r"\bdriver'?s? licen[cs]e\b", re.I)),
-)
-
-
 # ---------------------------------------------------------------------------
 # Main scoring function
 # ---------------------------------------------------------------------------
@@ -401,17 +395,26 @@ def score_job(job_data: dict, profile: Profile | None) -> tuple[float | None, di
     # Imported lazily because that module imports _estimate_user_years above.
     from app.services.resume_artifact.quality import _job_terms  # noqa: PLC0415
 
-    requirement_terms = _job_terms(SimpleNamespace(
+    legacy_terms = _job_terms(SimpleNamespace(
         title=job_data.get("title", ""),
         description=description,
         tags=job_data.get("tags") or [],
     ))
+    structured_requirements = extract_job_requirements(description)
+    structured_terms = structured_requirement_terms(structured_requirements)
+    requirement_terms = list(dict.fromkeys([*structured_terms, *legacy_terms]))
     matched_requirements = [
         term for term in requirement_terms if _skill_in_text(term, evidence_text)
     ]
-    required_terms = [
-        term for term in requirement_terms if _skill_in_text(term, req_text)
-    ]
+    required_terms = structured_requirement_terms([
+        requirement
+        for requirement in structured_requirements
+        if requirement.kind == "mandatory"
+    ])
+    if not required_terms:
+        required_terms = [
+            term for term in requirement_terms if _skill_in_text(term, req_text)
+        ]
     required_matched = [
         term for term in required_terms if _skill_in_text(term, evidence_text)
     ]
@@ -624,15 +627,35 @@ def score_job(job_data: dict, profile: Profile | None) -> tuple[float | None, di
         skills_score + exp_score + role_score
         + location_score + edu_score + level_score
     )
-    critical_matches = [
-        (label, pattern) for label, pattern in _CRITICAL_CREDENTIAL_PATTERNS
-        if pattern.search(req_text)
+    eligibility = evaluate_job_eligibility(
+        job_data=job_data,
+        requirements=structured_requirements,
+        evidence_text=evidence_text,
+        preferences=getattr(profile, "job_preferences", None),
+    )
+    breakdown["requirements"] = {
+        "version": 1,
+        "items": [requirement.as_dict() for requirement in structured_requirements],
+        "mandatory_count": sum(
+            requirement.kind == "mandatory" for requirement in structured_requirements
+        ),
+        "preferred_count": sum(
+            requirement.kind == "preferred" for requirement in structured_requirements
+        ),
+    }
+    breakdown["eligibility"] = eligibility.as_dict()
+    credential_failures = [
+        item for item in eligibility.hard_failures
+        if item.get("evidence_type") in {"credential", "license", "clearance"}
     ]
-    critical_requirements = [label for label, _ in critical_matches]
-    missing_critical = [
-        label for label, pattern in critical_matches
-        if not pattern.search(evidence_text)
+    critical_requirements = [
+        requirement.display_text
+        for requirement in structured_requirements
+        if requirement.kind == "mandatory"
+        and requirement.criticality == "hard"
+        and requirement.evidence_type in {"credential", "license", "clearance"}
     ]
+    missing_critical = [str(item.get("display_text")) for item in credential_failures]
     critical_gap_penalty = min(20.0, 10.0 * len(missing_critical))
     if critical_gap_penalty:
         total = max(0.0, total - critical_gap_penalty)

@@ -70,12 +70,22 @@ export function ResumeQualityPanel({ evaluation }: Props) {
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-medium">Resume quality gate</span>
-              <Badge className={scoreColor(overall)}>Quality {overall.toFixed(0)}%</Badge>
-              <Badge variant="outline">{readiness}</Badge>
+              <Badge className={scoreColor(overall)}>Internal quality {overall.toFixed(0)}%</Badge>
+              <Badge variant="outline">Internal readiness: {readiness}</Badge>
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
               {evaluation.profile_label} · {evaluation.rubric_version}
             </p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {evaluation.render_qa?.status === 'passed' && (
+                <Badge variant="outline">
+                  PDF verified · {evaluation.render_qa.page_count} page · 2 parsers
+                </Badge>
+              )}
+              {evaluation.truthfulness?.ledger?.status === 'passed' && (
+                <Badge variant="outline">Evidence ledger passed</Badge>
+              )}
+            </div>
           </div>
           <a
             href={evaluation.source_attribution.url}

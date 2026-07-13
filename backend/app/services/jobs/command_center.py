@@ -98,6 +98,17 @@ async def get_jobs(
     from app.utils.pagination import paginate
 
     query = select(Job).where(Job.user_id == user_id)
+    eligibility_value = Job.score_breakdown["eligibility"]["eligible"].as_boolean()
+    # Confirmed hard exclusions disappear from discovery, but never hide a job
+    # the user already moved into their tracking workflow.
+    query = query.where(
+        or_(
+            Job.stage != "discovered",
+            Job.score_breakdown.is_(None),
+            eligibility_value.is_(None),
+            eligibility_value.is_not(False),
+        )
+    )
     if defer_description:
         query = query.options(defer(Job.description))
     # Hide jobs whose people pre-warm is still running, so the user never sees a

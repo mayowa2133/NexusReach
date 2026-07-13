@@ -12,7 +12,7 @@ import { useProfile, useUpdateProfile, useUploadResume, getProfileCompletion } f
 import { useStories, useCreateStory, useUpdateStory, useDeleteStory } from '@/hooks/useStories';
 import { OccupationChipRow } from '@/components/OccupationChipRow';
 import { toast } from 'sonner';
-import type { Profile, Story, StoryInput } from '@/types';
+import type { JobPreferences, Profile, Story, StoryInput } from '@/types';
 
 const GOALS = ['job', 'mentor', 'network'] as const;
 const TONES = ['formal', 'conversational', 'humble'] as const;
@@ -31,7 +31,29 @@ type FormData = {
   linkedin_url: string;
   github_url: string;
   portfolio_url: string;
+  job_preferences: JobPreferences;
 };
+
+const EMPTY_JOB_PREFERENCES: JobPreferences = {
+  work_authorization_countries: [],
+  requires_sponsorship: null,
+  languages: [],
+  licenses: [],
+  clearances: [],
+  allowed_schedules: [],
+  max_travel_percent: null,
+  excluded_employers: [],
+  blocked_keywords: [],
+};
+
+type PreferenceListField =
+  | 'work_authorization_countries'
+  | 'languages'
+  | 'licenses'
+  | 'clearances'
+  | 'allowed_schedules'
+  | 'excluded_employers'
+  | 'blocked_keywords';
 
 function profileToForm(profile: Profile | undefined): FormData {
   return {
@@ -47,6 +69,10 @@ function profileToForm(profile: Profile | undefined): FormData {
     linkedin_url: profile?.linkedin_url ?? '',
     github_url: profile?.github_url ?? '',
     portfolio_url: profile?.portfolio_url ?? '',
+    job_preferences: {
+      ...EMPTY_JOB_PREFERENCES,
+      ...(profile?.job_preferences ?? {}),
+    },
   };
 }
 
@@ -58,7 +84,19 @@ export function ProfilePage() {
   const initialForm = useMemo(() => profileToForm(profile), [profile]);
   const [form, setForm] = useState<FormData>(profileToForm(undefined));
   const [formSynced, setFormSynced] = useState(false);
-  const [tagInput, setTagInput] = useState({ industries: '', roles: '', locations: '', sizes: '' });
+  const [tagInput, setTagInput] = useState({
+    industries: '',
+    roles: '',
+    locations: '',
+    sizes: '',
+    authorization: '',
+    languages: '',
+    licenses: '',
+    clearances: '',
+    schedules: '',
+    employers: '',
+    blocked: '',
+  });
 
   // Sync form with profile data when it first loads (avoids setState in useEffect)
   if (profile && !formSynced) {
@@ -113,6 +151,39 @@ export function ProfilePage() {
 
   const removeTag = (field: 'target_industries' | 'target_roles' | 'target_locations' | 'target_company_sizes', value: string) => {
     updateField(field, form[field].filter((v) => v !== value));
+  };
+
+  const updateJobPreferences = (next: Partial<JobPreferences>) => {
+    updateField('job_preferences', { ...form.job_preferences, ...next });
+  };
+
+  const addPreferenceTag = (
+    field: PreferenceListField,
+    inputKey: keyof typeof tagInput,
+  ) => {
+    const value = tagInput[inputKey].trim();
+    if (!value) return;
+    const current = form.job_preferences[field];
+    if (!current.some((item) => item.toLowerCase() === value.toLowerCase())) {
+      setForm((previous) => ({
+        ...previous,
+        job_preferences: {
+          ...previous.job_preferences,
+          [field]: [...previous.job_preferences[field], value],
+        },
+      }));
+    }
+    setTagInput((previous) => ({ ...previous, [inputKey]: '' }));
+  };
+
+  const removePreferenceTag = (field: PreferenceListField, value: string) => {
+    setForm((previous) => ({
+      ...previous,
+      job_preferences: {
+        ...previous.job_preferences,
+        [field]: previous.job_preferences[field].filter((item) => item !== value),
+      },
+    }));
   };
 
   if (isLoading) {
@@ -298,6 +369,122 @@ export function ProfilePage() {
                 onInputChange={(v) => setTagInput((p) => ({ ...p, sizes: v }))}
                 onAdd={() => addTag('target_company_sizes', 'sizes')}
                 onRemove={(v) => removeTag('target_company_sizes', v)}
+              />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Eligibility & Exclusions</CardTitle>
+              <CardDescription>
+                Confirm hard constraints so NexusReach can exclude jobs that cannot work for you. Blank fields remain unknown, never assumed.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <TagField
+                label="Work authorization countries"
+                placeholder="e.g. CA, US"
+                tags={form.job_preferences.work_authorization_countries}
+                inputValue={tagInput.authorization}
+                onInputChange={(value) => setTagInput((previous) => ({ ...previous, authorization: value }))}
+                onAdd={() => addPreferenceTag('work_authorization_countries', 'authorization')}
+                onRemove={(value) => removePreferenceTag('work_authorization_countries', value)}
+              />
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="sponsorship">Visa sponsorship</Label>
+                  <select
+                    id="sponsorship"
+                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    value={
+                      form.job_preferences.requires_sponsorship === null
+                        ? 'unknown'
+                        : form.job_preferences.requires_sponsorship
+                          ? 'required'
+                          : 'not_required'
+                    }
+                    onChange={(event) => updateJobPreferences({
+                      requires_sponsorship:
+                        event.target.value === 'unknown'
+                          ? null
+                          : event.target.value === 'required',
+                    })}
+                  >
+                    <option value="unknown">Not specified</option>
+                    <option value="required">I require sponsorship</option>
+                    <option value="not_required">I do not require sponsorship</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="max-travel">Maximum travel percentage</Label>
+                  <Input
+                    id="max-travel"
+                    type="number"
+                    min={0}
+                    max={100}
+                    placeholder="Leave blank if flexible"
+                    value={form.job_preferences.max_travel_percent ?? ''}
+                    onChange={(event) => updateJobPreferences({
+                      max_travel_percent: event.target.value
+                        ? Math.min(100, Math.max(0, Number(event.target.value)))
+                        : null,
+                    })}
+                  />
+                </div>
+              </div>
+              <TagField
+                label="Languages"
+                placeholder="e.g. English, French"
+                tags={form.job_preferences.languages}
+                inputValue={tagInput.languages}
+                onInputChange={(value) => setTagInput((previous) => ({ ...previous, languages: value }))}
+                onAdd={() => addPreferenceTag('languages', 'languages')}
+                onRemove={(value) => removePreferenceTag('languages', value)}
+              />
+              <TagField
+                label="Licenses and certifications"
+                placeholder="e.g. RN license, CPA, PMP"
+                tags={form.job_preferences.licenses}
+                inputValue={tagInput.licenses}
+                onInputChange={(value) => setTagInput((previous) => ({ ...previous, licenses: value }))}
+                onAdd={() => addPreferenceTag('licenses', 'licenses')}
+                onRemove={(value) => removePreferenceTag('licenses', value)}
+              />
+              <TagField
+                label="Security clearances"
+                placeholder="e.g. Secret clearance"
+                tags={form.job_preferences.clearances}
+                inputValue={tagInput.clearances}
+                onInputChange={(value) => setTagInput((previous) => ({ ...previous, clearances: value }))}
+                onAdd={() => addPreferenceTag('clearances', 'clearances')}
+                onRemove={(value) => removePreferenceTag('clearances', value)}
+              />
+              <TagField
+                label="Allowed special schedules"
+                placeholder="e.g. shift work, on-call"
+                tags={form.job_preferences.allowed_schedules}
+                inputValue={tagInput.schedules}
+                onInputChange={(value) => setTagInput((previous) => ({ ...previous, schedules: value }))}
+                onAdd={() => addPreferenceTag('allowed_schedules', 'schedules')}
+                onRemove={(value) => removePreferenceTag('allowed_schedules', value)}
+              />
+              <TagField
+                label="Excluded employers"
+                placeholder="Companies you do not want to see"
+                tags={form.job_preferences.excluded_employers}
+                inputValue={tagInput.employers}
+                onInputChange={(value) => setTagInput((previous) => ({ ...previous, employers: value }))}
+                onAdd={() => addPreferenceTag('excluded_employers', 'employers')}
+                onRemove={(value) => removePreferenceTag('excluded_employers', value)}
+              />
+              <TagField
+                label="Blocked job keywords"
+                placeholder="e.g. commission-only, overnight"
+                tags={form.job_preferences.blocked_keywords}
+                inputValue={tagInput.blocked}
+                onInputChange={(value) => setTagInput((previous) => ({ ...previous, blocked: value }))}
+                onAdd={() => addPreferenceTag('blocked_keywords', 'blocked')}
+                onRemove={(value) => removePreferenceTag('blocked_keywords', value)}
               />
             </CardContent>
           </Card>
