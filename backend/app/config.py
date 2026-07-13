@@ -158,6 +158,12 @@ class Settings(BaseSettings):
     linkedin_graph_refresh_recommended_days: int = 30
     linkedin_graph_stale_after_days: int = 90
 
+    # Companion extension auth (long-lived nrc_ tokens; see services/companion_tokens)
+    companion_token_ttl_days: int = 180
+    # Daily cap on LinkedIn graph sync sessions per user — bounds how often the
+    # companion (auto-sync included) can scrape LinkedIn on a user's behalf.
+    companion_sync_daily_limit: int = 6
+
     # Stale contact re-verification
     reverify_stale_days: int = 14
     # Employment verification can invoke multiple search providers per contact.

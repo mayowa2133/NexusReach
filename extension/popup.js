@@ -12,6 +12,12 @@ const disconnectBtn = document.getElementById("disconnect-btn");
 const apiUrlInput = document.getElementById("api-url");
 const authTokenInput = document.getElementById("auth-token");
 const autofillToggle = document.getElementById("autofill-toggle");
+const notConnectedCard = document.getElementById("not-connected-card");
+const reconnectBanner = document.getElementById("reconnect-banner");
+const openAppBtn = document.getElementById("open-app-btn");
+
+const DEFAULT_APP_URL = "http://localhost:5173";
+let knownAppUrl = null;
 
 // ---------------------------------------------------------------------------
 // View toggling
@@ -71,6 +77,17 @@ async function init() {
 
   // Check connection status
   chrome.runtime.sendMessage({ type: "GET_STATUS" }, (resp) => {
+    knownAppUrl = resp?.appUrl || null;
+
+    if (resp && resp.needsReconnect) {
+      // Token was revoked or expired server-side: keep the stored state but
+      // steer the user back to the app to mint a fresh companion token.
+      showLogin();
+      notConnectedCard.classList.add("hidden");
+      reconnectBanner.classList.remove("hidden");
+      return;
+    }
+
     if (resp && resp.connected && resp.hasProfile) {
       chrome.runtime.sendMessage({ type: "GET_PROFILE" }, (r) => {
         showConnected(r.profile);
@@ -144,6 +161,10 @@ disconnectBtn.addEventListener("click", () => {
 
 autofillToggle.addEventListener("change", () => {
   chrome.storage.local.set({ autofillEnabled: autofillToggle.checked });
+});
+
+openAppBtn.addEventListener("click", () => {
+  chrome.tabs.create({ url: `${knownAppUrl || DEFAULT_APP_URL}/settings` });
 });
 
 // Go

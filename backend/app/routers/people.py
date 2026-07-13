@@ -14,10 +14,13 @@ from app.services.known_people_service import expire_known_person
 from app.services.people.hiring_team_capture import ingest_hiring_team_capture
 
 from app.database import get_db
-from app.dependencies import get_current_user_id
+from app.dependencies import get_companion_or_user_id, get_current_user_id
 from app.middleware.rate_limit import limiter
 from app.observability import capture_event
-from app.utils.discovery_rate_limit import check_discovery_rate_limit
+from app.utils.discovery_rate_limit import (
+    check_discovery_rate_limit,
+    check_discovery_rate_limit_companion,
+)
 from app.schemas.people import (
     LinkedInPageCaptureRequest,
     PeopleSearchRequest,
@@ -191,9 +194,10 @@ async def save_linkedin_page_capture(
     request: Request,
     person_id: str,
     body: LinkedInPageCaptureRequest,
-    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    # Companion auth: the extension saves page captures during LinkedIn assist.
+    user_id: Annotated[uuid.UUID, Depends(get_companion_or_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
-    _rate_check: Annotated[None, Depends(check_discovery_rate_limit)],
+    _rate_check: Annotated[None, Depends(check_discovery_rate_limit_companion)],
 ):
     try:
         person_uuid = uuid.UUID(person_id)
@@ -381,7 +385,8 @@ class HiringTeamCaptureRequest(BaseModel):
 @router.post("/hiring-team-capture")
 async def hiring_team_capture(
     body: HiringTeamCaptureRequest,
-    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    # Companion auth: the extension ingests the hiring-team panel it captured.
+    user_id: Annotated[uuid.UUID, Depends(get_companion_or_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Ingest the LinkedIn 'Meet the hiring team' panel from the companion.

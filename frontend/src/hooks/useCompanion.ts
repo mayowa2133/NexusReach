@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
   connectCompanion,
+  disconnectCompanion,
   pingCompanion,
   refreshLinkedInGraphInCompanion,
   runLinkedInAssist,
@@ -25,6 +26,17 @@ export function useConnectCompanion() {
 
   return useMutation({
     mutationFn: connectCompanion,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: COMPANION_STATUS_QUERY_KEY });
+    },
+  });
+}
+
+export function useDisconnectCompanion() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: disconnectCompanion,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: COMPANION_STATUS_QUERY_KEY });
     },

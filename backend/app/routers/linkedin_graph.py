@@ -6,8 +6,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
-from app.dependencies import get_current_user_id
+from app.dependencies import get_companion_or_user_id, get_current_user_id
 from app.middleware.rate_limit import limiter
+from app.utils.discovery_rate_limit import check_linkedin_sync_rate_limit
 from app.schemas.linkedin_graph import (
     LinkedInGraphImportBatchRequest,
     LinkedInGraphImportFollowBatchRequest,
@@ -22,7 +23,8 @@ router = APIRouter(prefix="/linkedin-graph", tags=["linkedin-graph"])
 
 @router.get("/status", response_model=LinkedInGraphStatusResponse)
 async def get_status(
-    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    # Companion auth: the extension polls staleness for auto-sync.
+    user_id: Annotated[uuid.UUID, Depends(get_companion_or_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     return await linkedin_graph_service.get_status(db, user_id)
@@ -30,8 +32,10 @@ async def get_status(
 
 @router.post("/sync-session", response_model=LinkedInGraphSyncSessionResponse)
 async def create_sync_session(
-    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    # Companion auth: the extension starts sync sessions on its own (auto-sync).
+    user_id: Annotated[uuid.UUID, Depends(get_companion_or_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    _rate_check: Annotated[None, Depends(check_linkedin_sync_rate_limit)],
 ):
     return await linkedin_graph_service.create_sync_session(db, user_id)
 

@@ -1,11 +1,12 @@
-import { API_URL, getApiAccessToken } from '@/lib/api';
+import { api, API_URL } from '@/lib/api';
 import type { LinkedInGraphSyncSession, MessageWarmPath } from '@/types';
 
 type CompanionRequestType =
   | 'NR_EXTENSION_PING'
   | 'NR_EXTENSION_CONNECT'
   | 'NR_LINKEDIN_ASSIST'
-  | 'NR_LINKEDIN_GRAPH_REFRESH';
+  | 'NR_LINKEDIN_GRAPH_REFRESH'
+  | 'LOGOUT';
 
 type CompanionResponseEnvelope<T> = {
   source?: string;
@@ -134,20 +135,36 @@ export async function pingCompanion(): Promise<CompanionStatus> {
   }
 }
 
+interface CompanionTokenGrant {
+  token: string;
+  expires_at: string;
+}
+
 export async function connectCompanion() {
-  const authToken = await getApiAccessToken();
-  if (!authToken) {
-    throw new Error('Sign in again before connecting the companion.');
-  }
+  // Mint a long-lived companion token (revokes any previous one) instead of
+  // handing the extension the short-lived Supabase JWT, which expires within
+  // the hour and silently disconnected the companion.
+  const grant = await api.post<CompanionTokenGrant>('/api/companion/token');
 
   return sendCompanionRequest<CompanionStatus>(
     'NR_EXTENSION_CONNECT',
     {
       apiUrl: API_URL,
-      authToken,
+      authToken: grant.token,
     },
     15000,
   );
+}
+
+export async function disconnectCompanion() {
+  await api.delete<{ revoked: number }>('/api/companion/token');
+  try {
+    // Best-effort: clear the extension's stored (now revoked) token too.
+    await sendCompanionRequest('LOGOUT', {}, 5000);
+  } catch {
+    // Extension not installed or not responding — the token is revoked
+    // server-side either way.
+  }
 }
 
 export async function runLinkedInAssist(request: LinkedInAssistRequest) {
@@ -161,16 +178,13 @@ export async function runLinkedInAssist(request: LinkedInAssistRequest) {
 export async function refreshLinkedInGraphInCompanion(
   syncSession: LinkedInGraphSyncSession,
 ) {
-  const authToken = await getApiAccessToken();
-  if (!authToken) {
-    throw new Error('Sign in again before refreshing your LinkedIn graph.');
-  }
-
+  // No authToken here: the extension uses its stored companion token.
+  // Passing the Supabase JWT would overwrite that token with one that
+  // expires within the hour.
   return sendCompanionRequest<LinkedInGraphRefreshResult>(
     'NR_LINKEDIN_GRAPH_REFRESH',
     {
       apiUrl: API_URL,
-      authToken,
       sessionToken: syncSession.session_token,
       maxBatchSize: syncSession.max_batch_size,
     },

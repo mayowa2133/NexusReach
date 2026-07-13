@@ -21,6 +21,7 @@ import {
 import {
   useCompanionStatus,
   useConnectCompanion,
+  useDisconnectCompanion,
   useRefreshLinkedInGraphInCompanion,
 } from '@/hooks/useCompanion';
 import { API_URL } from '@/lib/api';
@@ -161,6 +162,7 @@ export function SettingsPage() {
   const { data: linkedinGraphStatus, isLoading: linkedinGraphLoading } = useLinkedInGraphStatus();
   const { data: companionStatus } = useCompanionStatus();
   const connectCompanion = useConnectCompanion();
+  const disconnectCompanion = useDisconnectCompanion();
   const refreshLinkedInGraphInCompanion = useRefreshLinkedInGraphInCompanion();
   const startLinkedInSync = useStartLinkedInGraphSyncSession();
   const uploadLinkedInGraphFile = useUploadLinkedInGraphFile();
@@ -239,6 +241,15 @@ export function SettingsPage() {
       toast.success('Solomon Companion connected');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to connect the companion');
+    }
+  };
+
+  const handleDisconnectCompanion = async () => {
+    try {
+      await disconnectCompanion.mutateAsync();
+      toast.success('Companion disconnected');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to disconnect the companion');
     }
   };
 
@@ -467,6 +478,15 @@ export function SettingsPage() {
             >
               {connectCompanion.isPending ? 'Connecting...' : 'Connect Companion'}
             </Button>
+            {companionStatus?.connected && (
+              <Button
+                variant="outline"
+                onClick={handleDisconnectCompanion}
+                disabled={disconnectCompanion.isPending}
+              >
+                {disconnectCompanion.isPending ? 'Disconnecting...' : 'Disconnect Companion'}
+              </Button>
+            )}
             <Button
               onClick={handleRefreshInCompanion}
               disabled={

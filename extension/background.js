@@ -5,27 +5,63 @@ const LINKEDIN_FOLLOWING_PEOPLE_URL =
   "https://www.linkedin.com/mynetwork/network-manager/people-follow/following/";
 
 async function getConfig() {
-  const data = await chrome.storage.local.get(["apiUrl", "authToken", "profile"]);
+  const data = await chrome.storage.local.get([
+    "apiUrl",
+    "authToken",
+    "profile",
+    "appUrl",
+    "needsReconnect",
+  ]);
   return {
     apiUrl: data.apiUrl || DEFAULT_API_URL,
     authToken: data.authToken || null,
     profile: data.profile || null,
+    appUrl: data.appUrl || null,
+    needsReconnect: Boolean(data.needsReconnect),
   };
 }
 
-async function setConfig({ apiUrl, authToken }) {
+async function setConfig({ apiUrl, authToken, appUrl }) {
   const update = {};
   if (apiUrl) update.apiUrl = apiUrl.replace(/\/+$/, "");
-  if (authToken) update.authToken = authToken;
+  if (appUrl) update.appUrl = appUrl.replace(/\/+$/, "");
+  if (authToken) {
+    // A fresh token (long-lived companion token minted by the app) clears any
+    // pending reconnect state.
+    update.authToken = authToken;
+    update.needsReconnect = false;
+  }
   await chrome.storage.local.set(update);
+  if (authToken) {
+    clearReconnectBadge();
+  }
 }
 
 async function setToken(token) {
-  await chrome.storage.local.set({ authToken: token });
+  await chrome.storage.local.set({ authToken: token, needsReconnect: false });
+  clearReconnectBadge();
+}
+
+function clearReconnectBadge() {
+  try {
+    chrome.action.setBadgeText({ text: "" });
+  } catch {
+    // Cosmetic only.
+  }
 }
 
 async function clearAuth() {
-  await chrome.storage.local.remove(["authToken", "profile"]);
+  await chrome.storage.local.remove(["authToken", "profile", "needsReconnect"]);
+}
+
+async function markNeedsReconnect() {
+  await chrome.storage.local.set({ needsReconnect: true });
+  try {
+    chrome.action.setBadgeText({ text: "!" });
+    chrome.action.setBadgeBackgroundColor({ color: "#ef4444" });
+  } catch {
+    // Badge APIs are cosmetic — never fail the request over them.
+  }
 }
 
 async function apiRequest(path, options = {}) {
@@ -44,7 +80,10 @@ async function apiRequest(path, options = {}) {
   });
 
   if (response.status === 401 || response.status === 403) {
-    await clearAuth();
+    // Keep the token so the user can see what happened; flag reconnect
+    // instead of silently wiping state (the token may have been revoked or
+    // expired server-side).
+    await markNeedsReconnect();
     throw new Error("Companion authentication expired. Reconnect it from NexusReach Settings.");
   }
 
@@ -378,7 +417,7 @@ async function runGraphRefresh(payload) {
   };
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "GET_PROFILE") {
     getConfig().then(({ profile }) => {
       if (profile) {
@@ -426,16 +465,21 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === "LOGOUT") {
-    clearAuth().then(() => sendResponse({ ok: true }));
+    clearAuth().then(() => {
+      clearReconnectBadge();
+      sendResponse({ ok: true });
+    });
     return true;
   }
 
   if (message.type === "GET_STATUS") {
-    getConfig().then(({ authToken, profile }) => {
+    getConfig().then(({ authToken, profile, needsReconnect, appUrl }) => {
       sendResponse({
         available: true,
         connected: Boolean(authToken),
         hasProfile: Boolean(profile),
+        needsReconnect,
+        appUrl,
         name: profile?.full_name || null,
         version: chrome.runtime.getManifest().version,
       });
@@ -444,11 +488,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === "NR_EXTENSION_PING") {
-    getConfig().then(({ authToken, profile }) => {
+    getConfig().then(({ authToken, profile, needsReconnect }) => {
       sendResponse({
         available: true,
         connected: Boolean(authToken),
         hasProfile: Boolean(profile),
+        needsReconnect,
         name: profile?.full_name || null,
         version: chrome.runtime.getManifest().version,
       });
@@ -460,6 +505,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     setConfig({
       apiUrl: message.payload?.apiUrl,
       authToken: message.payload?.authToken,
+      // Remember which NexusReach origin connected us so the popup can link
+      // back to the app (works for both localhost dev and production).
+      appUrl: sender?.origin || null,
     }).then(async () => {
       const profile = await fetchProfile();
       sendResponse({

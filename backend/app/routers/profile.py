@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
-from app.dependencies import get_current_user_id
+from app.dependencies import get_companion_or_user_id, get_current_user_id
 from app.middleware.rate_limit import limiter
 from app.models.profile import Profile
 from app.models.search_preference import SearchPreference
@@ -217,7 +217,8 @@ async def get_profile(
 
 @router.get("/autofill", response_model=AutofillProfileResponse)
 async def get_autofill_profile(
-    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    # Companion auth: this is the extension's profile fetch.
+    user_id: Annotated[uuid.UUID, Depends(get_companion_or_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Lightweight profile endpoint optimized for Chrome extension autofill."""

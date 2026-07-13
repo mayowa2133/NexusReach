@@ -12,11 +12,16 @@ from httpx import ASGITransport, AsyncClient
 
 from app.config import settings
 from app.main import app
-from app.dependencies import get_current_user_id
+from app.dependencies import get_companion_or_user_id, get_current_user_id
 from app.middleware.rate_limit import limiter
+from app.utils.discovery_rate_limit import check_linkedin_sync_rate_limit
 
 # Deterministic test user
 TEST_USER_ID = uuid.UUID("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+
+
+async def _noop_dependency():
+    return None
 
 
 @pytest.fixture
@@ -40,6 +45,12 @@ def authed_client(mock_user_id):
         return mock_user_id
 
     app.dependency_overrides[get_current_user_id] = _override_auth
+    # Companion-callable endpoints use a dual-auth dependency; bypass it the
+    # same way so authed tests cover both paths uniformly.
+    app.dependency_overrides[get_companion_or_user_id] = _override_auth
+    # The LinkedIn sync limit (6/day) is low enough that repeated local test
+    # runs against a live Redis would trip real 429s — no-op it here.
+    app.dependency_overrides[check_linkedin_sync_rate_limit] = _noop_dependency
     yield
     app.dependency_overrides.clear()
 
