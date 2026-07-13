@@ -101,6 +101,7 @@ async def test_search_jobs_persists_enriched_newgrad_metadata():
             return_value=[_newgrad_job()],
         ),
         patch("app.services.jobs.storage._find_existing_job", new_callable=AsyncMock, return_value=None),
+        patch("app.services.jobs.storage.finalize_new_jobs", new_callable=AsyncMock) as finalize,
     ):
         jobs = await search_jobs(db, user_id, query="software engineer", sources=["newgrad"])
 
@@ -114,6 +115,8 @@ async def test_search_jobs_persists_enriched_newgrad_metadata():
     assert job.experience_level == "new_grad"
     assert job.source == "newgrad_jobs"
     assert job.apply_url == "https://careers.usbank.com/associate-software-engineer"
+    finalize.assert_awaited_once()
+    assert finalize.await_args.args[2] == [job]
 
 
 async def test_search_jobs_records_source_failure_without_aborting_other_sources():

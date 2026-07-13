@@ -29,6 +29,7 @@ from app.utils.job_context import (
 )
 from app.services.occupation_taxonomy import (
     is_engineering_flavored as _occupation_is_engineering_flavored,
+    peer_title_seeds_for as _occupation_peer_titles,
 )
 
 from app.services.people.buckets import _append_bucket, _backfill_sparse_hiring_manager_bucket, _bucketed_linkedin_slugs, _finalize_bucketed
@@ -291,12 +292,16 @@ async def search_people_at_company(
     # "Software Engineer Intern", "Incoming SWE Intern") and a single query batch
     # often returns mostly former interns or posts rather than current profiles.
     if roles_context and roles_context.early_career:
-        early_career_titles = [
-            "SWE Intern",
-            "Software Engineer",
-            "Production Engineer",
-            "New Grad",
-        ]
+        base_peer_titles = _occupation_peer_titles(
+            roles_context.occupation_keys,
+            department=roles_context.department,
+        ) or roles_context.peer_titles
+        early_career_titles = list(dict.fromkeys([
+            *roles_context.peer_titles,
+            *(f"{title} Intern" for title in base_peer_titles[:4]),
+            *(f"New Grad {title}" for title in base_peer_titles[:4]),
+            *base_peer_titles[:4],
+        ]))
         extra_peers = await _search_candidates(
             company_name,
             titles=early_career_titles,
@@ -695,6 +700,7 @@ async def search_people_at_company(
         bucketed,
         target_count_per_bucket=target_count_per_bucket,
         location_terms=getattr(roles_context, "job_geo_terms", None),
+        context=roles_context,
     )
 
     # Record search in audit log
@@ -2135,6 +2141,7 @@ async def search_people_for_job(
         bucketed,
         target_count_per_bucket=target_count_per_bucket,
         location_terms=getattr(context, "job_geo_terms", None),
+        context=context,
     )
     if debug is not None:
         debug["final"] = {

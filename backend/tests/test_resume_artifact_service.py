@@ -463,6 +463,7 @@ def test_frontend_fullstack_experience_prefers_first_two_plus_best_relevant_thir
 
 from app.services.resume_artifact_service import _filter_rewrites_by_decisions  # noqa: E402
 from app.services.resume_tailor import _normalize_bullet_rewrites  # noqa: E402
+from app.services.resume_artifact.rewrites import _should_use_rewrite  # noqa: E402
 
 
 def _rewrites():
@@ -509,6 +510,20 @@ def test_filter_rejected_overrides_auto_accept():
     assert not any(r["id"] == "rw-inferred" for r in allowed)
 
 
+def test_every_rewrite_type_must_preserve_all_source_metrics():
+    original = "Reduced processing time by 35% across 4 regions for 10,000 users."
+    assert _should_use_rewrite(
+        original,
+        "Reduced processing time by 35% across 4 regions for 10,000 users using automation.",
+        change_type="inferred_claim",
+    )
+    assert not _should_use_rewrite(
+        original,
+        "Reduced processing time by 35% using automation.",
+        change_type="inferred_claim",
+    )
+
+
 def test_normalize_bullet_rewrites_fills_missing_fields():
     rewrites = _normalize_bullet_rewrites([
         {"original": "Built API.", "rewritten": "Built RESTful API with telemetry."},
@@ -521,10 +536,13 @@ def test_normalize_bullet_rewrites_fills_missing_fields():
     ])
     assert len(rewrites) == 2
     assert all("id" in r for r in rewrites)
-    # Second rewrite preserves declared change_type + flag
+    # Declared additions are preserved and deterministic validation appends any
+    # additional claim-bearing words the model failed to disclose.
     assert rewrites[1]["change_type"] == "inferred_claim"
     assert rewrites[1]["requires_user_confirm"] is True
-    assert rewrites[1]["inferred_additions"] == ["accessible", "component-based"]
+    assert rewrites[1]["inferred_additions"] == [
+        "accessible", "component-based", "responsive", "ui",
+    ]
 
 
 def test_normalize_bullet_rewrites_classifies_inferred_from_delta():
@@ -539,6 +557,69 @@ def test_normalize_bullet_rewrites_classifies_inferred_from_delta():
     ])
     assert rewrites[0]["change_type"] == "inferred_claim"
     assert rewrites[0]["requires_user_confirm"] is True
+
+
+def test_normalize_bullet_rewrites_gates_single_new_domain_word():
+    rewrite = _normalize_bullet_rewrites([{
+        "original": "Led campaigns",
+        "rewritten": "Led brand campaigns",
+        "change_type": "keyword",
+        "requires_user_confirm": False,
+    }])[0]
+
+    assert rewrite["change_type"] == "inferred_claim"
+    assert rewrite["requires_user_confirm"] is True
+    assert rewrite["inferred_additions"] == ["brand"]
+
+
+def test_render_resume_excludes_unsupported_tailored_skills_and_keywords():
+    profile = _make_profile()
+    job = SimpleNamespace(
+        title="Financial Analyst",
+        company_name="Target",
+        description="CPA and SAP are required.",
+    )
+    tailored = SimpleNamespace(
+        skills_to_emphasize=[],
+        skills_to_add=["CPA"],
+        keywords_to_add=["SAP"],
+        bullet_rewrites=[],
+    )
+
+    latex = _render_resume_latex(
+        profile=profile,
+        user=SimpleNamespace(email="candidate@example.com"),
+        job=job,
+        tailored=tailored,
+    )
+
+    assert "CPA" not in latex
+    assert "SAP" not in latex
+
+
+def test_render_resume_keeps_tailored_terms_supported_by_source_evidence():
+    profile = _make_profile()
+    job = SimpleNamespace(
+        title="Frontend Engineer",
+        company_name="Target",
+        description="React and Playwright are required.",
+    )
+    tailored = SimpleNamespace(
+        skills_to_emphasize=["React"],
+        skills_to_add=[],
+        keywords_to_add=["Playwright"],
+        bullet_rewrites=[],
+    )
+
+    latex = _render_resume_latex(
+        profile=profile,
+        user=SimpleNamespace(email="candidate@example.com"),
+        job=job,
+        tailored=tailored,
+    )
+
+    assert "React" in latex
+    assert "Playwright" in latex
 
 
 def test_build_redline_resume_artifact_content_marks_rendered_edits():

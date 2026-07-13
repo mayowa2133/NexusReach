@@ -284,33 +284,48 @@ def _job_terms(job: object) -> list[str]:
             re.IGNORECASE,
         )
     ]
+    # "Requirements" is normally a section-header stopword, but in business
+    # analysis it is a real capability when paired with gather/define/document.
+    if re.search(
+        r"\b(?:gather|define|document|analy[sz]e|translate)\w*\s+(?:business\s+)?requirements\b",
+        description,
+        re.IGNORECASE,
+    ):
+        ordered.append("requirements")
 
     title = _text(getattr(job, "title", ""))
-    title_tokens = re.findall(r"[A-Za-z][A-Za-z0-9+#./-]{2,}", title)
-    body_tokens = re.findall(r"[A-Za-z][A-Za-z0-9+#./-]{3,}", description)
+    title_tokens = re.findall(r"[A-Za-z][A-Za-z0-9+#.&/-]{1,}", title)
+    body_tokens = re.findall(r"[A-Za-z][A-Za-z0-9+#.&/-]{1,}", description)
     counts: dict[str, int] = {}
     original: dict[str, str] = {}
-    for token in body_tokens:
+    first_position: dict[str, int] = {}
+    for position, token in enumerate(body_tokens):
         key = token.lower().strip("./-")
-        if key in _JOB_STOPWORDS or key in _MARKUP_STOPWORDS or len(key) < 4:
+        if (
+            key in _JOB_STOPWORDS
+            or key in _MARKUP_STOPWORDS
+            or (len(key) < 3 and not token.isupper())
+        ):
             continue
         counts[key] = counts.get(key, 0) + 1
         original.setdefault(key, token.strip("./-"))
+        first_position.setdefault(key, position)
 
     title_candidates = [
         token for token in title_tokens
         if token.lower().strip("./-") not in _JOB_STOPWORDS
         and token.lower().strip("./-") not in _MARKUP_STOPWORDS
     ]
-    # Body candidates: repeated tokens (>= 2 = emphasized) OR longer domain nouns
-    # seen once ("reconciliation", "compliance", "curriculum", "assessment").
-    # JDs rarely repeat skill nouns, so a strict >= 2 gate collapsed non-tech
-    # term sets to just the title words; the length>= 7 rule recovers the real
-    # requirements without admitting short filler.
+    # Once filler is removed, retain single-occurrence domain terms too. Short
+    # but critical requirements (SQL, SEO, ETL, CAD, API, quota, scope, risk)
+    # were previously discarded by the repeated/length>=7 rule, making whole
+    # occupations score against generic title words instead of requirements.
     body_candidates = [
         original[key]
-        for key, _ in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
-        if counts[key] >= 2 or len(key) >= 7
+        for key, _ in sorted(
+            counts.items(), key=lambda item: (-item[1], first_position[item[0]])
+        )
+        if len(key) >= 3 or original[key].isupper()
     ]
     candidates = [*ordered, *title_candidates, *body_candidates]
 

@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import re
 from datetime import date, datetime
+from types import SimpleNamespace
 
 from app.models.profile import Profile
+from app.services.occupation_taxonomy import classify_title
 
 # ---------------------------------------------------------------------------
 # Skill synonyms — map common aliases to a canonical form
@@ -313,6 +315,39 @@ def _estimate_user_years(experience: list[dict]) -> float:
     return float(len(experience))  # fallback: one parsed entry approximates one year
 
 
+def _resume_evidence_text(parsed: dict) -> str:
+    """Flatten user-provided professional evidence for requirement matching."""
+    parts: list[str] = []
+    parts.extend(str(item) for item in (parsed.get("skills") or []) if item)
+    for values in (parsed.get("skills_by_category") or {}).values():
+        if isinstance(values, list):
+            parts.extend(str(item) for item in values if item)
+    parts.extend(str(item) for item in (parsed.get("certificates") or []) if item)
+    for section in ("experience", "projects", "education"):
+        for entry in parsed.get(section) or []:
+            if not isinstance(entry, dict):
+                continue
+            for key in (
+                "title", "company", "name", "description", "degree", "field",
+            ):
+                if entry.get(key):
+                    parts.append(str(entry[key]))
+            for key in ("bullets", "technologies", "details"):
+                parts.extend(str(item) for item in (entry.get(key) or []) if item)
+    return "\n".join(parts)
+
+
+_CRITICAL_CREDENTIAL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("CPA", re.compile(r"\bCPA\b", re.I)),
+    ("registered-nurse license", re.compile(r"\b(?:RN|registered nurse)\s+(?:license|licen[cs]ure)\b", re.I)),
+    ("bar admission", re.compile(r"\b(?:bar admission|admitted to the bar)\b", re.I)),
+    ("security clearance", re.compile(r"\b(?:security|secret|top secret)\s+clearance\b", re.I)),
+    ("PMP", re.compile(r"\bPMP\b", re.I)),
+    ("CISSP", re.compile(r"\bCISSP\b", re.I)),
+    ("driver's license", re.compile(r"\bdriver'?s? licen[cs]e\b", re.I)),
+)
+
+
 # ---------------------------------------------------------------------------
 # Main scoring function
 # ---------------------------------------------------------------------------
@@ -351,7 +386,7 @@ def score_job(job_data: dict, profile: Profile | None) -> tuple[float | None, di
     breakdown: dict[str, object] = {}
 
     # -----------------------------------------------------------------------
-    # 1. Skills match (0-35 points)
+    # 1. Supported job-requirement coverage (0-35 points)
     # -----------------------------------------------------------------------
     skills_score = 0.0
     skills_detail: dict[str, object] = {"matched": [], "total_resume_skills": 0}
@@ -360,23 +395,43 @@ def score_job(job_data: dict, profile: Profile | None) -> tuple[float | None, di
     if profile.resume_parsed and profile.resume_parsed.get("skills"):
         resume_skills = profile.resume_parsed["skills"]
 
-    if resume_skills:
-        canonical_resume = _canonicalize_skills(resume_skills)
-        skills_detail["total_resume_skills"] = len(canonical_resume)
-        skills_detail["required_matched"] = _extract_required_skills(req_text, resume_skills)
+    parsed_resume = profile.resume_parsed or {}
+    evidence_text = _resume_evidence_text(parsed_resume)
+    # Shared deterministic term extraction used by the resume quality gate.
+    # Imported lazily because that module imports _estimate_user_years above.
+    from app.services.resume_artifact.quality import _job_terms  # noqa: PLC0415
 
-        matched = []
-        for skill in canonical_resume:
-            # Check in requirements section first (higher weight), then full text
-            if _skill_in_text(skill, req_text):
-                matched.append(skill)
-            elif _skill_in_text(skill, full_text):
-                matched.append(skill)
-
-        skills_detail["matched"] = matched
-        match_ratio = len(matched) / max(len(canonical_resume), 1)
-        # Scale: 50%+ match = full score, below is proportional
-        skills_score = min(_W_SKILLS, match_ratio * _W_SKILLS * 2)
+    requirement_terms = _job_terms(SimpleNamespace(
+        title=job_data.get("title", ""),
+        description=description,
+        tags=job_data.get("tags") or [],
+    ))
+    matched_requirements = [
+        term for term in requirement_terms if _skill_in_text(term, evidence_text)
+    ]
+    required_terms = [
+        term for term in requirement_terms if _skill_in_text(term, req_text)
+    ]
+    required_matched = [
+        term for term in required_terms if _skill_in_text(term, evidence_text)
+    ]
+    overall_coverage = len(matched_requirements) / max(1, len(requirement_terms))
+    if required_terms:
+        required_coverage = len(required_matched) / len(required_terms)
+        coverage = required_coverage * 0.7 + overall_coverage * 0.3
+    else:
+        coverage = overall_coverage
+    skills_score = _W_SKILLS * coverage
+    skills_detail.update({
+        "total_resume_skills": len(_canonicalize_skills(resume_skills)),
+        "evaluated_job_requirements": requirement_terms,
+        "matched": matched_requirements,
+        "required_matched": [
+            _canonicalize_skill(str(term)) for term in required_matched
+        ],
+        "required_total": len(required_terms),
+        "coverage": round(coverage, 3),
+    })
 
     breakdown["skills_match"] = round(skills_score, 1)
     breakdown["skills_detail"] = skills_detail
@@ -392,7 +447,12 @@ def score_job(job_data: dict, profile: Profile | None) -> tuple[float | None, di
         experience = profile.resume_parsed["experience"]
 
     if experience:
-        # Check title overlap between resume jobs and target job
+        # Check canonical occupation overlap before falling back to literal title
+        # variants. This treats finance/healthcare/marketing experience as first-
+        # class instead of relying on a short software-only synonym map.
+        target_occupations = set(classify_title(
+            job_data.get("title", ""), description
+        ))
         target_variants = _normalize_title(job_data.get("title", ""))
         title_matches = 0
         relevant_companies = 0
@@ -401,10 +461,13 @@ def score_job(job_data: dict, profile: Profile | None) -> tuple[float | None, di
             entry_title = (entry.get("title") or "").lower()
             entry_desc = (entry.get("description") or "").lower()
             entry_company = (entry.get("company") or "").lower()
+            entry_occupations = set(classify_title(entry_title, entry_desc))
 
             # Title similarity
             entry_variants = _normalize_title(entry_title)
-            if entry_variants & target_variants:
+            if target_occupations and entry_occupations & target_occupations:
+                title_matches += 1
+            elif entry_variants & target_variants:
                 title_matches += 1
             elif any(v in entry_title for v in target_variants if len(v) > 3):
                 title_matches += 0.5
@@ -435,7 +498,16 @@ def score_job(job_data: dict, profile: Profile | None) -> tuple[float | None, di
     # -----------------------------------------------------------------------
     role_score = 0.0
 
-    if profile.target_roles:
+    target_job_occupations = set(classify_title(
+        job_data.get("title", ""), description
+    ))
+    profile_occupations = set(
+        value for value in (getattr(profile, "target_occupations", None) or [])
+        if isinstance(value, str)
+    )
+    if target_job_occupations and profile_occupations & target_job_occupations:
+        role_score = float(_W_ROLE)
+    elif profile.target_roles:
         best_role_score = 0.0
         for role in profile.target_roles:
             role_variants = _normalize_title(role)
@@ -455,10 +527,23 @@ def score_job(job_data: dict, profile: Profile | None) -> tuple[float | None, di
     location_score = 0.0
 
     if profile.target_locations:
+        from app.utils.job_metadata import (  # noqa: PLC0415
+            country_code_for_name,
+            geocode_location_query,
+        )
+        job_country_codes = {
+            str(code).upper() for code in (job_data.get("country_codes") or [])
+        }
         for loc in profile.target_locations:
             if loc.lower() in location:
                 location_score = float(_W_LOCATION)
                 break
+            geo = geocode_location_query(loc)
+            target_country = (
+                geo.country_code if geo else country_code_for_name(loc)
+            )
+            if target_country and target_country.upper() in job_country_codes:
+                location_score = max(location_score, _W_LOCATION * 0.6)
         if is_remote:
             location_score = max(location_score, _W_LOCATION * 0.8)
     elif is_remote:
@@ -475,9 +560,6 @@ def score_job(job_data: dict, profile: Profile | None) -> tuple[float | None, di
         education = profile.resume_parsed["education"]
 
     if education:
-        # Basic: having education entries = baseline
-        edu_score = _W_EDUCATION * 0.4
-
         for entry in education:
             field = (entry.get("field") or "").lower()
             degree = (entry.get("degree") or "").lower()
@@ -485,6 +567,14 @@ def score_job(job_data: dict, profile: Profile | None) -> tuple[float | None, di
             # Check if field of study matches JD
             if field and field in full_text:
                 edu_score = max(edu_score, _W_EDUCATION * 0.8)
+
+            # Education receives credit only when the posting asks for it;
+            # merely having any education is not evidence of job fit.
+            if degree and any(
+                token in full_text
+                for token in ("degree", "bachelor", "master", "phd", "doctorate")
+            ):
+                edu_score = max(edu_score, _W_EDUCATION * 0.4)
 
             # Advanced degree bonus
             if any(kw in degree for kw in ("master", "ms ", "m.s.", "phd", "ph.d.", "doctorate")):
@@ -534,6 +624,23 @@ def score_job(job_data: dict, profile: Profile | None) -> tuple[float | None, di
         skills_score + exp_score + role_score
         + location_score + edu_score + level_score
     )
+    critical_matches = [
+        (label, pattern) for label, pattern in _CRITICAL_CREDENTIAL_PATTERNS
+        if pattern.search(req_text)
+    ]
+    critical_requirements = [label for label, _ in critical_matches]
+    missing_critical = [
+        label for label, pattern in critical_matches
+        if not pattern.search(evidence_text)
+    ]
+    critical_gap_penalty = min(20.0, 10.0 * len(missing_critical))
+    if critical_gap_penalty:
+        total = max(0.0, total - critical_gap_penalty)
+    breakdown["critical_constraints"] = {
+        "required": critical_requirements,
+        "missing": missing_critical,
+        "penalty": critical_gap_penalty,
+    }
 
     # Compute summary fields for the frontend
     breakdown["max_possible"] = 100

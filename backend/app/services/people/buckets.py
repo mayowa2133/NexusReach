@@ -156,6 +156,7 @@ def _finalize_bucketed(
     *,
     target_count_per_bucket: int,
     location_terms: list[str] | None = None,
+    context: JobContext | None = None,
 ) -> dict[str, list[Person]]:
     finalized: dict[str, list[Person]] = {}
     for bucket, people in bucketed.items():
@@ -186,7 +187,7 @@ def _finalize_bucketed(
                 _manager_person_title_specificity_rank(person) if bucket == "hiring_managers" else 0,
                 _recruiter_person_scope_rank(person) if bucket == "recruiters" else 1,
                 _person_location_match_rank(person, location_terms) if bucket in {"recruiters", "peers"} else 1,
-                _peer_person_title_alignment_rank(person) if bucket == "peers" else 1,
+                _peer_person_title_alignment_rank(person, context) if bucket == "peers" else 1,
                 _warm_path_rank(person),
                 _linkedin_signal_rank(person),
                 -(getattr(person, "usefulness_score", None) or 0),

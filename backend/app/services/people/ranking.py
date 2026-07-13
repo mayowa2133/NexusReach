@@ -20,6 +20,8 @@ from app.services.people.affinity import affinity_rank
 from app.services.people.github_team_rank import github_team_rank
 from app.services.people.context import _location_match_rank
 from app.services.people.outcome_priors import outcome_prior_rank
+from app.services.people.occupation_gate import occupation_conflict
+from app.services.occupation_taxonomy import peer_title_seeds_for
 logger = logging.getLogger(__name__)
 
 
@@ -309,38 +311,46 @@ def _peer_title_alignment_rank(data: dict, *, context: JobContext | None) -> int
     if not haystack:
         return 2
 
-    if context.department == "engineering":
-        direct_terms = (
-            "full stack",
-            "fullstack",
-            "software engineer",
-            "software developer",
-            "backend engineer",
-            "frontend engineer",
-            "ui engineer",
-            "platform engineer",
-            "web engineer",
-        )
-        adjacent_terms = (
-            "engineer",
-            "developer",
-        )
-        off_target_terms = (
-            "machine learning",
-            "applied scientist",
-            "data scientist",
-            "security engineer",
-            "site reliability",
-            "sre",
-        )
-        if any(term in haystack for term in direct_terms):
+    requested_titles = list(dict.fromkeys([
+        *(context.peer_titles or []),
+        *peer_title_seeds_for(
+            context.occupation_keys, department=context.department
+        ),
+    ]))
+    normalized_haystack = _normalize_identity(haystack)
+    for requested in requested_titles:
+        normalized_requested = _normalize_identity(requested)
+        if normalized_requested and (
+            normalized_requested in normalized_haystack
+            or normalized_haystack in normalized_requested
+        ):
             return 0
-        if any(term in haystack for term in off_target_terms):
-            return 2
-        if any(term in haystack for term in adjacent_terms):
-            return 1
+
+    if occupation_conflict(
+        context.occupation_keys, context.department, title
+    ):
         return 2
-    return 1
+
+    stop = {
+        "senior", "junior", "staff", "principal", "lead", "associate",
+        "intern", "new", "grad", "i", "ii", "iii",
+    }
+    candidate_tokens = {
+        token for token in re.split(r"[^a-z0-9]+", normalized_haystack)
+        if len(token) > 1 and token not in stop
+    }
+    best_overlap = 0.0
+    for requested in requested_titles:
+        requested_tokens = {
+            token for token in re.split(r"[^a-z0-9]+", _normalize_identity(requested))
+            if len(token) > 1 and token not in stop
+        }
+        if requested_tokens:
+            best_overlap = max(
+                best_overlap,
+                len(candidate_tokens & requested_tokens) / len(requested_tokens),
+            )
+    return 1 if best_overlap >= 0.5 else 2
 
 
 
@@ -723,17 +733,20 @@ def _person_location_match_rank(
     return 1
 
 
-def _peer_person_title_alignment_rank(person: Person) -> int:
-    title = (person.title or "").lower()
-    if not title:
-        return 2
-    if any(term in title for term in ("full stack", "fullstack", "software engineer", "software developer", "frontend developer", "frontend engineer", "backend engineer")):
-        return 0
-    if any(term in title for term in ("machine learning", "applied scientist", "data scientist", "security engineer")):
-        return 2
-    if any(term in title for term in ("engineer", "developer")):
+def _peer_person_title_alignment_rank(
+    person: Person, context: JobContext | None = None
+) -> int:
+    """Rank a persisted peer against the requested occupation.
+
+    Without context every profession is neutral. The old final sort always put
+    software titles ahead of nursing, finance, marketing, education, and legal
+    titles, undoing the contextual ranking performed earlier in the pipeline.
+    """
+    if context is None:
         return 1
-    return 2
+    return _peer_title_alignment_rank(
+        {"title": person.title or ""}, context=context
+    )
 
 
 def _manager_person_title_specificity_rank(person: Person) -> int:

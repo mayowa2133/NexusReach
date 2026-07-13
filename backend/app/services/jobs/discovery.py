@@ -4,7 +4,10 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.job import Job
 from app.models.search_preference import SearchPreference
-from app.services.occupation_taxonomy import discover_queries_for_occupations
+from app.services.occupation_taxonomy import (
+    discover_queries_for_occupations,
+    occupations_for_keys,
+)
 from app.clients import newgrad_jobs_client
 from sqlalchemy import func as sa_func
 from sqlalchemy import select
@@ -19,6 +22,11 @@ from app.services.jobs import storage
 
 
 logger = logging.getLogger(__name__)
+
+
+def _new_match_count(jobs: list[Job]) -> int:
+    """Count inserts without treating refreshed existing matches as new."""
+    return sum(1 for job in jobs if getattr(job, "_is_new_job", True))
 
 
 async def seed_default_feeds(
@@ -54,7 +62,7 @@ async def seed_default_feeds(
                 location=seed["location"],  # type: ignore[arg-type]
                 remote_only=seed["remote_only"],  # type: ignore[arg-type]
             )
-            total_new += len(stored)
+            total_new += _new_match_count(stored)
         except Exception:
             logger.exception("Failed to seed default feed: %s", seed["query"])
 
@@ -87,11 +95,30 @@ async def discover_jobs(
     # sync scorer trigger a reload (MissingGreenlet). See load_profile_for_scoring.
     profile = await storage.load_profile_for_scoring(db, user_id)
 
+    profile_occupations = (
+        getattr(profile, "target_occupations", None) if profile is not None else None
+    )
+    if not isinstance(profile_occupations, (list, tuple)):
+        profile_occupations = None
     resolved_occupations = (
         list(occupations)
         if occupations
-        else (profile.target_occupations if profile is not None else None)
+        else (list(profile_occupations) if profile_occupations else None)
     )
+    if resolved_occupations:
+        valid_occupations = [
+            occupation.key for occupation in occupations_for_keys(resolved_occupations)
+        ]
+        invalid = [
+            key for key in resolved_occupations if key not in set(valid_occupations)
+        ]
+        if invalid:
+            logger.warning("Ignoring invalid occupation keys: %s", invalid)
+        resolved_occupations = valid_occupations or None
+        if not resolved_occupations and not queries:
+            # A stale/invalid non-empty profile must never silently become a
+            # software-engineering discovery run.
+            return 0
 
     if mode == "startup":
         if queries:
@@ -172,7 +199,7 @@ async def discover_jobs(
                 limit=constants.DISCOVER_LIMIT_PER_SOURCE,
                 occupation_hint=seed.get("occupation"),
             )
-            total_new += len(stored)
+            total_new += _new_match_count(stored)
         except Exception:
             await db.rollback()
             logger.exception("Discover failed for query: %s", seed["query"])
@@ -195,7 +222,7 @@ async def discover_jobs(
                 limit=constants.DISCOVER_LIMIT_PER_SOURCE * seed_count,
                 occupation_hint=occ,
             )
-            total_new += len(stored)
+            total_new += _new_match_count(stored)
         except Exception:
             await db.rollback()
             logger.exception("The Muse occupation discover failed for %s", occ)

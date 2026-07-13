@@ -427,7 +427,13 @@ def _broaden_peer_titles_for_retry(context: JobContext | None) -> list[str]:
         bucket="peers",
         context=context,
     )
-    base_titles: list[str] = []
+    # Canonical occupation peers lead every retry. Department-derived titles
+    # are only breadth fallbacks and must never replace the user's profession.
+    taxonomy_titles = (
+        _occupation_peer_titles(context.occupation_keys)
+        if context.occupation_keys else []
+    )
+    base_titles: list[str] = list(dict.fromkeys(prioritized + taxonomy_titles))
     ml_family_context = (
         "ml" in context.team_keywords
         or any(
@@ -449,20 +455,21 @@ def _broaden_peer_titles_for_retry(context: JobContext | None) -> list[str]:
             for title in prioritized
             for term in ("machine learning", "ml engineer", "applied scientist", "data scientist", "model training")
         ):
-            base_titles.extend(
-                [
-                    "Machine Learning Engineer",
-                    "Software Engineer",
-                    "Applied Scientist",
-                    "Research Engineer",
-                    "Data Scientist",
-                    "Model Training Engineer",
-                    "Training Infrastructure Engineer",
-                    "Distributed Systems Engineer",
-                ]
-            )
+            base_titles = [
+                "Machine Learning Engineer",
+                "Software Engineer",
+                "Applied Scientist",
+                "Research Engineer",
+                "Data Scientist",
+                "Model Training Engineer",
+                "Training Infrastructure Engineer",
+                "Distributed Systems Engineer",
+                *base_titles,
+            ]
         else:
-            base_titles.extend(["Data Scientist", "Research Engineer", "Software Engineer"])
+            base_titles = [
+                "Data Scientist", "Research Engineer", "Software Engineer", *base_titles,
+            ]
     elif context.department == "engineering":
         engineering_family = ["Software Engineer", "Software Developer"]
         if any(keyword in context.team_keywords for keyword in ("backend", "platform", "cloud", "devops")):
@@ -513,13 +520,11 @@ def _broaden_peer_titles_for_retry(context: JobContext | None) -> list[str]:
 
 def _companywide_recruiter_titles(context: JobContext | None) -> list[str]:
     if context:
+        engineering_context = context.department == "engineering"
         titles = _prioritize_titles_for_search(
             context.recruiter_titles
             + [
-                "Technical Recruiter",
-                "Engineering Recruiter",
                 "Talent Acquisition Partner",
-                "Technical Sourcer",
                 "Recruiting Coordinator",
                 "Recruitment Coordinator",
                 "Talent Operations",
@@ -529,6 +534,10 @@ def _companywide_recruiter_titles(context: JobContext | None) -> list[str]:
                 "Campus Recruiter",
                 "Emerging Talent Recruiter",
                 "Early Career Recruiter",
+                *(
+                    ["Technical Recruiter", "Engineering Recruiter", "Technical Sourcer"]
+                    if engineering_context else []
+                ),
             ],
             bucket="recruiters",
             context=context,
@@ -554,14 +563,15 @@ def _companywide_recruiter_titles(context: JobContext | None) -> list[str]:
 
 def _companywide_manager_titles(context: JobContext | None) -> list[str]:
     if context:
+        taxonomy_titles = _occupation_manager_titles(
+            context.occupation_keys, department=context.department
+        )
+        fallback = (
+            ["Engineering Manager", "Software Engineering Manager", "Technical Lead", "Team Lead"]
+            if context.department == "engineering" else []
+        )
         titles = _prioritize_titles_for_search(
-            context.manager_titles
-            + [
-                "Engineering Manager",
-                "Software Engineering Manager",
-                "Technical Lead",
-                "Team Lead",
-            ],
+            context.manager_titles + taxonomy_titles + fallback,
             bucket="hiring_managers",
             context=context,
         )
@@ -669,7 +679,11 @@ def _peer_targeted_recovery_keywords(context: JobContext | None) -> list[str]:
     if context:
         keywords.extend(context.team_keywords[:2])
         keywords.extend(context.product_team_names[:1])
-    keywords.extend(["software engineer", "software developer"])
+        keywords.extend(_occupation_peer_titles(
+            context.occupation_keys, department=context.department
+        )[:2])
+    if not keywords:
+        keywords.extend(["employee", "team member"])
     return list(dict.fromkeys(keyword for keyword in keywords if keyword))
 
 

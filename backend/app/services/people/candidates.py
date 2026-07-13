@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.clients import apollo_client, search_router_client
 from app.utils.company_identity import (
     is_ambiguous_company_name,
+    normalize_company_name,
 )
 from app.utils.job_context import (
     JobContext,
@@ -603,6 +604,53 @@ def _cached_title_matches(candidate_title: str | None, requested_titles: list[st
     return False
 
 
+def _cached_candidate_ready(
+    candidate: dict,
+    *,
+    company_name: str,
+    requested_titles: list[str],
+    public_identity_terms: list[str] | None,
+) -> bool:
+    """Apply cheap downstream gates before a cache hit suppresses live search."""
+    title = candidate.get("title") or ""
+    if not _cached_title_matches(title, requested_titles):
+        return False
+    if _title_is_weak(title, company_name):
+        return False
+    explicit_company = candidate.get("company_name")
+    if explicit_company and (
+        normalize_company_name(str(explicit_company))
+        != normalize_company_name(company_name)
+    ):
+        return False
+    if not _candidate_matches_company(candidate, company_name, public_identity_terms):
+        return False
+    if _classify_employment_status(
+        candidate, company_name, public_identity_terms
+    ) == "former":
+        return False
+
+    requested_types = {
+        _classify_person(requested, source="", snippet="")
+        for requested in requested_titles if requested
+    }
+    if len(requested_types) == 1:
+        expected = next(iter(requested_types))
+        actual = _classify_person(
+            title,
+            source=candidate.get("source", ""),
+            snippet=candidate.get("snippet", ""),
+        )
+        if actual != expected:
+            if not (
+                expected == "hiring_manager"
+                and actual == "peer"
+                and _is_senior_ic_fallback(title)
+            ):
+                return False
+    return True
+
+
 async def _search_candidates(
     company_name: str,
     *,
@@ -654,8 +702,16 @@ async def _search_candidates(
 
         relevant_cached = [
             item for item in cached_results
-            if _cached_title_matches(item.get("title"), titles)
+            if _cached_candidate_ready(
+                item,
+                company_name=company_name,
+                requested_titles=titles,
+                public_identity_terms=public_identity_terms,
+            )
         ]
+        # Never re-introduce rejected company-wide cache rows when live results
+        # are merged later in this function.
+        cached_results = relevant_cached
         if debug_bucket is not None:
             debug_bucket["known_people"] = {
                 "count": len(cached_results),

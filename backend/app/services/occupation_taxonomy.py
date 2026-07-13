@@ -551,6 +551,9 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "Industrial Engineer",
         ),
         manager_title_seeds=(
+            "Mechanical Engineering Manager",
+            "Electrical Engineering Manager",
+            "Manufacturing Engineering Manager",
             "Engineering Manager",
             "Director of Engineering",
             "Head of Engineering",
@@ -1050,6 +1053,7 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "Scrum Master",
         ),
         manager_title_seeds=(
+            "Director of Project Management",
             "Director of Program Management",
             "Head of Project Management",
             "VP of Program Management",
@@ -1270,11 +1274,12 @@ def occupation_keys_from_tags(tags: list[str] | None) -> list[str]:
 def discover_queries_for_occupations(keys: list[str] | None) -> list[dict]:
     """Build job-discover query dicts (query/location/remote_only) from occupation keys.
 
-    Returns the SWE-flavored default set when no keys resolve, preserving today's
-    behavior for users who haven't picked target occupations yet.
+    Returns the SWE-flavored default set only when no keys were supplied,
+    preserving the default feed for new users. A non-empty all-invalid list
+    returns no queries so stale taxonomy values cannot launch software search.
     """
     occupations = occupations_for_keys(keys)
-    if not occupations:
+    if not occupations and not keys:
         occupations = [occupation_by_key("software_engineering")]  # type: ignore[list-item]
         occupations = [occ for occ in occupations if occ is not None]
     queries: list[dict] = []
@@ -1338,6 +1343,16 @@ def newgrad_jobs_paths(keys: list[str] | None = None) -> list[str]:
 
 _WORD_BOUNDARY_CACHE: dict[str, re.Pattern[str]] = {}
 
+_GENERIC_TITLE_WORDS = frozenset({
+    "associate", "assistant", "advisor", "consultant", "coordinator", "director",
+    "intern", "lead", "manager", "officer", "representative", "specialist",
+    "staff", "technician", "trainee", "analyst", "clerk", "professional",
+})
+_TITLE_NOISE_WORDS = frozenset({
+    "senior", "sr", "junior", "jr", "entry", "level", "new", "grad",
+    "i", "ii", "iii", "iv", "remote", "hybrid",
+})
+
 
 def _alias_pattern(alias: str) -> re.Pattern[str]:
     cached = _WORD_BOUNDARY_CACHE.get(alias)
@@ -1370,10 +1385,30 @@ def classify_title(title: str | None, description: str | None = None) -> list[st
             if haystack_title and pattern.search(haystack_title):
                 matched.append(occ.key)
                 break
-            # Only fall through to the description if the title was unhelpful.
-            if not haystack_title and haystack_desc and pattern.search(haystack_desc):
+    if matched:
+        return matched
+
+    # A non-empty but generic title ("Associate II", "Coordinator", "Manager")
+    # is not useful evidence. Use the responsibility text only in that case;
+    # specific unmatched titles remain unclassified rather than inheriting a
+    # category from company boilerplate.
+    title_words = [
+        token for token in re.findall(r"[a-z]+", haystack_title.lower())
+        if token not in _TITLE_NOISE_WORDS
+    ]
+    generic_title = (
+        not haystack_title
+        or (bool(title_words) and len(title_words) <= 2 and all(
+            token in _GENERIC_TITLE_WORDS for token in title_words
+        ))
+    )
+    if generic_title and haystack_desc:
+        # Lead responsibilities carry more role signal than footer/benefits
+        # boilerplate and keep the classifier bounded on long scraped pages.
+        description_lead = haystack_desc[:2400]
+        for occ in OCCUPATIONS:
+            if any(_alias_pattern(alias).search(description_lead) for alias in occ.aliases):
                 matched.append(occ.key)
-                break
     return matched
 
 

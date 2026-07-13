@@ -23,9 +23,58 @@ from app.clients import yc_jobs_client
 from app.services.jobs import constants
 from app.services.jobs import normalize
 from app.services.jobs import storage
+from app.services.occupation_taxonomy import (
+    classify_title,
+    occupation_by_key,
+    occupation_keys_from_tags,
+)
 
 
 logger = logging.getLogger(__name__)
+
+
+def _occupation_relevance(
+    data: dict, occupation_hint: str | None
+) -> tuple[bool, str, list[str]]:
+    """Decide whether a targeted-search result is safe to persist.
+
+    Query text is provenance, not evidence. A result must be supported by a
+    trusted explicit source tag or by title/description classification.
+    """
+    if not occupation_hint:
+        return True, "untargeted", []
+    requested = occupation_by_key(occupation_hint)
+    if requested is None:
+        return False, "invalid_requested_occupation", []
+
+    raw_tags = data.get("tags") if isinstance(data.get("tags"), list) else []
+    explicit = occupation_keys_from_tags(raw_tags)
+    if requested.key in explicit:
+        return True, "explicit_source_tag", explicit
+
+    classified = classify_title(data.get("title"), data.get("description"))
+    if requested.key in classified:
+        return True, "content_classification", classified
+    if classified:
+        return False, "off_category", classified
+    return False, "unclassified", []
+
+
+def _record_accepted_job_quality(stat: dict, data: dict) -> None:
+    """Accumulate usefulness signals, not only source availability counts."""
+    details = dict(stat.get("details") or {})
+    details["accepted_count"] = int(details.get("accepted_count") or 0) + 1
+    field_map = {
+        "with_description": bool(data.get("description")),
+        "with_direct_apply": bool(data.get("apply_url")),
+        "with_posted_date": bool(data.get("posted_at")),
+        "with_salary": data.get("salary_min") is not None or data.get("salary_max") is not None,
+        "with_location": bool(data.get("location") or data.get("locations")),
+    }
+    for key, present in field_map.items():
+        if present:
+            details[key] = int(details.get(key) or 0) + 1
+    stat["details"] = details
 
 
 async def _dispatch_source_fetch(
@@ -221,14 +270,33 @@ async def search_jobs(
         data = dict(data)
         fetch_source_key = data.pop("_fetch_source_key", None) or normalize._job_source_key(data) or "unknown"
         stat = stats_by_source.setdefault(fetch_source_key, normalize._source_stat(fetch_source_key))
+        relevant, relevance_reason, classified_keys = _occupation_relevance(
+            data, occupation_hint
+        )
+        provenance = dict(data.get("metadata_provenance") or {})
         if occupation_hint:
-            data.setdefault("_occupation_hint", occupation_hint)
+            provenance["occupation_relevance"] = {
+                "requested": occupation_hint,
+                "accepted": relevant,
+                "reason": relevance_reason,
+                "classified_keys": classified_keys,
+            }
+            data["metadata_provenance"] = provenance
+        if not relevant:
+            stat["skipped_count"] += 1
+            details = dict(stat.get("details") or {})
+            details["occupation_rejected_count"] = int(
+                details.get("occupation_rejected_count") or 0
+            ) + 1
+            stat["details"] = details
+            continue
         storage._infer_startup_tags_for_job(data, known_startup_companies)
         storage._infer_occupation_tags_for_job(data)
         data = normalize_job_metadata(data)
         if not normalize._job_matches_refresh_filters(data, location=location, remote_only=remote_only):
             stat["skipped_count"] += 1
             continue
+        _record_accepted_job_quality(stat, data)
         fp = normalize._fingerprint(
             data.get("company_name", ""),
             data.get("title", ""),
@@ -323,6 +391,11 @@ async def search_jobs(
         db, refresh_run_id=refresh_run_id, source_stats=local_source_stats
     )
     await db.commit()
+    new_jobs = [
+        job for job in stored_jobs if getattr(job, "_is_new_job", False)
+    ]
+    if new_jobs:
+        await storage.finalize_new_jobs(db, user_id, new_jobs)
     return stored_jobs
 
 

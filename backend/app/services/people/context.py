@@ -5,7 +5,14 @@ import re
 
 
 from app.utils.job_context import (
+    APOLLO_DEPARTMENT_SLUGS,
     JobContext,
+)
+from app.services.occupation_taxonomy import (
+    classify_title,
+    manager_title_seeds_for,
+    occupations_for_keys,
+    peer_title_seeds_for,
 )
 
 from app.services.people.identity import _dedupe_text, _keyword_in_text
@@ -98,7 +105,17 @@ def _build_roles_context(roles: list[str] | None) -> JobContext | None:
     if not roles:
         return None
 
-    # Extract meaningful keywords from role titles
+    # Resolve the same canonical taxonomy used by job discovery. Company-level
+    # people search previously guessed only product/data/marketing and silently
+    # defaulted every other explicit role to engineering.
+    occupation_keys: list[str] = []
+    for role in roles:
+        for key in classify_title(role):
+            if key not in occupation_keys:
+                occupation_keys.append(key)
+    occupations = occupations_for_keys(occupation_keys)
+
+    # Extract meaningful keywords from role titles.
     STOP_WORDS = {
         "manager", "director", "lead", "head", "senior", "junior", "staff",
         "principal", "vp", "vice", "president", "chief", "officer", "coordinator",
@@ -118,17 +135,33 @@ def _build_roles_context(roles: list[str] | None) -> JobContext | None:
                 seen.add(word)
                 team_keywords.append(word)
 
-    if not team_keywords:
+    if not team_keywords and not occupations:
         return None
 
-    # Guess department from keywords
-    department = "engineering"
-    if any(kw in team_keywords for kw in ("product", "design", "ux")):
-        department = "product_management"
-    elif any(kw in team_keywords for kw in ("data", "science", "analytics")):
-        department = "data_science"
-    elif any(kw in team_keywords for kw in ("marketing", "growth")):
-        department = "marketing"
+    # Unknown roles stay neutral instead of becoming engineering.
+    department = occupations[0].department_bucket if occupations else ""
+    apollo_bucket = {
+        "engineering": "engineering",
+        "ml_ai": "data_science",
+        "data": "data_science",
+        "product": "product_management",
+        "design": "design",
+        "marketing": "marketing",
+        "sales": "sales",
+        "customer_success": "customer_success",
+        "finance": "finance",
+        "people": "human_resources",
+        "legal": "legal",
+        "business": "operations",
+        "consulting": "operations",
+        "program_management": "operations",
+        "supply_chain": "operations",
+        "information_technology": "information_technology",
+        "security": "information_technology",
+    }.get(department)
+    apollo_departments = (
+        APOLLO_DEPARTMENT_SLUGS.get(apollo_bucket, []) if apollo_bucket else []
+    )
 
     # Determine appropriate seniority level
     seniority = "mid"
@@ -136,15 +169,29 @@ def _build_roles_context(roles: list[str] | None) -> JobContext | None:
         has_intern = any("intern" in r.lower() for r in roles)
         seniority = "intern" if has_intern else "junior"
 
+    taxonomy_managers = manager_title_seeds_for(occupation_keys)
+    taxonomy_peers = peer_title_seeds_for(occupation_keys)
+    explicit_managers = [
+        role for role in roles if _is_manager_like(role) and not _is_recruiter_like(role)
+    ]
+    explicit_peers = [
+        role for role in roles if not _is_manager_like(role) and not _is_recruiter_like(role)
+    ]
+    explicit_recruiters = [role for role in roles if _is_recruiter_like(role)]
+
     return JobContext(
         department=department,
         team_keywords=team_keywords,
         domain_keywords=[],
         seniority=seniority,
         early_career=early_career,
-        manager_titles=[r for r in roles if _is_manager_like(r)],
-        peer_titles=[r for r in roles if not _is_manager_like(r) and not _is_recruiter_like(r)],
-        recruiter_titles=[r for r in roles if _is_recruiter_like(r)],
+        manager_titles=list(dict.fromkeys(explicit_managers + taxonomy_managers)),
+        peer_titles=list(dict.fromkeys(explicit_peers + taxonomy_peers)),
+        recruiter_titles=list(dict.fromkeys(explicit_recruiters + [
+            "Recruiter", "Talent Acquisition Partner", "Talent Partner",
+        ])),
+        apollo_departments=apollo_departments,
+        occupation_keys=occupation_keys,
     )
 
 

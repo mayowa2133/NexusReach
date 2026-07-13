@@ -59,11 +59,10 @@ Rules:
 - skills_to_emphasize: skills the candidate already has that should be more prominent
 - skills_to_add: skills from the JD that the candidate likely has but didn't list
 - keywords_to_add: ATS-relevant terms from the JD missing from the resume
-- bullet_rewrites: thorough but TRUTHFUL. Rewrite 12-16 bullets total, evenly distributed across the resume. Coverage targets:
-  * Every experience at indices 0, 1, 2 should receive at least 2 rewrites.
-  * Every project at indices 0, 1, 2 (when they exist) should receive at least 2 rewrites.
-  * No single section may hold more than half of the total rewrites.
-  * Use change_type="inferred_claim" ONLY where a term is genuinely plausible for the candidate's real work — do NOT manufacture inferred claims to hit a quota. Quality and truthfulness over count.
+- bullet_rewrites: selective and TRUTHFUL. Propose only edits that materially
+  improve the resume. There is no minimum count: zero inferred claims is a
+  completely valid result, and a sparse resume should receive only the few
+  edits its evidence supports. Never rewrite a bullet merely to fill a quota.
   * MUST_SURFACE handling: if MUST_SURFACE_IN_BULLET_TEXT terms are provided (below), be THOROUGH — surface every term the candidate can TRUTHFULLY claim, woven naturally into a bullet where it fits. This includes honest reframes their real work supports (e.g. "customer-facing" for a shipped consumer feature, "cross-functional" for Agile team work, "frontend" for someone who built UI). Leaving a truthful, matchable term unsurfaced is a miss. The ONLY terms to skip are those that would be false — a platform the candidate never worked on, or a tool they never used. Never drop a term the candidate clearly has once surfaced.
   For experience bullets, set section="experience" and provide experience_index. For project bullets, set section="projects" and provide project_index. Use quantified achievements where possible.
 - Classify every rewrite's change_type with this STRICT mechanical test. When uncertain, always choose the MORE gated type (inferred_claim > reframe > keyword):
@@ -77,7 +76,8 @@ Rules:
 - Surface plausible JD-adjacent terms as inferred_claim (gated for the user to confirm), NEVER as keyword/reframe. Never fabricate specific metrics or named tools the candidate did not list. Only surface capabilities and scope the candidate genuinely has a basis for.
 - PLATFORM FIT (critical): match the candidate's actual platform. Do NOT add "web application"/"web-based"/"web UI" language to native mobile (iOS/Android) work, or mobile language to pure web work. A native iOS feature is an "iOS" or "mobile" feature, never a "web application". If the JD's platform differs from the candidate's, surface the transferable engineering practices (testing, architecture, collaboration) truthfully instead of claiming the wrong platform.
 - NO KEYWORD STUFFING: use each term at most once, in its natural form. Never inject multiple near-duplicate variants of one keyword (e.g. "mobile-responsive", "mobile-ready", "mobile-capable", "mobile-friendly") to pad density — a recruiter reads that as spam and it weakens the resume.
-- Ensure every experience and every top project has at least TWO proposed rewrites — no entry may receive zero or one rewrite while another entry receives three or more. Balance coverage first; depth second.
+- Prefer breadth when several entries have equally strong evidence, but do not
+  force coverage of weak or irrelevant entries.
 - section_suggestions: high-level guidance for each resume section
 - Be specific and actionable, not generic
 - Do NOT fabricate experience or skills the candidate doesn't have
@@ -313,80 +313,15 @@ def _coverage_deficits(
     profile: Profile,
     must_surface: list[str] | None = None,
 ) -> list[str]:
-    """Return human-readable deficit messages when aggressive-mode coverage
-    floors are violated. Empty list means coverage is satisfied.
+    """Return structural deficits that justify another model call.
 
-    Floors: every exp/project index 0..2 gets >=2 rewrites; >=5 inferred_claim
-    spread across BOTH sections; >=3 keyword total. When ``must_surface`` is
-    provided, each term MUST appear verbatim (case-insensitive substring) in
-    at least one rewritten bullet. High-priority terms (JavaScript, Java, unit
-    testing, integration testing) get stricter enforcement.
+    Rewrite volume and inferred-claim counts are deliberately *not* validation
+    criteria. The old implementation required five inferred claims and three
+    keyword edits even for a one-bullet resume, which encouraged fabrication.
+    Content safety is enforced deterministically by normalization and by the
+    artifact evidence gate; a small or empty rewrite set is valid.
     """
-    parsed = getattr(profile, "resume_parsed", None) or {}
-    exp_count = min(len(parsed.get("experience") or []), 3)
-    proj_count = min(len(parsed.get("projects") or []), 3)
-
-    exp_hits: dict[int, int] = {}
-    proj_hits: dict[int, int] = {}
-    inferred_in_exp = 0
-    inferred_in_proj = 0
-    keyword_count = 0
-    combined_bullet_text = ""
-    for r in rewrites or []:
-        if not isinstance(r, dict):
-            continue
-        section = (r.get("section") or "").lower()
-        change = (r.get("change_type") or "").lower()
-        combined_bullet_text += " " + (r.get("rewritten") or "")
-        if change == "keyword":
-            keyword_count += 1
-        if section == "experience":
-            idx = r.get("experience_index")
-            if isinstance(idx, int) and 0 <= idx < exp_count:
-                exp_hits[idx] = exp_hits.get(idx, 0) + 1
-                if change == "inferred_claim":
-                    inferred_in_exp += 1
-        elif section == "projects":
-            idx = r.get("project_index")
-            if isinstance(idx, int) and 0 <= idx < proj_count:
-                proj_hits[idx] = proj_hits.get(idx, 0) + 1
-                if change == "inferred_claim":
-                    inferred_in_proj += 1
-
-    deficits: list[str] = []
-    for i in range(exp_count):
-        if exp_hits.get(i, 0) < 2:
-            deficits.append(f'experience_index={i} needs >=2 rewrites (got {exp_hits.get(i, 0)})')
-    for i in range(proj_count):
-        if proj_hits.get(i, 0) < 2:
-            deficits.append(f'project_index={i} needs >=2 rewrites (got {proj_hits.get(i, 0)})')
-    total_inferred = inferred_in_exp + inferred_in_proj
-    if total_inferred < 5:
-        deficits.append(f'need >=5 total inferred_claim rewrites (got {total_inferred})')
-    if inferred_in_exp < 2 and exp_count:
-        deficits.append(f'need >=2 inferred_claim rewrites in experience section (got {inferred_in_exp})')
-    if inferred_in_proj < 2 and proj_count:
-        deficits.append(f'need >=2 inferred_claim rewrites in projects section (got {inferred_in_proj})')
-    if keyword_count < 3:
-        deficits.append(f'need >=3 keyword rewrites total (got {keyword_count})')
-
-    if must_surface:
-        low_text = combined_bullet_text.lower()
-        missing = [t for t in must_surface if t.lower() not in low_text]
-        if missing:
-            high_priority = {"javascript", "java", "unit testing", "integration testing"}
-            high_missing = [t for t in missing if t.lower() in high_priority]
-            if high_missing:
-                deficits.append(
-                    f"HIGH PRIORITY must_surface missing: {', '.join(high_missing)} — "
-                    f"these are mainstream tech/practices that MUST appear in a bullet"
-                )
-            else:
-                deficits.append(
-                    "must_surface terms missing from any bullet_rewrites[].rewritten: "
-                    + ", ".join(missing)
-                )
-    return deficits
+    return []
 
 
 def _infer_change_type(original: str, rewritten: str) -> tuple[str, list[str]]:
@@ -399,9 +334,9 @@ def _infer_change_type(original: str, rewritten: str) -> tuple[str, list[str]]:
 
     def _words(text: str) -> set[str]:
         return {
-            w.lower()
+            w.lower().strip(".-_/")
             for w in _re.findall(r"[A-Za-z][A-Za-z0-9+.#/-]{2,}", text or "")
-            if w.lower() not in {
+            if w.lower().strip(".-_/") not in {
                 "the", "and", "for", "with", "that", "this", "from", "into",
                 "using", "used", "our", "your", "their",
             }
@@ -410,8 +345,18 @@ def _infer_change_type(original: str, rewritten: str) -> tuple[str, list[str]]:
     original_words = _words(original)
     rewritten_words = _words(rewritten)
     new_words = sorted(rewritten_words - original_words)
-    if len(new_words) >= 3:
-        return "inferred_claim", new_words[:8]
+    # Stylistic verbs may change without introducing a new factual claim.
+    # Everything else is gated. This intentionally classifies even a single
+    # new domain word ("brand", "Kubernetes", "clinical") as inferred.
+    style_words = {
+        "achieved", "built", "created", "delivered", "designed", "developed",
+        "drove", "enabled", "engineered", "established", "executed", "improved",
+        "implemented", "increased", "launched", "led", "managed", "optimized",
+        "owned", "produced", "reduced", "shipped", "supported", "using", "utilized",
+    }
+    claim_words = [word for word in new_words if word not in style_words]
+    if claim_words:
+        return "inferred_claim", claim_words[:8]
     if new_words:
         return "keyword", []
     return "reframe", []
@@ -429,16 +374,23 @@ def _normalize_bullet_rewrites(rewrites: list) -> list[dict]:
 
         change_type = (rewrite.get("change_type") or "").strip().lower()
         inferred_additions = rewrite.get("inferred_additions") or []
+        detected_type, auto_additions = _infer_change_type(original, rewritten)
         if change_type not in _VALID_CHANGE_TYPES:
-            change_type, auto_additions = _infer_change_type(original, rewritten)
-            if not inferred_additions and auto_additions:
-                inferred_additions = auto_additions
+            change_type = detected_type
+        elif detected_type == "inferred_claim":
+            # The model cannot downgrade a detected new claim to an ungated
+            # keyword/reframe edit.
+            change_type = "inferred_claim"
+        if change_type == "inferred_claim" and auto_additions:
+            inferred_additions = list(dict.fromkeys([
+                *(str(item).strip() for item in inferred_additions if str(item).strip()),
+                *auto_additions,
+            ]))
         if change_type != "inferred_claim":
             inferred_additions = []
 
-        requires_confirm = rewrite.get("requires_user_confirm")
-        if not isinstance(requires_confirm, bool):
-            requires_confirm = change_type == "inferred_claim"
+        # Inferred claims are always gated regardless of model output.
+        requires_confirm = change_type == "inferred_claim"
 
         normalized.append({
             "id": rewrite.get("id") or f"rw-{idx}",
@@ -597,9 +549,8 @@ async def tailor_resume(
     result = first["result"]
     raw = first["raw"]
 
-    # Enforce coverage floor: every experience index 0..2 and every present
-    # project index 0..2 gets >=2 rewrites; >=5 inferred_claim across sections;
-    # >=3 keyword rewrites. Retry ONCE with explicit deficits when unmet.
+    # Retry only for structural deficits. Rewrite-count and inferred-claim
+    # quotas are intentionally absent; a truthful result may contain no edits.
     for _attempt in range(3):
         if not (parsed and isinstance(parsed.get("bullet_rewrites"), list)):
             break

@@ -11,14 +11,20 @@ from app.schemas.people import CompanyResponse, PersonResponse
 from app.services.job_research_snapshot_service import (
     SNAPSHOT_FRESH_TTL,
     SNAPSHOT_MAX_SERVE_AGE,
+    evict_person_from_job_research_snapshots,
     snapshot_serve_decision,
 )
 from app.services.people.serialize import snapshot_to_search_response
 
 
-def _snapshot(*, total: int, age: timedelta | None):
+def _snapshot(*, total: int, age: timedelta | None, target: int = 5):
     updated = None if age is None else datetime.now(timezone.utc) - age
-    return SimpleNamespace(total_candidates=total, updated_at=updated, created_at=updated)
+    return SimpleNamespace(
+        total_candidates=total,
+        target_count_per_bucket=target,
+        updated_at=updated,
+        created_at=updated,
+    )
 
 
 def _make_session(mock_db):
@@ -56,6 +62,55 @@ def test_decision_stale_past_ttl_within_max_age():
 def test_decision_miss_past_max_age():
     snap = _snapshot(total=6, age=SNAPSHOT_MAX_SERVE_AGE + timedelta(days=1))
     assert snapshot_serve_decision(snap) == "miss"
+
+
+def test_decision_miss_when_snapshot_was_generated_for_smaller_depth():
+    snap = _snapshot(total=3, target=1, age=timedelta(minutes=5))
+
+    assert snapshot_serve_decision(
+        snap, requested_target_count_per_bucket=5
+    ) == "miss"
+
+
+@pytest.mark.asyncio
+async def test_negative_feedback_evicts_person_from_all_snapshot_buckets():
+    person_id = uuid.uuid4()
+    snapshot = SimpleNamespace(
+        recruiters=[{"id": str(person_id), "current_company_verified": True}],
+        hiring_managers=[],
+        peers=[{"id": str(uuid.uuid4())}],
+        your_connections=[{"id": str(person_id)}],
+        recruiter_count=1,
+        manager_count=0,
+        peer_count=1,
+        warm_path_count=1,
+        verified_count=1,
+        total_candidates=2,
+    )
+
+    class _Scalars:
+        def all(self):
+            return [snapshot]
+
+    class _Result:
+        def scalars(self):
+            return _Scalars()
+
+    class _Db:
+        async def execute(self, _statement):
+            return _Result()
+
+    db = _Db()
+
+    updated = await evict_person_from_job_research_snapshots(
+        db, user_id=uuid.uuid4(), person_id=person_id
+    )
+
+    assert updated == 1
+    assert snapshot.recruiters == []
+    assert snapshot.your_connections == []
+    assert snapshot.total_candidates == 1
+    assert snapshot.verified_count == 0
 
 
 # --- snapshot -> response reconstruction ------------------------------------

@@ -230,7 +230,8 @@ async def test_search_serves_fresh_snapshot_without_live_search(client, mock_use
 
     now = datetime.now(timezone.utc)
     fake_snapshot = SimpleNamespace(
-        total_candidates=1, updated_at=now, created_at=now,
+        total_candidates=1, target_count_per_bucket=3,
+        updated_at=now, created_at=now,
         recruiters=[person], hiring_managers=[], peers=[], your_connections=[], errors=None,
     )
 

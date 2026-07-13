@@ -8,6 +8,7 @@ reporting-line mining, the HM-focused Org gate, and the LLM title tie-break.
 from __future__ import annotations
 
 import uuid
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -15,6 +16,7 @@ import pytest
 from app.services.people import candidates as people_candidates
 from app.services.people import title_llm
 from app.services.people.classify import _classify_person_with_confidence
+from app.services.jobs.discovery import _new_match_count
 from app.utils.job_context import _extract_reporting_line_titles
 
 pytestmark = pytest.mark.asyncio
@@ -78,7 +80,14 @@ async def test_cache_short_circuit_is_bucket_aware():
 
 async def test_cache_short_circuit_fires_on_relevant_rows():
     cached_managers = [
-        {"full_name": f"M{i}", "title": "Engineering Manager"} for i in range(3)
+        {
+            "full_name": f"M{i}",
+            "title": "Engineering Manager",
+            "company_name": "Acme",
+            "snippet": "Engineering Manager at Acme",
+            "source": "public_web",
+        }
+        for i in range(3)
     ]
     db = MagicMock()
 
@@ -139,6 +148,37 @@ def test_infer_occupation_tags_consumes_hint():
     _infer_occupation_tags_for_job(data)
     assert "occupation:sales" in (data.get("tags") or [])
     assert "_occupation_hint" not in data
+
+
+def test_discovery_new_count_excludes_refreshed_existing_matches():
+    assert _new_match_count([
+        SimpleNamespace(_is_new_job=True),
+        SimpleNamespace(_is_new_job=False),
+    ]) == 1
+
+
+async def test_stale_invalid_profile_occupation_does_not_launch_swe_discovery():
+    from app.services import job_service
+
+    profile = MagicMock()
+    profile.target_occupations = ["removed_taxonomy_key"]
+    profile.target_locations = []
+    db = MagicMock()
+
+    with (
+        patch(
+            "app.services.jobs.storage.load_profile_for_scoring",
+            new=AsyncMock(return_value=profile),
+        ),
+        patch(
+            "app.services.jobs.search.search_jobs",
+            new=AsyncMock(return_value=[]),
+        ) as search,
+    ):
+        count = await job_service.discover_jobs(db, uuid.uuid4())
+
+    assert count == 0
+    search.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------

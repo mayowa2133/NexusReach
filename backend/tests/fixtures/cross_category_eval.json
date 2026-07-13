@@ -1,0 +1,140 @@
+[
+  {
+    "key": "software_engineering",
+    "job": {"title": "Backend Software Engineer", "description": "Build distributed backend services and APIs.", "critical_terms": ["backend", "APIs"]},
+    "people": {"peer": "Backend Engineer", "manager": "Engineering Manager", "wrong_function": "Marketing Manager"},
+    "resume": {"supported": ["Python", "APIs"], "unsupported": ["Kubernetes"]}
+  },
+  {
+    "key": "data_analyst",
+    "job": {"title": "Business Intelligence Analyst", "description": "Build dashboards, reporting, SQL analysis, and data visualizations.", "critical_terms": ["SQL", "dashboards"]},
+    "people": {"peer": "Data Analyst", "manager": "Analytics Manager", "wrong_function": "Account Executive"},
+    "resume": {"supported": ["SQL", "dashboards"], "unsupported": ["Tableau"]}
+  },
+  {
+    "key": "marketing",
+    "job": {"title": "Growth Marketing Manager", "description": "Own brand campaigns, content strategy, SEO, and paid media.", "critical_terms": ["campaigns", "SEO"]},
+    "people": {"peer": "Growth Marketing Manager", "manager": "Marketing Director", "wrong_function": "Software Engineer"},
+    "resume": {"supported": ["campaigns", "SEO"], "unsupported": ["Marketo"]}
+  },
+  {
+    "key": "machine_learning_ai",
+    "job": {"title": "Machine Learning Engineer", "description": "Train and evaluate machine learning models with Python and PyTorch.", "critical_terms": ["Python", "PyTorch"]},
+    "people": {"peer": "Machine Learning Engineer", "manager": "Machine Learning Manager", "wrong_function": "Sales Manager"},
+    "resume": {"supported": ["Python", "PyTorch"], "unsupported": ["TensorFlow"]}
+  },
+  {
+    "key": "data_engineer",
+    "job": {"title": "Analytics Engineer", "description": "Build ETL pipelines, warehouse models, and data contracts.", "critical_terms": ["ETL", "pipelines"]},
+    "people": {"peer": "Analytics Engineer", "manager": "Data Engineering Manager", "wrong_function": "Brand Manager"},
+    "resume": {"supported": ["ETL", "pipelines"], "unsupported": ["Snowflake"]}
+  },
+  {
+    "key": "business_analyst",
+    "job": {"title": "Business Systems Analyst", "description": "Gather requirements, map processes, and improve business operations.", "critical_terms": ["requirements", "processes"]},
+    "people": {"peer": "Business Systems Analyst", "manager": "Business Analysis Manager", "wrong_function": "Security Engineer"},
+    "resume": {"supported": ["requirements", "processes"], "unsupported": ["SAP"]}
+  },
+  {
+    "key": "product_management",
+    "job": {"title": "Product Manager", "description": "Own roadmap, discovery, prioritization, and product outcomes.", "critical_terms": ["roadmap", "discovery"]},
+    "people": {"peer": "Product Manager", "manager": "Director of Product", "wrong_function": "Accountant"},
+    "resume": {"supported": ["roadmap", "discovery"], "unsupported": ["Amplitude"]}
+  },
+  {
+    "key": "creatives_design",
+    "job": {"title": "Product Designer", "description": "Create user flows, prototypes, visual systems, and accessible experiences.", "critical_terms": ["prototypes", "user flows"]},
+    "people": {"peer": "Product Designer", "manager": "Design Manager", "wrong_function": "Financial Analyst"},
+    "resume": {"supported": ["prototypes", "user flows"], "unsupported": ["Figma"]}
+  },
+  {
+    "key": "accounting_finance",
+    "job": {"title": "Financial Analyst", "description": "Own forecasts, budgets, variance analysis, and financial models.", "critical_terms": ["forecasts", "budgets"]},
+    "people": {"peer": "Financial Analyst", "manager": "Finance Manager", "wrong_function": "Software Engineer"},
+    "resume": {"supported": ["forecasts", "budgets"], "unsupported": ["CPA"]}
+  },
+  {
+    "key": "consulting",
+    "job": {"title": "Management Consultant", "description": "Advise clients, analyze operating models, and deliver recommendations.", "critical_terms": ["clients", "recommendations"]},
+    "people": {"peer": "Management Consultant", "manager": "Principal Consultant", "wrong_function": "Registered Nurse"},
+    "resume": {"supported": ["clients", "recommendations"], "unsupported": ["PMP"]}
+  },
+  {
+    "key": "engineering_development",
+    "job": {"title": "Mechanical Engineer", "description": "Design mechanical systems, prototypes, CAD assemblies, and validation tests.", "critical_terms": ["CAD", "prototypes"]},
+    "people": {"peer": "Mechanical Engineer", "manager": "Mechanical Engineering Manager", "wrong_function": "Marketing Manager"},
+    "resume": {"supported": ["CAD", "prototypes"], "unsupported": ["SolidWorks"]}
+  },
+  {
+    "key": "human_resources",
+    "job": {"title": "Human Resources Business Partner", "description": "Support employee relations, performance management, and workforce planning.", "critical_terms": ["employee relations", "workforce planning"]},
+    "people": {"peer": "HR Business Partner", "manager": "HR Manager", "wrong_function": "Data Engineer"},
+    "resume": {"supported": ["employee relations", "workforce planning"], "unsupported": ["CHRP"]}
+  },
+  {
+    "key": "arts_entertainment",
+    "job": {"title": "Film Producer", "description": "Produce film projects, manage production schedules, crews, and budgets.", "critical_terms": ["production", "budgets"]},
+    "people": {"peer": "Film Producer", "manager": "Executive Producer", "wrong_function": "Security Engineer"},
+    "resume": {"supported": ["production", "budgets"], "unsupported": ["Avid"]}
+  },
+  {
+    "key": "management_executive",
+    "job": {"title": "General Manager", "description": "Lead strategy, operations, teams, revenue, and organizational performance.", "critical_terms": ["strategy", "revenue"]},
+    "people": {"peer": "General Manager", "manager": "Chief Executive Officer", "wrong_function": "Frontend Engineer"},
+    "resume": {"supported": ["strategy", "revenue"], "unsupported": ["MBA"]}
+  },
+  {
+    "key": "customer_service_support",
+    "job": {"title": "Customer Success Manager", "description": "Drive onboarding, adoption, retention, and customer outcomes.", "critical_terms": ["onboarding", "retention"]},
+    "people": {"peer": "Customer Success Manager", "manager": "Director of Customer Success", "wrong_function": "Mechanical Engineer"},
+    "resume": {"supported": ["onboarding", "retention"], "unsupported": ["Gainsight"]}
+  },
+  {
+    "key": "legal_compliance",
+    "job": {"title": "Corporate Attorney", "description": "Draft contracts, advise on corporate law, compliance, and regulatory risk.", "critical_terms": ["contracts", "compliance"]},
+    "people": {"peer": "Corporate Attorney", "manager": "General Counsel", "wrong_function": "Software Engineer"},
+    "resume": {"supported": ["contracts", "compliance"], "unsupported": ["Bar admission"]}
+  },
+  {
+    "key": "sales",
+    "job": {"title": "Account Executive", "description": "Own pipeline, prospecting, negotiations, quota, and enterprise deals.", "critical_terms": ["pipeline", "quota"]},
+    "people": {"peer": "Account Executive", "manager": "Sales Manager", "wrong_function": "Data Scientist"},
+    "resume": {"supported": ["pipeline", "quota"], "unsupported": ["Salesforce"]}
+  },
+  {
+    "key": "public_sector_government",
+    "job": {"title": "Public Policy Analyst", "description": "Research legislation, develop policy recommendations, and brief stakeholders.", "critical_terms": ["legislation", "policy"]},
+    "people": {"peer": "Policy Analyst", "manager": "Director of Policy", "wrong_function": "Product Designer"},
+    "resume": {"supported": ["legislation", "policy"], "unsupported": ["Security Clearance"]}
+  },
+  {
+    "key": "education_training",
+    "job": {"title": "High School Teacher", "description": "Plan curriculum, teach students, assess learning, and manage classrooms.", "critical_terms": ["curriculum", "students"]},
+    "people": {"peer": "Teacher", "manager": "Principal", "wrong_function": "Account Executive"},
+    "resume": {"supported": ["curriculum", "students"], "unsupported": ["Teaching license"]}
+  },
+  {
+    "key": "cybersecurity",
+    "job": {"title": "Security Engineer", "description": "Perform threat modeling, vulnerability management, and incident response.", "critical_terms": ["threat modeling", "incident response"]},
+    "people": {"peer": "Security Engineer", "manager": "Security Manager", "wrong_function": "Brand Manager"},
+    "resume": {"supported": ["threat modeling", "incident response"], "unsupported": ["CISSP"]}
+  },
+  {
+    "key": "project_management",
+    "job": {"title": "Project Manager", "description": "Manage scope, schedule, risks, stakeholders, and project delivery.", "critical_terms": ["scope", "risks"]},
+    "people": {"peer": "Project Manager", "manager": "Director of Project Management", "wrong_function": "Registered Nurse"},
+    "resume": {"supported": ["scope", "risks"], "unsupported": ["PMP"]}
+  },
+  {
+    "key": "healthcare",
+    "job": {"title": "Registered Nurse", "description": "Provide patient care, administer medications, and coordinate care plans.", "critical_terms": ["patient care", "medications"]},
+    "people": {"peer": "Registered Nurse", "manager": "Nurse Manager", "wrong_function": "Software Engineer"},
+    "resume": {"supported": ["patient care", "medications"], "unsupported": ["RN license"]}
+  },
+  {
+    "key": "supply_chain",
+    "job": {"title": "Supply Chain Analyst", "description": "Optimize inventory, logistics, demand planning, and supplier performance.", "critical_terms": ["inventory", "logistics"]},
+    "people": {"peer": "Supply Chain Analyst", "manager": "Supply Chain Manager", "wrong_function": "Marketing Manager"},
+    "resume": {"supported": ["inventory", "logistics"], "unsupported": ["SAP"]}
+  }
+]

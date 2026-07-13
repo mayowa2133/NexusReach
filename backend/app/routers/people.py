@@ -40,6 +40,7 @@ from app.services.people.serialize import (
 )
 from app.services.employment_verification_service import verify_current_company_for_person
 from app.services.job_research_snapshot_service import (
+    evict_person_from_job_research_snapshots,
     get_job_research_snapshot,
     save_job_research_snapshot,
     snapshot_serve_decision,
@@ -81,7 +82,10 @@ async def search_people(
                 # fall through to a live search.
                 logger.debug("Snapshot lookup failed; running live search", exc_info=True)
                 snapshot = None
-            decision = snapshot_serve_decision(snapshot)
+            decision = snapshot_serve_decision(
+                snapshot,
+                requested_target_count_per_bucket=body.target_count_per_bucket,
+            )
             if decision != "miss":
                 if decision == "stale":
                     try:
@@ -302,6 +306,7 @@ async def submit_person_feedback(
     person.profile_data = profile_data
 
     evicted = False
+    snapshots_updated = 0
     if body.feedback in ("wrong_person", "not_at_company"):
         if body.feedback == "not_at_company":
             person.current_company_verified = False
@@ -313,13 +318,27 @@ async def submit_person_feedback(
                 )
             except Exception:
                 logger.warning("known-people eviction failed", exc_info=True)
+        try:
+            snapshots_updated = await evict_person_from_job_research_snapshots(
+                db, user_id=user_id, person_id=person.id
+            )
+        except Exception:
+            logger.warning("job snapshot contact eviction failed", exc_info=True)
     await db.commit()
     capture_event(
         str(user_id),
         "contact_feedback",
-        properties={"feedback": body.feedback, "cache_evicted": evicted},
+        properties={
+            "feedback": body.feedback,
+            "cache_evicted": evicted,
+            "snapshots_updated": snapshots_updated,
+        },
     )
-    return {"ok": True, "cache_evicted": evicted}
+    return {
+        "ok": True,
+        "cache_evicted": evicted,
+        "snapshots_updated": snapshots_updated,
+    }
 
 
 class HiringTeamMember(BaseModel):

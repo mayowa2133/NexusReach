@@ -15,6 +15,7 @@ def _make_profile(**overrides):
     profile.target_roles = overrides.get("target_roles", ["Software Engineer"])
     profile.target_industries = overrides.get("target_industries", ["Technology"])
     profile.target_locations = overrides.get("target_locations", ["New York"])
+    profile.target_occupations = overrides.get("target_occupations", [])
     profile.resume_parsed = overrides.get("resume_parsed", {
         "skills": ["Python", "React", "TypeScript", "FastAPI", "PostgreSQL"],
         "experience": [
@@ -237,6 +238,85 @@ class TestScoreJob:
         detail = breakdown.get("skills_detail", {})
         matched = detail.get("matched", [])
         assert "rlang" not in matched
+
+    def test_extra_resume_skills_do_not_reduce_job_requirement_coverage(self):
+        base_resume = {
+            "skills": ["Python"],
+            "experience": [{
+                "title": "Software Engineer",
+                "company": "Acme",
+                "description": "Built Python APIs",
+            }],
+            "education": [],
+        }
+        broad_resume = {
+            **base_resume,
+            "skills": [
+                "Python", "Excel", "Figma", "Salesforce", "Tableau",
+                "Copywriting", "Budgeting", "Recruiting",
+            ],
+        }
+        job = _make_job(description="Python API development required")
+
+        _, narrow = _score_job(job, _make_profile(resume_parsed=base_resume))
+        _, broad = _score_job(job, _make_profile(resume_parsed=broad_resume))
+
+        assert broad["skills_match"] == narrow["skills_match"]
+
+    def test_nontechnical_occupation_and_experience_receive_first_class_credit(self):
+        profile = _make_profile(
+            target_roles=[],
+            target_occupations=["accounting_finance"],
+            resume_parsed={
+                "skills": ["Forecasting", "Budgeting", "Variance Analysis"],
+                "experience": [{
+                    "title": "FP&A Analyst",
+                    "company": "Acme",
+                    "description": "Owned forecasts, budgets, and variance analysis.",
+                }],
+                "education": [],
+            },
+        )
+        job = _make_job(
+            title="Financial Analyst",
+            description="Own forecasts, budgets, and variance analysis.",
+        )
+
+        _, breakdown = _score_job(job, profile)
+
+        assert breakdown["role_match"] == 20.0
+        assert breakdown["experience_match"] > 0
+        assert breakdown["skills_match"] > 0
+
+    def test_missing_required_credential_is_explicit_and_penalized(self):
+        job = _make_job(
+            title="Senior Accountant",
+            description="Requirements\nCPA required. Own financial reporting and audit.",
+        )
+        missing_profile = _make_profile(
+            target_roles=["Senior Accountant"],
+            resume_parsed={
+                "skills": ["Financial Reporting", "Audit"],
+                "experience": [],
+                "education": [],
+            },
+        )
+        qualified_profile = _make_profile(
+            target_roles=["Senior Accountant"],
+            resume_parsed={
+                "skills": ["Financial Reporting", "Audit", "CPA"],
+                "experience": [],
+                "education": [],
+            },
+        )
+
+        missing_score, missing = _score_job(job, missing_profile)
+        qualified_score, qualified = _score_job(job, qualified_profile)
+
+        assert missing["critical_constraints"]["missing"] == ["CPA"]
+        assert missing["critical_constraints"]["penalty"] == 10.0
+        assert qualified["critical_constraints"]["missing"] == []
+        assert qualified_score > missing_score
 
 
 # --- _fingerprint ---

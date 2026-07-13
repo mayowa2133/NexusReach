@@ -45,6 +45,45 @@ def _ordered_skills(
     return ordered[:24]
 
 
+def _resume_evidence_text(parsed: dict[str, Any]) -> str:
+    """Flatten only user-provided resume evidence for term validation."""
+    values: list[str] = []
+    values.extend(str(item) for item in (parsed.get("skills") or []) if item)
+    for items in (parsed.get("skills_by_category") or {}).values():
+        if isinstance(items, list):
+            values.extend(str(item) for item in items if item)
+    values.extend(str(item) for item in (parsed.get("certificates") or []) if item)
+    for section in ("experience", "projects", "education"):
+        for entry in parsed.get(section) or []:
+            if not isinstance(entry, dict):
+                continue
+            for key in (
+                "name", "title", "company", "degree", "field", "description",
+            ):
+                if entry.get(key):
+                    values.append(str(entry[key]))
+            values.extend(str(item) for item in (entry.get("bullets") or []) if item)
+            values.extend(str(item) for item in (entry.get("technologies") or []) if item)
+            values.extend(str(item) for item in (entry.get("details") or []) if item)
+    return "\n".join(values)
+
+
+def _term_supported_by_resume(term: str, evidence_text: str) -> bool:
+    normalized = _clean(term)
+    if not normalized:
+        return False
+    return bool(re.search(
+        rf"(?<![A-Za-z0-9]){re.escape(normalized)}(?![A-Za-z0-9])",
+        evidence_text,
+        re.IGNORECASE,
+    ))
+
+
+def _supported_terms(terms: list[str], parsed: dict[str, Any]) -> list[str]:
+    evidence_text = _resume_evidence_text(parsed)
+    return [term for term in terms if _term_supported_by_resume(term, evidence_text)]
+
+
 LANGUAGE_SKILLS = {
     "c", "c++", "java", "python", "javascript", "typescript", "html", "css",
     "sql", "mysql", "swift", "go", "rust", "kotlin", "scala", "r", "nosql",
@@ -181,6 +220,9 @@ def _render_resume_latex(
     contact = parsed.get("contact") or {}
     artifact_plan = artifact_plan or _default_artifact_plan(parsed, job, tailored)
     projects = parsed.get("projects", []) or []
+    supported_emphasis = _supported_terms(tailored.skills_to_emphasize or [], parsed)
+    supported_additions = _supported_terms(tailored.skills_to_add or [], parsed)
+    supported_keywords = _supported_terms(tailored.keywords_to_add or [], parsed)
     project_technologies = [
         technology
         for project in projects
@@ -188,9 +230,9 @@ def _render_resume_latex(
     ]
     skills = _ordered_skills(
         parsed.get("skills", []) or [],
-        tailored.skills_to_emphasize or [],
-        tailored.skills_to_add or [],
-        tailored.keywords_to_add or [],
+        supported_emphasis,
+        supported_additions,
+        supported_keywords,
         project_technologies,
     )
     skill_categories = parsed.get("skills_by_category") or {}
@@ -312,13 +354,13 @@ def _render_resume_latex(
             planned_projects.append({**project, "selected_bullets": selected_bullets})
 
     font_size, line_height, line_spread = _layout_profile(planned_experience, planned_projects, certificates)
-    focused_skills = _merge_unique([
+    focused_skills = _supported_terms(_merge_unique([
         *(artifact_plan.get("skills_focus") or []),
-        *(tailored.skills_to_emphasize or []),
-        *(tailored.keywords_to_add or []),
-        *(tailored.skills_to_add or []),
+        *supported_emphasis,
+        *supported_keywords,
+        *supported_additions,
         *(_preferred_skills_focus(parsed, job, tailored) or []),
-    ])[:18]
+    ]), parsed)[:18]
 
     contact_parts: list[str] = []
     if address:

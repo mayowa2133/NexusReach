@@ -32,6 +32,7 @@ def snapshot_serve_decision(
     snapshot: JobResearchSnapshot | None,
     *,
     now: datetime | None = None,
+    requested_target_count_per_bucket: int | None = None,
 ) -> SnapshotServeDecision:
     """Decide how to use a snapshot for a Find People click.
 
@@ -45,6 +46,13 @@ def snapshot_serve_decision(
     # Never serve an empty snapshot — a user clicking Find People on a blank
     # result would assume it's broken. Run live to actually find people.
     if not snapshot.total_candidates:
+        return "miss"
+    stored_target = int(getattr(snapshot, "target_count_per_bucket", 0) or 0)
+    requested_target = int(requested_target_count_per_bucket or 0)
+    if requested_target and stored_target < requested_target:
+        # A one-contact prewarm is not a complete answer to a later request for
+        # five or ten contacts. Run live once; the replacement snapshot records
+        # the larger attempted depth even when the provider finds fewer people.
         return "miss"
     ts = snapshot.updated_at or snapshot.created_at
     if ts is None:
@@ -186,6 +194,54 @@ async def delete_job_research_snapshot(
     await db.delete(snapshot)
     await db.commit()
     return True
+
+
+async def evict_person_from_job_research_snapshots(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    person_id: uuid.UUID,
+) -> int:
+    """Remove a negatively-rated contact from every durable job snapshot.
+
+    Snapshot payloads serialize the CRM Person id, so this is deterministic and
+    avoids deleting same-name contacts. The caller owns the transaction.
+    """
+    result = await db.execute(
+        select(JobResearchSnapshot).where(JobResearchSnapshot.user_id == user_id)
+    )
+    snapshots = list(result.scalars().all())
+    target_id = str(person_id)
+    updated = 0
+    for snapshot in snapshots:
+        changed = False
+        buckets: dict[str, list[dict]] = {}
+        for field in ("recruiters", "hiring_managers", "peers", "your_connections"):
+            values = list(getattr(snapshot, field, None) or [])
+            kept = [
+                item for item in values
+                if not (isinstance(item, dict) and str(item.get("id") or "") == target_id)
+            ]
+            if len(kept) != len(values):
+                changed = True
+                setattr(snapshot, field, kept)
+            buckets[field] = kept
+        if not changed:
+            continue
+        counts = _summarize(
+            recruiters=buckets["recruiters"],
+            hiring_managers=buckets["hiring_managers"],
+            peers=buckets["peers"],
+            your_connections=buckets["your_connections"],
+        )
+        snapshot.recruiter_count = counts["recruiter_count"]
+        snapshot.manager_count = counts["manager_count"]
+        snapshot.peer_count = counts["peer_count"]
+        snapshot.warm_path_count = counts["warm_path_count"]
+        snapshot.verified_count = counts["verified_count"]
+        snapshot.total_candidates = counts["total_candidates"]
+        updated += 1
+    return updated
 
 
 def serialize_snapshot(snapshot: JobResearchSnapshot | None) -> dict[str, Any] | None:

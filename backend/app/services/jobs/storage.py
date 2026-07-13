@@ -13,7 +13,7 @@ from app.utils.startup_jobs import has_startup_tag
 from app.utils.startup_jobs import merge_startup_tags
 from app.utils.startup_jobs import merge_tags
 from app.utils.job_metadata import normalize_job_metadata
-from app.services.occupation_taxonomy import occupation_tags_for_job
+from app.services.occupation_taxonomy import classify_title, occupation_tags_for_job
 from sqlalchemy import func as sa_func
 from sqlalchemy import select
 from sqlalchemy import tuple_
@@ -640,6 +640,11 @@ def _infer_occupation_tags_for_job(data: dict) -> None:
         if isinstance(tag, str) and tag.startswith(OCCUPATION_TAG_PREFIX):
             explicit_keys.append(tag[len(OCCUPATION_TAG_PREFIX):])
 
+    title_keys = classify_title(data.get("title"))
+    content_keys = title_keys or classify_title(
+        data.get("title"), data.get("description")
+    )
+
     inferred = occupation_tags_for_job(
         title=data.get("title"),
         description=data.get("description"),
@@ -648,6 +653,27 @@ def _infer_occupation_tags_for_job(data: dict) -> None:
     )
     if inferred:
         data["tags"] = merge_tags(existing, inferred)
+        if explicit_keys:
+            source, confidence = "explicit_source_tag", 1.0
+        elif title_keys:
+            source, confidence = "title_classifier", 0.95
+        elif content_keys:
+            source, confidence = "description_classifier", 0.75
+        else:
+            source, confidence = "query_hint", 0.25
+        provenance = (
+            dict(data.get("metadata_provenance"))
+            if isinstance(data.get("metadata_provenance"), dict)
+            else {}
+        )
+        provenance["occupation_classification"] = {
+            "version": 1,
+            "keys": [tag[len(OCCUPATION_TAG_PREFIX):] for tag in inferred],
+            "source": source,
+            "confidence": confidence,
+            "query_hint": hint if isinstance(hint, str) else None,
+        }
+        data["metadata_provenance"] = provenance
 
 
 def recompute_occupation_tags(job: Job) -> list[str] | None:
@@ -773,17 +799,7 @@ async def _store_raw_jobs(
                 return []
 
     if stored:
-        # Trigger auto-prospect for newly stored jobs (if enabled)
-        try:
-            await _maybe_auto_prospect(db, user_id, stored)
-        except Exception:
-            logger.debug("Auto-prospect trigger check failed", exc_info=True)
-        # Pre-warm the contact cache for the top companies so "Find People"
-        # feels instant on the jobs the user is most likely to open (default on).
-        try:
-            await _maybe_prewarm_people(db, user_id, stored)
-        except Exception:
-            logger.debug("People pre-warm trigger check failed", exc_info=True)
+        await finalize_new_jobs(db, user_id, stored)
 
     return stored
 
@@ -929,3 +945,21 @@ async def _maybe_prewarm_people(
             for job in batch:
                 job.people_prewarm_status = "ready"
     await db.commit()
+
+
+async def finalize_new_jobs(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    jobs: list[Job],
+) -> None:
+    """Apply post-insert policies consistently across every discovery source."""
+    if not jobs:
+        return
+    try:
+        await _maybe_auto_prospect(db, user_id, jobs)
+    except Exception:
+        logger.debug("Auto-prospect trigger check failed", exc_info=True)
+    try:
+        await _maybe_prewarm_people(db, user_id, jobs)
+    except Exception:
+        logger.debug("People pre-warm trigger check failed", exc_info=True)

@@ -116,6 +116,22 @@ def test_classify_title_falls_back_to_description_when_title_blank() -> None:
     assert "sales" in keys
 
 
+def test_classify_title_uses_description_for_generic_nonempty_title() -> None:
+    keys = classify_title(
+        "Associate II",
+        "Provide ICU patient care as a registered nurse and administer medications.",
+    )
+    assert "healthcare" in keys
+
+
+def test_classify_title_does_not_use_boilerplate_for_specific_unmatched_title() -> None:
+    keys = classify_title(
+        "Puzzle Wrangler",
+        "Our company also employs software engineers and marketing managers.",
+    )
+    assert keys == []
+
+
 def test_occupation_tag_round_trip() -> None:
     tag = occupation_tag("data_analyst")
     assert tag == f"{OCCUPATION_TAG_PREFIX}data_analyst"
@@ -146,10 +162,9 @@ def test_discover_queries_for_data_analyst_excludes_swe_titles() -> None:
     assert "Data Analyst" in query_strings
 
 
-def test_discover_queries_unknown_keys_fall_back_to_swe_default() -> None:
+def test_discover_queries_unknown_nonempty_keys_fail_closed() -> None:
     queries = discover_queries_for_occupations(["definitely_not_real"])
-    query_strings = [q["query"] for q in queries]
-    assert "Software Engineer" in query_strings
+    assert queries == []
 
 
 def test_startup_query_strings_default_to_startup_friendly_set() -> None:

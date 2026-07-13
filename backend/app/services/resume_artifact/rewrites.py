@@ -16,9 +16,10 @@ logger = logging.getLogger(__name__)
 def _should_use_rewrite(original: str, rewrite: str, *, change_type: str = "reframe") -> bool:
     original_tokens = _metric_tokens(original)
     rewrite_tokens = _metric_tokens(rewrite)
-    # Inferred claims intentionally add content; they may not preserve every
-    # metric token. For keyword/reframe we still require metric preservation.
-    if change_type != "inferred_claim" and original_tokens and not (original_tokens & rewrite_tokens):
+    # Every concrete metric in the source is evidence and must survive every
+    # rewrite type. Adding an inferred claim is not permission to discard a
+    # percentage, count, currency amount, duration, or scale marker.
+    if original_tokens and not original_tokens.issubset(rewrite_tokens):
         return False
     return len(_clean(rewrite)) >= max(int(len(_clean(original)) * 0.65), 30)
 

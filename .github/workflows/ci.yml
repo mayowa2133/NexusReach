@@ -35,6 +35,9 @@ jobs:
       - name: Lint with ruff
         run: ruff check app tests conftest.py
 
+      - name: Cross-category product quality gate
+        run: python scripts/run_cross_category_eval.py
+
       - name: Run tests
         run: pytest -x -q
 
