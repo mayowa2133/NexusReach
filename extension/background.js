@@ -789,6 +789,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === "CAPTURE_PROFILE") {
+    // Ambient "Save to NexusReach" (Workstream E): the content script read the
+    // visible profile top card; persist it as a CRM contact.
+    apiRequest("/api/people/capture-linkedin-profile", {
+      method: "POST",
+      body: JSON.stringify(message.payload || {}),
+    })
+      .then((person) => sendResponse({ ok: true, person }))
+      .catch((error) =>
+        sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }),
+      );
+    return true;
+  }
+
   if (message.type === "START_OPPORTUNISTIC_SYNC") {
     // User clicked "Refresh now" on the in-page nudge — run in the foreground
     // in their current session (fast, visible, human-present).

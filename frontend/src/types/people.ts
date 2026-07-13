@@ -63,6 +63,7 @@ export interface Person {
     | 'crawl4ai_linkedin'
     | 'public_web'
     | 'firecrawl_public_web'
+    | 'companion_capture'
     | 'manual'
     | null;
   current_company_verification_confidence?: number | null;

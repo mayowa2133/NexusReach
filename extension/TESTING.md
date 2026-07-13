@@ -63,6 +63,18 @@ Chrome profile logged into LinkedIn.
       named contacts; they appear on the People page as verified.
 - [ ] On a job without the panel: clean "no members" result, no error toast.
 
+## Save to NexusReach (Workstream E)
+
+- [ ] Visit any LinkedIn profile (`/in/...`) while connected → a bottom-right
+      "Save to NexusReach" chip appears after a moment. Click Save → chip shows
+      "Saved <name> ✓" and the contact appears on the People page with a
+      "Captured from LinkedIn" chip; if a current employer was visible, the
+      company shows as verified.
+- [ ] Navigate to another profile (SPA nav, no reload) → the chip re-appears
+      for the new person; navigate off `/in/` → the chip disappears.
+- [ ] Save the same profile twice → no duplicate contact (upsert by URL).
+- [ ] While NOT connected, the chip does not appear.
+
 ## ATS autofill
 
 - [ ] Greenhouse or Lever application form autofills from the profile with

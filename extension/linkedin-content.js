@@ -1035,4 +1035,104 @@
 
   // Give the SPA a moment to settle before checking staleness.
   window.setTimeout(maybeShowStaleNudge, 4000);
+
+  // -------------------------------------------------------------------------
+  // Ambient "Save to NexusReach" on profile pages (Workstream E)
+  //
+  // On any /in/ profile the user visits, offer a one-click save of the visible
+  // top-card fields into their NexusReach contacts. Read-only — nothing is
+  // fetched or expanded beyond what is already on screen.
+  // -------------------------------------------------------------------------
+
+  const SAVE_CHIP_ID = "nexusreach-save-chip";
+
+  function isProfilePage() {
+    return /^\/in\//.test(window.location.pathname);
+  }
+
+  function renderSaveChip() {
+    if (document.getElementById(SAVE_CHIP_ID)) return;
+
+    const chip = document.createElement("div");
+    chip.id = SAVE_CHIP_ID;
+    chip.style.cssText = [
+      "position:fixed", "bottom:16px", "right:16px", "z-index:2147483646",
+      "display:flex", "align-items:center", "gap:8px",
+      "padding:10px 14px", "border-radius:999px",
+      "border:1px solid rgba(2,132,199,0.25)",
+      "background:rgba(255,255,255,0.98)",
+      "box-shadow:0 10px 30px rgba(15,23,42,0.18)",
+      "font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif",
+      "font-size:13px", "color:#0f172a",
+    ].join(";");
+
+    const label = document.createElement("span");
+    label.textContent = "Save to NexusReach";
+    label.style.cssText = "font-weight:600;";
+
+    const btn = document.createElement("button");
+    btn.textContent = "Save";
+    btn.style.cssText = "padding:5px 12px;border:none;border-radius:999px;background:#0284c7;color:#fff;font-weight:600;cursor:pointer;";
+
+    const close = document.createElement("button");
+    close.textContent = "✕";
+    close.setAttribute("aria-label", "Dismiss");
+    close.style.cssText = "border:none;background:transparent;color:#94a3b8;cursor:pointer;font-size:13px;";
+    close.addEventListener("click", () => chip.remove());
+
+    btn.addEventListener("click", () => {
+      const profile = captureProfile(window.location.href);
+      if (!profile.linkedin_url) {
+        label.textContent = "Couldn't read this profile";
+        return;
+      }
+      btn.disabled = true;
+      btn.textContent = "Saving…";
+      chrome.runtime.sendMessage({ type: "CAPTURE_PROFILE", payload: profile }, (response) => {
+        if (chrome.runtime.lastError || !response?.ok) {
+          label.textContent = response?.error || "Save failed";
+          btn.disabled = false;
+          btn.textContent = "Retry";
+          return;
+        }
+        const name = response.person?.full_name || "Contact";
+        label.textContent = `Saved ${name} ✓`;
+        btn.remove();
+        close.textContent = "Close";
+      });
+    });
+
+    chip.append(label, btn, close);
+    document.body.appendChild(chip);
+  }
+
+  function syncSaveChip() {
+    if (TEST_MODE) return;
+    const chip = document.getElementById(SAVE_CHIP_ID);
+    if (!isProfilePage()) {
+      if (chip) chip.remove();
+      return;
+    }
+    if (chip) return;
+    // Only offer the chip to a connected companion.
+    try {
+      chrome.runtime.sendMessage({ type: "GET_STATUS" }, (resp) => {
+        if (chrome.runtime.lastError || !resp?.connected || resp?.needsReconnect) return;
+        if (isProfilePage()) renderSaveChip();
+      });
+    } catch {
+      // Extension context unavailable — no chip.
+    }
+  }
+
+  // LinkedIn is a SPA: profile navigations don't reload the content script.
+  // Poll for URL changes and re-evaluate the chip.
+  let lastHref = window.location.href;
+  window.setInterval(() => {
+    if (window.location.href !== lastHref) {
+      lastHref = window.location.href;
+      window.setTimeout(syncSaveChip, 1200);
+    }
+  }, 1500);
+  window.setTimeout(syncSaveChip, 2500);
 })();

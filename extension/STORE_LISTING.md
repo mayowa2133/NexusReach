@@ -55,9 +55,9 @@ store rejects re-uploads of an existing version number.
   > choose to view or syncs you explicitly start.
 
 - **Single-purpose statement:** Assists the user's own job search by
-  connecting their browser to their Solomon account: capturing job-page
-  contact information the user is viewing, importing the user's own LinkedIn
-  connections with their consent, and autofilling job applications.
+  connecting their browser to their Solomon account: capturing job-page and
+  profile contact information the user is viewing, importing the user's own
+  LinkedIn connections with their consent, and autofilling job applications.
 
 ## Permission justifications (reviewer form)
 

@@ -22,6 +22,7 @@ from app.utils.discovery_rate_limit import (
     check_discovery_rate_limit_companion,
 )
 from app.schemas.people import (
+    CaptureLinkedInProfileRequest,
     LinkedInPageCaptureRequest,
     PeopleSearchRequest,
     PeopleSearchResponse,
@@ -30,6 +31,7 @@ from app.schemas.people import (
     SearchLogResponse,
 )
 from app.services.people import (
+    capture_linkedin_profile,
     search_people_at_company,
     search_people_for_job,
     enrich_person_from_linkedin,
@@ -214,6 +216,35 @@ async def save_linkedin_page_capture(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    return _serialize_person(person)
+
+
+@router.post("/capture-linkedin-profile", response_model=PersonResponse)
+@limiter.limit("20/minute")
+async def capture_linkedin_profile_endpoint(
+    request: Request,
+    body: CaptureLinkedInProfileRequest,
+    # Companion auth: the extension's ambient "Save to NexusReach" on a profile.
+    user_id: Annotated[uuid.UUID, Depends(get_companion_or_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _rate_check: Annotated[None, Depends(check_discovery_rate_limit_companion)],
+):
+    """Save a contact from a LinkedIn profile the user is viewing.
+
+    Upserts a CRM person by ``(user_id, linkedin_url)`` and links the visible
+    current employer. Read-only capture of on-screen fields; never scrapes
+    beyond the page or seeds the global known-people cache.
+    """
+    try:
+        person = await capture_linkedin_profile(
+            db=db,
+            user_id=user_id,
+            payload=body.model_dump(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    capture_event(str(user_id), "profile_captured", properties={"has_company": bool(person.company_id)})
     return _serialize_person(person)
 
 

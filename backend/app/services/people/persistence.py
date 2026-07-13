@@ -337,6 +337,88 @@ async def persist_linkedin_page_capture(
     return person
 
 
+async def capture_linkedin_profile(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    payload: dict[str, Any],
+) -> Person:
+    """Save a contact from a LinkedIn profile the user is viewing (Workstream E).
+
+    Ambient "Save to NexusReach" from the companion: read-only capture of the
+    top-card fields the user personally has on screen. Upserts a CRM ``Person``
+    by ``(user_id, linkedin_url)`` and links a ``Company`` when a current
+    employer is visible. Because the user viewed the live profile, the current
+    company is treated as verified evidence (like a hiring-team capture), never
+    a SERP guess. Email trust is untouched — that stays in its own waterfall.
+
+    This creates a CRM row on explicit user action; it never writes
+    ``linkedin_graph_connections`` and never seeds the global known-people
+    cache (that is for discovery corroboration, not a user's ad-hoc save).
+    """
+    normalized = normalize_linkedin_url(payload.get("linkedin_url"))
+    if not normalized:
+        raise ValueError("A valid LinkedIn profile URL is required.")
+
+    capture = _normalize_linkedin_page_capture({**payload, "linkedin_url": normalized})
+    capture["source"] = "companion_capture"
+
+    full_name = (payload.get("visible_name") or "").strip() or None
+    title = (
+        (payload.get("current_role_title") or "").strip()
+        or (payload.get("headline") or "").strip()
+        or None
+    )
+    company_label = (payload.get("current_company_label") or "").strip() or None
+
+    company: Company | None = None
+    if company_label:
+        company = await get_or_create_company(db, user_id, company_label)
+
+    result = await db.execute(
+        select(Person)
+        .options(selectinload(Person.company))
+        .where(Person.user_id == user_id, Person.linkedin_url == normalized)
+    )
+    person = result.scalar_one_or_none()
+
+    if person is None:
+        person = Person(
+            user_id=user_id,
+            full_name=full_name,
+            title=title,
+            linkedin_url=normalized,
+            person_type=_classify_person(title or ""),
+            source="companion_capture",
+            profile_data={"linkedin_live": capture},
+        )
+        db.add(person)
+    else:
+        # Fill blanks; never clobber an existing (possibly stronger) value.
+        if full_name and not person.full_name:
+            person.full_name = full_name
+        if title and not person.title:
+            person.title = title
+        profile_data = dict(person.profile_data) if isinstance(person.profile_data, dict) else {}
+        profile_data["linkedin_live"] = capture
+        person.profile_data = profile_data
+
+    if company is not None:
+        person.company = company
+        # The user personally viewed the live profile stating this employer:
+        # strong direct evidence of current employment.
+        person.current_company_verified = True
+        person.current_company_verification_status = "verified"
+        person.current_company_verification_source = "companion_capture"
+        person.current_company_verified_at = datetime.now(timezone.utc)
+        person.current_company_verification_evidence = (
+            "Saved from the member's LinkedIn profile"
+        )
+
+    await db.commit()
+    await db.refresh(person)
+    return person
+
+
 async def get_saved_people(
     db: AsyncSession,
     user_id: uuid.UUID,

@@ -1,14 +1,17 @@
 # LinkedIn Companion — Tier 1 Implementation Plan
 
 Date: 2026-07-13
-Status: in progress on branch `linkedin-companion-tier1` — Workstreams A, B, C,
-and D implemented (A: migration landed as `060_add_companion_tokens`; B: build
+Status: in progress on branch `linkedin-companion-tier1` — Workstreams A–E
+implemented (A: migration landed as `060_add_companion_tokens`; B: build
 via `extension/build.mjs`, submission package in `extension/STORE_LISTING.md`;
 C: Settings blessed-path card, onboarding `network` step, dashboard nudge —
 the install CTA reads `VITE_COMPANION_INSTALL_URL`, unset until the store
 listing is live; D: jittered weekly `chrome.alarms` background sync + in-page
 staleness nudge, guarded by cooldown/staleness/interstitial checks, opt-out
-popup toggle, `node --test` guard-logic coverage). E and F not started.
+popup toggle, `node --test` guard-logic coverage; E: `POST /api/people/
+capture-linkedin-profile` companion-authed upsert + in-page "Save to
+NexusReach" chip on `/in/` profiles + People-page "Captured from LinkedIn"
+chip). F not started.
 D deviation: the auto-sync opt-out toggle lives in the extension popup (its
 state is extension-local), not the Settings card — the card links to it. This
 avoids new app↔extension bridge plumbing that can't be verified without loading
