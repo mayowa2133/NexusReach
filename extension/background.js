@@ -1,4 +1,8 @@
-const DEFAULT_API_URL = "http://localhost:8000";
+// Runtime defaults (dev localhost vs production origins) come from config.js,
+// which build.mjs rewrites in the production package.
+importScripts("config.js");
+
+const DEFAULT_API_URL = NR_DEFAULTS.apiUrl;
 const LINKEDIN_CONNECTIONS_URL =
   "https://www.linkedin.com/mynetwork/invite-connect/connections/";
 const LINKEDIN_FOLLOWING_PEOPLE_URL =

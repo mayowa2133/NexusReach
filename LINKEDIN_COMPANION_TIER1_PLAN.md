@@ -1,8 +1,14 @@
 # LinkedIn Companion — Tier 1 Implementation Plan
 
 Date: 2026-07-13
-Status: in progress on branch `linkedin-companion-tier1` — Workstream A implemented
-(migration landed as `060_add_companion_tokens`; B–F not started)
+Status: in progress on branch `linkedin-companion-tier1` — Workstreams A and B
+implemented (A: migration landed as `060_add_companion_tokens`; B: build via
+`extension/build.mjs`, submission package in `extension/STORE_LISTING.md`).
+Two deliberate B deviations: (1) the `alarms` permission is deferred to the
+release that ships Workstream D — requesting an unused permission is a CWS
+review rejection risk; (2) naming resolved to **Solomon Companion**, not
+"NexusReach Companion" — Solomon is the user-facing brand on every launch
+surface (landing, login, terms, privacy); NexusReach is the internal name.
 
 Goal: make the Companion extension the single, near-zero-effort path for getting a user's
 LinkedIn network and profile into NexusReach. No new integration channel is being built —
@@ -113,8 +119,8 @@ Start this early: CWS review with `linkedin.com` host permissions can take 1–3
    justification for review; finalize the single-purpose description ("assists your own
    job search: saves pages you view, refreshes your own network graph, autofills
    applications").
-3. Naming: settle "NexusReach Companion" everywhere (fix the "Solomon Companion" strings in
-   `frontend/src/lib/companion.ts` / Settings toasts).
+3. Naming: settled as **Solomon Companion** (the user-facing brand); the manifest
+   and popup were renamed to match the frontend's existing strings.
 4. Store listing package: icons already exist; add screenshots (Settings connect, graph
    sync result, hiring-team capture, ATS autofill), promo tile, privacy-policy URL
    (`/privacy` — **update it to describe extension data flows**: what is read from

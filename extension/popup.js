@@ -16,7 +16,7 @@ const notConnectedCard = document.getElementById("not-connected-card");
 const reconnectBanner = document.getElementById("reconnect-banner");
 const openAppBtn = document.getElementById("open-app-btn");
 
-const DEFAULT_APP_URL = "http://localhost:5173";
+const DEFAULT_APP_URL = NR_DEFAULTS.appUrl;
 let knownAppUrl = null;
 
 // ---------------------------------------------------------------------------
@@ -70,9 +70,9 @@ function renderProfile(p) {
 // ---------------------------------------------------------------------------
 
 async function init() {
-  // Load saved API URL
+  // Load saved API URL (falling back to the build's default origin)
   const data = await chrome.storage.local.get(["apiUrl", "autofillEnabled"]);
-  if (data.apiUrl) apiUrlInput.value = data.apiUrl;
+  apiUrlInput.value = data.apiUrl || NR_DEFAULTS.apiUrl;
   autofillToggle.checked = data.autofillEnabled !== false; // default on
 
   // Check connection status
