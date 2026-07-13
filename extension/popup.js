@@ -12,6 +12,7 @@ const disconnectBtn = document.getElementById("disconnect-btn");
 const apiUrlInput = document.getElementById("api-url");
 const authTokenInput = document.getElementById("auth-token");
 const autofillToggle = document.getElementById("autofill-toggle");
+const autosyncToggle = document.getElementById("autosync-toggle");
 const notConnectedCard = document.getElementById("not-connected-card");
 const reconnectBanner = document.getElementById("reconnect-banner");
 const openAppBtn = document.getElementById("open-app-btn");
@@ -78,6 +79,7 @@ async function init() {
   // Check connection status
   chrome.runtime.sendMessage({ type: "GET_STATUS" }, (resp) => {
     knownAppUrl = resp?.appUrl || null;
+    autosyncToggle.checked = resp?.autoSyncEnabled !== false; // default on
 
     if (resp && resp.needsReconnect) {
       // Token was revoked or expired server-side: keep the stored state but
@@ -161,6 +163,10 @@ disconnectBtn.addEventListener("click", () => {
 
 autofillToggle.addEventListener("change", () => {
   chrome.storage.local.set({ autofillEnabled: autofillToggle.checked });
+});
+
+autosyncToggle.addEventListener("change", () => {
+  chrome.runtime.sendMessage({ type: "SET_AUTOSYNC", enabled: autosyncToggle.checked });
 });
 
 openAppBtn.addEventListener("click", () => {

@@ -541,7 +541,7 @@ export function SettingsPage() {
 
           <p className="text-sm text-muted-foreground">
             {companionStatus?.available
-              ? 'The Companion imports your network in one click — or use a file: on the LinkedIn export page choose "Connections" only (the file is ready in about 10 minutes), then Upload Export.'
+              ? 'The Companion imports your network in one click and, once connected, keeps it fresh automatically each week (turn that off in the Companion popup). Or use a file: on the LinkedIn export page choose "Connections" only (the file is ready in about 10 minutes), then Upload Export.'
               : COMPANION_INSTALL_URL
                 ? 'The Solomon Companion extension imports your network in one click — install it, then reload this page.'
                 : 'The Solomon Companion extension imports your network in one click and ships with launch. Meanwhile: on the LinkedIn export page choose "Connections" only (the file is ready in about 10 minutes), then Upload Export.'}

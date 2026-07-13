@@ -127,13 +127,22 @@ function chunk(items, size) {
   return chunks;
 }
 
-async function createAndWaitForTab(url) {
-  const tab = await chrome.tabs.create({ url, active: true });
+async function createAndWaitForTab(url, { active = true } = {}) {
+  const tab = await chrome.tabs.create({ url, active });
   if (!tab.id) {
     throw new Error("Failed to open LinkedIn tab.");
   }
   await waitForTabComplete(tab.id);
   return tab.id;
+}
+
+async function closeTabQuietly(tabId) {
+  if (!tabId) return;
+  try {
+    await chrome.tabs.remove(tabId);
+  } catch {
+    // Tab already gone — nothing to clean up.
+  }
 }
 
 function waitForTabComplete(tabId, timeoutMs = 15000) {
@@ -300,12 +309,13 @@ async function finishEmptyGraphSync(sessionToken) {
   });
 }
 
-async function scrapeFollowTab(url, entityType) {
+async function scrapeFollowTab(url, entityType, { active = true, background = false, deadline = 0 } = {}) {
+  let tabId = null;
   try {
-    const tabId = await createAndWaitForTab(url);
+    tabId = await createAndWaitForTab(url, { active });
     const result = await sendMessageToTab(tabId, {
       type: "RUN_GRAPH_REFRESH_FOLLOWS",
-      payload: { entityType },
+      payload: { entityType, background, deadline },
     });
     const statusWarning =
       result?.status === "blocked" || result?.status === "error"
@@ -327,6 +337,10 @@ async function scrapeFollowTab(url, entityType) {
           : `Could not scrape LinkedIn ${entityType} follows.`,
       ],
     };
+  } finally {
+    // Background runs open their own hidden tabs and must not leave them behind;
+    // foreground runs leave the tab so the user can see what happened.
+    if (background) await closeTabQuietly(tabId);
   }
 }
 
@@ -354,34 +368,237 @@ function profileInterestsUrl(profileUrl) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Auto-cadence sync (Workstream D)
+//
+// A jittered weekly alarm keeps the user's graph fresh with zero effort. All
+// runs are heavily guarded: at most one per 24h, only when the graph already
+// exists and has aged past AUTO_SYNC_STALE_DAYS, always in hidden tabs with a
+// wall-clock budget, and aborting on any LinkedIn interstitial. Opt-out via
+// the popup's Auto-sync toggle (default on).
+// ---------------------------------------------------------------------------
+
+const AUTO_SYNC_ALARM = "nr-auto-sync";
+const AUTO_SYNC_BASE_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // weekly
+const AUTO_SYNC_JITTER_MS = 24 * 60 * 60 * 1000; // + up to a day
+const AUTO_SYNC_COOLDOWN_MS = 24 * 60 * 60 * 1000; // never more than 1/24h
+const AUTO_SYNC_STALE_DAYS = 7; // don't auto-run a fresher graph
+const STALE_PROMPT_DAYS = 14; // opportunistic in-page nudge threshold
+const STATUS_CACHE_MS = 6 * 60 * 60 * 1000; // bound status API calls
+const GRAPH_BACKGROUND_BUDGET_MS = 4 * 60 * 1000; // finish before throttling
+
+async function getSyncState() {
+  const data = await chrome.storage.local.get([
+    "autoSyncEnabled",
+    "lastAutoSyncAt",
+    "lastStalePromptAt",
+    "cachedGraphStatus",
+    "cachedGraphStatusAt",
+  ]);
+  return {
+    // Opt-out: undefined (never set) counts as enabled.
+    autoSyncEnabled: data.autoSyncEnabled !== false,
+    lastAutoSyncAt: Number(data.lastAutoSyncAt) || 0,
+    lastStalePromptAt: Number(data.lastStalePromptAt) || 0,
+    cachedGraphStatus: data.cachedGraphStatus || null,
+    cachedGraphStatusAt: Number(data.cachedGraphStatusAt) || 0,
+  };
+}
+
+async function fetchGraphStatusCached(force = false) {
+  const { cachedGraphStatus, cachedGraphStatusAt } = await getSyncState();
+  if (!force && cachedGraphStatus && Date.now() - cachedGraphStatusAt < STATUS_CACHE_MS) {
+    return cachedGraphStatus;
+  }
+  const status = await apiRequest("/api/linkedin-graph/status", { method: "GET" });
+  await chrome.storage.local.set({
+    cachedGraphStatus: status,
+    cachedGraphStatusAt: Date.now(),
+  });
+  return status;
+}
+
+function setStaleBadge() {
+  try {
+    chrome.action.setBadgeText({ text: "↻" });
+    chrome.action.setBadgeBackgroundColor({ color: "#d97706" });
+  } catch {
+    // Cosmetic only.
+  }
+}
+
+function notify(title, message) {
+  try {
+    chrome.notifications?.create({
+      type: "basic",
+      iconUrl: "icons/icon128.png",
+      title,
+      message,
+    });
+  } catch {
+    // Notifications are best-effort feedback for a background run.
+  }
+}
+
+async function runOneShotGraphSync({ background }) {
+  // Shared body for both the background alarm and the opportunistic prompt:
+  // mint a fresh sync session (respects the server's 6/day cap) and run a
+  // refresh. Records the run timestamp so the 24h cooldown holds across both.
+  const session = await apiRequest("/api/linkedin-graph/sync-session", { method: "POST" });
+  const result = await runGraphRefresh({
+    sessionToken: session.session_token,
+    maxBatchSize: session.max_batch_size,
+    background,
+    budgetMs: background ? GRAPH_BACKGROUND_BUDGET_MS : 0,
+  });
+  await chrome.storage.local.set({ lastAutoSyncAt: Date.now() });
+  // A completed sync refreshes the cached status on the next read.
+  await chrome.storage.local.remove(["cachedGraphStatus", "cachedGraphStatusAt"]);
+  return result;
+}
+
+async function maybeAutoSync(trigger) {
+  const { authToken, needsReconnect } = await getConfig();
+  if (!authToken || needsReconnect) return { ran: false, reason: "not_connected" };
+
+  const { autoSyncEnabled, lastAutoSyncAt } = await getSyncState();
+  if (!autoSyncEnabled) return { ran: false, reason: "disabled" };
+  if (Date.now() - lastAutoSyncAt < AUTO_SYNC_COOLDOWN_MS) {
+    return { ran: false, reason: "cooldown" };
+  }
+
+  let status;
+  try {
+    status = await fetchGraphStatusCached(true);
+  } catch (error) {
+    console.warn("[NexusReach Companion] Auto-sync status check failed:", error);
+    return { ran: false, reason: "status_error" };
+  }
+
+  // Only auto-run an existing graph that has aged. A never-synced graph stays
+  // user-initiated (onboarding / Settings), never surprise-scraped.
+  const connectionCount = Number(status?.connection_count) || 0;
+  const daysSince = status?.days_since_sync;
+  const aged =
+    Boolean(status?.refresh_recommended)
+    || (typeof daysSince === "number" && daysSince >= AUTO_SYNC_STALE_DAYS);
+  if (connectionCount === 0 || !aged) {
+    return { ran: false, reason: "fresh_or_empty" };
+  }
+
+  try {
+    const result = await runOneShotGraphSync({ background: true });
+    if (result.status === "completed") {
+      clearReconnectBadge();
+      notify(
+        "Network refreshed",
+        `Imported ${result.imported_connections} connections from LinkedIn.`,
+      );
+    } else {
+      setStaleBadge();
+    }
+    return { ran: true, result };
+  } catch (error) {
+    console.warn(`[NexusReach Companion] Auto-sync (${trigger}) failed:`, error);
+    setStaleBadge();
+    return { ran: false, reason: "run_error" };
+  }
+}
+
+async function shouldPromptStaleGraph() {
+  const { authToken, needsReconnect } = await getConfig();
+  if (!authToken || needsReconnect) return { prompt: false };
+
+  const { autoSyncEnabled, lastAutoSyncAt, lastStalePromptAt } = await getSyncState();
+  // The prompt only matters when auto-sync can't keep up on its own.
+  if (!autoSyncEnabled) return { prompt: false };
+  if (Date.now() - lastAutoSyncAt < AUTO_SYNC_COOLDOWN_MS) return { prompt: false };
+  if (Date.now() - lastStalePromptAt < AUTO_SYNC_COOLDOWN_MS) return { prompt: false };
+
+  let status;
+  try {
+    status = await fetchGraphStatusCached(false);
+  } catch {
+    return { prompt: false };
+  }
+  const connectionCount = Number(status?.connection_count) || 0;
+  const daysSince = status?.days_since_sync;
+  if (connectionCount === 0 || typeof daysSince !== "number" || daysSince < STALE_PROMPT_DAYS) {
+    return { prompt: false };
+  }
+  await chrome.storage.local.set({ lastStalePromptAt: Date.now() });
+  return { prompt: true, daysSinceSync: daysSince };
+}
+
+function scheduleNextAutoSync() {
+  const when = Date.now() + AUTO_SYNC_BASE_INTERVAL_MS + Math.random() * AUTO_SYNC_JITTER_MS;
+  chrome.alarms.create(AUTO_SYNC_ALARM, { when });
+}
+
+async function ensureAutoSyncAlarm() {
+  // MV3 service workers are ephemeral but alarms persist; only (re)arm when the
+  // alarm is missing so we don't reset the jittered schedule on every wake.
+  const existing = await chrome.alarms.get(AUTO_SYNC_ALARM);
+  if (!existing) scheduleNextAutoSync();
+}
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== AUTO_SYNC_ALARM) return;
+  maybeAutoSync("alarm").finally(() => scheduleNextAutoSync());
+});
+
 async function runGraphRefresh(payload) {
   if (!payload.sessionToken) {
     throw new Error("LinkedIn graph refresh session token is missing.");
   }
 
-  await setConfig({
-    apiUrl: payload.apiUrl,
-    authToken: payload.authToken,
-  });
+  // Background (auto-sync) runs use hidden tabs, slower scroll pacing, and a
+  // wall-clock budget so they finish before Chrome's intensive throttling and
+  // never steal focus. Foreground (user-initiated) runs keep the fast, visible
+  // behavior.
+  const background = Boolean(payload.background);
+  const active = !background;
+  const deadline = background && payload.budgetMs
+    ? Date.now() + Number(payload.budgetMs)
+    : 0;
+  const scrapeOpts = { background, deadline };
 
-  const connectionTabId = await createAndWaitForTab(LINKEDIN_CONNECTIONS_URL);
-  const connectionResult = await sendMessageToTab(connectionTabId, {
-    type: "RUN_GRAPH_REFRESH_CONNECTIONS",
-  });
-  if (connectionResult?.status === "blocked" || connectionResult?.status === "error") {
-    throw new Error(connectionResult?.message || "Could not scrape LinkedIn connections.");
+  // Only overwrite stored auth when the caller actually passed a token — the
+  // background path relies on the already-stored companion token.
+  if (payload.apiUrl || payload.authToken) {
+    await setConfig({
+      apiUrl: payload.apiUrl,
+      authToken: payload.authToken,
+    });
   }
 
-  const peopleFollowResult = await scrapeFollowTab(LINKEDIN_FOLLOWING_PEOPLE_URL, "person");
-  const ownProfileUrl = await resolveOwnLinkedInProfileUrl(connectionTabId);
-  const companyFollowUrl = profileInterestsUrl(ownProfileUrl);
-  const companyFollowResult = companyFollowUrl
-    ? await scrapeFollowTab(companyFollowUrl, "company")
-    : {
-        follows: [],
-        warnings: ["Could not resolve your LinkedIn profile URL for company follow capture."],
-      };
+  const connectionTabId = await createAndWaitForTab(LINKEDIN_CONNECTIONS_URL, { active });
+  let connectionResult;
+  try {
+    connectionResult = await sendMessageToTab(connectionTabId, {
+      type: "RUN_GRAPH_REFRESH_CONNECTIONS",
+      payload: scrapeOpts,
+    });
+    if (connectionResult?.status === "blocked" || connectionResult?.status === "error") {
+      throw new Error(connectionResult?.message || "Could not scrape LinkedIn connections.");
+    }
 
+    const peopleFollowResult = await scrapeFollowTab(LINKEDIN_FOLLOWING_PEOPLE_URL, "person", { active, ...scrapeOpts });
+    const ownProfileUrl = await resolveOwnLinkedInProfileUrl(connectionTabId);
+    const companyFollowUrl = profileInterestsUrl(ownProfileUrl);
+    const companyFollowResult = companyFollowUrl
+      ? await scrapeFollowTab(companyFollowUrl, "company", { active, ...scrapeOpts })
+      : {
+          follows: [],
+          warnings: ["Could not resolve your LinkedIn profile URL for company follow capture."],
+        };
+    return await finalizeGraphRefresh(payload, connectionResult, peopleFollowResult, companyFollowResult);
+  } finally {
+    if (background) await closeTabQuietly(connectionTabId);
+  }
+}
+
+async function finalizeGraphRefresh(payload, connectionResult, peopleFollowResult, companyFollowResult) {
   const connections = Array.isArray(connectionResult?.connections)
     ? connectionResult.connections
     : [];
@@ -477,17 +694,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "GET_STATUS") {
-    getConfig().then(({ authToken, profile, needsReconnect, appUrl }) => {
-      sendResponse({
-        available: true,
-        connected: Boolean(authToken),
-        hasProfile: Boolean(profile),
-        needsReconnect,
-        appUrl,
-        name: profile?.full_name || null,
-        version: chrome.runtime.getManifest().version,
-      });
-    });
+    Promise.all([getConfig(), getSyncState()]).then(
+      ([{ authToken, profile, needsReconnect, appUrl }, { autoSyncEnabled }]) => {
+        sendResponse({
+          available: true,
+          connected: Boolean(authToken),
+          hasProfile: Boolean(profile),
+          needsReconnect,
+          appUrl,
+          autoSyncEnabled,
+          name: profile?.full_name || null,
+          version: chrome.runtime.getManifest().version,
+        });
+      },
+    );
     return true;
   }
 
@@ -547,9 +767,57 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  // Auto-cadence sync (Workstream D)
+  if (message.type === "GET_AUTOSYNC") {
+    getSyncState().then(({ autoSyncEnabled, lastAutoSyncAt }) => {
+      sendResponse({ enabled: autoSyncEnabled, lastAutoSyncAt });
+    });
+    return true;
+  }
+
+  if (message.type === "SET_AUTOSYNC") {
+    chrome.storage.local
+      .set({ autoSyncEnabled: Boolean(message.enabled) })
+      .then(() => sendResponse({ ok: true, enabled: Boolean(message.enabled) }));
+    return true;
+  }
+
+  if (message.type === "SHOULD_PROMPT_STALE_GRAPH") {
+    shouldPromptStaleGraph()
+      .then((result) => sendResponse(result))
+      .catch(() => sendResponse({ prompt: false }));
+    return true;
+  }
+
+  if (message.type === "START_OPPORTUNISTIC_SYNC") {
+    // User clicked "Refresh now" on the in-page nudge — run in the foreground
+    // in their current session (fast, visible, human-present).
+    runOneShotGraphSync({ background: false })
+      .then((result) => {
+        clearReconnectBadge();
+        sendResponse({ ok: true, ...result });
+      })
+      .catch((error) =>
+        sendResponse({
+          ok: false,
+          error: error instanceof Error ? error.message : "LinkedIn graph refresh failed.",
+        }),
+      );
+    return true;
+  }
+
   return false;
 });
 
 chrome.runtime.onInstalled.addListener(() => {
   fetchProfile();
+  ensureAutoSyncAlarm();
 });
+
+chrome.runtime.onStartup?.addListener(() => {
+  ensureAutoSyncAlarm();
+});
+
+// Ensure the alarm exists whenever the service worker wakes (MV3 workers are
+// ephemeral; onInstalled/onStartup don't cover every revival).
+ensureAutoSyncAlarm();

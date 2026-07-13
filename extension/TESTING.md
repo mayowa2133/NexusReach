@@ -1,6 +1,11 @@
 # Solomon Companion — manual test checklist
 
-The extension has no automated harness (chrome.* APIs need a real browser).
+Auto-sync guard logic (Workstream D) has automated coverage: `node --test`
+from the `extension/` directory loads the real background.js in a stubbed
+environment and pins the "never over-scrape" decisions
+(`tests/autosync.test.mjs`). Run it before every submission. Everything below
+needs a real browser (chrome.* + live LinkedIn DOM).
+
 Run this checklist before every store submission and after any change to
 background.js / popup.js / app-bridge.js / linkedin-content.js.
 
@@ -26,10 +31,31 @@ Chrome profile logged into LinkedIn.
 
 ## LinkedIn graph refresh
 
-- [ ] Settings → Refresh in Companion → connections tab opens, scrolls,
-      follows tabs process, and Settings shows imported counts.
+- [ ] Settings → Sync Now → connections tab opens, scrolls, follows tabs
+      process, and Settings shows imported counts.
 - [ ] Run it a 7th time in one day → clean "Daily LinkedIn sync limit"
       error (6/day cap), not a crash.
+
+## Auto-cadence sync (Workstream D)
+
+- [ ] Popup shows "Keep my network fresh automatically" toggle, default ON;
+      toggling it persists (reopen popup → same state).
+- [ ] Force an alarm run for testing: in the service-worker console,
+      `chrome.storage.local.remove('lastAutoSyncAt')` then
+      `chrome.alarms.create('nr-auto-sync',{when:Date.now()+1000})`. With an
+      aged graph (>7 days) it runs in a BACKGROUND tab (never steals focus),
+      cleans the tab up afterward, fires a "Network refreshed" notification,
+      and Settings shows updated counts.
+- [ ] With the toggle OFF, the same forced alarm does nothing.
+- [ ] With a fresh graph (<7 days) or an empty graph, the forced alarm does
+      nothing (no tab opens).
+- [ ] Only one auto-run per 24h: immediately forcing a second alarm (without
+      clearing lastAutoSyncAt) does nothing.
+- [ ] Opportunistic nudge: set `days_since_sync` high (or wait), clear
+      `lastAutoSyncAt`/`lastStalePromptAt`, visit any normal LinkedIn page →
+      after ~4s a "Your network graph is N weeks old" panel appears with
+      "Refresh now" (runs a foreground sync) and "Not now" (dismisses). It
+      does NOT appear on the connections/following pages.
 
 ## Hiring-team capture
 

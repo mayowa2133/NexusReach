@@ -1,12 +1,18 @@
 # LinkedIn Companion — Tier 1 Implementation Plan
 
 Date: 2026-07-13
-Status: in progress on branch `linkedin-companion-tier1` — Workstreams A, B, and C
-implemented (A: migration landed as `060_add_companion_tokens`; B: build via
-`extension/build.mjs`, submission package in `extension/STORE_LISTING.md`;
+Status: in progress on branch `linkedin-companion-tier1` — Workstreams A, B, C,
+and D implemented (A: migration landed as `060_add_companion_tokens`; B: build
+via `extension/build.mjs`, submission package in `extension/STORE_LISTING.md`;
 C: Settings blessed-path card, onboarding `network` step, dashboard nudge —
 the install CTA reads `VITE_COMPANION_INSTALL_URL`, unset until the store
-listing is live).
+listing is live; D: jittered weekly `chrome.alarms` background sync + in-page
+staleness nudge, guarded by cooldown/staleness/interstitial checks, opt-out
+popup toggle, `node --test` guard-logic coverage). E and F not started.
+D deviation: the auto-sync opt-out toggle lives in the extension popup (its
+state is extension-local), not the Settings card — the card links to it. This
+avoids new app↔extension bridge plumbing that can't be verified without loading
+the real extension.
 Two deliberate B deviations: (1) the `alarms` permission is deferred to the
 release that ships Workstream D — requesting an unused permission is a CWS
 review rejection risk; (2) naming resolved to **Solomon Companion**, not

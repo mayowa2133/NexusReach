@@ -390,15 +390,26 @@
     return queryTextButton(["connect"]);
   }
 
-  async function autoScroll(maxPasses = 10, anchorSelector = 'a[href*="/in/"], a[href*="/company/"]') {
+  async function autoScroll(
+    maxPasses = 10,
+    anchorSelector = 'a[href*="/in/"], a[href*="/company/"]',
+    { deadline = 0, background = false } = {},
+  ) {
     let previousHeight = -1;
     let previousCount = -1;
     let stablePasses = 0;
+    // Hidden tabs get their timers clamped to ~1s anyway; pace to match rather
+    // than fight it, and honor a wall-clock budget so an auto-run finishes
+    // before Chrome's intensive throttling kicks in.
+    const stepMs = background ? 1000 : 800;
     for (let pass = 0; pass < maxPasses; pass += 1) {
+      if (deadline && Date.now() > deadline) {
+        break;
+      }
       clickVisibleShowMore();
 
       const nextHeight = scrollGraphContainers();
-      await wait(800);
+      await wait(stepMs);
 
       const nextCount = document.querySelectorAll(anchorSelector).length;
       if (nextCount >= MAX_GRAPH_ITEMS) {
@@ -613,13 +624,14 @@
     return cleaned || fallback;
   }
 
-  async function runConnectionScrape() {
+  async function runConnectionScrape(options = {}) {
+    const scrollOpts = { deadline: Number(options.deadline) || 0, background: Boolean(options.background) };
     const blocked = detectBlockedState();
     if (blocked) {
       return { status: "blocked", message: blocked, connections: [] };
     }
     await waitForElement(() => document.querySelector('a[href*="/in/"]'), 15000, 500);
-    await autoScroll(120, 'a[href*="/in/"]');
+    await autoScroll(120, 'a[href*="/in/"]', scrollOpts);
     const connections = scrapeConnections();
     return {
       status: "completed",
@@ -629,6 +641,7 @@
   }
 
   async function runFollowScrape(payload = {}) {
+    const scrollOpts = { deadline: Number(payload.deadline) || 0, background: Boolean(payload.background) };
     const blocked = detectBlockedState();
     if (blocked) {
       return { status: "blocked", message: blocked, follows: [], warnings: [blocked] };
@@ -642,7 +655,7 @@
         await switchFollowTab("companies");
       }
       await waitForElement(() => document.querySelector(selector), 15000, 500);
-      await autoScroll(120, selector);
+      await autoScroll(120, selector, scrollOpts);
       const follows = scrapeFollows(payload.entityType);
       const warnings = follows.length
         ? []
@@ -659,17 +672,17 @@
     const follows = [];
 
     if (await switchFollowTab("people")) {
-      await autoScroll(80, 'a[href*="/in/"]');
+      await autoScroll(80, 'a[href*="/in/"]', scrollOpts);
       follows.push(...scrapeFollows("person"));
     } else if (window.location.href.includes("/people-follow/") || window.location.href.includes("/feed/following/")) {
-      await autoScroll(80, 'a[href*="/in/"]');
+      await autoScroll(80, 'a[href*="/in/"]', scrollOpts);
       follows.push(...scrapeFollows("person"));
     } else {
       warnings.push("Could not open the LinkedIn People follow tab.");
     }
 
     if (await switchFollowTab("companies")) {
-      await autoScroll(80, 'a[href*="/company/"]');
+      await autoScroll(80, 'a[href*="/company/"]', scrollOpts);
       follows.push(...scrapeFollows("company"));
     } else {
       warnings.push("Could not open the LinkedIn Companies follow tab.");
@@ -883,7 +896,7 @@
     }
 
     if (message.type === "RUN_GRAPH_REFRESH_CONNECTIONS") {
-      runConnectionScrape()
+      runConnectionScrape(message.payload || {})
         .then((result) => sendResponse(result))
         .catch((error) =>
           sendResponse({
@@ -924,4 +937,102 @@
 
     return false;
   });
+
+  // -------------------------------------------------------------------------
+  // Opportunistic stale-graph nudge (Workstream D)
+  //
+  // When the user is naturally on LinkedIn and their imported network graph
+  // has gone stale (and the background alarm hasn't kept up), offer a one-click
+  // refresh in this already-logged-in session. This is the safest posture:
+  // human-present, foreground, and only on pages the user navigated to.
+  // -------------------------------------------------------------------------
+
+  function isGraphRefreshPage() {
+    // Skip the pages the sync itself drives, so an in-progress sync (its own
+    // tabs) never triggers the nudge.
+    const path = window.location.pathname;
+    return (
+      path.includes("/mynetwork/invite-connect/connections")
+      || path.includes("/mynetwork/network-manager/people-follow")
+      || path.includes("/details/interests")
+      || path.includes("/feed/following")
+    );
+  }
+
+  function renderStaleNudge(daysSinceSync) {
+    const root = panel();
+    root.replaceChildren();
+
+    const eyebrow = document.createElement("div");
+    eyebrow.style.cssText = "font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#0369a1;";
+    eyebrow.textContent = "NexusReach Companion";
+    root.appendChild(eyebrow);
+
+    const title = document.createElement("div");
+    title.style.cssText = "margin-top:4px;font-size:14px;font-weight:700;color:#0f172a;";
+    const weeks = Math.floor(daysSinceSync / 7);
+    title.textContent = weeks >= 1
+      ? `Your network graph is about ${weeks} week${weeks === 1 ? "" : "s"} old`
+      : `Your network graph is ${daysSinceSync} days old`;
+    root.appendChild(title);
+
+    const body = document.createElement("div");
+    body.style.cssText = "margin-top:6px;color:#475569;";
+    body.textContent = "Refresh it now while you're signed in so warm paths stay accurate.";
+    root.appendChild(body);
+
+    const status = document.createElement("div");
+    status.style.cssText = "margin-top:8px;color:#334155;min-height:16px;";
+    root.appendChild(status);
+
+    const actions = document.createElement("div");
+    actions.style.cssText = "margin-top:10px;display:flex;gap:8px;";
+
+    const refreshBtn = document.createElement("button");
+    refreshBtn.textContent = "Refresh now";
+    refreshBtn.style.cssText = "flex:1;padding:7px;border:none;border-radius:8px;background:#0284c7;color:#fff;font-weight:600;cursor:pointer;";
+
+    const dismissBtn = document.createElement("button");
+    dismissBtn.textContent = "Not now";
+    dismissBtn.style.cssText = "padding:7px 10px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;color:#334155;cursor:pointer;";
+    dismissBtn.addEventListener("click", () => root.remove());
+
+    refreshBtn.addEventListener("click", () => {
+      refreshBtn.disabled = true;
+      dismissBtn.disabled = true;
+      status.textContent = "Refreshing your network…";
+      chrome.runtime.sendMessage({ type: "START_OPPORTUNISTIC_SYNC" }, (response) => {
+        if (chrome.runtime.lastError || !response?.ok) {
+          status.textContent = response?.error || chrome.runtime.lastError?.message || "Refresh failed. Try again from Settings.";
+          refreshBtn.disabled = false;
+          dismissBtn.disabled = false;
+          return;
+        }
+        status.textContent = response.message || "Network refreshed.";
+        refreshBtn.remove();
+        dismissBtn.textContent = "Close";
+        dismissBtn.disabled = false;
+      });
+    });
+
+    actions.append(refreshBtn, dismissBtn);
+    root.appendChild(actions);
+  }
+
+  function maybeShowStaleNudge() {
+    if (TEST_MODE) return;
+    if (isGraphRefreshPage()) return;
+    if (detectBlockedState()) return;
+    try {
+      chrome.runtime.sendMessage({ type: "SHOULD_PROMPT_STALE_GRAPH" }, (response) => {
+        if (chrome.runtime.lastError || !response?.prompt) return;
+        renderStaleNudge(Number(response.daysSinceSync) || 0);
+      });
+    } catch {
+      // Extension context unavailable — no nudge.
+    }
+  }
+
+  // Give the SPA a moment to settle before checking staleness.
+  window.setTimeout(maybeShowStaleNudge, 4000);
 })();

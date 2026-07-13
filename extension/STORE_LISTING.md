@@ -3,6 +3,11 @@
 Everything needed to build, submit, and maintain the extension listing.
 See `LINKEDIN_COMPANION_TIER1_PLAN.md` (Workstream B) for context.
 
+## Before you build
+
+Run the auto-sync guard tests: `cd extension && node --test`. All must pass
+(`tests/autosync.test.mjs`).
+
 ## Build the production package
 
 ```bash
@@ -60,13 +65,16 @@ store rejects re-uploads of an existing version number.
 |---|---|
 | `storage` | Stores the user's Solomon companion token, API endpoint, and cached profile for autofill. |
 | `activeTab` / `tabs` | Opens and reads the user-initiated tabs used for hiring-team capture and the user-started network sync; opens the Solomon app from the popup. |
-| `https://www.linkedin.com/*` | Reads the "Meet the hiring team" panel on job postings the user is viewing and, when the user starts a sync, the user's own connections list. Read-only; no automated actions (no invites, likes, messages); no credential or cookie access. |
+| `alarms` | Schedules the optional weekly background refresh of the user's own imported network graph (opt-out, default on). |
+| `notifications` | Tells the user when a background network refresh finished (e.g. "Imported N connections"), since it runs without a visible tab. |
+| `https://www.linkedin.com/*` | Reads the "Meet the hiring team" panel on job postings the user is viewing and, when the user starts (or has opted into) a sync, the user's own connections list. Read-only; no automated actions (no invites, likes, messages); no credential or cookie access. |
 | ATS hosts (`boards.greenhouse.io`, `jobs.lever.co`, `jobs.ashbyhq.com`, `apply.workable.com`, `*.myworkdayjobs.com`, `jobs.apple.com`, `*.careers-page.com`) | Autofills the user's own job applications from their Solomon profile. |
 | API origin (`https://<railway-api-domain>/*`) | Syncs captured data with the user's own Solomon account. |
 
-Note: the `alarms` permission is deliberately NOT requested yet — auto-sync
-(plan Workstream D) adds it in the same release that uses it, so the listing
-never requests an unused permission.
+The optional weekly refresh is read-only and heavily rate-limited (at most one
+run per 24h, only when the user's graph has aged past a week, always in a
+background tab with a wall-clock budget, aborting on any LinkedIn
+interstitial). It is opt-out from the extension popup.
 
 ## Data-use disclosures (Privacy tab)
 
