@@ -54,6 +54,21 @@ vi.mock('sonner', () => ({
   },
 }));
 
+// The network step pings the companion extension on mount; without this mock
+// the real ping waits out a 10s bridge timeout in jsdom.
+vi.mock('@/lib/companion', () => ({
+  COMPANION_INSTALL_URL: '',
+  pingCompanion: vi.fn().mockResolvedValue({
+    available: false,
+    connected: false,
+    hasProfile: false,
+    name: null,
+    version: null,
+  }),
+  connectCompanion: vi.fn(),
+  refreshLinkedInGraphInCompanion: vi.fn(),
+}));
+
 function renderOnboarding() {
   return render(
     <MemoryRouter>
@@ -119,6 +134,10 @@ describe('OnboardingDialog', () => {
     await waitFor(() => {
       expect(mocks.uploadResume).toHaveBeenCalledWith(resume);
     });
+
+    // Network step: no companion in the test environment, so skip past it.
+    expect(await screen.findByText(/connect your network/i)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /skip for now/i }));
 
     await user.click(screen.getByRole('button', { name: /discover matching jobs/i }));
 

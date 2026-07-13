@@ -119,5 +119,7 @@ never requests an unused permission.
 2. Set on Railway (web service):
    `NEXUSREACH_COMPANION_EXTENSION_ORIGINS=["chrome-extension://<id>"]`
    (feeds CORS/OAuth origin allowlisting — `app/utils/origins.py`).
-3. Add the store URL to the frontend install CTA (Workstream C constant).
+3. Set `VITE_COMPANION_INSTALL_URL=<store listing URL>` on the Vercel frontend
+   build — the Settings and onboarding install CTAs hide themselves while it
+   is unset.
 4. Update `DEPLOYMENT_RUNBOOK.md` secrets/domains checklist with both values.

@@ -204,8 +204,12 @@ describe('SettingsPage — basic', () => {
   it('renders LinkedIn graph section', () => {
     renderSettings();
     expect(screen.getByText('LinkedIn Graph')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /sync now/i })).toBeInTheDocument();
+    // No companion detected in tests: the companion Sync Now button is hidden
+    // and the fallback import paths are shown instead.
+    expect(screen.queryByRole('button', { name: /sync now/i })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /upload export/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /open linkedin export page/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /developer options/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /clear graph data/i })).toBeInTheDocument();
   });
 
@@ -248,7 +252,12 @@ describe('SettingsPage — basic', () => {
     });
 
     renderSettings();
-    await userEvent.click(screen.getByRole('button', { name: /sync now/i }));
+    // The CLI connector is a power-user path behind the Developer options
+    // disclosure; the Companion extension is the primary sync path.
+    await userEvent.click(screen.getByRole('button', { name: /developer options/i }));
+    await userEvent.click(
+      screen.getByRole('button', { name: /start local connector session/i }),
+    );
 
     expect(await screen.findByText(/existing logged-in chrome session via cdp/i)).toBeInTheDocument();
     expect(screen.getAllByText(/python scripts\/linkedin_graph_connector\.py --base-url/i)).toHaveLength(2);

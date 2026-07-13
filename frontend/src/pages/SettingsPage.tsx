@@ -24,6 +24,7 @@ import {
   useDisconnectCompanion,
   useRefreshLinkedInGraphInCompanion,
 } from '@/hooks/useCompanion';
+import { COMPANION_INSTALL_URL } from '@/lib/companion';
 import { API_URL } from '@/lib/api';
 import { useProfile, useUpdateProfile } from '@/hooks/useProfile';
 import {
@@ -41,6 +42,9 @@ import { consumePendingOAuthCallback } from '@/lib/observability';
 
 const REDIRECT_URI = `${window.location.origin}/settings`;
 const LINKEDIN_CONNECTOR_PROFILE_DIR = '~/.nexusreach/linkedin-graph-browser';
+// LinkedIn's official "get a copy of your data" page — the Connections-only
+// export is ready in about 10 minutes and uploads directly here.
+const LINKEDIN_EXPORT_URL = 'https://www.linkedin.com/mypreferences/d/download-my-data';
 
 function buildLinkedInCdpCommand(sessionToken: string): string {
   return `cd backend && python scripts/linkedin_graph_connector.py --base-url ${API_URL} --session-token ${sessionToken} --cdp-url http://127.0.0.1:9222`;
@@ -164,6 +168,9 @@ export function SettingsPage() {
   const connectCompanion = useConnectCompanion();
   const disconnectCompanion = useDisconnectCompanion();
   const refreshLinkedInGraphInCompanion = useRefreshLinkedInGraphInCompanion();
+  // The CLI/local-connector path lives behind this disclosure — the Companion
+  // extension is the blessed path; terminal commands are for power users.
+  const [showConnectorOptions, setShowConnectorOptions] = useState(false);
   const startLinkedInSync = useStartLinkedInGraphSyncSession();
   const uploadLinkedInGraphFile = useUploadLinkedInGraphFile();
   const clearLinkedInGraph = useClearLinkedInGraph();
@@ -471,46 +478,57 @@ export function SettingsPage() {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <Button
-              onClick={handleConnectCompanion}
-              variant={companionStatus?.connected ? 'outline' : 'default'}
-              disabled={connectCompanion.isPending}
-            >
-              {connectCompanion.isPending ? 'Connecting...' : 'Connect Companion'}
-            </Button>
-            {companionStatus?.connected && (
-              <Button
-                variant="outline"
-                onClick={handleDisconnectCompanion}
-                disabled={disconnectCompanion.isPending}
-              >
-                {disconnectCompanion.isPending ? 'Disconnecting...' : 'Disconnect Companion'}
+            {companionStatus?.available ? (
+              <>
+                <Button
+                  onClick={handleRefreshInCompanion}
+                  disabled={
+                    startLinkedInSync.isPending
+                    || refreshLinkedInGraphInCompanion.isPending
+                    || linkedinGraphLoading
+                    || !companionStatus?.connected
+                  }
+                >
+                  {refreshLinkedInGraphInCompanion.isPending ? 'Syncing...' : 'Sync Now'}
+                </Button>
+                <Button
+                  onClick={handleConnectCompanion}
+                  variant={companionStatus?.connected ? 'outline' : 'default'}
+                  disabled={connectCompanion.isPending}
+                >
+                  {connectCompanion.isPending
+                    ? 'Connecting...'
+                    : companionStatus?.connected
+                      ? 'Reconnect Companion'
+                      : 'Connect Companion'}
+                </Button>
+                {companionStatus?.connected && (
+                  <Button
+                    variant="outline"
+                    onClick={handleDisconnectCompanion}
+                    disabled={disconnectCompanion.isPending}
+                  >
+                    {disconnectCompanion.isPending ? 'Disconnecting...' : 'Disconnect Companion'}
+                  </Button>
+                )}
+              </>
+            ) : COMPANION_INSTALL_URL ? (
+              <Button onClick={() => window.open(COMPANION_INSTALL_URL, '_blank', 'noopener')}>
+                Install the Companion
               </Button>
-            )}
-            <Button
-              onClick={handleRefreshInCompanion}
-              disabled={
-                startLinkedInSync.isPending
-                || refreshLinkedInGraphInCompanion.isPending
-                || linkedinGraphLoading
-                || !companionStatus?.available
-              }
-            >
-              {refreshLinkedInGraphInCompanion.isPending ? 'Refreshing...' : 'Refresh in Companion'}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={handleStartLinkedInSync}
-              disabled={startLinkedInSync.isPending || linkedinGraphLoading}
-            >
-              {startLinkedInSync.isPending ? 'Starting...' : 'Sync Now'}
-            </Button>
+            ) : null}
             <Button
               variant="outline"
               onClick={() => fileInputRef.current?.click()}
               disabled={uploadLinkedInGraphFile.isPending}
             >
               {uploadLinkedInGraphFile.isPending ? 'Uploading...' : 'Upload Export'}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => window.open(LINKEDIN_EXPORT_URL, '_blank', 'noopener')}
+            >
+              Open LinkedIn Export Page
             </Button>
             <Button
               variant="outline"
@@ -521,7 +539,40 @@ export function SettingsPage() {
             </Button>
           </div>
 
-          {syncSession && (
+          <p className="text-sm text-muted-foreground">
+            {companionStatus?.available
+              ? 'The Companion imports your network in one click — or use a file: on the LinkedIn export page choose "Connections" only (the file is ready in about 10 minutes), then Upload Export.'
+              : COMPANION_INSTALL_URL
+                ? 'The Solomon Companion extension imports your network in one click — install it, then reload this page.'
+                : 'The Solomon Companion extension imports your network in one click and ships with launch. Meanwhile: on the LinkedIn export page choose "Connections" only (the file is ready in about 10 minutes), then Upload Export.'}
+          </p>
+
+          <div className="space-y-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowConnectorOptions((value) => !value)}
+            >
+              {showConnectorOptions ? 'Hide developer options' : 'Developer options'}
+            </Button>
+            {showConnectorOptions && (
+              <div className="rounded-lg border bg-muted/20 p-4 space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  The local connector scrapes LinkedIn from your own logged-in browser via a
+                  terminal command — for development or non-Chrome setups.
+                </p>
+                <Button
+                  variant="outline"
+                  onClick={handleStartLinkedInSync}
+                  disabled={startLinkedInSync.isPending || linkedinGraphLoading}
+                >
+                  {startLinkedInSync.isPending ? 'Starting...' : 'Start Local Connector Session'}
+                </Button>
+              </div>
+            )}
+          </div>
+
+          {showConnectorOptions && syncSession && (
             <div className="rounded-lg border bg-muted/30 p-4 space-y-2">
               <p className="text-sm font-medium">Local connector session ready</p>
               <p className="text-sm text-muted-foreground">

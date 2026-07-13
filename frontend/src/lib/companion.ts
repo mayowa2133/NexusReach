@@ -1,6 +1,12 @@
 import { api, API_URL } from '@/lib/api';
 import type { LinkedInGraphSyncSession, MessageWarmPath } from '@/types';
 
+// Chrome Web Store listing URL for the Solomon Companion. Empty until the
+// extension is published (pre-launch); install CTAs hide themselves when
+// unset. Set VITE_COMPANION_INSTALL_URL at build time once the listing is live.
+export const COMPANION_INSTALL_URL: string =
+  (import.meta.env.VITE_COMPANION_INSTALL_URL as string | undefined) ?? '';
+
 type CompanionRequestType =
   | 'NR_EXTENSION_PING'
   | 'NR_EXTENSION_CONNECT'
