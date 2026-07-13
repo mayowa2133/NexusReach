@@ -8,6 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.dependencies import get_current_user_id
 from app.observability import capture_event
+from app.services.outcome_telemetry import (
+    attribution_key,
+    job_category_properties,
+    person_ranking_properties,
+)
 from app.schemas.outreach import (
     CreateOutreachRequest,
     UpdateOutreachRequest,
@@ -77,7 +82,17 @@ async def create_outreach(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    capture_event(str(user_id), "outreach_logged", properties={"status": body.status, "channel": body.channel})
+    person = getattr(log, "person", None)
+    job = getattr(log, "job", None)
+    capture_event(str(user_id), "outreach_logged", properties={
+        "status": body.status,
+        "channel": body.channel,
+        "job_key": attribution_key(log.job_id),
+        "person_key": attribution_key(log.person_id),
+        "message_key": attribution_key(log.message_id),
+        **person_ranking_properties(person),
+        **job_category_properties(job),
+    })
     return _to_response(log)
 
 

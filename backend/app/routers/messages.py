@@ -8,6 +8,7 @@ from app.database import get_db
 from app.dependencies import get_current_user_id
 from app.middleware.rate_limit import limiter
 from app.observability import capture_event
+from app.services.outcome_telemetry import attribution_key, person_ranking_properties
 from app.schemas.messages import (
     BatchDraftItem,
     BatchDraftRequest,
@@ -134,6 +135,9 @@ async def create_draft(
         "channel": body.channel,
         "goal": body.goal,
         "has_job_context": bool(body.job_id),
+        "job_key": attribution_key(body.job_id),
+        "person_key": attribution_key(body.person_id),
+        **person_ranking_properties(result.get("person")),
     })
     return DraftResponse(
         message=_to_response(

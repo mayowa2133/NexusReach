@@ -268,6 +268,8 @@ async def search_people_at_company(
             limit=search_limit,
             min_results=minimum_results,
             db=db,
+            context=roles_context,
+            bucket="recruiters",
         ),
         _search_candidates(
             company_name,
@@ -277,6 +279,8 @@ async def search_people_at_company(
             limit=search_limit,
             min_results=minimum_results,
             db=db,
+            context=roles_context,
+            bucket="hiring_managers",
         ),
         _search_candidates(
             company_name,
@@ -285,6 +289,8 @@ async def search_people_at_company(
             limit=search_limit,
             min_results=minimum_results,
             db=db,
+            context=roles_context,
+            bucket="peers",
         ),
     )
     # For early-career searches, run additional queries with common intern/new-grad

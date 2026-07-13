@@ -32,6 +32,7 @@ EvidenceType = Literal[
     "license",
     "portfolio",
     "contract",
+    "salary",
 ]
 Criticality = Literal["hard", "important", "supporting"]
 
@@ -154,6 +155,18 @@ _LANGUAGE_RE = re.compile(
     r"\b(?:fluent|fluency|proficient|proficiency|bilingual)\s+(?:in\s+)?"
     r"(English|French|Spanish|German|Mandarin|Cantonese|Portuguese|Arabic|Hindi|Japanese|Korean)\b",
     re.I,
+)
+_CONTRACT_DURATION_PATTERNS = (
+    re.compile(
+        r"\b(?P<count>\d{1,3})\s*[- ]?\s*(?P<unit>weeks?|months?|years?)\b"
+        r"(?=.{0,30}\b(?:contract|fixed[- ]term|temporary)\b)",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:contract|fixed[- ]term|temporary)\b.{0,30}?"
+        r"(?P<count>\d{1,3})\s*[- ]?\s*(?P<unit>weeks?|months?|years?)\b",
+        re.I,
+    ),
 )
 
 _CAPABILITY_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
@@ -307,6 +320,27 @@ def extract_job_requirements(description: str | None) -> list[JobRequirement]:
                 normalized_language,
             )
 
+        for duration_pattern in _CONTRACT_DURATION_PATTERNS:
+            duration = duration_pattern.search(line)
+            if not duration:
+                continue
+            count = int(duration.group("count"))
+            unit = duration.group("unit").lower()
+            months = (
+                max(1, round(count / 4.345))
+                if unit.startswith("week")
+                else count * 12 if unit.startswith("year") else count
+            )
+            add(
+                f"contract duration {months} months",
+                f"{months}-month contract",
+                "contract",
+                "hard" if kind == "mandatory" else "important",
+                0.95,
+                months,
+            )
+            break
+
         for label, pattern in _CAPABILITY_PATTERNS:
             if pattern.search(line):
                 add(
@@ -405,6 +439,99 @@ def evaluate_job_eligibility(
         if str(value).strip()
     }
     max_travel = preferences.get("max_travel_percent")
+
+    def preference_constraint(
+        constraint_id: str,
+        display_text: str,
+        evidence_type: EvidenceType,
+        value: str | int | float | bool | None,
+    ) -> dict:
+        return {
+            "id": f"preference:{constraint_id}",
+            "normalized": constraint_id.replace("_", " "),
+            "display_text": display_text,
+            "kind": "mandatory",
+            "evidence_type": evidence_type,
+            "criticality": "hard",
+            "source_span": "User job preferences",
+            "confidence": 1.0,
+            "value": value,
+            "version": REQUIREMENT_SCHEMA_VERSION,
+        }
+
+    required_currency = str(preferences.get("required_salary_currency") or "").strip().upper()
+    salary_currency = str(job_data.get("salary_currency") or "").strip().upper()
+    salary_present = job_data.get("salary_min") is not None or job_data.get("salary_max") is not None
+    if required_currency:
+        item = preference_constraint(
+            "required_salary_currency",
+            f"Salary must be reported in {required_currency}",
+            "salary",
+            required_currency,
+        )
+        if salary_currency:
+            (matched if salary_currency == required_currency else hard_failures).append(item)
+        else:
+            unknown.append(item)
+
+    required_period = str(preferences.get("required_salary_period") or "").strip().lower()
+    salary_period = str(job_data.get("salary_period") or "").strip().lower()
+    if required_period:
+        item = preference_constraint(
+            "required_salary_period",
+            f"Salary must be reported per {required_period}",
+            "salary",
+            required_period,
+        )
+        if salary_period:
+            (matched if salary_period == required_period else hard_failures).append(item)
+        else:
+            unknown.append(item)
+
+    minimum_salary_confidence = preferences.get("minimum_salary_confidence")
+    if isinstance(minimum_salary_confidence, (int, float)):
+        item = preference_constraint(
+            "minimum_salary_confidence",
+            f"Salary confidence must be at least {float(minimum_salary_confidence):.2f}",
+            "salary",
+            float(minimum_salary_confidence),
+        )
+        salary_provenance = (
+            job_data.get("metadata_provenance", {}).get("salary", {})
+            if isinstance(job_data.get("metadata_provenance"), dict)
+            else {}
+        )
+        confidence = salary_provenance.get("confidence") if isinstance(salary_provenance, dict) else None
+        if not salary_present or not isinstance(confidence, (int, float)):
+            unknown.append(item)
+        elif float(confidence) < float(minimum_salary_confidence):
+            hard_failures.append(item)
+        else:
+            matched.append(item)
+
+    minimum_contract_months = preferences.get("minimum_contract_months")
+    is_contract = str(job_data.get("employment_type") or "").strip().lower() == "contract" or any(
+        requirement.evidence_type == "contract" for requirement in requirements
+    )
+    if isinstance(minimum_contract_months, int) and is_contract:
+        item = preference_constraint(
+            "minimum_contract_months",
+            f"Contract must be at least {minimum_contract_months} months",
+            "contract",
+            minimum_contract_months,
+        )
+        durations = [
+            int(requirement.value)
+            for requirement in requirements
+            if requirement.evidence_type == "contract"
+            and isinstance(requirement.value, (int, float))
+        ]
+        if not durations:
+            unknown.append(item)
+        elif max(durations) < minimum_contract_months:
+            hard_failures.append(item)
+        else:
+            matched.append(item)
 
     for requirement in requirements:
         if requirement.criticality != "hard" or requirement.kind != "mandatory":

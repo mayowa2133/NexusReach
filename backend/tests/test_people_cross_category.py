@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.services.people.buckets import _finalize_bucketed
-from app.services.people.candidates import _cached_candidate_ready
+from app.services.people.candidates import _cached_candidate_ready, _search_candidates
 from app.services.people.context import _build_roles_context
 from app.services.people.titles import (
     _companywide_manager_titles,
@@ -127,6 +127,21 @@ def test_cache_hit_must_pass_company_employment_and_bucket_preflight():
         requested_titles=["Registered Nurse"],
         public_identity_terms=None,
     )
+
+    healthcare = _build_roles_context(["Registered Nurse"])
+    assert healthcare is not None
+    assert not _cached_candidate_ready(
+        {
+            **base,
+            "title": "Engineering Manager",
+            "snippet": "Engineering Manager at Northbridge Health",
+        },
+        company_name="Northbridge Health",
+        requested_titles=["Manager"],
+        public_identity_terms=None,
+        context=healthcare,
+        bucket="hiring_managers",
+    )
     assert not _cached_candidate_ready(
         {**base, "snippet": "Former Registered Nurse at Northbridge Health"},
         company_name="Northbridge Health",
@@ -139,3 +154,49 @@ def test_cache_hit_must_pass_company_employment_and_bucket_preflight():
         requested_titles=["Registered Nurse"],
         public_identity_terms=None,
     )
+
+
+@pytest.mark.asyncio
+async def test_rejected_cache_underfill_continues_only_requested_bucket_waterfall(
+    monkeypatch,
+):
+    from app.clients import apollo_client
+    from app.services import known_people_service
+
+    context = _build_roles_context(["Registered Nurse"])
+    apollo_calls = []
+
+    async def fake_cache(*args, **kwargs):
+        return [{
+            "full_name": "Wrong Function",
+            "title": "Engineering Manager",
+            "company_name": "Northbridge Health",
+            "source": "apollo",
+            "snippet": "Engineering Manager at Northbridge Health",
+        }]
+
+    async def fake_apollo(*args, **kwargs):
+        apollo_calls.append(kwargs)
+        return [{
+            "full_name": "Clinical Leader",
+            "title": "Nurse Manager",
+            "company_name": "Northbridge Health",
+            "source": "apollo",
+            "snippet": "Nurse Manager at Northbridge Health",
+        }]
+
+    monkeypatch.setattr(known_people_service, "lookup_known_people", fake_cache)
+    monkeypatch.setattr(apollo_client, "search_people", fake_apollo)
+
+    results = await _search_candidates(
+        "Northbridge Health",
+        titles=["Manager"],
+        limit=5,
+        min_results=1,
+        db=SimpleNamespace(),
+        context=context,
+        bucket="hiring_managers",
+    )
+
+    assert apollo_calls, "a post-gate cache underfill must continue to live retrieval"
+    assert [candidate["full_name"] for candidate in results] == ["Clinical Leader"]

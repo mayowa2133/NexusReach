@@ -192,6 +192,7 @@ class JobSourceRunResponse(BaseModel):
     duration_seconds: float | None = None
     started_at: str
     finished_at: str | None = None
+    details: dict | None = None
 
 
 class JobRefreshRunResponse(BaseModel):

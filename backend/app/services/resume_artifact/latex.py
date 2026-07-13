@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from difflib import SequenceMatcher
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -90,14 +91,37 @@ def _pdf_qa_tokens(text: str) -> set[str]:
     }
 
 
+def _pdf_qa_stream(text: str) -> str:
+    """Normalize parser output while ignoring harmless whitespace boundaries."""
+    return "".join(re.findall(r"[a-z0-9+#.]+", text.lower()))
+
+
 def _intended_metric_tokens(content: str) -> set[str]:
-    body = content.split(r"\begin{document}", 1)[-1]
+    body = content.split(r"\begin{document}", 1)[-1].split(r"\end{document}", 1)[0]
     body = re.sub(
         r"\\(?:fontsize|linespread|setlength|vspace)\{[^}]*\}(?:\{[^}]*\})?",
         " ",
         body,
     )
     return set(_metric_tokens(_latex_plain_text(body)))
+
+
+def _intended_resume_text(content: str) -> str:
+    """Extract only user-visible body text from generated LaTeX.
+
+    Preamble package names and layout arguments are implementation details,
+    not intended PDF text. Including them in retention checks falsely rejects
+    fully intact production templates even though both PDF parsers agree.
+    """
+    body = content.split(r"\begin{document}", 1)[-1].split(r"\end{document}", 1)[0]
+    body = re.sub(
+        r"\\(?:fontsize|linespread|setlength|vspace|thispagestyle)"
+        r"\{[^}]*\}(?:\{[^}]*\})?",
+        " ",
+        body,
+    )
+    body = re.sub(r"\\(?:begin|end)\{[^}]*\}", " ", body)
+    return _latex_plain_text(body)
 
 
 def verify_rendered_resume_pdf(
@@ -146,7 +170,7 @@ def verify_rendered_resume_pdf(
     if any(marker in pypdf_text or marker in poppler_text for marker in ("\ufffd", "\x00")):
         raise ValueError("Rendered resume contains missing or invalid glyphs.")
 
-    expected_text = _latex_plain_text(content)
+    expected_text = _intended_resume_text(content)
     expected_tokens = _pdf_qa_tokens(expected_text)
     pypdf_tokens = _pdf_qa_tokens(pypdf_text)
     poppler_tokens = _pdf_qa_tokens(poppler_text)
@@ -154,12 +178,14 @@ def verify_rendered_resume_pdf(
         raise ValueError("Rendered resume has no verifiable source text.")
     pypdf_retention = len(expected_tokens & pypdf_tokens) / len(expected_tokens)
     poppler_retention = len(expected_tokens & poppler_tokens) / len(expected_tokens)
-    parser_union = pypdf_tokens | poppler_tokens
-    parser_agreement = (
-        len(pypdf_tokens & poppler_tokens) / len(parser_union)
-        if parser_union
-        else 0.0
-    )
+    pypdf_stream = _pdf_qa_stream(pypdf_text)
+    poppler_stream = _pdf_qa_stream(poppler_text)
+    parser_agreement = SequenceMatcher(
+        None,
+        pypdf_stream,
+        poppler_stream,
+        autojunk=False,
+    ).ratio()
     if min(pypdf_retention, poppler_retention) < 0.78:
         raise ValueError("Rendered resume lost too much intended text during PDF extraction.")
     if parser_agreement < 0.85:

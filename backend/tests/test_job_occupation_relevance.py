@@ -113,11 +113,11 @@ def test_source_quality_stats_measure_accepted_metadata_yield():
     })
     _record_accepted_job_quality(stat, {"description": "Another role"})
 
-    assert stat["details"] == {
-        "accepted_count": 2,
-        "with_description": 2,
-        "with_direct_apply": 1,
-        "with_posted_date": 1,
-        "with_salary": 1,
-        "with_location": 1,
-    }
+    assert stat["details"]["accepted_count"] == 2
+    assert stat["details"]["with_description"] == 2
+    assert stat["details"]["with_direct_apply"] == 1
+    assert stat["details"]["direct_apply_valid_count"] == 1
+    assert stat["details"]["with_posted_date"] == 1
+    assert stat["details"]["with_salary"] == 1
+    assert stat["details"]["with_location"] == 1
+    assert stat["details"]["age_observation_count"] == 1

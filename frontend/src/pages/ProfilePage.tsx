@@ -42,6 +42,10 @@ const EMPTY_JOB_PREFERENCES: JobPreferences = {
   clearances: [],
   allowed_schedules: [],
   max_travel_percent: null,
+  minimum_contract_months: null,
+  required_salary_currency: null,
+  required_salary_period: null,
+  minimum_salary_confidence: null,
   excluded_employers: [],
   blocked_keywords: [],
 };
@@ -151,6 +155,17 @@ export function ProfilePage() {
 
   const removeTag = (field: 'target_industries' | 'target_roles' | 'target_locations' | 'target_company_sizes', value: string) => {
     updateField(field, form[field].filter((v) => v !== value));
+  };
+
+  const moveTargetLocation = (value: string, direction: -1 | 1) => {
+    setForm((previous) => {
+      const locations = [...previous.target_locations];
+      const index = locations.indexOf(value);
+      const nextIndex = index + direction;
+      if (index < 0 || nextIndex < 0 || nextIndex >= locations.length) return previous;
+      [locations[index], locations[nextIndex]] = [locations[nextIndex], locations[index]];
+      return { ...previous, target_locations: locations };
+    });
   };
 
   const updateJobPreferences = (next: Partial<JobPreferences>) => {
@@ -360,7 +375,12 @@ export function ProfilePage() {
                 onInputChange={(v) => setTagInput((p) => ({ ...p, locations: v }))}
                 onAdd={() => addTag('target_locations', 'locations')}
                 onRemove={(v) => removeTag('target_locations', v)}
+                onMove={moveTargetLocation}
+                ordered
               />
+              <p className="text-xs text-muted-foreground">
+                Location order is priority order. Higher-priority markets receive larger discovery budgets.
+              </p>
               <TagField
                 label="Company Sizes"
                 placeholder="e.g. Startup, Mid-size, Enterprise"
@@ -430,6 +450,72 @@ export function ProfilePage() {
                         : null,
                     })}
                   />
+                </div>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                <div className="space-y-2">
+                  <Label htmlFor="minimum-contract-months">Minimum contract length</Label>
+                  <Input
+                    id="minimum-contract-months"
+                    type="number"
+                    min={1}
+                    max={120}
+                    placeholder="Months"
+                    value={form.job_preferences.minimum_contract_months ?? ''}
+                    onChange={(event) => updateJobPreferences({
+                      minimum_contract_months: event.target.value
+                        ? Math.min(120, Math.max(1, Number(event.target.value)))
+                        : null,
+                    })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="salary-currency">Required salary currency</Label>
+                  <Input
+                    id="salary-currency"
+                    maxLength={3}
+                    placeholder="CAD"
+                    value={form.job_preferences.required_salary_currency ?? ''}
+                    onChange={(event) => updateJobPreferences({
+                      required_salary_currency: event.target.value
+                        ? event.target.value.toUpperCase().slice(0, 3)
+                        : null,
+                    })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="salary-period">Required salary period</Label>
+                  <select
+                    id="salary-period"
+                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    value={form.job_preferences.required_salary_period ?? ''}
+                    onChange={(event) => updateJobPreferences({
+                      required_salary_period: (event.target.value || null) as JobPreferences['required_salary_period'],
+                    })}
+                  >
+                    <option value="">Any / unknown</option>
+                    <option value="hour">Hourly</option>
+                    <option value="day">Daily</option>
+                    <option value="week">Weekly</option>
+                    <option value="month">Monthly</option>
+                    <option value="year">Annual</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="salary-confidence">Minimum salary confidence</Label>
+                  <select
+                    id="salary-confidence"
+                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    value={form.job_preferences.minimum_salary_confidence ?? ''}
+                    onChange={(event) => updateJobPreferences({
+                      minimum_salary_confidence: event.target.value ? Number(event.target.value) : null,
+                    })}
+                  >
+                    <option value="">Any / unknown</option>
+                    <option value="0.5">At least moderate</option>
+                    <option value="0.75">High confidence</option>
+                    <option value="0.9">Source-verified only</option>
+                  </select>
                 </div>
               </div>
               <TagField
@@ -668,6 +754,8 @@ function TagField({
   onInputChange,
   onAdd,
   onRemove,
+  onMove,
+  ordered = false,
 }: {
   label: string;
   placeholder: string;
@@ -676,6 +764,8 @@ function TagField({
   onInputChange: (v: string) => void;
   onAdd: () => void;
   onRemove: (v: string) => void;
+  onMove?: (v: string, direction: -1 | 1) => void;
+  ordered?: boolean;
 }) {
   return (
     <div className="space-y-2">
@@ -698,9 +788,17 @@ function TagField({
       </div>
       {tags.length > 0 && (
         <div className="flex flex-wrap gap-1">
-          {tags.map((tag) => (
-            <Badge key={tag} variant="secondary" className="cursor-pointer" onClick={() => onRemove(tag)}>
-              {tag} &times;
+          {tags.map((tag, index) => (
+            <Badge key={tag} variant="secondary" className="gap-1">
+              {ordered && <span className="font-mono text-[10px]">{index + 1}</span>}
+              <span>{tag}</span>
+              {onMove && (
+                <>
+                  <button type="button" aria-label={`Move ${tag} up`} disabled={index === 0} onClick={() => onMove(tag, -1)}>↑</button>
+                  <button type="button" aria-label={`Move ${tag} down`} disabled={index === tags.length - 1} onClick={() => onMove(tag, 1)}>↓</button>
+                </>
+              )}
+              <button type="button" aria-label={`Remove ${tag}`} onClick={() => onRemove(tag)}>×</button>
             </Badge>
           ))}
         </div>

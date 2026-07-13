@@ -55,6 +55,18 @@ Minimum Qualifications
     assert requirements["work_authorization:no_sponsorship"].criticality == "hard"
 
 
+def test_extracts_contract_duration_as_normalized_months():
+    requirements = _by_id("""
+Requirements
+- This is a 26-week fixed-term contract.
+""")
+
+    duration = requirements["contract:contract_duration_6_months"]
+    assert duration.value == 6
+    assert duration.kind == "mandatory"
+    assert duration.criticality == "hard"
+
+
 def test_preferred_license_is_not_a_hard_failure():
     requirements = extract_job_requirements("""
 Preferred Qualifications
@@ -177,16 +189,91 @@ def test_profile_preferences_normalize_dedupe_and_validate_travel():
         languages=[" French ", "french", "English"],
         excluded_employers=[" Acme, Inc. "],
         max_travel_percent=25,
+        required_salary_currency=" cad ",
+        required_salary_period="year",
+        minimum_salary_confidence=0.75,
+        minimum_contract_months=6,
     )
 
     assert preferences.languages == ["French", "English"]
     assert preferences.excluded_employers == ["Acme, Inc."]
+    assert preferences.required_salary_currency == "CAD"
     try:
         JobPreferences(max_travel_percent=101)
     except ValidationError:
         pass
     else:
         raise AssertionError("travel above 100 must be rejected")
+
+
+def test_salary_currency_period_and_confidence_are_explicit_hard_preferences():
+    decision = evaluate_job_eligibility(
+        job_data={
+            "title": "Analyst",
+            "company_name": "Acme",
+            "salary_min": 80_000,
+            "salary_currency": "USD",
+            "salary_period": "year",
+            "metadata_provenance": {"salary": {"confidence": 0.6}},
+        },
+        requirements=[],
+        evidence_text="",
+        preferences={
+            "required_salary_currency": "CAD",
+            "required_salary_period": "year",
+            "minimum_salary_confidence": 0.75,
+        },
+    )
+
+    assert decision.eligible is False
+    assert {item["id"] for item in decision.hard_failures} == {
+        "preference:required_salary_currency",
+        "preference:minimum_salary_confidence",
+    }
+    assert {item["id"] for item in decision.matched_constraints} == {
+        "preference:required_salary_period",
+    }
+
+
+def test_unknown_salary_metadata_stays_unknown_not_a_false_failure():
+    decision = evaluate_job_eligibility(
+        job_data={"title": "Analyst", "company_name": "Acme"},
+        requirements=[],
+        evidence_text="",
+        preferences={
+            "required_salary_currency": "CAD",
+            "minimum_salary_confidence": 0.75,
+        },
+    )
+
+    assert decision.eligible is None
+    assert {item["id"] for item in decision.unknown_constraints} == {
+        "preference:required_salary_currency",
+        "preference:minimum_salary_confidence",
+    }
+
+
+def test_short_contract_is_rejected_and_unknown_duration_abstains():
+    short_requirements = extract_job_requirements(
+        "Requirements\nThis is a 3-month contract."
+    )
+    short = evaluate_job_eligibility(
+        job_data={"title": "Analyst", "company_name": "Acme", "employment_type": "contract"},
+        requirements=short_requirements,
+        evidence_text="",
+        preferences={"minimum_contract_months": 6},
+    )
+    unknown = evaluate_job_eligibility(
+        job_data={"title": "Analyst", "company_name": "Acme", "employment_type": "contract"},
+        requirements=extract_job_requirements("Contract role"),
+        evidence_text="",
+        preferences={"minimum_contract_months": 6},
+    )
+
+    assert short.eligible is False
+    assert short.hard_failures[0]["id"] == "preference:minimum_contract_months"
+    assert unknown.eligible is None
+    assert unknown.unknown_constraints[0]["id"] == "preference:minimum_contract_months"
 
 
 def test_storage_hard_filter_uses_explicit_profile_preferences():

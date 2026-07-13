@@ -610,6 +610,8 @@ def _cached_candidate_ready(
     company_name: str,
     requested_titles: list[str],
     public_identity_terms: list[str] | None,
+    context: JobContext | None = None,
+    bucket: str | None = None,
 ) -> bool:
     """Apply cheap downstream gates before a cache hit suppresses live search."""
     title = candidate.get("title") or ""
@@ -628,6 +630,16 @@ def _cached_candidate_ready(
     if _classify_employment_status(
         candidate, company_name, public_identity_terms
     ) == "former":
+        return False
+    if (
+        context
+        and bucket in {"hiring_managers", "peers"}
+        and occupation_conflict(
+            context.occupation_keys,
+            context.department,
+            title,
+        )
+    ):
         return False
 
     requested_types = {
@@ -666,6 +678,8 @@ async def _search_candidates(
     db: AsyncSession | None = None,
     debug_bucket: dict[str, Any] | None = None,
     search_profile: str = "standard",
+    context: JobContext | None = None,
+    bucket: str | None = None,
 ) -> list[dict]:
     """Run Apollo plus routed SERP/public search with dedupe.
 
@@ -707,6 +721,8 @@ async def _search_candidates(
                 company_name=company_name,
                 requested_titles=titles,
                 public_identity_terms=public_identity_terms,
+                context=context,
+                bucket=bucket,
             )
         ]
         # Never re-introduce rejected company-wide cache rows when live results

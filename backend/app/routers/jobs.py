@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import func as sa_func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -76,6 +76,12 @@ from app.services.resume_artifact import (
 )
 from app.models.profile import Profile
 from app.models.job_refresh_run import JobRefreshRun, JobSourceRun
+from app.models.job import Job
+from app.services.outcome_telemetry import (
+    artifact_quality_properties,
+    attribution_key,
+    job_category_properties,
+)
 from app.models.resume_artifact import ResumeArtifact
 from app.models.tailored_resume import TailoredResume
 from app.utils.action_budget import enforce_action_budget
@@ -549,7 +555,18 @@ def _pref_to_response(pref) -> SearchPreferenceResponse:
     )
 
 
-def _source_run_to_response(source_run) -> JobSourceRunResponse:
+def _source_run_to_response(
+    source_run,
+    downstream_outcomes: dict[str, dict[str, int]] | None = None,
+) -> JobSourceRunResponse:
+    details = dict(source_run.details or {})
+    if downstream_outcomes:
+        details["downstream_outcomes"] = downstream_outcomes.get(source_run.source, {
+            "visible": 0,
+            "saved": 0,
+            "applied": 0,
+            "interviewed": 0,
+        })
     return JobSourceRunResponse(
         id=str(source_run.id),
         refresh_run_id=str(source_run.refresh_run_id),
@@ -564,10 +581,15 @@ def _source_run_to_response(source_run) -> JobSourceRunResponse:
         duration_seconds=source_run.duration_seconds,
         started_at=source_run.started_at.isoformat(),
         finished_at=source_run.finished_at.isoformat() if source_run.finished_at else None,
+        details=details or None,
     )
 
 
-def _refresh_run_to_response(refresh_run, source_runs: list) -> JobRefreshRunResponse:
+def _refresh_run_to_response(
+    refresh_run,
+    source_runs: list,
+    downstream_outcomes: dict[str, dict[str, int]] | None = None,
+) -> JobRefreshRunResponse:
     return JobRefreshRunResponse(
         id=str(refresh_run.id),
         search_preference_id=(
@@ -589,7 +611,10 @@ def _refresh_run_to_response(refresh_run, source_runs: list) -> JobRefreshRunRes
         duration_seconds=refresh_run.duration_seconds,
         started_at=refresh_run.started_at.isoformat(),
         finished_at=refresh_run.finished_at.isoformat() if refresh_run.finished_at else None,
-        source_runs=[_source_run_to_response(source_run) for source_run in source_runs],
+        source_runs=[
+            _source_run_to_response(source_run, downstream_outcomes)
+            for source_run in source_runs
+        ],
     )
 
 
@@ -631,8 +656,38 @@ async def list_refresh_runs(
     for source_run in source_result.scalars().all():
         source_runs_by_refresh.setdefault(source_run.refresh_run_id, []).append(source_run)
 
+    tracked_stages = {"interested", "researching", "networking", "applied", "interviewing", "offer", "accepted"}
+    applied_stages = {"applied", "interviewing", "offer", "accepted", "rejected", "withdrawn"}
+    interviewed_stages = {"interviewing", "offer", "accepted"}
+    outcome_rows = (
+        await db.execute(
+            select(Job.source, Job.stage, sa_func.count(Job.id))
+            .where(Job.user_id == user_id)
+            .group_by(Job.source, Job.stage)
+        )
+    ).all()
+    downstream_outcomes: dict[str, dict[str, int]] = {}
+    for source, stage, count in outcome_rows:
+        metrics = downstream_outcomes.setdefault(str(source or "unknown"), {
+            "visible": 0,
+            "saved": 0,
+            "applied": 0,
+            "interviewed": 0,
+        })
+        metrics["visible"] += int(count or 0)
+        if stage in tracked_stages:
+            metrics["saved"] += int(count or 0)
+        if stage in applied_stages:
+            metrics["applied"] += int(count or 0)
+        if stage in interviewed_stages:
+            metrics["interviewed"] += int(count or 0)
+
     return [
-        _refresh_run_to_response(run, source_runs_by_refresh.get(run.id, []))
+        _refresh_run_to_response(
+            run,
+            source_runs_by_refresh.get(run.id, []),
+            downstream_outcomes,
+        )
         for run in runs
     ]
 
@@ -967,6 +1022,11 @@ async def generate_resume_artifact(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    capture_event(str(user_id), "resume_artifact_generated", properties={
+        "force_new": force_new,
+        **artifact_quality_properties(artifact),
+    })
+
     return await _build_artifact_response(db, user_id=user_id, job_id=job_id, artifact=artifact)
 
 
@@ -1123,6 +1183,13 @@ async def update_resume_artifact_decisions(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    capture_event(str(user_id), "resume_artifact_reviewed", properties={
+        "accepted_count": sum(value == "accepted" for value in decisions.values()),
+        "rejected_count": sum(value == "rejected" for value in decisions.values()),
+        "pending_count": sum(value == "pending" for value in decisions.values()),
+        **artifact_quality_properties(artifact),
+    })
+
     return await _build_artifact_response(db, user_id=user_id, job_id=job_id, artifact=artifact)
 
 
@@ -1149,6 +1216,9 @@ async def download_resume_artifact_pdf(
 
     pdf_bytes = await render_resume_artifact_pdf_async(artifact.content)
     pdf_filename = artifact.filename.rsplit(".", 1)[0] + ".pdf"
+    capture_event(str(user_id), "resume_artifact_downloaded", properties={
+        **artifact_quality_properties(artifact),
+    })
 
     return StreamingResponse(
         iter([pdf_bytes]),
@@ -1221,7 +1291,11 @@ async def update_stage(
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    capture_event(str(user_id), "job_stage_updated", properties={"stage": body.stage, "company_name": job.company_name, "job_title": job.title})
+    capture_event(str(user_id), "job_stage_updated", properties={
+        "stage": body.stage,
+        "job_key": attribution_key(job.id),
+        **job_category_properties(job),
+    })
     return _to_response(job)
 
 

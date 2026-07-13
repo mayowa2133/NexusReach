@@ -77,6 +77,35 @@ def _record_accepted_job_quality(stat: dict, data: dict) -> None:
     for key, present in field_map.items():
         if present:
             details[key] = int(details.get(key) or 0) + 1
+    apply_url = data.get("apply_url") or data.get("url")
+    if apply_url:
+        validity_key = (
+            "direct_apply_valid_count"
+            if normalize._canonical_job_url(str(apply_url))
+            else "direct_apply_invalid_count"
+        )
+        details[validity_key] = int(details.get(validity_key) or 0) + 1
+    posted_ts, posted_date = normalize._parse_posting_time(data.get("posted_at"))
+    observed_date = posted_ts.date() if posted_ts else posted_date
+    if observed_date:
+        age_days = max(0, (normalize._utcnow().date() - observed_date).days)
+        details["age_days_total"] = int(details.get("age_days_total") or 0) + age_days
+        details["age_observation_count"] = int(details.get("age_observation_count") or 0) + 1
+        age_bucket = (
+            "age_0_7_count" if age_days <= 7
+            else "age_8_30_count" if age_days <= 30
+            else "age_31_60_count" if age_days <= 60
+            else "stale_count"
+        )
+        details[age_bucket] = int(details.get(age_bucket) or 0) + 1
+    if str(data.get("source_status") or "active").lower() in {"closed", "expired", "inactive"}:
+        details["closed_count"] = int(details.get("closed_count") or 0) + 1
+    estimated_cost = data.get("_estimated_cost_usd")
+    if isinstance(estimated_cost, (int, float)) and estimated_cost >= 0:
+        details["estimated_cost_usd"] = round(
+            float(details.get("estimated_cost_usd") or 0) + float(estimated_cost),
+            6,
+        )
     stat["details"] = details
 
 
@@ -262,11 +291,13 @@ async def search_jobs(
     raw_jobs = [job for jobs, _ in fetch_results for job in jobs]
     local_source_stats = [stat for _, stat in fetch_results]
     stats_by_source = {stat["source"]: stat for stat in local_source_stats}
-    if occupation_hint:
-        for stat in local_source_stats:
-            details = dict(stat.get("details") or {})
+    for stat in local_source_stats:
+        details = dict(stat.get("details") or {})
+        details["requested_location"] = location
+        details["requested_country"] = normalize._adzuna_country_for_location(location)
+        if occupation_hint:
             details["requested_occupation"] = occupation_hint
-            stat["details"] = details
+        stat["details"] = details
 
     # Deduplicate and store
     stored_jobs: list[Job] = []
@@ -322,6 +353,9 @@ async def search_jobs(
             data.get("company_name", ""),
             data.get("title", ""),
             data.get("location", ""),
+            description=data.get("description"),
+            locations=data.get("locations"),
+            posted_at=data.get("posted_at"),
         )
         job_key = normalize._job_identity_key(data, fingerprint=fp)
 
@@ -470,7 +504,14 @@ async def search_ats_jobs(
     seen_job_keys: set[str] = set()
     for raw_data in raw_jobs:
         data = normalize_job_metadata(normalize._with_extra_tags(raw_data, extra_tags))
-        fp = normalize._fingerprint(data.get("company_name", ""), data["title"], data.get("location", ""))
+        fp = normalize._fingerprint(
+            data.get("company_name", ""),
+            data["title"],
+            data.get("location", ""),
+            description=data.get("description"),
+            locations=data.get("locations"),
+            posted_at=data.get("posted_at"),
+        )
         job_key = normalize._job_identity_key(data, fingerprint=fp)
         if job_key in seen_job_keys:
             continue

@@ -249,6 +249,64 @@ async def test_usefulness_budget_keeps_exploration_until_sample_is_sufficient():
     assert factors["new_source"] == 1.0
 
 
+async def test_usefulness_budget_penalizes_stale_invalid_costly_slow_results():
+    healthy_rows = []
+    degraded_rows = []
+    for _ in range(3):
+        base = {
+            "requested_occupation": "marketing",
+            "accepted_count": 10,
+            "occupation_rejected_count": 1,
+            "with_description": 10,
+            "with_direct_apply": 10,
+            "with_posted_date": 10,
+            "with_salary": 5,
+            "with_location": 10,
+        }
+        healthy_rows.append({
+            "source": "healthy",
+            "duration_seconds": 1,
+            "details": {**base, "direct_apply_valid_count": 10},
+        })
+        degraded_rows.append({
+            "source": "degraded",
+            "duration_seconds": 20,
+            "details": {
+                **base,
+                "direct_apply_invalid_count": 10,
+                "stale_count": 8,
+                "closed_count": 1,
+                "estimated_cost_usd": 1.0,
+            },
+        })
+
+    factors = storage.compute_source_budget_factors(
+        healthy_rows + degraded_rows,
+        occupation_keys=["marketing"],
+    )
+
+    assert factors["healthy"] > factors["degraded"]
+
+
+async def test_country_and_location_priority_shape_budgets_with_exploration_floor():
+    first = storage.source_limits_for_budget(
+        ["jobbank", "adzuna", "jsearch"],
+        base_limit=20,
+        location="Toronto, Canada",
+        priority_rank=0,
+    )
+    third = storage.source_limits_for_budget(
+        ["jobbank", "adzuna", "jsearch"],
+        base_limit=20,
+        location="Toronto, Canada",
+        priority_rank=2,
+    )
+
+    assert first["jobbank"] > first["adzuna"] > first["jsearch"]
+    assert first["jobbank"] > third["jobbank"]
+    assert min(third.values()) >= 5
+
+
 async def test_thread_exhaustion_is_transient():
     """Worker thread-pool exhaustion is operational, not a paged bug (PYTHON-1D/1E)."""
     assert normalize.is_transient_fetch_error(RuntimeError("can't start new thread"))

@@ -353,6 +353,41 @@ class TestFingerprint:
         fp2 = _fingerprint("Acme Corp", "Marketing Manager", "Remote")
         assert fp1 == fp2
 
+    def test_company_family_description_and_location_set_cluster(self):
+        description = "Build reliable data platforms with Python SQL and cloud services for customers."
+        fp1 = _fingerprint(
+            "Google",
+            "Senior Data Engineer",
+            "Toronto | Remote",
+            description=description,
+            locations=[{"raw": "Toronto"}, {"raw": "Remote"}],
+            posted_at="2026-07-01",
+        )
+        fp2 = _fingerprint(
+            "Alphabet Inc.",
+            "Sr. Data Engineer",
+            "Remote | Toronto",
+            description=description + " Apply today.",
+            locations=[{"raw": "Remote"}, {"raw": "Toronto"}],
+            posted_at="2026-07-01",
+        )
+
+        assert fp1 == fp2
+
+    def test_distinct_publication_windows_do_not_cluster(self):
+        kwargs = {
+            "description": "Build reliable data platforms with Python SQL and cloud services.",
+            "locations": [{"raw": "Toronto"}],
+        }
+        first = _fingerprint(
+            "Acme", "Data Engineer", "Toronto", posted_at="2026-01-01", **kwargs
+        )
+        repost = _fingerprint(
+            "Acme", "Data Engineer", "Toronto", posted_at="2026-03-01", **kwargs
+        )
+
+        assert first != repost
+
     def test_returns_hex_string(self):
         fp = _fingerprint("Company", "Title", "Location")
         assert isinstance(fp, str)

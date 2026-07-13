@@ -126,6 +126,9 @@ async def backfill_newgrad_jobs(
                 data.get("company_name", ""),
                 data.get("title", ""),
                 data.get("location", ""),
+                description=data.get("description"),
+                locations=data.get("locations"),
+                posted_at=data.get("posted_at"),
             )
             score, breakdown = _score_job(data, profile)
             experience_level = _experience_level_for_job(data)

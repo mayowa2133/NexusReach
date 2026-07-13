@@ -353,10 +353,14 @@ async def test_list_refresh_runs_exposes_source_health(client, mock_user_id):
     source_run.duration_seconds = 0.4
     source_run.started_at = run.started_at
     source_run.finished_at = run.finished_at
+    source_run.details = {"accepted_count": 3, "direct_apply_valid_count": 3}
+
+    outcomes = MagicMock()
+    outcomes.all.return_value = [("jsearch", "interviewing", 2)]
 
     fake_db = MagicMock()
     fake_db.execute = AsyncMock(
-        side_effect=[_ScalarResult([run]), _ScalarResult([source_run])]
+        side_effect=[_ScalarResult([run]), _ScalarResult([source_run]), outcomes]
     )
 
     async def _override_db():
@@ -374,6 +378,13 @@ async def test_list_refresh_runs_exposes_source_health(client, mock_user_id):
     assert data[0]["source_runs"][0]["source"] == "jsearch"
     assert data[0]["source_runs"][0]["status"] == "failed"
     assert data[0]["source_runs"][0]["error"] == "rate limited"
+    assert data[0]["source_runs"][0]["details"]["direct_apply_valid_count"] == 3
+    assert data[0]["source_runs"][0]["details"]["downstream_outcomes"] == {
+        "visible": 2,
+        "saved": 2,
+        "applied": 2,
+        "interviewed": 2,
+    }
 
 
 async def test_get_single_job(client, mock_user_id):

@@ -35,6 +35,10 @@ export interface JobPreferences {
   clearances: string[];
   allowed_schedules: string[];
   max_travel_percent: number | null;
+  minimum_contract_months: number | null;
+  required_salary_currency: string | null;
+  required_salary_period: 'hour' | 'day' | 'week' | 'month' | 'year' | null;
+  minimum_salary_confidence: number | null;
   excluded_employers: string[];
   blocked_keywords: string[];
 }

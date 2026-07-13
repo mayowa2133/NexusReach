@@ -16,6 +16,10 @@ class JobPreferences(BaseModel):
     clearances: list[str] = Field(default_factory=list)
     allowed_schedules: list[str] = Field(default_factory=list)
     max_travel_percent: int | None = Field(default=None, ge=0, le=100)
+    minimum_contract_months: int | None = Field(default=None, ge=1, le=120)
+    required_salary_currency: str | None = Field(default=None, min_length=3, max_length=3)
+    required_salary_period: str | None = Field(default=None, pattern=r"^(hour|day|week|month|year)$")
+    minimum_salary_confidence: float | None = Field(default=None, ge=0, le=1)
     excluded_employers: list[str] = Field(default_factory=list)
     blocked_keywords: list[str] = Field(default_factory=list)
 
@@ -39,6 +43,11 @@ class JobPreferences(BaseModel):
                 seen.add(key)
                 normalized.append(cleaned)
         return normalized
+
+    @field_validator("required_salary_currency", mode="before")
+    @classmethod
+    def _normalize_currency(cls, value: str | None) -> str | None:
+        return value.strip().upper() if value else None
 
 
 def _validate_optional_url(value: str | None) -> str | None:

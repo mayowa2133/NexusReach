@@ -634,6 +634,12 @@ def compute_source_budget_factors(
             "accepted": 0.0,
             "rejected": 0.0,
             "metadata_hits": 0.0,
+            "direct_apply_valid": 0.0,
+            "direct_apply_invalid": 0.0,
+            "stale": 0.0,
+            "closed": 0.0,
+            "cost": 0.0,
+            "duration": 0.0,
         })
         bucket["runs"] += 1
         bucket["accepted"] += accepted
@@ -646,6 +652,12 @@ def compute_source_budget_factors(
             "with_location",
         ):
             bucket["metadata_hits"] += float(details.get(field) or 0)
+        bucket["direct_apply_valid"] += float(details.get("direct_apply_valid_count") or 0)
+        bucket["direct_apply_invalid"] += float(details.get("direct_apply_invalid_count") or 0)
+        bucket["stale"] += float(details.get("stale_count") or 0)
+        bucket["closed"] += float(details.get("closed_count") or 0)
+        bucket["cost"] += float(details.get("estimated_cost_usd") or 0)
+        bucket["duration"] += float(row.get("duration_seconds") or 0)
 
     factors: dict[str, float] = {}
     for source, bucket in grouped.items():
@@ -659,9 +671,23 @@ def compute_source_budget_factors(
             if bucket["accepted"]
             else 0.0
         )
+        direct_total = bucket["direct_apply_valid"] + bucket["direct_apply_invalid"]
+        direct_validity = bucket["direct_apply_valid"] / direct_total if direct_total else 0.5
+        stale_rate = (bucket["stale"] + bucket["closed"]) / max(1.0, bucket["accepted"])
+        cost_per_accepted = bucket["cost"] / max(1.0, bucket["accepted"])
+        latency_per_accepted = bucket["duration"] / max(1.0, bucket["accepted"])
         # Relevance dominates; metadata quality breaks ties. Keep a meaningful
         # exploration floor and a conservative ceiling to avoid feedback loops.
-        factors[source] = round(max(0.6, min(1.5, 0.45 + precision * 0.8 + metadata * 0.25)), 2)
+        score = (
+            0.4
+            + precision * 0.75
+            + metadata * 0.2
+            + direct_validity * 0.15
+            - min(0.25, stale_rate * 0.3)
+            - min(0.15, cost_per_accepted * 5)
+            - min(0.1, latency_per_accepted / 30)
+        )
+        factors[source] = round(max(0.6, min(1.5, score)), 2)
     return factors
 
 
@@ -675,13 +701,21 @@ async def load_source_budget_factors(
     """Load recent source usefulness and return routing multipliers."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=window_days)
     result = await db.execute(
-        select(JobSourceRun.source, JobSourceRun.details)
+        select(
+            JobSourceRun.source,
+            JobSourceRun.details,
+            JobSourceRun.duration_seconds,
+        )
         .where(JobSourceRun.created_at >= cutoff)
         .order_by(JobSourceRun.created_at.desc())
         .limit(max_rows)
     )
     rows = [
-        {"source": row.source, "details": row.details}
+        {
+            "source": row.source,
+            "details": row.details,
+            "duration_seconds": row.duration_seconds,
+        }
         for row in result.all()
     ]
     return compute_source_budget_factors(rows, occupation_keys=occupation_keys)
@@ -692,11 +726,36 @@ def source_limits_for_budget(
     *,
     base_limit: int,
     factors: dict[str, float] | None = None,
+    location: str | None = None,
+    priority_rank: int | None = None,
 ) -> dict[str, int]:
-    """Allocate bounded per-source limits while retaining exploration."""
+    """Allocate usefulness-, country-, and priority-aware source budgets.
+
+    Every source retains a five-result exploration floor. The ordered target
+    location list is an explicit user preference: rank zero receives the
+    largest fanout, while lower priorities taper conservatively. National
+    sources are boosted only in their supported country.
+    """
     factors = factors or {}
+    country = normalize._adzuna_country_for_location(location)
+    country_multipliers = {
+        "ca": {"jobbank": 1.4, "adzuna": 1.15},
+        "us": {"usajobs": 1.4, "jsearch": 1.1, "adzuna": 1.1},
+        "gb": {"adzuna": 1.2},
+        "au": {"adzuna": 1.2},
+    }.get(country, {})
+    priority_multiplier = (
+        max(0.75, 1.2 - 0.1 * priority_rank)
+        if priority_rank is not None
+        else 1.0
+    )
     return {
-        source: max(5, int(round(base_limit * factors.get(source, 1.0))))
+        source: max(5, int(round(
+            base_limit
+            * factors.get(source, 1.0)
+            * country_multipliers.get(source, 1.0)
+            * priority_multiplier
+        )))
         for source in sources
     }
 
@@ -881,7 +940,14 @@ async def _store_raw_jobs(
         data["metadata_provenance"] = provenance
         if eligibility.get("eligible") is False:
             continue
-        fp = normalize._fingerprint(data.get("company_name", ""), data.get("title", ""), data.get("location", ""))
+        fp = normalize._fingerprint(
+            data.get("company_name", ""),
+            data.get("title", ""),
+            data.get("location", ""),
+            description=data.get("description"),
+            locations=data.get("locations"),
+            posted_at=data.get("posted_at"),
+        )
         job_key = normalize._job_identity_key(data, fingerprint=fp)
         if job_key in seen_job_keys:
             continue

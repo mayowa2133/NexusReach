@@ -27,5 +27,15 @@ def test_cross_category_correctness_release_gates():
     assert result["people"]["context_accuracy"] == 1.0
     assert result["people"]["peer_preference_accuracy"] == 1.0
     assert result["people"]["manager_seed_coverage"] == 1.0
+    assert result["people"]["precision_at_2"] == 1.0
+    assert result["people"]["recall_at_2"] == 1.0
+    assert result["people"]["mrr"] == 1.0
+    assert result["people"]["ndcg_at_3"] == 1.0
+    assert result["people"]["bucket_accuracy"] == 1.0
+    assert result["people"]["current_company_precision"] == 1.0
+    assert result["people"]["wrong_person_rate"] == 0.0
+    assert result["people"]["abstention_accuracy"] >= 0.85
+    assert result["people"]["latency_ms"]["p95"] >= result["people"]["latency_ms"]["p50"]
+    assert result["people"]["estimated_provider_cost_usd"] == 0.0
     assert result["resumes"]["supported_term_retention"] == 1.0
     assert result["resumes"]["unsupported_term_block_rate"] == 1.0

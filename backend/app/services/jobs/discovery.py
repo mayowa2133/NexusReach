@@ -161,10 +161,14 @@ async def discover_jobs(
     ))
     expanded_seeds: list[dict] = []
     for seed in search_list:
-        expanded_seeds.append(seed)
+        expanded_seeds.append({**seed, "_location_priority": None})
         if seed.get("location") is None and not seed.get("remote_only"):
-            for loc in target_locations:
-                expanded_seeds.append({**seed, "location": loc})
+            for priority_rank, loc in enumerate(target_locations):
+                expanded_seeds.append({
+                    **seed,
+                    "location": loc,
+                    "_location_priority": priority_rank,
+                })
 
     # The engineering-only boards (Dice/Jobicy/Remotive/Simplify) and the tech
     # new-grad scraper / ATS crawl only ever carry tech roles — Remotive even
@@ -190,12 +194,6 @@ async def discover_jobs(
     except Exception:
         logger.debug("Source usefulness history unavailable; using exploration budgets", exc_info=True)
         source_factors = {}
-    adaptive_source_limits = storage.source_limits_for_budget(
-        discover_sources,
-        base_limit=constants.DISCOVER_LIMIT_PER_SOURCE,
-        factors=source_factors,
-    )
-
     # The Muse fetches by *category*, so on the occupation path every seed of the
     # same occupation resolves to the same category tuple and re-fetches the
     # identical first pages (measured: 4 marketing seeds -> 1 unique batch).
@@ -208,6 +206,13 @@ async def discover_jobs(
 
     for seed in expanded_seeds:
         try:
+            adaptive_source_limits = storage.source_limits_for_budget(
+                discover_sources,
+                base_limit=constants.DISCOVER_LIMIT_PER_SOURCE,
+                factors=source_factors,
+                location=seed.get("location"),
+                priority_rank=seed.get("_location_priority"),
+            )
             stored = await search.search_jobs(
                 db,
                 user_id,

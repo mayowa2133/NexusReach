@@ -24,6 +24,11 @@ from sqlalchemy.orm import selectinload
 
 from app.models.outreach import OutreachLog
 from app.observability import capture_event
+from app.services.outcome_telemetry import (
+    attribution_key,
+    job_category_properties,
+    person_ranking_properties,
+)
 from app.services import gmail_service, outlook_service
 from app.services.notification_service import create_notification
 
@@ -53,6 +58,10 @@ async def reconcile_sent_drafts(
 
     stmt = (
         select(OutreachLog)
+        .options(
+            selectinload(OutreachLog.person),
+            selectinload(OutreachLog.job),
+        )
         .where(
             OutreachLog.user_id == user_id,
             OutreachLog.status == "draft",
@@ -88,6 +97,19 @@ async def reconcile_sent_drafts(
             log.status = "sent"
             log.sent_at = now
             log.last_contacted_at = now
+            capture_event(
+                str(user_id),
+                "outreach_sent",
+                properties={
+                    "provider": log.provider,
+                        "channel": getattr(log, "channel", None),
+                        "job_key": attribution_key(getattr(log, "job_id", None)),
+                        "person_key": attribution_key(getattr(log, "person_id", None)),
+                        "message_key": attribution_key(getattr(log, "message_id", None)),
+                        **person_ranking_properties(getattr(log, "person", None)),
+                        **job_category_properties(getattr(log, "job", None)),
+                },
+            )
             stats["flipped"] += 1
 
     if stats["flipped"] > 0:
@@ -135,7 +157,10 @@ async def reconcile_replies(
 
     stmt = (
         select(OutreachLog)
-        .options(selectinload(OutreachLog.person))
+        .options(
+            selectinload(OutreachLog.person),
+            selectinload(OutreachLog.job),
+        )
         .where(
             OutreachLog.user_id == user_id,
             OutreachLog.status == "sent",
@@ -213,6 +238,11 @@ async def reconcile_replies(
                 "provider": log.provider,
                 "channel": log.channel,
                 "reply_count": outcome.get("reply_count"),
+                "job_key": attribution_key(getattr(log, "job_id", None)),
+                "person_key": attribution_key(getattr(log, "person_id", None)),
+                "message_key": attribution_key(getattr(log, "message_id", None)),
+                **person_ranking_properties(getattr(log, "person", None)),
+                **job_category_properties(getattr(log, "job", None)),
             },
         )
 

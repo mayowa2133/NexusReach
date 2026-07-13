@@ -18,7 +18,7 @@ from sqlalchemy import func as sa_func
 from datetime import timezone
 from urllib.parse import urlparse
 from urllib.parse import urlunparse
-from app.utils.company_identity import normalize_company_name
+from app.utils.company_identity import company_family, normalize_company_name
 
 logger = logging.getLogger(__name__)
 
@@ -48,26 +48,96 @@ def is_transient_fetch_error(exc: BaseException) -> bool:
 EARTH_RADIUS_KM = 6371.0
 
 
-def _fingerprint(company_name: str | None, title: str | None, location: str | None) -> str:
+def _description_minhash(description: str | None) -> str:
+    """Return a compact locality-sensitive signature for syndicated text."""
+    words = re.findall(r"[a-z0-9]+", (description or "").lower())
+    if len(words) < 6:
+        return "none"
+    boilerplate = {
+        "equal opportunity employer",
+        "we are an equal opportunity",
+        "reasonable accommodation",
+    }
+    shingles = {
+        " ".join(words[index:index + 4])
+        for index in range(len(words) - 3)
+    }
+    shingles = {
+        shingle for shingle in shingles
+        if not any(phrase in shingle for phrase in boilerplate)
+    }
+    if not shingles:
+        return "none"
+    minimum = min(
+        hashlib.sha256(shingle.encode()).hexdigest()[:8]
+        for shingle in shingles
+    )
+    return minimum
+
+
+def _normalized_location_set(
+    location: str | None,
+    locations: list[dict] | list[str] | None,
+) -> str:
+    values: list[str] = []
+    for item in locations or []:
+        if isinstance(item, dict):
+            value = (
+                item.get("geocoded_label")
+                or item.get("raw")
+                or ", ".join(
+                    str(part) for part in (
+                        item.get("city"), item.get("region"), item.get("country")
+                    ) if part
+                )
+            )
+        else:
+            value = item
+        normalized = _normalized_pref_location(str(value or ""))
+        if normalized:
+            values.append(normalized)
+    if not values:
+        raw_location = (location or "").strip()
+        values.append(
+            "remote"
+            if re.search(r"\bremote\b", raw_location, re.IGNORECASE)
+            else _normalized_pref_location(raw_location)
+        )
+    return ";".join(sorted(set(filter(None, values))))
+
+
+def _fingerprint(
+    company_name: str | None,
+    title: str | None,
+    location: str | None,
+    *,
+    description: str | None = None,
+    locations: list[dict] | list[str] | None = None,
+    posted_at: str | None = None,
+) -> str:
     """Create a cross-source cluster key from normalized posting identity.
 
     This intentionally removes company legal suffixes and harmless title
     punctuation/seniority abbreviations so syndicated copies such as
     ``Acme, Inc. / Sr. FP&A Analyst`` and ``ACME / Senior FP&A Analyst``
-    converge. Location remains part of the key to avoid collapsing distinct
-    openings at different offices.
+    converge. The normalized location set, 14-day publication window, and a
+    description minhash keep distinct openings from collapsing together.
     """
-    company = normalize_company_name(company_name)
+    family = sorted(filter(None, company_family(company_name)))
+    company = family[0] if family else normalize_company_name(company_name)
     title_text = re.sub(r"\bsr\.?\b", "senior", (title or "").lower())
     title_text = re.sub(r"\bjr\.?\b", "junior", title_text)
     title_text = re.sub(r"\b(?:remote|hybrid)\b", " ", title_text)
     normalized_title = " ".join(re.findall(r"[a-z0-9]+", title_text))
-    raw_location = (location or "").strip()
-    if re.search(r"\bremote\b", raw_location, re.IGNORECASE):
-        normalized_location = "remote"
-    else:
-        normalized_location = _normalized_pref_location(raw_location)
-    raw = f"{company}|{normalized_title}|{normalized_location}"
+    normalized_locations = _normalized_location_set(location, locations)
+    posted_ts, posted_date = _parse_posting_time(posted_at)
+    observed_date = posted_ts.date() if posted_ts else posted_date
+    publication_window = str(observed_date.toordinal() // 14) if observed_date else "unknown"
+    text_signature = _description_minhash(description)
+    raw = (
+        f"cluster-v2|{company}|{normalized_title}|{normalized_locations}|"
+        f"{publication_window}|{text_signature}"
+    )
     return hashlib.md5(raw.encode(), usedforsecurity=False).hexdigest()
 
 
