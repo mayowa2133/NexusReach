@@ -7,3 +7,7 @@
 35de1bbf2a388076794f2b6d24f73f9a6e1b0679:LAUNCH_CONFIG_CHECKLIST.md:generic-api-key:159
 1f4c8dcc9df502bba1e439f66699dd0d130f9d1f:backend/app/clients/remote_jobs_client.py:generic-api-key:25
 e342416a2680fe79824d53dc3ddbcdc7ba8e3f01:backend/app/clients/remote_jobs_client.py:generic-api-key:28
+# resume_artifact/plan.py line 116 sets a rubric section-policy identifier
+# (a plain version label, not a credential) that the generic-api-key heuristic
+# mis-flags. Worded here without the literal so this file does not self-trip.
+663a581cdeca73f2f6d9cd260a6d90461fc3c87f:backend/app/services/resume_artifact/plan.py:generic-api-key:116
