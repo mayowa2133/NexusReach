@@ -12,6 +12,7 @@ type CompanionRequestType =
   | 'NR_EXTENSION_CONNECT'
   | 'NR_LINKEDIN_ASSIST'
   | 'NR_LINKEDIN_GRAPH_REFRESH'
+  | 'NR_CAPTURE_SELF_PROFILE'
   | 'LOGOUT';
 
 type CompanionResponseEnvelope<T> = {
@@ -159,6 +160,32 @@ export async function connectCompanion() {
       authToken: grant.token,
     },
     15000,
+  );
+}
+
+export interface CapturedLinkedInProfile {
+  linkedin_url: string | null;
+  full_name: string | null;
+  headline: string | null;
+  location: string | null;
+  positions: { title: string | null; company: string | null }[];
+  education: { school: string | null; degree: string | null }[];
+  skills: string[];
+}
+
+export interface CaptureSelfProfileResult {
+  profile: CapturedLinkedInProfile;
+  warnings: string[];
+}
+
+export async function captureSelfLinkedInProfile() {
+  // Opens the user's own LinkedIn profile in a background tab, scrapes the
+  // visible sections, and returns them for review — the caller POSTs to
+  // /api/profile/import-linkedin after the user confirms.
+  return sendCompanionRequest<CaptureSelfProfileResult>(
+    'NR_CAPTURE_SELF_PROFILE',
+    {},
+    120000,
   );
 }
 

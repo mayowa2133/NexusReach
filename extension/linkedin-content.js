@@ -590,6 +590,90 @@
     };
   }
 
+  function anchoredSection(id) {
+    // LinkedIn profile sections carry scroll-anchor divs (#experience, etc.).
+    const anchor = document.getElementById(id);
+    return anchor ? anchor.closest("section") : null;
+  }
+
+  function scrapeOwnPositions() {
+    const section = anchoredSection("experience");
+    if (!section) return [];
+    const positions = [];
+    for (const li of Array.from(section.querySelectorAll("li"))) {
+      const bold = li.querySelector(".t-bold span[aria-hidden='true'], .mr1.t-bold span[aria-hidden='true']");
+      const title = textOf(bold);
+      if (!title) continue;
+      const lines = linesOf(li);
+      // The company usually follows the title; strip the "· Full-time" suffix.
+      const company = (lines[1] || "").split("·")[0].trim() || null;
+      positions.push({ title, company });
+      if (positions.length >= 20) break;
+    }
+    return positions;
+  }
+
+  function scrapeOwnEducation() {
+    const section = anchoredSection("education");
+    if (!section) return [];
+    const education = [];
+    for (const li of Array.from(section.querySelectorAll("li"))) {
+      const bold = li.querySelector(".t-bold span[aria-hidden='true'], .mr1.t-bold span[aria-hidden='true']");
+      const school = textOf(bold);
+      if (!school) continue;
+      const lines = linesOf(li);
+      const degree = lines[1] || null;
+      education.push({ school, degree });
+      if (education.length >= 10) break;
+    }
+    return education;
+  }
+
+  function scrapeOwnSkills() {
+    const section = anchoredSection("skills");
+    if (!section) return [];
+    const skills = [];
+    const seen = new Set();
+    for (const bold of Array.from(section.querySelectorAll(".t-bold span[aria-hidden='true'], .mr1.t-bold span[aria-hidden='true']"))) {
+      const skill = textOf(bold);
+      if (!skill || seen.has(skill.toLowerCase())) continue;
+      seen.add(skill.toLowerCase());
+      skills.push(skill);
+      if (skills.length >= 50) break;
+    }
+    return skills;
+  }
+
+  async function captureSelfProfile() {
+    const blocked = detectBlockedState();
+    if (blocked) {
+      return { status: "blocked", message: blocked };
+    }
+    // Nudge lazy sections into the DOM before reading them.
+    await autoScroll(6, "section");
+    const top = captureProfile(window.location.href);
+    const warnings = [];
+    const positions = scrapeOwnPositions();
+    const education = scrapeOwnEducation();
+    const skills = scrapeOwnSkills();
+    if (!positions.length) warnings.push("Couldn't read your Experience section.");
+    if (!education.length) warnings.push("Couldn't read your Education section.");
+    if (!skills.length) warnings.push("Couldn't read your Skills section.");
+    return {
+      status: "completed",
+      profile: {
+        linkedin_url: top.linkedin_url,
+        full_name: top.visible_name,
+        headline: top.headline,
+        location: top.location,
+        positions,
+        education,
+        skills,
+      },
+      warnings,
+    };
+  }
+
   function graphCardFor(anchor) {
     return anchor.closest(
       [
@@ -930,6 +1014,18 @@
             status: "error",
             profileUrl: null,
             message: error instanceof Error ? error.message : "Could not resolve LinkedIn profile URL.",
+          }),
+        );
+      return true;
+    }
+
+    if (message.type === "CAPTURE_SELF_PROFILE") {
+      captureSelfProfile()
+        .then((result) => sendResponse(result))
+        .catch((error) =>
+          sendResponse({
+            status: "error",
+            message: error instanceof Error ? error.message : "Could not read your LinkedIn profile.",
           }),
         );
       return true;

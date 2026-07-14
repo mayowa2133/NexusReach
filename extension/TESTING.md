@@ -75,6 +75,17 @@ Chrome profile logged into LinkedIn.
 - [ ] Save the same profile twice → no duplicate contact (upsert by URL).
 - [ ] While NOT connected, the chip does not appear.
 
+## Own-profile import (Workstream F)
+
+- [ ] Onboarding "Connect your network" step (or trigger via the app) →
+      "Import my LinkedIn profile" opens your own profile in a background tab,
+      reads Experience/Education/Skills, and shows a review summary (name,
+      headline, N positions/schools/skills) before saving.
+- [ ] "Save to my profile" fills blank profile fields, adds skills, and
+      populates experience/education (visible on the Profile page); it does
+      NOT overwrite fields you already set.
+- [ ] Sections it can't read fail soft with a warning, not an error.
+
 ## ATS autofill
 
 - [ ] Greenhouse or Lever application form autofills from the profile with

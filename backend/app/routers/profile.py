@@ -15,10 +15,13 @@ from app.models.profile import Profile
 from app.models.search_preference import SearchPreference
 from app.schemas.profile import (
     AutofillProfileResponse,
+    LinkedInProfileImportRequest,
+    LinkedInProfileImportResponse,
     ProfileResponse,
     ProfileUpdate,
     ResumeUploadJsonRequest,
 )
+from app.services.profile_linkedin_import import merge_linkedin_profile
 from app.utils.sandboxed_process import run_in_sandbox_async
 from app.utils.uploads import read_upload_capped
 
@@ -330,6 +333,28 @@ async def update_profile(
         rescore_user_jobs.delay(str(user_id))
 
     return _serialize_profile(profile)
+
+
+@router.post("/import-linkedin", response_model=LinkedInProfileImportResponse)
+@limiter.limit("10/minute")
+async def import_linkedin_profile(
+    request: Request,
+    body: LinkedInProfileImportRequest,
+    # Companion auth: the extension captures the user's own LinkedIn profile.
+    user_id: Annotated[uuid.UUID, Depends(get_companion_or_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Merge the user's own captured LinkedIn profile into their profile.
+
+    Non-destructive: fills blank fields, unions skills, and appends
+    positions/education into ``resume_parsed`` (feeding warm-path affinity).
+    A parsed resume stays authoritative.
+    """
+    profile = await _get_profile_or_404(db, user_id)
+    changed = merge_linkedin_profile(profile, body.model_dump())
+    await db.commit()
+    await db.refresh(profile)
+    return LinkedInProfileImportResponse(profile=_serialize_profile(profile), **changed)
 
 
 @router.post("/resume", response_model=ProfileResponse)

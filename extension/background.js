@@ -145,6 +145,33 @@ async function closeTabQuietly(tabId) {
   }
 }
 
+async function navigateAndWait(tabId, url) {
+  await chrome.tabs.update(tabId, { url });
+  await waitForTabComplete(tabId);
+}
+
+async function captureSelfLinkedInProfile() {
+  // Resolve the user's own profile URL from a hidden LinkedIn tab, navigate to
+  // it, scrape the visible sections, and return the payload for the app to
+  // review before saving. Never writes anything server-side itself.
+  const tabId = await createAndWaitForTab("https://www.linkedin.com/feed/", { active: false });
+  try {
+    const resolved = await sendMessageToTab(tabId, { type: "RESOLVE_LINKEDIN_SELF_PROFILE" });
+    const url = resolved?.profileUrl;
+    if (!url) {
+      throw new Error(resolved?.message || "Could not resolve your LinkedIn profile URL.");
+    }
+    await navigateAndWait(tabId, url);
+    const scraped = await sendMessageToTab(tabId, { type: "CAPTURE_SELF_PROFILE" });
+    if (!scraped || scraped.status === "error" || scraped.status === "blocked") {
+      throw new Error(scraped?.message || "Could not read your LinkedIn profile.");
+    }
+    return { profile: scraped.profile, warnings: scraped.warnings || [] };
+  } finally {
+    await closeTabQuietly(tabId);
+  }
+}
+
 function waitForTabComplete(tabId, timeoutMs = 15000) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -797,6 +824,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       body: JSON.stringify(message.payload || {}),
     })
       .then((person) => sendResponse({ ok: true, person }))
+      .catch((error) =>
+        sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }),
+      );
+    return true;
+  }
+
+  if (message.type === "NR_CAPTURE_SELF_PROFILE") {
+    // Own-profile import (Workstream F): capture the user's own profile and
+    // return it to the app for review. The app POSTs it after the user confirms.
+    captureSelfLinkedInProfile()
+      .then((result) => sendResponse({ ok: true, ...result }))
       .catch((error) =>
         sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }),
       );

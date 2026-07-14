@@ -1,17 +1,25 @@
 # LinkedIn Companion — Tier 1 Implementation Plan
 
 Date: 2026-07-13
-Status: in progress on branch `linkedin-companion-tier1` — Workstreams A–E
-implemented (A: migration landed as `060_add_companion_tokens`; B: build
-via `extension/build.mjs`, submission package in `extension/STORE_LISTING.md`;
+Status: Tier 1 COMPLETE on branch `linkedin-companion-tier1` — Workstreams A–F
+implemented (A: migration `060_add_companion_tokens`; B: build via
+`extension/build.mjs`, submission package in `extension/STORE_LISTING.md`;
 C: Settings blessed-path card, onboarding `network` step, dashboard nudge —
 the install CTA reads `VITE_COMPANION_INSTALL_URL`, unset until the store
 listing is live; D: jittered weekly `chrome.alarms` background sync + in-page
 staleness nudge, guarded by cooldown/staleness/interstitial checks, opt-out
 popup toggle, `node --test` guard-logic coverage; E: `POST /api/people/
 capture-linkedin-profile` companion-authed upsert + in-page "Save to
-NexusReach" chip on `/in/` profiles + People-page "Captured from LinkedIn"
-chip). F not started.
+NexusReach" chip + People-page "Captured from LinkedIn" chip; F: `POST
+/api/profile/import-linkedin` non-destructive merge into `resume_parsed`
+feeding warm-path affinity, extension `CAPTURE_SELF_PROFILE` returning the
+scrape to the app for a review-then-confirm step in onboarding).
+
+Remaining before launch (external / manual, not code): publish the extension
+to the Chrome Web Store (screenshots + submission), set
+`VITE_COMPANION_INSTALL_URL` and `NEXUSREACH_COMPANION_EXTENSION_ORIGINS`
+post-publish, and run `extension/TESTING.md` against real LinkedIn in Chrome
+(the in-page/scrape paths can't be driven from the preview browser).
 D deviation: the auto-sync opt-out toggle lives in the extension popup (its
 state is extension-local), not the Settings card — the card links to it. This
 avoids new app↔extension bridge plumbing that can't be verified without loading

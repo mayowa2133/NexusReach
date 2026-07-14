@@ -67,6 +67,7 @@ vi.mock('@/lib/companion', () => ({
   }),
   connectCompanion: vi.fn(),
   refreshLinkedInGraphInCompanion: vi.fn(),
+  captureSelfLinkedInProfile: vi.fn(),
 }));
 
 function renderOnboarding() {
