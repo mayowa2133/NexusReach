@@ -52,7 +52,7 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 const DIMENSION_LABELS: Record<string, string> = {
-  job_fit: 'Job fit',
+  job_fit: 'Evidence alignment',
   contactability: 'Contactability',
   warm_path: 'Warm path',
   outreach_opportunity: 'Outreach opportunity',
@@ -135,7 +135,7 @@ function TriageCard({ result }: { result: TriageResult }) {
 
       {/* Quick stats */}
       <div className="flex flex-wrap gap-3 text-[11px] text-muted-foreground">
-        {result.job.match_score != null && (
+        {result.job.match_score_calibration?.calibrated && result.job.match_score != null && (
           <span>Match {Math.round(result.job.match_score)}%</span>
         )}
         {result.verified_contacts > 0 && (

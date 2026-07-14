@@ -463,7 +463,7 @@ export function ResumeArtifactReview({ jobId, artifact }: Props) {
                       : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
                   }`}
                 >
-                  ATS {artifact.body_ats_score.toFixed(0)}%
+                  Job-term coverage {artifact.body_ats_score.toFixed(0)}%
                 </Badge>
               )}
             </div>

@@ -194,7 +194,7 @@ describe('JobDetailPage', () => {
             job_family: 'frontend_fullstack',
             generated_at: '2026-04-18T00:00:00Z',
             updated_at: '2026-04-19T00:00:00Z',
-            reason: 'This saved resume scores 91.2% against the new posting.',
+            reason: 'This saved resume covers 91.2% of the evaluated posting terms.',
           },
         ],
       },
@@ -203,8 +203,9 @@ describe('JobDetailPage', () => {
 
     renderPage();
 
-    expect(screen.getByText('Strong existing resume available')).toBeInTheDocument();
-    expect(screen.getByText('84% quality')).toBeInTheDocument();
+    expect(screen.getByText('Evidence-qualified resume available')).toBeInTheDocument();
+    expect(screen.getByText('91% job-term coverage')).toBeInTheDocument();
+    expect(screen.getByText('84% evidence quality')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /use existing resume/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /generate new anyway/i })).toBeInTheDocument();
   });

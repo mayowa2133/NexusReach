@@ -89,7 +89,17 @@ async def test_search_jobs(client, mock_user_id):
     assert len(data) == 1
     assert data[0]["title"] == "Software Engineer"
     assert data[0]["apply_url"] == "https://example.com/job/1/apply"
-    assert data[0]["match_score"] == 75.0
+    assert data[0]["match_score"] is None
+    assert data[0]["match_score_calibration"] == {
+        "schema_version": 1,
+        "score_kind": "job_match",
+        "calibrated": False,
+        "display_mode": "dimensions_only",
+        "reason": (
+            "Aggregate score withheld until a versioned outcome-calibration "
+            "release passes cohort sufficiency and monotonicity gates."
+        ),
+    }
 
 
 async def test_search_ats(client, mock_user_id):
@@ -773,6 +783,68 @@ async def test_get_resume_artifact_exposes_typed_quality_evaluation(client, mock
     assert data["quality_evaluation"]["truthfulness"][
         "unverified_inferred_additions_excluded"
     ] == 1
+
+
+async def test_artifact_response_withholds_uncalibrated_aggregate(mock_user_id):
+    """The real response builder exposes axes but not the internal aggregate."""
+    from app.routers.jobs import _build_artifact_response
+
+    artifact = MagicMock()
+    artifact.id = uuid.uuid4()
+    artifact.job_id = uuid.uuid4()
+    artifact.tailored_resume_id = None
+    artifact.reused_from_artifact_id = None
+    artifact.reuse_score = None
+    artifact.format = "latex"
+    artifact.filename = "resume.tex"
+    artifact.content = "\\begin{document}Evidence\\end{document}"
+    artifact.generated_at = datetime(2026, 7, 13, tzinfo=timezone.utc)
+    artifact.created_at = artifact.generated_at
+    artifact.updated_at = artifact.generated_at
+    artifact.rewrite_decisions = {}
+    artifact.quality_score = 91.0
+    artifact.quality_evaluation = {
+        "schema_version": 1,
+        "rubric_version": "nexusreach_resume_quality_v1",
+        "status": "ready",
+        "evaluation_mode": "deterministic_supported_evidence",
+        "source_attribution": {
+            "name": "HackerRank Hiring Agent",
+            "url": "https://github.com/interviewstreet/hiring-agent",
+            "license": "MIT",
+            "adaptation": "Occupation-aware NexusReach quality gate.",
+        },
+        "evaluated_at": "2026-07-13T12:00:00+00:00",
+        "profile": "general_professional_v1",
+        "profile_label": "General professional",
+        "overall_score": 91.0,
+        "readiness": "strong",
+        "axes": {"job_fit": {"score": 80, "max": 100, "evidence": [], "improvements": []}},
+        "categories": [],
+        "strengths": [],
+        "improvements": [],
+        "truthfulness": None,
+        "disclaimer": "Internal evidence dimensions only.",
+    }
+    profile = MagicMock(resume_auto_accept_inferred=False)
+    job = MagicMock(description="Evidence")
+    db = AsyncMock()
+    db.execute.side_effect = [_ScalarResult(profile), _ScalarResult(job)]
+
+    response = await _build_artifact_response(
+        db,
+        user_id=mock_user_id,
+        job_id=str(artifact.job_id),
+        artifact=artifact,
+    )
+
+    assert response.quality_score is None
+    assert response.quality_evaluation is not None
+    assert response.quality_evaluation.overall_score is None
+    assert response.quality_evaluation.readiness is None
+    assert response.quality_evaluation.axes["job_fit"].score == 80
+    assert response.quality_evaluation.calibration is not None
+    assert response.quality_evaluation.calibration.calibrated is False
 
 
 async def test_download_resume_artifact_pdf(client, mock_user_id):

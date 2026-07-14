@@ -233,8 +233,8 @@ async def _refresh_single_preference(
                             db,
                             user_id,
                             type="new_job",
-                            title=f"New match: {job.title} at {job.company_name}",
-                            body=f"{int(job.match_score)}% match score",
+                            title=f"New evidence-aligned role: {job.title} at {job.company_name}",
+                            body="Review the requirement dimensions and hard constraints.",
                             job_id=job.id,
                         )
 
@@ -797,8 +797,8 @@ async def _rescore_user_jobs(user_id: uuid.UUID) -> dict:
                 db,
                 user_id,
                 type="rescore_complete",
-                title="Match scores updated",
-                body=f"Re-scored {stats['rescored']} jobs against your updated resume.",
+                title="Evidence alignment updated",
+                body=f"Re-evaluated {stats['rescored']} jobs against your updated resume.",
             )
 
     return stats

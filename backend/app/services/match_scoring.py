@@ -686,7 +686,7 @@ def score_job(job_data: dict, profile: Profile | None) -> tuple[float | None, di
 async def deep_analyze_match(
     job_data: dict,
     profile: Profile,
-    score: float,
+    _score: float,
     breakdown: dict,
 ) -> dict:
     """Use LLM to produce human-readable match analysis.
@@ -724,6 +724,7 @@ async def deep_analyze_match(
         "- Gaps: what the job requires that the candidate lacks.\n"
         "- Recommendations: concrete actions to improve fit (courses, projects, framing).\n"
         "- Keep each list to 3-5 items max.\n"
+        "- Do not state or infer an aggregate match percentage or hiring probability.\n"
         "- Do NOT fabricate or assume skills not listed in the resume."
     )
 
@@ -753,8 +754,8 @@ async def deep_analyze_match(
         f"Skills: {', '.join(resume_skills[:30])}\n\n"
         f"Experience:\n{experience_summary}\n"
         f"Education:\n{education_summary}\n"
-        f"## Current Match Score: {score}/100\n"
-        f"Breakdown: {breakdown}\n"
+        "## Deterministic evidence dimensions (not an outcome prediction)\n"
+        f"{breakdown}\n"
     )
 
     import json  # noqa: PLC0415

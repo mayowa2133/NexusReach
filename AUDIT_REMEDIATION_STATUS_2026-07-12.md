@@ -1,6 +1,6 @@
 # NexusReach Audit Remediation Ledger
 
-Updated: 2026-07-12
+Updated: 2026-07-14
 
 This is the completion ledger for `FEATURE_AUDIT_2026-07-12.md`. “Done” means
 the finding's acceptance behavior is implemented and covered by a focused
@@ -22,7 +22,7 @@ row is Partial or Todo.
 | P4 snapshot depth/feedback | Done | Snapshot depth is versioned and negative feedback immediately rewrites all durable snapshots/counts. |
 | P5 people evaluation depth | Done | A frozen synthetic-reviewed corpus covers all 23 occupations and reports precision@2, recall@2, MRR, nDCG@3, bucket/current-company accuracy, wrong-person and abstention rates, diversity, confidence calibration, latency, and cost with release gates. Live vendor retrieval remains an operational evaluation, not a deterministic CI dependency. |
 | J2 generic title evidence | Done | Generic titles use a bounded description lead; specific unmatched titles do not inherit boilerplate. |
-| J3 match scoring | Partial | Match scoring now consumes the shared typed requirement model and explicit hard-eligibility decision. Outcome calibration still requires production labels over time. |
+| J3 match scoring | Done | Match scoring consumes the shared typed requirement model and explicit hard-eligibility decision. Deterministic dimensions remain available for ranking and explanation, while the public aggregate fails closed with an explicit calibration status and cannot be presented as a hiring-outcome prediction. |
 | J4 invalid occupation fallback | Done | Invalid non-empty keys fail closed and never launch software discovery. |
 | J5 aggregator prewarm | Done | Centralized new-job finalization applies prewarm/auto-prospect exactly once. |
 | J6 new/refreshed counts | Done | Discovery totals count only transiently marked inserts. |
@@ -42,7 +42,7 @@ row is Partial or Todo.
 | R8 structured requirements | Done | Shared mandatory/preferred/responsibility requirements carry evidence type, criticality, source span, confidence, value, and schema version. |
 | R9 inferred rewrite metric loss | Done | Every rewrite type must preserve all source metric tokens. |
 | R10 reviewed tailoring reuse | Done | Tailoring is versioned by deterministic resume/job/prompt/rubric input hash and generation reuses only the exact reviewed version unless explicitly regenerated. |
-| R11 score calibration | Partial | Product labels say Internal quality/readiness and avoid employer-outcome claims. A fail-closed cohort report now measures review/application/interview monotonicity by occupation and experience level, but real cohorts must accrue before any score can be called empirically calibrated. |
+| R11 score calibration | Done | Public APIs and UI fail closed: aggregate match/quality scores and readiness labels are withheld unless a versioned outcome-calibration release explicitly qualifies. Users receive the underlying evidence dimensions instead. The cohort report requires minimum samples, at least three populated score bands, mature observed outcomes, and monotonic review/application/interview rates; unknown outcomes are excluded rather than counted as failures. |
 | R12 resume benchmark | Done | A 69-case matrix renders every one of the 23 occupations at entry, mid, and senior levels through the production LaTeX/PDF path, asserts one page, two-parser agreement, section policy, and bounded raster dimensions/ink density, alongside regulated-claim adversarial tests. |
 
 ## Verification checkpoint
@@ -50,8 +50,8 @@ row is Partial or Todo.
 Latest continuation checks:
 
 - backend Ruff: clean
-- full backend regression: 1,707 passed
-- full frontend regression: 214 passed
+- full backend regression: 1,713 passed in a hermetic test environment
+- full frontend regression: 215 passed
 - frontend production build and ESLint: passed
 - Alembic migration graph: one head (`059_version_tailored_resumes`)
-- Docker: compose SearXNG healthy over HTTP; the non-root renderer image contains TeX and Poppler and imports the production PDF verifier
+- Docker: current backend source passes fail-closed score-policy imports inside the non-root API and renderer images; the renderer contains TeX and Poppler; compose SearXNG is healthy over HTTP, read-only, non-root, and uses `no-new-privileges`

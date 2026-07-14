@@ -1,4 +1,5 @@
 import type { WarmPath, WarmPathPerson } from "./people";
+import type { ScoreCalibrationStatus } from "./jobs";
 
 // Insights Dashboard types (Phase 8)
 export interface DashboardSummary {
@@ -128,6 +129,7 @@ export interface TriageJobSummary {
   company_name: string | null;
   stage: string;
   match_score: number | null;
+  match_score_calibration?: ScoreCalibrationStatus;
   starred: boolean;
   tags: string[] | null;
   applied_at: string | null;

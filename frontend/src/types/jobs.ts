@@ -15,6 +15,14 @@ export type InterviewType =
 
 export type OfferStatus = 'pending' | 'accepted' | 'declined' | 'expired';
 
+export interface ScoreCalibrationStatus {
+  schema_version: number;
+  score_kind: 'job_match' | 'resume_readiness' | string;
+  calibrated: boolean;
+  display_mode: 'dimensions_only' | 'calibrated_overall';
+  reason: string;
+}
+
 export interface OfferDetails {
   salary: number | null;
   salary_currency: string | null;
@@ -66,6 +74,7 @@ export interface Job {
   closed_at?: string | null;
   not_seen_count?: number;
   match_score: number | null;
+  match_score_calibration?: ScoreCalibrationStatus;
   score_breakdown: Record<string, unknown> | null;
   stage: JobStage;
   tags: string[] | null;
@@ -86,6 +95,7 @@ export interface MatchAnalysis {
   gaps: string[];
   recommendations: string[];
   match_score: number | null;
+  match_score_calibration?: ScoreCalibrationStatus;
   model: string | null;
 }
 
@@ -163,6 +173,7 @@ export interface ResumeQualityEvaluation {
   profile_label: string | null;
   overall_score: number | null;
   readiness: 'strong' | 'competitive' | 'developing' | 'needs_work' | null;
+  calibration?: ScoreCalibrationStatus | null;
   axes: Record<string, ResumeQualityDimension>;
   categories: ResumeQualityCategory[];
   strengths: string[];

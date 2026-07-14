@@ -223,7 +223,7 @@ export function DashboardPage() {
                         </div>
                       )}
                     </div>
-                    {job.match_score != null && (
+                    {job.match_score_calibration?.calibrated && job.match_score != null && (
                       <Badge
                         variant={job.match_score >= 60 ? 'default' : 'outline'}
                         className="text-xs ml-2"
@@ -361,7 +361,7 @@ export function DashboardPage() {
                           </div>
                         )}
                       </div>
-                      {job.match_score != null && (
+                      {job.match_score_calibration?.calibrated && job.match_score != null && (
                         <Badge
                           variant={job.match_score >= 60 ? 'default' : 'outline'}
                           className="text-xs ml-2"

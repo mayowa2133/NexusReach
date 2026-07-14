@@ -41,3 +41,40 @@ def test_calibration_fails_closed_for_small_or_nonmonotonic_cohorts():
     assert small["calibrated"] is False
     assert reversed_report["cohorts"][0]["calibrated"] is False
     assert reversed_report["calibrated"] is False
+
+
+def test_calibration_requires_enough_observations_across_score_bands():
+    sparse = [
+        {
+            "score": 55 if index < 15 else 95,
+            "occupation": "healthcare",
+            "experience_level": "mid",
+            "review_accepted": index >= 15,
+            "applied": index >= 15,
+            "interviewed": index >= 15,
+        }
+        for index in range(30)
+    ]
+
+    report = compute_readiness_calibration(sparse, minimum_cohort_size=30)
+
+    assert report["cohorts"][0]["sufficient_sample"] is True
+    assert report["cohorts"][0]["monotonic"] == {
+        "review_acceptance_rate": False,
+        "application_rate": False,
+        "interview_rate": False,
+    }
+    assert report["calibrated"] is False
+
+
+def test_unknown_outcomes_do_not_count_as_negative_observations():
+    samples = _samples()
+    for sample in samples[:6]:
+        sample["interviewed"] = None
+
+    report = compute_readiness_calibration(samples, minimum_cohort_size=30)
+    first_band = report["cohorts"][0]["bands"][0]
+
+    assert first_band["interview_rate_observations"] == 0
+    assert first_band["interview_rate"] is None
+    assert report["cohorts"][0]["monotonic"]["interview_rate"] is True

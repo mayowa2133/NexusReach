@@ -8,6 +8,7 @@ application, and interview outcomes.
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -25,18 +26,25 @@ def _rate(numerator: int, denominator: int) -> float | None:
     return round(numerator / denominator, 4) if denominator else None
 
 
-def _monotonic(values: list[float | None]) -> bool:
+def _monotonic(values: list[float | None], *, minimum_observed_bands: int) -> bool:
     observed = [value for value in values if value is not None]
-    return len(observed) >= 2 and all(
+    return len(observed) >= minimum_observed_bands and all(
         current <= following
         for current, following in zip(observed, observed[1:])
     )
+
+
+def _observed_rate(rows: list[dict[str, Any]], key: str) -> tuple[int, float | None]:
+    observed = [row[key] for row in rows if isinstance(row.get(key), bool)]
+    return len(observed), _rate(sum(observed), len(observed))
 
 
 def compute_readiness_calibration(
     samples: list[dict[str, Any]],
     *,
     minimum_cohort_size: int = 30,
+    minimum_band_size: int = 5,
+    minimum_observed_bands: int = 3,
 ) -> dict[str, Any]:
     cohorts: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     for sample in samples:
@@ -57,22 +65,25 @@ def compute_readiness_calibration(
                 sample for sample in cohort_samples
                 if minimum <= sample["score"] <= maximum
             ]
-            bands.append({
+            band: dict[str, Any] = {
                 "label": f"{minimum}-{maximum}",
                 "count": len(rows),
-                "review_acceptance_rate": _rate(
-                    sum(bool(row.get("review_accepted")) for row in rows), len(rows)
-                ),
-                "application_rate": _rate(
-                    sum(bool(row.get("applied")) for row in rows), len(rows)
-                ),
-                "interview_rate": _rate(
-                    sum(bool(row.get("interviewed")) for row in rows), len(rows)
-                ),
-            })
+            }
+            for sample_key, metric in (
+                ("review_accepted", "review_acceptance_rate"),
+                ("applied", "application_rate"),
+                ("interviewed", "interview_rate"),
+            ):
+                observations, rate = _observed_rate(rows, sample_key)
+                band[f"{metric}_observations"] = observations
+                band[metric] = rate if observations >= minimum_band_size else None
+            bands.append(band)
         sufficient = len(cohort_samples) >= minimum_cohort_size
         monotonic = {
-            metric: _monotonic([band[metric] for band in bands])
+            metric: _monotonic(
+                [band[metric] for band in bands],
+                minimum_observed_bands=minimum_observed_bands,
+            )
             for metric in (
                 "review_acceptance_rate",
                 "application_rate",
@@ -92,6 +103,8 @@ def compute_readiness_calibration(
     return {
         "schema_version": CALIBRATION_SCHEMA_VERSION,
         "minimum_cohort_size": minimum_cohort_size,
+        "minimum_band_size": minimum_band_size,
+        "minimum_observed_bands": minimum_observed_bands,
         "sample_count": sum(len(rows) for rows in cohorts.values()),
         "cohorts": reports,
         "calibrated": bool(reports) and all(report["calibrated"] for report in reports),
@@ -109,10 +122,19 @@ async def load_readiness_calibration(
         )
     ).all()
     samples: list[dict[str, Any]] = []
+    now = datetime.now(timezone.utc)
     for artifact, job in rows:
         decisions = artifact.rewrite_decisions or {}
         decided = [value for value in decisions.values() if value in {"accepted", "rejected"}]
         accepted = sum(value == "accepted" for value in decided)
+        generated_at = artifact.generated_at
+        if generated_at.tzinfo is None:
+            generated_at = generated_at.replace(tzinfo=timezone.utc)
+        age = now - generated_at
+        applied = job.stage in {
+            "applied", "interviewing", "offer", "accepted", "rejected", "withdrawn"
+        }
+        interviewed = job.stage in {"interviewing", "offer", "accepted"}
         occupation_keys = [
             tag.split(":", 1)[1]
             for tag in (job.tags or [])
@@ -123,11 +145,14 @@ async def load_readiness_calibration(
                 "score": artifact.quality_score,
                 "occupation": occupation,
                 "experience_level": job.experience_level or "unknown",
-                "review_accepted": bool(decided) and accepted / len(decided) >= 0.5,
-                "applied": job.stage in {
-                    "applied", "interviewing", "offer", "accepted", "rejected", "withdrawn"
-                },
-                "interviewed": job.stage in {"interviewing", "offer", "accepted"},
+                "review_accepted": (
+                    accepted / len(decided) >= 0.5 if decided else None
+                ),
+                # Do not turn still-maturing artifacts into false negatives.
+                "applied": applied if applied or age >= timedelta(days=30) else None,
+                "interviewed": (
+                    interviewed if interviewed or age >= timedelta(days=60) else None
+                ),
             })
     return compute_readiness_calibration(
         samples,

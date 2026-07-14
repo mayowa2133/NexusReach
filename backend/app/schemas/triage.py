@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from app.schemas.jobs import ScoreCalibrationStatus
+
 
 class TriageDimensions(BaseModel):
     """Per-dimension breakdown of the ROI score (each 0–100)."""
 
-    job_fit: float = Field(description="Match score against profile")
+    job_fit: float = Field(description="Deterministic evidence alignment against profile")
     contactability: float = Field(description="Verified contacts found at this company")
     warm_path: float = Field(description="LinkedIn warm-path connections present")
     outreach_opportunity: float = Field(description="Open outreach opportunity window")
@@ -23,6 +25,7 @@ class TriageJobSummary(BaseModel):
     company_name: str | None
     stage: str
     match_score: float | None
+    match_score_calibration: ScoreCalibrationStatus
     starred: bool
     tags: list[str] | None
     applied_at: str | None

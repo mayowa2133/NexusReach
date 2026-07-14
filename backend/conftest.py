@@ -5,7 +5,51 @@ we mock the service layer for API integration tests rather than using an
 in-memory database. Unit tests target pure functions directly.
 """
 
+# ruff: noqa: E402 -- test environment must be sealed before app imports
+
+import os
 import uuid
+
+# Unit/API tests must never inherit production-like connection strings or
+# credentials from a developer's ignored ``backend/.env``. Unexpected database
+# access fails immediately on the discard port instead of reaching Supabase;
+# focused integration tests create and bind their own engines explicitly.
+os.environ["NEXUSREACH_ENVIRONMENT"] = "test"
+os.environ["NEXUSREACH_DATABASE_URL"] = (
+    "postgresql+asyncpg://nexusreach_test:nexusreach_test@127.0.0.1:1/nexusreach_test"
+)
+os.environ["NEXUSREACH_REDIS_URL"] = "redis://127.0.0.1:1/15"
+for _secret_name in (
+    "SUPABASE_JWT_SECRET",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "WAITLIST_ADMIN_TOKEN",
+    "APOLLO_API_KEY",
+    "APOLLO_MASTER_API_KEY",
+    "HUNTER_API_KEY",
+    "GITHUB_TOKEN",
+    "JSEARCH_API_KEY",
+    "ADZUNA_API_KEY",
+    "DICE_API_KEY",
+    "USAJOBS_API_KEY",
+    "THEMUSE_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "GOOGLE_API_KEY",
+    "GROQ_API_KEY",
+    "BRAVE_API_KEY",
+    "SERPER_API_KEY",
+    "TAVILY_API_KEY",
+    "YOUCOM_API_KEY",
+    "EXA_API_KEY",
+    "FIRECRAWL_API_KEY",
+    "SCRAPEGRAPH_API_KEY",
+    "GOOGLE_CLIENT_SECRET",
+    "MICROSOFT_CLIENT_SECRET",
+    "SENTRY_DSN",
+    "POSTHOG_API_KEY",
+    "READINESS_TOKEN",
+):
+    os.environ[f"NEXUSREACH_{_secret_name}"] = ""
 
 import pytest
 from httpx import ASGITransport, AsyncClient

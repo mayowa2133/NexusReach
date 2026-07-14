@@ -15,6 +15,14 @@ VALID_INTERVIEW_TYPES = {
 VALID_OFFER_STATUSES = {"pending", "accepted", "declined", "expired"}
 
 
+class ScoreCalibrationStatus(BaseModel):
+    schema_version: int = 1
+    score_kind: str
+    calibrated: bool = False
+    display_mode: Literal["dimensions_only", "calibrated_overall"] = "dimensions_only"
+    reason: str
+
+
 class JobSearchRequest(BaseModel):
     query: str = Field(min_length=1, max_length=200)
     location: str | None = Field(default=None, max_length=200)
@@ -110,6 +118,7 @@ class JobResponse(BaseModel):
     closed_at: str | None = None
     not_seen_count: int = 0
     match_score: float | None
+    match_score_calibration: ScoreCalibrationStatus
     score_breakdown: dict | None
     stage: str
     tags: list[str] | None
@@ -221,6 +230,7 @@ class MatchAnalysisResponse(BaseModel):
     gaps: list[str]
     recommendations: list[str]
     match_score: float | None = None
+    match_score_calibration: ScoreCalibrationStatus
     model: str | None = None
 
 
@@ -384,6 +394,7 @@ class ResumeQualityEvaluation(BaseModel):
     profile_label: str | None = None
     overall_score: float | None = None
     readiness: str | None = None
+    calibration: ScoreCalibrationStatus | None = None
     axes: dict[str, ResumeQualityDimension] = Field(default_factory=dict)
     categories: list[ResumeQualityCategory] = Field(default_factory=list)
     strengths: list[str] = Field(default_factory=list)

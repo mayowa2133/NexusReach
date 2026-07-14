@@ -226,7 +226,7 @@ class TestTailorResume:
         assert isinstance(result["bullet_rewrites"], list)
 
     @pytest.mark.asyncio
-    async def test_includes_score_context_in_prompt(self):
+    async def test_withholds_aggregate_score_and_includes_dimensions_in_prompt(self):
         mock_llm = AsyncMock(return_value={
             "draft": json.dumps({
                 "summary": "s", "skills_to_emphasize": [],
@@ -250,9 +250,13 @@ class TestTailorResume:
                 },
             )
 
-        # Check that score context was included in the user prompt
+        # The uncalibrated aggregate must not leak into model output through
+        # prompt context; direct evidence dimensions remain useful context.
         call_args = mock_llm.call_args
         user_prompt = call_args.kwargs.get("user_prompt") or call_args[0][1]
-        assert "72/100" in user_prompt or "73/100" in user_prompt
+        assert "72/100" not in user_prompt
+        assert "73/100" not in user_prompt
+        assert "algorithmic match score" not in user_prompt.lower()
+        assert "not a hiring-outcome prediction" in user_prompt
         assert "skills_match" in user_prompt
         assert "Python" in user_prompt

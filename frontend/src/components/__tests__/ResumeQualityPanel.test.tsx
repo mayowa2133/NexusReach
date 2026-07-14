@@ -20,6 +20,13 @@ const evaluation: ResumeQualityEvaluation = {
   profile_label: 'Early-career technical',
   overall_score: 81.5,
   readiness: 'competitive',
+  calibration: {
+    schema_version: 1,
+    score_kind: 'resume_readiness',
+    calibrated: false,
+    display_mode: 'dimensions_only',
+    reason: 'Outcome calibration is pending.',
+  },
   axes: {
     job_fit: {
       score: 80,
@@ -90,8 +97,10 @@ describe('ResumeQualityPanel', () => {
     render(<ResumeQualityPanel evaluation={evaluation} />);
 
     expect(screen.getByText('Resume quality gate')).toBeInTheDocument();
-    expect(screen.getByText('Internal quality 82%')).toBeInTheDocument();
-    expect(screen.getByText('Internal readiness: Competitive')).toBeInTheDocument();
+    expect(screen.getByText('Dimension-only assessment')).toBeInTheDocument();
+    expect(screen.queryByText(/81|82%/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Competitive/)).not.toBeInTheDocument();
+    expect(screen.getByText(/No aggregate readiness percentage is shown/)).toBeInTheDocument();
     expect(screen.getByText(/Early-career technical/)).toBeInTheDocument();
     expect(screen.getByText('Job fit')).toBeInTheDocument();
     expect(screen.getByText('Evidence quality')).toBeInTheDocument();
@@ -103,6 +112,25 @@ describe('ResumeQualityPanel', () => {
     expect(screen.getByText(/PDF verified · 1 page · 2 parsers/)).toBeInTheDocument();
     expect(screen.getByText('Evidence ledger passed')).toBeInTheDocument();
     expect(screen.getByText(/not an employer decision/)).toBeInTheDocument();
+  });
+
+  it('shows an aggregate only when the response marks it calibrated', () => {
+    render(
+      <ResumeQualityPanel
+        evaluation={{
+          ...evaluation,
+          calibration: {
+            ...evaluation.calibration!,
+            calibrated: true,
+            display_mode: 'calibrated_overall',
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Calibrated readiness 82%')).toBeInTheDocument();
+    expect(screen.getByText('Readiness: Competitive')).toBeInTheDocument();
+    expect(screen.queryByText('Dimension-only assessment')).not.toBeInTheDocument();
   });
 
   it('gives legacy artifacts an actionable regeneration state', () => {

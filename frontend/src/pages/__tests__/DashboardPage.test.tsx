@@ -425,7 +425,7 @@ describe('DashboardPage — top opportunities', () => {
     };
     renderDashboard();
     expect(screen.getAllByText('Senior SWE').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText('85%').length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText('85%')).not.toBeInTheDocument();
   });
 
   it('shows "View all jobs" link', () => {

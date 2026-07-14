@@ -58,7 +58,10 @@ export function ResumeQualityPanel({ evaluation }: Props) {
     );
   }
 
-  const overall = evaluation.overall_score ?? 0;
+  const calibrated = evaluation.calibration?.calibrated === true;
+  const overall = calibrated && evaluation.overall_score != null
+    ? evaluation.overall_score
+    : null;
   const readiness = evaluation.readiness
     ? READINESS_LABELS[evaluation.readiness] ?? evaluation.readiness
     : 'Unrated';
@@ -70,12 +73,25 @@ export function ResumeQualityPanel({ evaluation }: Props) {
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-medium">Resume quality gate</span>
-              <Badge className={scoreColor(overall)}>Internal quality {overall.toFixed(0)}%</Badge>
-              <Badge variant="outline">Internal readiness: {readiness}</Badge>
+              {overall != null && (
+                <Badge className={scoreColor(overall)}>Calibrated readiness {overall.toFixed(0)}%</Badge>
+              )}
+              {calibrated && evaluation.readiness && (
+                <Badge variant="outline">Readiness: {readiness}</Badge>
+              )}
+              {!calibrated && (
+                <Badge variant="outline">Dimension-only assessment</Badge>
+              )}
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
               {evaluation.profile_label} · {evaluation.rubric_version}
             </p>
+            {!calibrated && (
+              <p className="mt-1 max-w-2xl text-xs text-muted-foreground">
+                No aggregate readiness percentage is shown because this rubric has not yet
+                passed real-outcome calibration. Review the independent evidence dimensions below.
+              </p>
+            )}
             <div className="mt-2 flex flex-wrap gap-1.5">
               {evaluation.render_qa?.status === 'passed' && (
                 <Badge variant="outline">

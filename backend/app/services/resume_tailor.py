@@ -427,8 +427,8 @@ async def tailor_resume(
     Args:
         job_data: Job fields dict (title, company_name, description, etc.)
         profile: User profile with resume_parsed
-        score: Optional match score for context
-        breakdown: Optional score breakdown for context
+        score: Internal ordering score; intentionally not sent to the model
+        breakdown: Optional evidence-dimension breakdown for context
 
     Returns:
         Dict with tailoring suggestions + model metadata.
@@ -443,7 +443,8 @@ async def tailor_resume(
     must_surface = jd_terms.get("must_surface") or []
     role_family = jd_terms.get("role_family")
 
-    # Build user prompt with optional score context
+    # Build user prompt with evidence context. The uncalibrated aggregate score
+    # is deliberately excluded so generated prose cannot leak it back to users.
     user_parts = [
         "Analyze this resume against the job posting and provide tailoring suggestions.",
         "Optimize for truthful ATS alignment and recruiter scan quality.",
@@ -504,11 +505,6 @@ async def tailor_resume(
                 "- Never repeat near-duplicate variants of a term to inflate density.",
             ])
 
-    if score is not None:
-        user_parts.extend([
-            "",
-            f"Current algorithmic match score: {score:.0f}/100",
-        ])
     if breakdown:
         # Include key breakdown categories for context
         relevant = {
@@ -522,7 +518,10 @@ async def tailor_resume(
             score_lines = [
                 f"  {k}: {v}/{maxes.get(k, '?')}" for k, v in relevant.items()
             ]
-            user_parts.append("Score breakdown:\n" + "\n".join(score_lines))
+            user_parts.append(
+                "Deterministic evidence dimensions (not a hiring-outcome prediction):\n"
+                + "\n".join(score_lines)
+            )
 
         skills_detail = breakdown.get("skills_detail", {})
         matched = skills_detail.get("matched", [])

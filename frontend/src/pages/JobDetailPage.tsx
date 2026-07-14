@@ -446,7 +446,7 @@ function ResumeTailorSection({ job }: { job: Job }) {
       setArtifact(result);
       toast.success(
         result.reused_from_artifact_id && !forceNew
-          ? 'Reused a high-scoring saved resume for this job'
+          ? 'Reused a compatible, evidence-qualified resume for this job'
           : 'Generated a job-linked resume artifact',
       );
     } catch (err) {
@@ -527,13 +527,13 @@ function ResumeTailorSection({ job }: { job: Job }) {
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="space-y-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-medium">Strong existing resume available</span>
+                  <span className="text-sm font-medium">Evidence-qualified resume available</span>
                   <Badge className="bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200">
-                    {topReuseCandidate.score.toFixed(0)}% match
+                    {topReuseCandidate.score.toFixed(0)}% job-term coverage
                   </Badge>
                   {topReuseCandidate.quality_score != null && (
                     <Badge variant="outline" className="text-[11px]">
-                      {topReuseCandidate.quality_score.toFixed(0)}% quality
+                      {topReuseCandidate.quality_score.toFixed(0)}% evidence quality
                     </Badge>
                   )}
                   {reuseData?.auto_reuse_enabled && (
@@ -1392,7 +1392,7 @@ export function JobDetailPage() {
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          {job.match_score != null && (
+          {job.match_score_calibration?.calibrated && job.match_score != null && (
             <div className={`text-base font-bold px-3 py-1.5 rounded-lg ${
               job.match_score >= 60 ? 'bg-status-positive/10 text-status-positive' :
               job.match_score >= 30 ? 'bg-status-pending/10 text-status-pending' :
@@ -1473,8 +1473,8 @@ export function JobDetailPage() {
         <InterviewPrepPanel jobId={job.id} interviewRounds={job.interview_rounds} />
       )}
 
-      {/* Match Score Breakdown + Analyze */}
-      {job.match_score != null && job.score_breakdown && (
+      {/* Evidence dimensions + analysis */}
+      {job.score_breakdown && !(job.score_breakdown as Record<string, unknown>).resume_not_uploaded && (
         <Card id="match-section">
           <CardContent className="pt-4 space-y-3">
             <div className="flex items-center justify-between">
@@ -1619,16 +1619,16 @@ export function JobDetailPage() {
       )}
 
       {/* Resume Tailoring */}
-      {job.match_score != null && (
+      {job.score_breakdown && !(job.score_breakdown as Record<string, unknown>).resume_not_uploaded && (
         <div id="resume-section">
           <ResumeTailorSection job={job} />
         </div>
       )}
 
       {/* No resume prompt */}
-      {job.match_score == null && (
+      {(!job.score_breakdown || Boolean((job.score_breakdown as Record<string, unknown>).resume_not_uploaded)) && (
         <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground text-center">
-          Upload your resume in your Profile for match scores, AI analysis, and resume tailoring.
+          Upload your resume in your Profile for evidence dimensions, AI analysis, and resume tailoring.
         </div>
       )}
 

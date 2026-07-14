@@ -218,14 +218,14 @@ describe('SettingsPage — basic', () => {
 
   it('defaults resume auto-reuse to confirmation first', () => {
     renderSettings();
-    expect(screen.getByText('Auto-use strong existing resumes')).toBeInTheDocument();
+    expect(screen.getByText('Auto-use evidence-qualified resumes')).toBeInTheDocument();
     expect(screen.getByText(/when off, you will be asked before reuse/i)).toBeInTheDocument();
   });
 
   it('allows users to opt into automatic high-score resume reuse', async () => {
     renderSettings();
     const autoReuseRow = screen
-      .getByText('Auto-use strong existing resumes')
+      .getByText('Auto-use evidence-qualified resumes')
       .closest('[class*="rounded-lg"]');
 
     expect(autoReuseRow).not.toBeNull();

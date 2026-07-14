@@ -82,6 +82,10 @@ from app.services.outcome_telemetry import (
     attribution_key,
     job_category_properties,
 )
+from app.services.score_display import (
+    public_match_score,
+    public_resume_quality_evaluation,
+)
 from app.models.resume_artifact import ResumeArtifact
 from app.models.tailored_resume import TailoredResume
 from app.utils.action_budget import enforce_action_budget
@@ -146,8 +150,10 @@ async def _build_artifact_response(
     )
     reused_from_artifact_id = getattr(artifact, "reused_from_artifact_id", None)
     reuse_score = getattr(artifact, "reuse_score", None)
-    quality_score = getattr(artifact, "quality_score", None)
     quality_evaluation = getattr(artifact, "quality_evaluation", None)
+    public_quality_evaluation = public_resume_quality_evaluation(
+        quality_evaluation if isinstance(quality_evaluation, dict) else None
+    )
 
     return ResumeArtifactResponse(
         id=str(artifact.id),
@@ -169,14 +175,10 @@ async def _build_artifact_response(
         rewrite_previews=previews,
         auto_accept_inferred=auto_accept,
         body_ats_score=body_ats_score,
-        quality_score=(
-            float(quality_score)
-            if isinstance(quality_score, (int, float))
-            else None
-        ),
-        quality_evaluation=(
-            quality_evaluation if isinstance(quality_evaluation, dict) else None
-        ),
+        # The aggregate remains available internally for deterministic gates,
+        # but is withheld publicly until an outcome-calibration release exists.
+        quality_score=None,
+        quality_evaluation=public_quality_evaluation,
     )
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -204,6 +206,7 @@ def _to_response(
     not_seen_count = getattr(job, "not_seen_count", 0)
     if not isinstance(not_seen_count, int):
         not_seen_count = 0
+    public_score, score_calibration = public_match_score(job.match_score)
     return JobResponse(
         id=str(job.id),
         title=job.title,
@@ -239,7 +242,8 @@ def _to_response(
         last_seen_at=last_seen_at.isoformat() if last_seen_at else None,
         closed_at=closed_at.isoformat() if closed_at else None,
         not_seen_count=not_seen_count,
-        match_score=job.match_score,
+        match_score=public_score,
+        match_score_calibration=score_calibration,
         score_breakdown=job.score_breakdown,
         stage=job.stage,
         tags=job.tags,
@@ -869,12 +873,14 @@ async def analyze_match(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    public_score, score_calibration = public_match_score(score)
     return MatchAnalysisResponse(
         summary=analysis.get("summary", ""),
         strengths=analysis.get("strengths", []),
         gaps=analysis.get("gaps", []),
         recommendations=analysis.get("recommendations", []),
-        match_score=score,
+        match_score=public_score,
+        match_score_calibration=score_calibration,
         model=analysis.get("model"),
     )
 
@@ -1067,7 +1073,7 @@ async def get_resume_reuse_candidates(
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Return saved resume artifacts that are strong enough to reuse."""
+    """Return saved artifacts that pass deterministic evidence/reuse gates."""
     try:
         candidates = await get_resume_reuse_candidates_for_job(
             db=db,
@@ -1095,7 +1101,7 @@ async def reuse_resume_artifact(
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Use a high-scoring saved resume artifact for another job."""
+    """Use an evidence-qualified compatible artifact for another job."""
     try:
         artifact, source_job = await reuse_resume_artifact_for_job(
             db=db,

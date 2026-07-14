@@ -115,10 +115,11 @@ function ResumeAiAssistCard() {
         </div>
         <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
           <div className="space-y-1">
-            <div className="font-medium">Auto-use strong existing resumes</div>
+            <div className="font-medium">Auto-use evidence-qualified resumes</div>
             <p className="text-xs text-muted-foreground">
               When on, Solomon will reuse a saved resume instead of spending
-              LLM tokens if it scores at least 80% for a new compatible posting.
+              LLM tokens if it covers at least 80% of evaluated terms for a compatible posting
+              and passes the independent evidence-quality gate.
               When off, you will be asked before reuse.
             </p>
           </div>
@@ -134,7 +135,8 @@ function ResumeAiAssistCard() {
         {autoReuseEnabled && (
           <div className="rounded-md border border-blue-300 bg-blue-50 p-2.5 text-xs text-blue-900 dark:border-blue-600 dark:bg-blue-900/20 dark:text-blue-200">
             Automatic reuse only applies to compatible jobs with a deterministic
-            resume score of 80% or higher. You can still regenerate a fresh
+            posting-term coverage of 80% or higher. This is a deterministic reuse
+            gate, not a hiring-outcome prediction. You can still regenerate a fresh
             resume from the job page.
           </div>
         )}

@@ -785,7 +785,7 @@ export function JobsPage() {
                   onChange={(e) => setSortBy(e.target.value)}
                   className="h-8 rounded-lg border border-input bg-transparent px-2 text-sm outline-none"
                 >
-                  <option value="score">Match Score</option>
+                  <option value="score">Evidence Alignment</option>
                   <option value="date">Newest First</option>
                   <option value="distance">Distance</option>
                 </select>
@@ -978,7 +978,7 @@ const JobListCard = memo(function JobListCard({
             >
               <StarIcon filled={job.starred} className="h-4 w-4" />
             </button>
-            {job.match_score != null && (
+            {job.match_score_calibration?.calibrated && job.match_score != null && (
               <div className={`text-xs font-medium px-1.5 py-0.5 rounded ${
                 job.match_score >= 60 ? 'bg-status-positive/10 text-status-positive' :
                 job.match_score >= 30 ? 'bg-status-pending/10 text-status-pending' :
@@ -1062,7 +1062,7 @@ function JobDetail({
               <CardDescription>{job.company_name}</CardDescription>
             </div>
           </div>
-          {job.match_score != null && (
+          {job.match_score_calibration?.calibrated && job.match_score != null && (
             <div className={`text-lg font-bold px-3 py-1 rounded-lg ${
               job.match_score >= 60 ? 'bg-status-positive/10 text-status-positive' :
               job.match_score >= 30 ? 'bg-status-pending/10 text-status-pending' :

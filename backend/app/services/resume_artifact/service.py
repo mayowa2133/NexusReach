@@ -206,10 +206,10 @@ def _build_resume_reuse_candidate(
         "quality_threshold": quality_threshold,
         "job_family": target_family,
         "reason": (
-            f"This saved resume scores {score:.1f}% against the new posting "
+            f"This saved resume covers {score:.1f}% of the evaluated posting terms "
             f"and matches the {target_family.replace('_', '/')} job family."
             + (
-                f" Its evidence-quality gate is {quality_score:.1f}%."
+                f" Its evidence-quality dimension is {quality_score:.1f}%."
                 if quality_score is not None
                 else ""
             )
@@ -225,7 +225,7 @@ async def get_resume_reuse_candidates_for_job(
     threshold: float = RESUME_REUSE_SCORE_THRESHOLD,
     limit: int = 5,
 ) -> list[dict[str, Any]]:
-    """Find existing resume artifacts that are strong enough for a target job."""
+    """Find artifacts that pass deterministic compatibility and evidence gates."""
     target_result = await db.execute(
         select(Job).where(Job.id == job_id, Job.user_id == user_id)
     )
@@ -284,7 +284,7 @@ async def reuse_resume_artifact_for_job(
     source_artifact_id: uuid.UUID,
     threshold: float = RESUME_REUSE_SCORE_THRESHOLD,
 ) -> tuple[ResumeArtifact, Job]:
-    """Copy a high-scoring saved resume artifact onto another job."""
+    """Copy an evidence-qualified compatible artifact onto another job."""
     target_result = await db.execute(
         select(Job).where(Job.id == job_id, Job.user_id == user_id)
     )

@@ -4,7 +4,7 @@ Ranks all of a user's saved jobs by how much networking effort each deserves.
 No LLM. Every score is derived from observable CRM state and is explainable.
 
 Dimensions (each 0-100):
-  job_fit          30%  match_score against profile
+  job_fit          30%  deterministic requirement/evidence alignment
   contactability   25%  verified contacts found via research snapshot
   warm_path        20%  LinkedIn warm-path connections present
   outreach_opp     15%  how open the outreach window is
@@ -33,6 +33,7 @@ from app.schemas.triage import (
     TriageResponse,
     TriageResult,
 )
+from app.services.score_display import public_match_score
 
 # Stages that are effectively closed — deprioritize automatically
 _CLOSED_STAGES = {"rejected", "withdrawn", "archived"}
@@ -63,7 +64,7 @@ _WEIGHTS = {
 
 
 def _score_job_fit(match_score: float | None) -> float:
-    """Direct match score, default 50 if not yet analysed."""
+    """Internal evidence-alignment signal, neutral when not yet evaluated."""
     if match_score is None:
         return 50.0
     return float(match_score)
@@ -156,7 +157,7 @@ def _recommend(
     if verified_count == 0 and has_snapshot:
         return "No verified contacts found — try people search again or check email finder."
     if job_fit < 40:
-        return "Low match score — consider deprioritizing."
+        return "Limited evidence alignment — review the requirement dimensions before prioritizing."
     return "Research contacts and start outreach."
 
 
@@ -242,6 +243,7 @@ async def compute_triage(
             warm_path_count=warm_path_count,
         )
 
+        public_score, score_calibration = public_match_score(job.match_score)
         results.append(
             TriageResult(
                 job=TriageJobSummary(
@@ -249,7 +251,8 @@ async def compute_triage(
                     title=job.title,
                     company_name=job.company_name,
                     stage=job.stage,
-                    match_score=job.match_score,
+                    match_score=public_score,
+                    match_score_calibration=score_calibration,
                     starred=job.starred,
                     tags=list(job.tags) if job.tags else None,
                     applied_at=job.applied_at.isoformat() if job.applied_at else None,
