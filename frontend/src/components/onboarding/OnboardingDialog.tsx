@@ -10,6 +10,7 @@ import { WelcomeStep } from './steps/WelcomeStep';
 import { ProfileStep, type ProfileStepData } from './steps/ProfileStep';
 import { GoalsStep, type GoalsStepData } from './steps/GoalsStep';
 import { ResumeStep } from './steps/ResumeStep';
+import { NetworkStep } from './steps/NetworkStep';
 import { CompletedStep } from './steps/CompletedStep';
 import { useCompleteOnboarding } from '@/hooks/useOnboarding';
 import { useUpdateProfile, useUploadResume } from '@/hooks/useProfile';
@@ -20,7 +21,7 @@ interface OnboardingDialogProps {
   open: boolean;
 }
 
-type Step = 'welcome' | 'profile' | 'goals' | 'resume' | 'completed';
+type Step = 'welcome' | 'profile' | 'goals' | 'resume' | 'network' | 'completed';
 type FinalAction = 'jobs' | 'people' | 'profile';
 
 function errorMessage(err: unknown, fallback: string): string {
@@ -104,14 +105,14 @@ export function OnboardingDialog({ open }: OnboardingDialogProps) {
 
   const handleResumeNext = async (file: File | null) => {
     if (!file) {
-      setStep('completed');
+      setStep('network');
       return;
     }
 
     setSavingStep('resume');
     try {
       await uploadResume.mutateAsync(file);
-      setStep('completed');
+      setStep('network');
     } catch (err) {
       toast.error(errorMessage(err, 'Failed to upload resume'));
     } finally {
@@ -176,8 +177,14 @@ export function OnboardingDialog({ open }: OnboardingDialogProps) {
         {step === 'resume' && (
           <ResumeStep
             onNext={handleResumeNext}
-            onSkip={() => setStep('completed')}
+            onSkip={() => setStep('network')}
             isUploading={savingStep === 'resume'}
+          />
+        )}
+        {step === 'network' && (
+          <NetworkStep
+            onDone={() => setStep('completed')}
+            onSkip={() => setStep('completed')}
           />
         )}
         {step === 'completed' && (

@@ -108,6 +108,24 @@ class LinkedInPageCaptureRequest(BaseModel):
     captured_at: datetime | None = None
 
 
+class CaptureLinkedInProfileRequest(BaseModel):
+    """Ambient 'Save to NexusReach' from the companion (Workstream E).
+
+    Same visible-field shape as a page capture, but ``linkedin_url`` is required
+    because it is the upsert key for a brand-new saved contact.
+    """
+
+    linkedin_url: str
+    visible_name: str | None = None
+    headline: str | None = None
+    location: str | None = None
+    current_role_title: str | None = None
+    current_company_label: str | None = None
+    about_snippet: str | None = None
+    recent_experience_snippet: str | None = None
+    captured_at: datetime | None = None
+
+
 class JobContextResponse(BaseModel):
     department: str
     team_keywords: list[str]

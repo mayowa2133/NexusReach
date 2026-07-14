@@ -23,8 +23,17 @@ const sections = [
     title: 'Processors and Integrations',
     body: [
       'Solomon uses Supabase for authentication and hosted Postgres, Railway for backend services, Vercel for frontend hosting, Redis for queues and caching, Sentry for error monitoring, and PostHog for privacy-conscious product analytics.',
-      'When enabled or configured, Solomon may call Gmail, Microsoft Graph, Apollo, SearXNG, Serper, Brave Search, Tavily, Proxycurl, Hunter, GitHub, Crawl4AI, Firecrawl, and supported job boards or ATS providers to deliver product features.',
+      'When enabled or configured, Solomon may call Gmail, Microsoft Graph, Apollo, SearXNG, Serper, Brave Search, Tavily, Hunter, GitHub, Crawl4AI, Firecrawl, and supported job boards or ATS providers to deliver product features.',
       'Third-party services receive only the data needed for the specific feature request, such as a company, job URL, search query, public profile URL, email candidate, or email draft action.',
+    ],
+  },
+  {
+    title: 'Browser Companion Extension',
+    body: [
+      'The Solomon Companion browser extension is optional. It only reads pages you choose to view or syncs you explicitly start; it performs no automated LinkedIn actions (no invites, likes, or messages) and no background crawling.',
+      'The extension stores a Solomon-issued companion token and a snapshot of your Solomon profile locally in your browser. It never accesses or transmits your LinkedIn password, cookies, or browser session.',
+      'Data the extension uploads to your account: normalized first-degree connection rows you sync, hiring-team contacts you capture from job postings you are viewing, and application autofill activity.',
+      'Disconnecting the companion from Settings revokes its token immediately; previously synced data remains in your account until you delete it.',
     ],
   },
   {
@@ -56,7 +65,7 @@ export function PrivacyPage() {
           </Link>
           <div className="space-y-2">
             <h1 className="text-3xl font-semibold tracking-tight">Privacy Policy</h1>
-            <p className="text-sm text-muted-foreground">Effective May 24, 2026</p>
+            <p className="text-sm text-muted-foreground">Effective July 13, 2026</p>
           </div>
           <p className="text-muted-foreground">
             Solomon is a job-seeker networking assistant. This policy

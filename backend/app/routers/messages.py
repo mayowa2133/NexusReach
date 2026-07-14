@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import get_current_user_id
+from app.dependencies import get_companion_or_user_id, get_current_user_id
 from app.middleware.rate_limit import limiter
 from app.observability import capture_event
 from app.services.outcome_telemetry import attribution_key, person_ranking_properties
@@ -212,7 +212,8 @@ async def edit_message(
 @router.post("/{message_id}/copy", response_model=MessageResponse)
 async def copy_message(
     message_id: str,
-    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    # Companion auth: the extension marks drafts copied during LinkedIn assist.
+    user_id: Annotated[uuid.UUID, Depends(get_companion_or_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Mark a message as copied to clipboard."""

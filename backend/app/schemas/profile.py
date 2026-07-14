@@ -141,3 +141,35 @@ class ResumeUploadJsonRequest(BaseModel):
     filename: str
     content_type: str
     file_base64: str
+
+
+class LinkedInPositionInput(BaseModel):
+    title: str | None = None
+    company: str | None = None
+
+
+class LinkedInEducationInput(BaseModel):
+    school: str | None = None
+    degree: str | None = None
+
+
+class LinkedInProfileImportRequest(BaseModel):
+    """Self-captured LinkedIn profile from the companion (Workstream F)."""
+
+    linkedin_url: str | None = None
+    full_name: str | None = None
+    headline: str | None = None
+    location: str | None = None
+    positions: list[LinkedInPositionInput] = []
+    education: list[LinkedInEducationInput] = []
+    skills: list[str] = []
+
+
+class LinkedInProfileImportResponse(BaseModel):
+    profile: ProfileResponse
+    filled_name: bool
+    filled_bio: bool
+    filled_linkedin_url: bool
+    skills_added: int
+    positions_added: int
+    education_added: int

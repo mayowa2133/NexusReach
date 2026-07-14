@@ -14,6 +14,7 @@ Module layering (each module imports only from those below it):
 """
 
 from app.services.people.persistence import (
+    capture_linkedin_profile,
     get_or_create_company,
     get_saved_people,
     get_search_history,
@@ -26,6 +27,7 @@ from app.services.people.service import (
 )
 
 __all__ = [
+    "capture_linkedin_profile",
     "enrich_person_from_linkedin",
     "get_or_create_company",
     "get_saved_people",

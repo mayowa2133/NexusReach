@@ -16,6 +16,7 @@ from app.observability import capture_event, identify_user
 from app.models.user import User
 from app.models.profile import Profile
 from app.models.settings import UserSettings
+from app.services import companion_tokens
 
 security = HTTPBearer(auto_error=False)
 
@@ -135,4 +136,32 @@ async def get_current_user_id(
     user: Annotated[User, Depends(get_or_create_user)],
 ) -> uuid.UUID:
     """Compatibility dependency that returns the current bootstrapped user ID."""
+    return user.id
+
+
+async def get_companion_or_user_id(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> uuid.UUID:
+    """Auth for the endpoints the browser companion extension calls.
+
+    Accepts a long-lived companion token (``nrc_`` prefix, hashed at rest,
+    revocable — see ``services/companion_tokens``) or falls back to the
+    standard Supabase path, dev bypass included. Apply this only to the
+    specific endpoints the extension needs: a companion token must never
+    work as a general-purpose credential, and it cannot mint successors
+    (the /api/companion endpoints require full auth).
+    """
+    if credentials is not None and credentials.credentials.startswith(
+        companion_tokens.COMPANION_TOKEN_PREFIX
+    ):
+        user_id = await companion_tokens.resolve_token(db, credentials.credentials)
+        if user_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired companion token",
+            )
+        return user_id
+    auth_user = await get_current_auth_user(credentials)
+    user = await get_or_create_user(auth_user, db)
     return user.id

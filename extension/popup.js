@@ -12,6 +12,13 @@ const disconnectBtn = document.getElementById("disconnect-btn");
 const apiUrlInput = document.getElementById("api-url");
 const authTokenInput = document.getElementById("auth-token");
 const autofillToggle = document.getElementById("autofill-toggle");
+const autosyncToggle = document.getElementById("autosync-toggle");
+const notConnectedCard = document.getElementById("not-connected-card");
+const reconnectBanner = document.getElementById("reconnect-banner");
+const openAppBtn = document.getElementById("open-app-btn");
+
+const DEFAULT_APP_URL = NR_DEFAULTS.appUrl;
+let knownAppUrl = null;
 
 // ---------------------------------------------------------------------------
 // View toggling
@@ -64,13 +71,25 @@ function renderProfile(p) {
 // ---------------------------------------------------------------------------
 
 async function init() {
-  // Load saved API URL
+  // Load saved API URL (falling back to the build's default origin)
   const data = await chrome.storage.local.get(["apiUrl", "autofillEnabled"]);
-  if (data.apiUrl) apiUrlInput.value = data.apiUrl;
+  apiUrlInput.value = data.apiUrl || NR_DEFAULTS.apiUrl;
   autofillToggle.checked = data.autofillEnabled !== false; // default on
 
   // Check connection status
   chrome.runtime.sendMessage({ type: "GET_STATUS" }, (resp) => {
+    knownAppUrl = resp?.appUrl || null;
+    autosyncToggle.checked = resp?.autoSyncEnabled !== false; // default on
+
+    if (resp && resp.needsReconnect) {
+      // Token was revoked or expired server-side: keep the stored state but
+      // steer the user back to the app to mint a fresh companion token.
+      showLogin();
+      notConnectedCard.classList.add("hidden");
+      reconnectBanner.classList.remove("hidden");
+      return;
+    }
+
     if (resp && resp.connected && resp.hasProfile) {
       chrome.runtime.sendMessage({ type: "GET_PROFILE" }, (r) => {
         showConnected(r.profile);
@@ -144,6 +163,14 @@ disconnectBtn.addEventListener("click", () => {
 
 autofillToggle.addEventListener("change", () => {
   chrome.storage.local.set({ autofillEnabled: autofillToggle.checked });
+});
+
+autosyncToggle.addEventListener("change", () => {
+  chrome.runtime.sendMessage({ type: "SET_AUTOSYNC", enabled: autosyncToggle.checked });
+});
+
+openAppBtn.addEventListener("click", () => {
+  chrome.tabs.create({ url: `${knownAppUrl || DEFAULT_APP_URL}/settings` });
 });
 
 // Go

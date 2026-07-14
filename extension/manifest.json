@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "NexusReach Companion",
-  "version": "0.1.0",
-  "description": "ATS autofill plus local-first LinkedIn assist and graph refresh for NexusReach.",
-  "permissions": ["storage", "activeTab", "tabs"],
+  "name": "Solomon Companion",
+  "version": "1.0.0",
+  "description": "Solomon job-search companion: capture hiring teams from pages you view, sync your own LinkedIn network, autofill applications.",
+  "permissions": ["storage", "activeTab", "tabs", "alarms", "notifications"],
   "host_permissions": [
     "http://localhost:8000/*",
     "http://127.0.0.1:8000/*",

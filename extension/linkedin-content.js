@@ -390,15 +390,26 @@
     return queryTextButton(["connect"]);
   }
 
-  async function autoScroll(maxPasses = 10, anchorSelector = 'a[href*="/in/"], a[href*="/company/"]') {
+  async function autoScroll(
+    maxPasses = 10,
+    anchorSelector = 'a[href*="/in/"], a[href*="/company/"]',
+    { deadline = 0, background = false } = {},
+  ) {
     let previousHeight = -1;
     let previousCount = -1;
     let stablePasses = 0;
+    // Hidden tabs get their timers clamped to ~1s anyway; pace to match rather
+    // than fight it, and honor a wall-clock budget so an auto-run finishes
+    // before Chrome's intensive throttling kicks in.
+    const stepMs = background ? 1000 : 800;
     for (let pass = 0; pass < maxPasses; pass += 1) {
+      if (deadline && Date.now() > deadline) {
+        break;
+      }
       clickVisibleShowMore();
 
       const nextHeight = scrollGraphContainers();
-      await wait(800);
+      await wait(stepMs);
 
       const nextCount = document.querySelectorAll(anchorSelector).length;
       if (nextCount >= MAX_GRAPH_ITEMS) {
@@ -579,6 +590,90 @@
     };
   }
 
+  function anchoredSection(id) {
+    // LinkedIn profile sections carry scroll-anchor divs (#experience, etc.).
+    const anchor = document.getElementById(id);
+    return anchor ? anchor.closest("section") : null;
+  }
+
+  function scrapeOwnPositions() {
+    const section = anchoredSection("experience");
+    if (!section) return [];
+    const positions = [];
+    for (const li of Array.from(section.querySelectorAll("li"))) {
+      const bold = li.querySelector(".t-bold span[aria-hidden='true'], .mr1.t-bold span[aria-hidden='true']");
+      const title = textOf(bold);
+      if (!title) continue;
+      const lines = linesOf(li);
+      // The company usually follows the title; strip the "· Full-time" suffix.
+      const company = (lines[1] || "").split("·")[0].trim() || null;
+      positions.push({ title, company });
+      if (positions.length >= 20) break;
+    }
+    return positions;
+  }
+
+  function scrapeOwnEducation() {
+    const section = anchoredSection("education");
+    if (!section) return [];
+    const education = [];
+    for (const li of Array.from(section.querySelectorAll("li"))) {
+      const bold = li.querySelector(".t-bold span[aria-hidden='true'], .mr1.t-bold span[aria-hidden='true']");
+      const school = textOf(bold);
+      if (!school) continue;
+      const lines = linesOf(li);
+      const degree = lines[1] || null;
+      education.push({ school, degree });
+      if (education.length >= 10) break;
+    }
+    return education;
+  }
+
+  function scrapeOwnSkills() {
+    const section = anchoredSection("skills");
+    if (!section) return [];
+    const skills = [];
+    const seen = new Set();
+    for (const bold of Array.from(section.querySelectorAll(".t-bold span[aria-hidden='true'], .mr1.t-bold span[aria-hidden='true']"))) {
+      const skill = textOf(bold);
+      if (!skill || seen.has(skill.toLowerCase())) continue;
+      seen.add(skill.toLowerCase());
+      skills.push(skill);
+      if (skills.length >= 50) break;
+    }
+    return skills;
+  }
+
+  async function captureSelfProfile() {
+    const blocked = detectBlockedState();
+    if (blocked) {
+      return { status: "blocked", message: blocked };
+    }
+    // Nudge lazy sections into the DOM before reading them.
+    await autoScroll(6, "section");
+    const top = captureProfile(window.location.href);
+    const warnings = [];
+    const positions = scrapeOwnPositions();
+    const education = scrapeOwnEducation();
+    const skills = scrapeOwnSkills();
+    if (!positions.length) warnings.push("Couldn't read your Experience section.");
+    if (!education.length) warnings.push("Couldn't read your Education section.");
+    if (!skills.length) warnings.push("Couldn't read your Skills section.");
+    return {
+      status: "completed",
+      profile: {
+        linkedin_url: top.linkedin_url,
+        full_name: top.visible_name,
+        headline: top.headline,
+        location: top.location,
+        positions,
+        education,
+        skills,
+      },
+      warnings,
+    };
+  }
+
   function graphCardFor(anchor) {
     return anchor.closest(
       [
@@ -613,13 +708,14 @@
     return cleaned || fallback;
   }
 
-  async function runConnectionScrape() {
+  async function runConnectionScrape(options = {}) {
+    const scrollOpts = { deadline: Number(options.deadline) || 0, background: Boolean(options.background) };
     const blocked = detectBlockedState();
     if (blocked) {
       return { status: "blocked", message: blocked, connections: [] };
     }
     await waitForElement(() => document.querySelector('a[href*="/in/"]'), 15000, 500);
-    await autoScroll(120, 'a[href*="/in/"]');
+    await autoScroll(120, 'a[href*="/in/"]', scrollOpts);
     const connections = scrapeConnections();
     return {
       status: "completed",
@@ -629,6 +725,7 @@
   }
 
   async function runFollowScrape(payload = {}) {
+    const scrollOpts = { deadline: Number(payload.deadline) || 0, background: Boolean(payload.background) };
     const blocked = detectBlockedState();
     if (blocked) {
       return { status: "blocked", message: blocked, follows: [], warnings: [blocked] };
@@ -642,7 +739,7 @@
         await switchFollowTab("companies");
       }
       await waitForElement(() => document.querySelector(selector), 15000, 500);
-      await autoScroll(120, selector);
+      await autoScroll(120, selector, scrollOpts);
       const follows = scrapeFollows(payload.entityType);
       const warnings = follows.length
         ? []
@@ -659,17 +756,17 @@
     const follows = [];
 
     if (await switchFollowTab("people")) {
-      await autoScroll(80, 'a[href*="/in/"]');
+      await autoScroll(80, 'a[href*="/in/"]', scrollOpts);
       follows.push(...scrapeFollows("person"));
     } else if (window.location.href.includes("/people-follow/") || window.location.href.includes("/feed/following/")) {
-      await autoScroll(80, 'a[href*="/in/"]');
+      await autoScroll(80, 'a[href*="/in/"]', scrollOpts);
       follows.push(...scrapeFollows("person"));
     } else {
       warnings.push("Could not open the LinkedIn People follow tab.");
     }
 
     if (await switchFollowTab("companies")) {
-      await autoScroll(80, 'a[href*="/company/"]');
+      await autoScroll(80, 'a[href*="/company/"]', scrollOpts);
       follows.push(...scrapeFollows("company"));
     } else {
       warnings.push("Could not open the LinkedIn Companies follow tab.");
@@ -883,7 +980,7 @@
     }
 
     if (message.type === "RUN_GRAPH_REFRESH_CONNECTIONS") {
-      runConnectionScrape()
+      runConnectionScrape(message.payload || {})
         .then((result) => sendResponse(result))
         .catch((error) =>
           sendResponse({
@@ -922,6 +1019,216 @@
       return true;
     }
 
+    if (message.type === "CAPTURE_SELF_PROFILE") {
+      captureSelfProfile()
+        .then((result) => sendResponse(result))
+        .catch((error) =>
+          sendResponse({
+            status: "error",
+            message: error instanceof Error ? error.message : "Could not read your LinkedIn profile.",
+          }),
+        );
+      return true;
+    }
+
     return false;
   });
+
+  // -------------------------------------------------------------------------
+  // Opportunistic stale-graph nudge (Workstream D)
+  //
+  // When the user is naturally on LinkedIn and their imported network graph
+  // has gone stale (and the background alarm hasn't kept up), offer a one-click
+  // refresh in this already-logged-in session. This is the safest posture:
+  // human-present, foreground, and only on pages the user navigated to.
+  // -------------------------------------------------------------------------
+
+  function isGraphRefreshPage() {
+    // Skip the pages the sync itself drives, so an in-progress sync (its own
+    // tabs) never triggers the nudge.
+    const path = window.location.pathname;
+    return (
+      path.includes("/mynetwork/invite-connect/connections")
+      || path.includes("/mynetwork/network-manager/people-follow")
+      || path.includes("/details/interests")
+      || path.includes("/feed/following")
+    );
+  }
+
+  function renderStaleNudge(daysSinceSync) {
+    const root = panel();
+    root.replaceChildren();
+
+    const eyebrow = document.createElement("div");
+    eyebrow.style.cssText = "font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#0369a1;";
+    eyebrow.textContent = "NexusReach Companion";
+    root.appendChild(eyebrow);
+
+    const title = document.createElement("div");
+    title.style.cssText = "margin-top:4px;font-size:14px;font-weight:700;color:#0f172a;";
+    const weeks = Math.floor(daysSinceSync / 7);
+    title.textContent = weeks >= 1
+      ? `Your network graph is about ${weeks} week${weeks === 1 ? "" : "s"} old`
+      : `Your network graph is ${daysSinceSync} days old`;
+    root.appendChild(title);
+
+    const body = document.createElement("div");
+    body.style.cssText = "margin-top:6px;color:#475569;";
+    body.textContent = "Refresh it now while you're signed in so warm paths stay accurate.";
+    root.appendChild(body);
+
+    const status = document.createElement("div");
+    status.style.cssText = "margin-top:8px;color:#334155;min-height:16px;";
+    root.appendChild(status);
+
+    const actions = document.createElement("div");
+    actions.style.cssText = "margin-top:10px;display:flex;gap:8px;";
+
+    const refreshBtn = document.createElement("button");
+    refreshBtn.textContent = "Refresh now";
+    refreshBtn.style.cssText = "flex:1;padding:7px;border:none;border-radius:8px;background:#0284c7;color:#fff;font-weight:600;cursor:pointer;";
+
+    const dismissBtn = document.createElement("button");
+    dismissBtn.textContent = "Not now";
+    dismissBtn.style.cssText = "padding:7px 10px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;color:#334155;cursor:pointer;";
+    dismissBtn.addEventListener("click", () => root.remove());
+
+    refreshBtn.addEventListener("click", () => {
+      refreshBtn.disabled = true;
+      dismissBtn.disabled = true;
+      status.textContent = "Refreshing your network…";
+      chrome.runtime.sendMessage({ type: "START_OPPORTUNISTIC_SYNC" }, (response) => {
+        if (chrome.runtime.lastError || !response?.ok) {
+          status.textContent = response?.error || chrome.runtime.lastError?.message || "Refresh failed. Try again from Settings.";
+          refreshBtn.disabled = false;
+          dismissBtn.disabled = false;
+          return;
+        }
+        status.textContent = response.message || "Network refreshed.";
+        refreshBtn.remove();
+        dismissBtn.textContent = "Close";
+        dismissBtn.disabled = false;
+      });
+    });
+
+    actions.append(refreshBtn, dismissBtn);
+    root.appendChild(actions);
+  }
+
+  function maybeShowStaleNudge() {
+    if (TEST_MODE) return;
+    if (isGraphRefreshPage()) return;
+    if (detectBlockedState()) return;
+    try {
+      chrome.runtime.sendMessage({ type: "SHOULD_PROMPT_STALE_GRAPH" }, (response) => {
+        if (chrome.runtime.lastError || !response?.prompt) return;
+        renderStaleNudge(Number(response.daysSinceSync) || 0);
+      });
+    } catch {
+      // Extension context unavailable — no nudge.
+    }
+  }
+
+  // Give the SPA a moment to settle before checking staleness.
+  window.setTimeout(maybeShowStaleNudge, 4000);
+
+  // -------------------------------------------------------------------------
+  // Ambient "Save to NexusReach" on profile pages (Workstream E)
+  //
+  // On any /in/ profile the user visits, offer a one-click save of the visible
+  // top-card fields into their NexusReach contacts. Read-only — nothing is
+  // fetched or expanded beyond what is already on screen.
+  // -------------------------------------------------------------------------
+
+  const SAVE_CHIP_ID = "nexusreach-save-chip";
+
+  function isProfilePage() {
+    return /^\/in\//.test(window.location.pathname);
+  }
+
+  function renderSaveChip() {
+    if (document.getElementById(SAVE_CHIP_ID)) return;
+
+    const chip = document.createElement("div");
+    chip.id = SAVE_CHIP_ID;
+    chip.style.cssText = [
+      "position:fixed", "bottom:16px", "right:16px", "z-index:2147483646",
+      "display:flex", "align-items:center", "gap:8px",
+      "padding:10px 14px", "border-radius:999px",
+      "border:1px solid rgba(2,132,199,0.25)",
+      "background:rgba(255,255,255,0.98)",
+      "box-shadow:0 10px 30px rgba(15,23,42,0.18)",
+      "font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif",
+      "font-size:13px", "color:#0f172a",
+    ].join(";");
+
+    const label = document.createElement("span");
+    label.textContent = "Save to NexusReach";
+    label.style.cssText = "font-weight:600;";
+
+    const btn = document.createElement("button");
+    btn.textContent = "Save";
+    btn.style.cssText = "padding:5px 12px;border:none;border-radius:999px;background:#0284c7;color:#fff;font-weight:600;cursor:pointer;";
+
+    const close = document.createElement("button");
+    close.textContent = "✕";
+    close.setAttribute("aria-label", "Dismiss");
+    close.style.cssText = "border:none;background:transparent;color:#94a3b8;cursor:pointer;font-size:13px;";
+    close.addEventListener("click", () => chip.remove());
+
+    btn.addEventListener("click", () => {
+      const profile = captureProfile(window.location.href);
+      if (!profile.linkedin_url) {
+        label.textContent = "Couldn't read this profile";
+        return;
+      }
+      btn.disabled = true;
+      btn.textContent = "Saving…";
+      chrome.runtime.sendMessage({ type: "CAPTURE_PROFILE", payload: profile }, (response) => {
+        if (chrome.runtime.lastError || !response?.ok) {
+          label.textContent = response?.error || "Save failed";
+          btn.disabled = false;
+          btn.textContent = "Retry";
+          return;
+        }
+        const name = response.person?.full_name || "Contact";
+        label.textContent = `Saved ${name} ✓`;
+        btn.remove();
+        close.textContent = "Close";
+      });
+    });
+
+    chip.append(label, btn, close);
+    document.body.appendChild(chip);
+  }
+
+  function syncSaveChip() {
+    if (TEST_MODE) return;
+    const chip = document.getElementById(SAVE_CHIP_ID);
+    if (!isProfilePage()) {
+      if (chip) chip.remove();
+      return;
+    }
+    if (chip) return;
+    // Only offer the chip to a connected companion.
+    try {
+      chrome.runtime.sendMessage({ type: "GET_STATUS" }, (resp) => {
+        if (chrome.runtime.lastError || !resp?.connected || resp?.needsReconnect) return;
+        if (isProfilePage()) renderSaveChip();
+      });
+    } catch {
+      // Extension context unavailable — no chip.
+    }
+  }
+
+  // LinkedIn is a SPA: profile navigations don't reload the content script.
+  // Poll for URL changes and re-evaluate the chip.
+  let lastHref = window.location.href;
+  window.setInterval(() => {
+    if (window.location.href !== lastHref) {
+      lastHref = window.location.href;
+      window.setTimeout(syncSaveChip, 1200);
+    }
+  }, 1500);
+  window.setTimeout(syncSaveChip, 2500);
 })();

@@ -35,6 +35,10 @@ test('authenticated user completes onboarding and persists profile data through 
   await expect(page.getByRole('heading', { name: 'Add your resume' })).toBeVisible();
   await page.getByRole('button', { name: 'Skip for now' }).click();
 
+  // Network step (no companion extension in E2E) — skip past it.
+  await expect(page.getByRole('heading', { name: 'Connect your network' })).toBeVisible();
+  await page.getByRole('button', { name: 'Skip for now' }).click();
+
   await expect(page.getByRole('heading', { name: 'Ready for your first search' })).toBeVisible();
   await page.getByRole('button', { name: 'Review full profile' }).click();
 

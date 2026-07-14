@@ -14,11 +14,15 @@ from app.services.known_people_service import expire_known_person
 from app.services.people.hiring_team_capture import ingest_hiring_team_capture
 
 from app.database import get_db
-from app.dependencies import get_current_user_id
+from app.dependencies import get_companion_or_user_id, get_current_user_id
 from app.middleware.rate_limit import limiter
 from app.observability import capture_event
-from app.utils.discovery_rate_limit import check_discovery_rate_limit
+from app.utils.discovery_rate_limit import (
+    check_discovery_rate_limit,
+    check_discovery_rate_limit_companion,
+)
 from app.schemas.people import (
+    CaptureLinkedInProfileRequest,
     LinkedInPageCaptureRequest,
     PeopleSearchRequest,
     PeopleSearchResponse,
@@ -27,6 +31,7 @@ from app.schemas.people import (
     SearchLogResponse,
 )
 from app.services.people import (
+    capture_linkedin_profile,
     search_people_at_company,
     search_people_for_job,
     enrich_person_from_linkedin,
@@ -191,9 +196,10 @@ async def save_linkedin_page_capture(
     request: Request,
     person_id: str,
     body: LinkedInPageCaptureRequest,
-    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    # Companion auth: the extension saves page captures during LinkedIn assist.
+    user_id: Annotated[uuid.UUID, Depends(get_companion_or_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
-    _rate_check: Annotated[None, Depends(check_discovery_rate_limit)],
+    _rate_check: Annotated[None, Depends(check_discovery_rate_limit_companion)],
 ):
     try:
         person_uuid = uuid.UUID(person_id)
@@ -210,6 +216,35 @@ async def save_linkedin_page_capture(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    return _serialize_person(person)
+
+
+@router.post("/capture-linkedin-profile", response_model=PersonResponse)
+@limiter.limit("20/minute")
+async def capture_linkedin_profile_endpoint(
+    request: Request,
+    body: CaptureLinkedInProfileRequest,
+    # Companion auth: the extension's ambient "Save to NexusReach" on a profile.
+    user_id: Annotated[uuid.UUID, Depends(get_companion_or_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _rate_check: Annotated[None, Depends(check_discovery_rate_limit_companion)],
+):
+    """Save a contact from a LinkedIn profile the user is viewing.
+
+    Upserts a CRM person by ``(user_id, linkedin_url)`` and links the visible
+    current employer. Read-only capture of on-screen fields; never scrapes
+    beyond the page or seeds the global known-people cache.
+    """
+    try:
+        person = await capture_linkedin_profile(
+            db=db,
+            user_id=user_id,
+            payload=body.model_dump(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    capture_event(str(user_id), "profile_captured", properties={"has_company": bool(person.company_id)})
     return _serialize_person(person)
 
 
@@ -381,7 +416,8 @@ class HiringTeamCaptureRequest(BaseModel):
 @router.post("/hiring-team-capture")
 async def hiring_team_capture(
     body: HiringTeamCaptureRequest,
-    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    # Companion auth: the extension ingests the hiring-team panel it captured.
+    user_id: Annotated[uuid.UUID, Depends(get_companion_or_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Ingest the LinkedIn 'Meet the hiring team' panel from the companion.

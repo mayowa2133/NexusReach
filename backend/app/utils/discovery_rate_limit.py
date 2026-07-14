@@ -1,4 +1,4 @@
-"""Per-user daily sliding-window rate limit for discovery endpoints.
+"""Per-user daily sliding-window rate limits for discovery-class endpoints.
 
 Uses a Redis sorted set to track request timestamps within a 24-hour window.
 This is layered on top of the existing slowapi per-minute burst limits.
@@ -13,7 +13,7 @@ import redis.asyncio as aioredis
 from fastapi import Depends, HTTPException
 
 from app.config import settings
-from app.dependencies import get_current_user_id
+from app.dependencies import get_companion_or_user_id, get_current_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -32,18 +32,10 @@ def _client() -> aioredis.Redis:
     return _redis_client
 
 
-async def check_discovery_rate_limit(
-    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
-) -> None:
-    """Enforce a sliding-window daily limit on discovery requests.
-
-    Raises ``HTTPException(429)`` when the user has exceeded
-    ``settings.discovery_daily_limit`` discovery requests in the
-    past 24 hours.
-    """
+async def _enforce_daily_limit(key: str, limit: int, exceeded_detail: str) -> None:
+    """Shared sliding-window check. Raises 429 past ``limit`` in 24h."""
     r = _client()
     try:
-        key = f"nexusreach:discovery_daily:{user_id}"
         now = time.time()
 
         pipe = r.pipeline()
@@ -52,11 +44,8 @@ async def check_discovery_rate_limit(
         results = await pipe.execute()
         count: int = results[1]
 
-        if count >= settings.discovery_daily_limit:
-            raise HTTPException(
-                status_code=429,
-                detail=f"Daily discovery limit ({settings.discovery_daily_limit}) exceeded. Try again tomorrow.",
-            )
+        if count >= limit:
+            raise HTTPException(status_code=429, detail=exceeded_detail)
 
         pipe2 = r.pipeline()
         pipe2.zadd(key, {str(now): now})
@@ -69,10 +58,61 @@ async def check_discovery_rate_limit(
         # outage turns an infrastructure incident into an unbounded-cost event
         # in production. Local development and test environments retain the
         # existing no-Redis workflow.
-        logger.error("Discovery rate-limit backend unavailable", exc_info=True)
+        logger.error("Rate-limit backend unavailable", exc_info=True)
         if settings.environment != "production":
             return
         raise HTTPException(
             status_code=503,
-            detail="Discovery is temporarily unavailable. Please try again shortly.",
+            detail="This action is temporarily unavailable. Please try again shortly.",
         )
+
+
+async def check_discovery_rate_limit(
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+) -> None:
+    """Enforce a sliding-window daily limit on discovery requests.
+
+    Raises ``HTTPException(429)`` when the user has exceeded
+    ``settings.discovery_daily_limit`` discovery requests in the
+    past 24 hours.
+    """
+    await _enforce_daily_limit(
+        f"nexusreach:discovery_daily:{user_id}",
+        settings.discovery_daily_limit,
+        f"Daily discovery limit ({settings.discovery_daily_limit}) exceeded. Try again tomorrow.",
+    )
+
+
+async def check_discovery_rate_limit_companion(
+    user_id: Annotated[uuid.UUID, Depends(get_companion_or_user_id)],
+) -> None:
+    """Discovery limit variant for endpoints the companion extension calls.
+
+    Identical window/limit to ``check_discovery_rate_limit``; only the auth
+    dependency differs (companion tokens accepted). Kept separate so switching
+    an endpoint to companion auth is an explicit, reviewable choice.
+    """
+    await _enforce_daily_limit(
+        f"nexusreach:discovery_daily:{user_id}",
+        settings.discovery_daily_limit,
+        f"Daily discovery limit ({settings.discovery_daily_limit}) exceeded. Try again tomorrow.",
+    )
+
+
+async def check_linkedin_sync_rate_limit(
+    user_id: Annotated[uuid.UUID, Depends(get_companion_or_user_id)],
+) -> None:
+    """Bound LinkedIn graph sync sessions per user per day.
+
+    Protects both LinkedIn (a runaway companion auto-sync cannot scrape on a
+    loop) and us. Covers every sync-session creator: Settings "Sync Now", the
+    local connector, and the companion's manual/auto refresh.
+    """
+    await _enforce_daily_limit(
+        f"nexusreach:linkedin_sync_daily:{user_id}",
+        settings.companion_sync_daily_limit,
+        (
+            f"Daily LinkedIn sync limit ({settings.companion_sync_daily_limit}) "
+            "exceeded. Try again tomorrow."
+        ),
+    )

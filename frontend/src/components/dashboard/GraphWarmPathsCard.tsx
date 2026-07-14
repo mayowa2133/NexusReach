@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import type { GraphWarmPathCompany } from '@/types';
@@ -13,11 +14,18 @@ export function GraphWarmPathsCard({ companies }: GraphWarmPathsCardProps) {
         <CardHeader>
           <CardTitle className="text-base">LinkedIn Graph Warm Paths</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-2">
           <p className="text-sm text-muted-foreground">
-            Import your LinkedIn connections in Settings to see which companies
-            you already have warm paths into.
+            You might already know someone at your target companies. Import your
+            LinkedIn connections and Solomon checks — one click with the
+            Companion extension.
           </p>
+          <Link
+            to="/settings"
+            className="inline-block text-sm font-medium text-primary underline-offset-4 hover:underline"
+          >
+            Connect your network in Settings →
+          </Link>
         </CardContent>
       </Card>
     );
