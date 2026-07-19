@@ -77,12 +77,22 @@ async def test_search_jobs(client, mock_user_id):
     """POST /api/jobs/search returns scored job results."""
     job = _mock_job(mock_user_id, apply_url="https://example.com/job/1/apply")
 
-    with patch("app.routers.jobs.search_jobs", new_callable=AsyncMock) as mock_search:
+    with (
+        patch("app.routers.jobs.search_jobs", new_callable=AsyncMock) as mock_search,
+        patch(
+            "app.routers.jobs._hydrate_deferred_job_columns", new_callable=AsyncMock
+        ) as mock_hydrate,
+    ):
         mock_search.return_value = [job]
         resp = await client.post(
             "/api/jobs/search",
             json={"query": "software engineer", "remote_only": False},
         )
+
+    # Dedup-matched rows come back with deferred columns; the endpoint must
+    # rehydrate them before serialization or reads raise MissingGreenlet.
+    mock_hydrate.assert_awaited_once()
+    assert mock_hydrate.await_args.args[1] == [job]
 
     assert resp.status_code == 200
     data = resp.json()
@@ -106,7 +116,12 @@ async def test_search_ats(client, mock_user_id):
     """POST /api/jobs/search/ats returns ATS board results."""
     job = _mock_job(mock_user_id, source="greenhouse", ats="greenhouse")
 
-    with patch("app.routers.jobs.search_ats_jobs", new_callable=AsyncMock) as mock_search:
+    with (
+        patch("app.routers.jobs.search_ats_jobs", new_callable=AsyncMock) as mock_search,
+        patch(
+            "app.routers.jobs._hydrate_deferred_job_columns", new_callable=AsyncMock
+        ) as mock_hydrate,
+    ):
         mock_search.return_value = [job]
         resp = await client.post(
             "/api/jobs/search/ats",
@@ -117,13 +132,17 @@ async def test_search_ats(client, mock_user_id):
     data = resp.json()
     assert len(data) == 1
     assert data[0]["source"] == "greenhouse"
+    mock_hydrate.assert_awaited_once()
 
 
 async def test_search_ats_with_job_url(client, mock_user_id):
     """POST /api/jobs/search/ats accepts a direct job posting URL."""
     job = _mock_job(mock_user_id, source="greenhouse", ats="greenhouse")
 
-    with patch("app.routers.jobs.search_ats_jobs", new_callable=AsyncMock) as mock_search:
+    with (
+        patch("app.routers.jobs.search_ats_jobs", new_callable=AsyncMock) as mock_search,
+        patch("app.routers.jobs._hydrate_deferred_job_columns", new_callable=AsyncMock),
+    ):
         mock_search.return_value = [job]
         resp = await client.post(
             "/api/jobs/search/ats",
@@ -138,11 +157,38 @@ async def test_search_ats_with_job_url(client, mock_user_id):
     assert call_kwargs["ats_type"] is None
 
 
+async def test_hydrate_deferred_job_columns_reloads_rows():
+    """The rehydration helper re-selects rows with populate_existing, chunked."""
+    from app.routers.jobs import _hydrate_deferred_job_columns
+
+    db = MagicMock()
+    db.execute = AsyncMock()
+
+    # Empty input never touches the session.
+    await _hydrate_deferred_job_columns(db, [])
+    db.execute.assert_not_awaited()
+
+    jobs = [MagicMock(id=uuid.uuid4()) for _ in range(3)]
+    await _hydrate_deferred_job_columns(db, jobs)
+    assert db.execute.await_count == 1
+    stmt = db.execute.await_args.args[0]
+    assert stmt.get_execution_options().get("populate_existing") is True
+
+    # Large batches split into 500-id chunks.
+    db.execute.reset_mock()
+    many = [MagicMock(id=uuid.uuid4()) for _ in range(501)]
+    await _hydrate_deferred_job_columns(db, many)
+    assert db.execute.await_count == 2
+
+
 async def test_search_ats_with_apple_job_url(client, mock_user_id):
     """POST /api/jobs/search/ats accepts Apple Jobs exact-job URLs."""
     job = _mock_job(mock_user_id, source="apple_jobs", ats="apple_jobs", company_name="Apple")
 
-    with patch("app.routers.jobs.search_ats_jobs", new_callable=AsyncMock) as mock_search:
+    with (
+        patch("app.routers.jobs.search_ats_jobs", new_callable=AsyncMock) as mock_search,
+        patch("app.routers.jobs._hydrate_deferred_job_columns", new_callable=AsyncMock),
+    ):
         mock_search.return_value = [job]
         resp = await client.post(
             "/api/jobs/search/ats",
@@ -164,7 +210,10 @@ async def test_search_ats_with_workday_job_url(client, mock_user_id):
     """POST /api/jobs/search/ats accepts Workday exact-job URLs."""
     job = _mock_job(mock_user_id, source="workday", ats="workday", company_name="NVIDIA")
 
-    with patch("app.routers.jobs.search_ats_jobs", new_callable=AsyncMock) as mock_search:
+    with (
+        patch("app.routers.jobs.search_ats_jobs", new_callable=AsyncMock) as mock_search,
+        patch("app.routers.jobs._hydrate_deferred_job_columns", new_callable=AsyncMock),
+    ):
         mock_search.return_value = [job]
         resp = await client.post(
             "/api/jobs/search/ats",

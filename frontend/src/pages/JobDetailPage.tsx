@@ -1513,7 +1513,9 @@ export function JobDetailPage() {
                 const entries = Object.entries(job.score_breakdown!)
                   .filter(([key]) => scoreKeys.includes(key) || (!['category_maxes', 'max_possible', 'skills_detail', 'experience_detail', 'resume_not_uploaded'].includes(key) && typeof job.score_breakdown![key] === 'number'));
                 return entries.map(([key, value]) => {
-                  const max = maxes?.[key] ?? 10;
+                  // Rows without a category_maxes entry (legacy/import scores)
+                  // can be on a 0-100 scale; never show e.g. "91/10".
+                  const max = maxes?.[key] ?? ((value as number) > 10 ? 100 : 10);
                   const pct = max > 0 ? ((value as number) / max) * 100 : 0;
                   return (
                     <div key={key} className="space-y-0.5">

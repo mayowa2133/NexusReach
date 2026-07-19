@@ -2,6 +2,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -20,6 +21,7 @@ from app.schemas.messages import (
     MessageResponse,
     MessageWarmPathResponse,
 )
+from app.models.person import Person
 from app.schemas.people import PersonResponse
 from app.services.message_service import (
     batch_draft_messages,
@@ -91,6 +93,21 @@ def _to_response(msg, person=None, warm_path_override=None, linkedin_signal_over
         created_at=msg.created_at.isoformat(),
         updated_at=msg.updated_at.isoformat(),
     )
+
+
+async def _people_for_messages(db, user_id: uuid.UUID, messages) -> dict:
+    """Bulk-load the saved contacts behind a batch of messages.
+
+    ``_to_response`` only fills ``person_name``/``person_title`` when handed the
+    person row; without this lookup every history card renders "Unknown".
+    """
+    person_ids = {m.person_id for m in messages if m.person_id is not None}
+    if not person_ids:
+        return {}
+    result = await db.execute(
+        select(Person).where(Person.user_id == user_id, Person.id.in_(person_ids))
+    )
+    return {person.id: person for person in result.scalars()}
 
 
 def _to_batch_item(item: dict) -> BatchDraftItem:
@@ -206,7 +223,8 @@ async def edit_message(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
-    return _to_response(msg)
+    people = await _people_for_messages(db, user_id, [msg])
+    return _to_response(msg, people.get(msg.person_id))
 
 
 @router.post("/{message_id}/copy", response_model=MessageResponse)
@@ -226,7 +244,8 @@ async def copy_message(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
-    return _to_response(msg)
+    people = await _people_for_messages(db, user_id, [msg])
+    return _to_response(msg, people.get(msg.person_id))
 
 
 @router.get("")
@@ -240,8 +259,9 @@ async def list_messages(
     """List messages with optional filtering and pagination."""
     pid = uuid.UUID(person_id) if person_id else None
     messages, total = await get_messages(db, user_id, pid, limit=limit, offset=offset)
+    people = await _people_for_messages(db, user_id, messages)
     return {
-        "items": [_to_response(m) for m in messages],
+        "items": [_to_response(m, people.get(m.person_id)) for m in messages],
         "total": total,
         "limit": limit,
         "offset": offset,
@@ -258,4 +278,5 @@ async def get_single_message(
     msg = await get_message(db, user_id, uuid.UUID(message_id))
     if not msg:
         raise HTTPException(status_code=404, detail="Message not found")
-    return _to_response(msg)
+    people = await _people_for_messages(db, user_id, [msg])
+    return _to_response(msg, people.get(msg.person_id))

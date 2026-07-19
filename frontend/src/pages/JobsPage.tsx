@@ -433,7 +433,11 @@ export function JobsPage() {
       },
       (error) => {
         setNearMeStatus(null);
-        toast.error(error.message || 'Location permission was not granted.');
+        toast.error(
+          error.code === error.PERMISSION_DENIED
+            ? 'Location permission was not granted. Type a city into the Near filter instead.'
+            : 'Could not determine your location. Type a city into the Near filter instead.',
+        );
       },
       {
         enableHighAccuracy: false,
@@ -794,7 +798,7 @@ export function JobsPage() {
                 <span className="text-xs text-muted-foreground">{nearMeStatus}</span>
               )}
               <span className="text-sm text-muted-foreground ml-auto">
-                {savedJobs.length} jobs{newJobCount > 0 && (
+                {savedJobs.length} {savedJobs.length === 1 ? 'job' : 'jobs'}{newJobCount > 0 && (
                   <span className="text-blue-600 dark:text-blue-400 font-medium"> ({newJobCount} new)</span>
                 )}
               </span>

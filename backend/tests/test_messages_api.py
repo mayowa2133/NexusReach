@@ -241,8 +241,12 @@ async def test_edit_message(client, mock_user_id):
     """PUT /api/messages/{id} edits a draft."""
     msg = _mock_message(mock_user_id, status="edited")
 
-    with patch("app.routers.messages.update_message", new_callable=AsyncMock) as mock_update:
+    with (
+        patch("app.routers.messages.update_message", new_callable=AsyncMock) as mock_update,
+        patch("app.routers.messages._people_for_messages", new_callable=AsyncMock) as mock_people,
+    ):
         mock_update.return_value = msg
+        mock_people.return_value = {}
         resp = await client.put(
             f"/api/messages/{uuid.uuid4()}",
             json={"body": "Updated body"},
@@ -268,8 +272,12 @@ async def test_copy_message(client, mock_user_id):
     """POST /api/messages/{id}/copy marks as copied."""
     msg = _mock_message(mock_user_id, status="copied")
 
-    with patch("app.routers.messages.mark_copied", new_callable=AsyncMock) as mock_copy:
+    with (
+        patch("app.routers.messages.mark_copied", new_callable=AsyncMock) as mock_copy,
+        patch("app.routers.messages._people_for_messages", new_callable=AsyncMock) as mock_people,
+    ):
         mock_copy.return_value = msg
+        mock_people.return_value = {}
         resp = await client.post(f"/api/messages/{uuid.uuid4()}/copy")
 
     assert resp.status_code == 200
@@ -280,8 +288,12 @@ async def test_list_messages(client, mock_user_id):
     """GET /api/messages lists all messages."""
     msg = _mock_message(mock_user_id)
 
-    with patch("app.routers.messages.get_messages", new_callable=AsyncMock) as mock_get:
+    with (
+        patch("app.routers.messages.get_messages", new_callable=AsyncMock) as mock_get,
+        patch("app.routers.messages._people_for_messages", new_callable=AsyncMock) as mock_people,
+    ):
         mock_get.return_value = ([msg], 1)
+        mock_people.return_value = {}
         resp = await client.get("/api/messages")
 
     assert resp.status_code == 200
@@ -290,12 +302,39 @@ async def test_list_messages(client, mock_user_id):
     assert data["total"] == 1
 
 
+async def test_list_messages_resolves_person_names(client, mock_user_id):
+    """GET /api/messages fills person_name/person_title from saved contacts.
+
+    Regression: the list endpoint used to serialize without the person lookup,
+    so every Message History card rendered "Unknown".
+    """
+    person = _mock_person(full_name="Avery Chen", title="Senior Technical Recruiter")
+    msg = _mock_message(mock_user_id, person_id=person.id)
+
+    with (
+        patch("app.routers.messages.get_messages", new_callable=AsyncMock) as mock_get,
+        patch("app.routers.messages._people_for_messages", new_callable=AsyncMock) as mock_people,
+    ):
+        mock_get.return_value = ([msg], 1)
+        mock_people.return_value = {person.id: person}
+        resp = await client.get("/api/messages")
+
+    assert resp.status_code == 200
+    item = resp.json()["items"][0]
+    assert item["person_name"] == "Avery Chen"
+    assert item["person_title"] == "Senior Technical Recruiter"
+
+
 async def test_get_single_message(client, mock_user_id):
     """GET /api/messages/{id} returns a single message."""
     msg = _mock_message(mock_user_id)
 
-    with patch("app.routers.messages.get_message", new_callable=AsyncMock) as mock_get:
+    with (
+        patch("app.routers.messages.get_message", new_callable=AsyncMock) as mock_get,
+        patch("app.routers.messages._people_for_messages", new_callable=AsyncMock) as mock_people,
+    ):
         mock_get.return_value = msg
+        mock_people.return_value = {}
         resp = await client.get(f"/api/messages/{uuid.uuid4()}")
 
     assert resp.status_code == 200

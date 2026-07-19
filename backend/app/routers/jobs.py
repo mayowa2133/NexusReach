@@ -259,6 +259,26 @@ def _to_response(
     )
 
 
+async def _hydrate_deferred_job_columns(db: AsyncSession, jobs: list) -> None:
+    """Reload search results so every column is present before serialization.
+
+    Results that dedup-matched an existing row come from the deferred dedup
+    prefetch (``storage._DEDUP_DEFER_OPTIONS``) — columns like
+    ``interview_rounds`` stay unloaded, and reading one on the async session
+    would lazy-load and raise ``MissingGreenlet`` mid-response.
+    ``populate_existing`` refreshes the identity-mapped instances in place, so
+    callers keep serializing the same list in the same order.
+    """
+    ids = [job.id for job in jobs if getattr(job, "id", None) is not None]
+    for start in range(0, len(ids), 500):
+        stmt = (
+            select(Job)
+            .where(Job.id.in_(ids[start : start + 500]))
+            .execution_options(populate_existing=True)
+        )
+        await db.execute(stmt)
+
+
 @router.post("/search", response_model=list[JobResponse])
 @limiter.limit("10/minute")
 async def search(
@@ -276,6 +296,7 @@ async def search(
         remote_only=body.remote_only,
         sources=body.sources,
     )
+    await _hydrate_deferred_job_columns(db, jobs)
     return [_to_response(j) for j in jobs]
 
 
@@ -309,6 +330,7 @@ async def search_ats(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await _hydrate_deferred_job_columns(db, jobs)
     return [_to_response(j) for j in jobs]
 
 

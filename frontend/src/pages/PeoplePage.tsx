@@ -1181,7 +1181,7 @@ function PersonCard({
             {CONTACT_FEEDBACK_REASONS.map((reason) => (
               <DropdownMenuItem
                 key={reason.value}
-                onSelect={async () => {
+                onClick={async () => {
                   try {
                     trackPersonAction('feedback', { feedback: reason.value });
                     await sendFeedback.mutateAsync({
