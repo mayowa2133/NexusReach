@@ -26,7 +26,7 @@ Vercel frontend
       -> Railway Celery worker
       -> Railway Celery beat
       -> SearXNG
-      -> external providers: Apollo, Proxycurl, Hunter, Tavily, Serper, Brave, LLMs, Gmail, Microsoft Graph
+      -> external providers: Apollo, Hunter, Tavily, Serper, Brave, LLMs, Gmail, Microsoft Graph
 ```
 
 Only one Celery beat instance should be active in production. Beat schedules job
@@ -217,7 +217,6 @@ NEXUSREACH_GROQ_API_KEY=<optional-key>
 
 NEXUSREACH_APOLLO_API_KEY=<key>
 NEXUSREACH_APOLLO_MASTER_API_KEY=<optional-key>
-NEXUSREACH_PROXYCURL_API_KEY=<key>
 NEXUSREACH_HUNTER_API_KEY=<key>
 NEXUSREACH_HUNTER_PATTERN_MONTHLY_BUDGET=25
 NEXUSREACH_GITHUB_TOKEN=<key>
@@ -226,16 +225,23 @@ NEXUSREACH_ADZUNA_APP_ID=<key>
 NEXUSREACH_ADZUNA_API_KEY=<key>
 NEXUSREACH_DICE_API_KEY=<rotated-key>   # optional; old committed key must be rotated
 
-NEXUSREACH_SEARXNG_BASE_URL=http://nexusreach-searxng.railway.internal:8080  # see SearXNG section
+NEXUSREACH_GOOGLE_CSE_ID=<google-cse-id>                     # best LinkedIn x-ray recall; leads the LinkedIn orders
 NEXUSREACH_SERPER_API_KEY=<optional-key>
 NEXUSREACH_BRAVE_API_KEY=<optional-key>
 NEXUSREACH_TAVILY_API_KEY=<key>
+NEXUSREACH_YOUCOM_API_KEY=<optional-key>                     # off until set; datacenter-safe LinkedIn x-ray fallback
+NEXUSREACH_EXA_API_KEY=<optional-key>                        # off until set; neural people-search fallback
 NEXUSREACH_SEARCH_CACHE_TTL_SECONDS=86400
-NEXUSREACH_SEARCH_LINKEDIN_PROVIDER_ORDER=searxng,serper,brave,google_cse
-NEXUSREACH_SEARCH_EXACT_LINKEDIN_PROVIDER_ORDER=searxng,brave,serper,google_cse
-NEXUSREACH_SEARCH_HIRING_TEAM_PROVIDER_ORDER=searxng,serper,brave
-NEXUSREACH_SEARCH_PUBLIC_PROVIDER_ORDER=searxng,serper,brave,tavily
-NEXUSREACH_SEARCH_EMPLOYMENT_PROVIDER_ORDER=tavily,searxng,serper,brave
+# Authenticated SERP APIs are primary. SearXNG is NOT a production provider —
+# on a datacenter IP its engines get CAPTCHA'd/blocked and return 0 results, so
+# it is absent from every order below. (It remains a local-dev-only option on a
+# residential IP; see the SearXNG section.) Google-backed sources have the best
+# `site:linkedin.com/in` recall, so the LinkedIn orders lead with Google CSE.
+NEXUSREACH_SEARCH_LINKEDIN_PROVIDER_ORDER=google_cse,serper,brave,youcom,exa
+NEXUSREACH_SEARCH_EXACT_LINKEDIN_PROVIDER_ORDER=google_cse,serper,brave,youcom
+NEXUSREACH_SEARCH_HIRING_TEAM_PROVIDER_ORDER=serper,brave
+NEXUSREACH_SEARCH_PUBLIC_PROVIDER_ORDER=brave,serper,tavily
+NEXUSREACH_SEARCH_EMPLOYMENT_PROVIDER_ORDER=tavily,brave,serper
 
 NEXUSREACH_GOOGLE_CLIENT_ID=<gmail-oauth-client-id>
 NEXUSREACH_GOOGLE_CLIENT_SECRET=<gmail-oauth-client-secret>
@@ -411,7 +417,7 @@ Configure alerts before opening public access:
 - Vercel: build failures, production deployment failures, elevated frontend errors.
 - Sentry: new issue spikes, unhandled backend exceptions, frontend error spikes, release regressions.
 - PostHog: pageview/event ingestion, onboarding completion drop-off, export/delete event volume.
-- External providers: quota exhaustion for Hunter, Proxycurl, Apollo, Tavily, Serper, Brave, LLM provider.
+- External providers: quota exhaustion for Hunter, Apollo, Tavily, Serper, Brave, LLM provider.
 - Uptime monitor: public frontend URL and API `/api/health`.
 
 Until a first-party alerting integration is added to the codebase, use platform
