@@ -1,4 +1,5 @@
 import uuid
+from urllib.parse import urlparse
 
 from cryptography.fernet import Fernet
 from pydantic import model_validator
@@ -129,6 +130,11 @@ class Settings(BaseSettings):
 
     # App
     environment: str = "development"
+    # Fail-closed synthetic environment used by local browser-product testing.
+    # Demo mode is intentionally stricter than ordinary development: it only
+    # starts against loopback e2e/demo databases, uses dev auth, and refuses any
+    # configured external provider or telemetry credential.
+    demo_mode: bool = False
     service_role: str = "api"  # api | worker | beat | renderer
     app_release: str = ""
     frontend_url: str = "http://localhost:5173"
@@ -209,6 +215,8 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _validate_production_config(self) -> "Settings":
         """Fail fast if production is missing critical config."""
+        if self.demo_mode:
+            self._validate_demo_config()
         if self.environment != "production":
             return self
         errors: list[str] = []
@@ -274,6 +282,77 @@ class Settings(BaseSettings):
                 "Production configuration errors:\n  - " + "\n  - ".join(errors)
             )
         return self
+
+    def _validate_demo_config(self) -> None:
+        errors: list[str] = []
+        database = urlparse(self.database_url.replace("postgresql+asyncpg", "postgresql", 1))
+        redis = urlparse(self.redis_url)
+        loopback_hosts = {"localhost", "127.0.0.1", "::1"}
+        database_name = database.path.lstrip("/").lower()
+
+        if self.environment != "e2e":
+            errors.append("NEXUSREACH_ENVIRONMENT must be e2e in demo mode")
+        if self.auth_mode != "dev" or not self.dev_auth_bypass_enabled:
+            errors.append(
+                "demo mode requires NEXUSREACH_AUTH_MODE=dev and "
+                "NEXUSREACH_DEV_AUTH_BYPASS_ENABLED=true"
+            )
+        if database.hostname not in loopback_hosts:
+            errors.append("NEXUSREACH_DATABASE_URL must use a loopback host in demo mode")
+        if not database_name or not any(marker in database_name for marker in ("e2e", "demo")):
+            errors.append("the demo database name must contain e2e or demo")
+        if redis.hostname not in loopback_hosts:
+            errors.append("NEXUSREACH_REDIS_URL must use a loopback host in demo mode")
+
+        external_values = {
+            "NEXUSREACH_SUPABASE_URL": self.supabase_url,
+            "NEXUSREACH_SUPABASE_KEY": self.supabase_key,
+            "NEXUSREACH_SUPABASE_JWT_SECRET": self.supabase_jwt_secret,
+            "NEXUSREACH_SUPABASE_SERVICE_ROLE_KEY": self.supabase_service_role_key,
+            "NEXUSREACH_APOLLO_API_KEY": self.apollo_api_key,
+            "NEXUSREACH_APOLLO_MASTER_API_KEY": self.apollo_master_api_key,
+            "NEXUSREACH_HUNTER_API_KEY": self.hunter_api_key,
+            "NEXUSREACH_GITHUB_TOKEN": self.github_token,
+            "NEXUSREACH_JSEARCH_API_KEY": self.jsearch_api_key,
+            "NEXUSREACH_ADZUNA_APP_ID": self.adzuna_app_id,
+            "NEXUSREACH_ADZUNA_API_KEY": self.adzuna_api_key,
+            "NEXUSREACH_DICE_API_KEY": self.dice_api_key,
+            "NEXUSREACH_USAJOBS_API_KEY": self.usajobs_api_key,
+            "NEXUSREACH_THEMUSE_API_KEY": self.themuse_api_key,
+            "NEXUSREACH_ANTHROPIC_API_KEY": self.anthropic_api_key,
+            "NEXUSREACH_OPENAI_API_KEY": self.openai_api_key,
+            "NEXUSREACH_GOOGLE_API_KEY": self.google_api_key,
+            "NEXUSREACH_GROQ_API_KEY": self.groq_api_key,
+            "NEXUSREACH_BRAVE_API_KEY": self.brave_api_key,
+            "NEXUSREACH_SERPER_API_KEY": self.serper_api_key,
+            "NEXUSREACH_TAVILY_API_KEY": self.tavily_api_key,
+            "NEXUSREACH_YOUCOM_API_KEY": self.youcom_api_key,
+            "NEXUSREACH_EXA_API_KEY": self.exa_api_key,
+            "NEXUSREACH_FIRECRAWL_BASE_URL": self.firecrawl_base_url,
+            "NEXUSREACH_FIRECRAWL_API_KEY": self.firecrawl_api_key,
+            "NEXUSREACH_JINA_READER_API_KEY": self.jina_reader_api_key,
+            "NEXUSREACH_SCRAPEGRAPH_API_KEY": self.scrapegraph_api_key,
+            "NEXUSREACH_GOOGLE_CLIENT_ID": self.google_client_id,
+            "NEXUSREACH_GOOGLE_CLIENT_SECRET": self.google_client_secret,
+            "NEXUSREACH_MICROSOFT_CLIENT_ID": self.microsoft_client_id,
+            "NEXUSREACH_MICROSOFT_CLIENT_SECRET": self.microsoft_client_secret,
+            "NEXUSREACH_SENTRY_DSN": self.sentry_dsn,
+            "NEXUSREACH_POSTHOG_API_KEY": self.posthog_api_key,
+        }
+        for name, value in external_values.items():
+            if value:
+                errors.append(f"{name} must be empty in demo mode")
+        if self.rendered_page_fetch_enabled or self.render_remote_enabled:
+            errors.append("remote/rendered page fetching must be disabled in demo mode")
+        if self.jina_reader_enabled:
+            errors.append("NEXUSREACH_JINA_READER_ENABLED must be false in demo mode")
+        if self.employment_verify_enabled:
+            errors.append("NEXUSREACH_EMPLOYMENT_VERIFY_ENABLED must be false in demo mode")
+        if self.theorg_traversal_enabled:
+            errors.append("NEXUSREACH_THEORG_TRAVERSAL_ENABLED must be false in demo mode")
+
+        if errors:
+            raise ValueError("Demo configuration errors:\n  - " + "\n  - ".join(errors))
 
 
 settings = Settings()

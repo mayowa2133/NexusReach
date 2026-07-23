@@ -4,6 +4,9 @@ import './lib/observability'
 import { Sentry } from './lib/observability'
 import './index.css'
 import App from './App.tsx'
+import { installDemoNavigationGuard } from './lib/demoMode'
+
+installDemoNavigationGuard()
 
 createRoot(document.getElementById('root')!, {
   onUncaughtError: Sentry.reactErrorHandler(),
