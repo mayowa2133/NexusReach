@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { WaitlistModal } from '@/components/WaitlistModal';
 import { BrandMark } from '@/components/BrandLogo';
 import './landing.css';
@@ -35,6 +35,29 @@ export function LandingPage() {
   const [waitlistOpen, setWaitlistOpen] = useState(false);
   const [waitlistSource, setWaitlistSource] = useState('landing');
   const rootRef = useRef<HTMLDivElement>(null);
+  const [searchParams] = useSearchParams();
+  const refFromUrl = searchParams.get('ref');
+
+  // Referral code from ?ref= (falling back to a previously-stored one), read
+  // once at mount so it can be threaded into the signup payload.
+  const [referredByCode] = useState<string | null>(() => {
+    if (refFromUrl) return refFromUrl;
+    try {
+      return localStorage.getItem('nr_ref');
+    } catch {
+      return null;
+    }
+  });
+
+  // Persist a fresh ?ref= so it survives navigation before the form is submitted.
+  useEffect(() => {
+    if (!refFromUrl) return;
+    try {
+      localStorage.setItem('nr_ref', refFromUrl);
+    } catch {
+      /* private-mode storage failure is non-fatal */
+    }
+  }, [refFromUrl]);
 
   const openWaitlist = useCallback((source: string) => {
     setWaitlistSource(source);
@@ -935,7 +958,13 @@ export function LandingPage() {
         </div>
       </footer>
 
-      {waitlistOpen && <WaitlistModal onClose={closeWaitlist} source={waitlistSource} />}
+      {waitlistOpen && (
+        <WaitlistModal
+          onClose={closeWaitlist}
+          source={waitlistSource}
+          referredByCode={referredByCode}
+        />
+      )}
     </div>
   );
 }

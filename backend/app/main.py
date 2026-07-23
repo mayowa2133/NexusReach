@@ -42,6 +42,7 @@ from app.routers import (
     occupations,
     account,
     waitlist,
+    referrals,
     companion,
 )
 
@@ -124,6 +125,7 @@ app.include_router(triage.router, prefix="/api")
 app.include_router(occupations.router, prefix="/api")
 app.include_router(account.router, prefix="/api")
 app.include_router(waitlist.router, prefix="/api")
+app.include_router(referrals.router, prefix="/api")
 app.include_router(companion.router, prefix="/api")
 
 

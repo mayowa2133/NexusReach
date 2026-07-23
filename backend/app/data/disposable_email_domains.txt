@@ -1,0 +1,75 @@
+# Curated disposable / throwaway email domains blocked from the referral
+# waitlist (anti-fraud — see app/services/referral_service.py). This is a
+# "good-enough" subset of the most common providers, not the exhaustive
+# open-source list; unknown throwaway domains are additionally caught by the
+# double-opt-in email verification gate. One lowercase domain per line; blank
+# lines and lines starting with "#" are ignored.
+0-mail.com
+10minutemail.com
+20minutemail.com
+33mail.com
+guerrillamail.com
+guerrillamail.net
+guerrillamail.org
+guerrillamailblock.com
+sharklasers.com
+grr.la
+mailinator.com
+mailinator.net
+mailinator2.com
+maildrop.cc
+mailnesia.com
+trashmail.com
+trashmail.net
+trashmail.me
+trash-mail.com
+temp-mail.org
+temp-mail.io
+tempmail.com
+tempmailo.com
+tempr.email
+tempmail.net
+tempmailaddress.com
+tmpmail.org
+tmpmail.net
+throwawaymail.com
+getnada.com
+nada.email
+dispostable.com
+fakeinbox.com
+fakemailgenerator.com
+yopmail.com
+yopmail.net
+yopmail.fr
+cool.fr.nf
+jetable.org
+mytemp.email
+mohmal.com
+emailondeck.com
+mailcatch.com
+spamgourmet.com
+spam4.me
+mailtemp.net
+mailexpire.com
+tempinbox.com
+burnermail.io
+33mail.net
+inboxbear.com
+harakirimail.com
+mvrht.net
+discard.email
+discardmail.com
+mailnull.com
+spambog.com
+spambog.de
+spambog.ru
+mail-temporaire.fr
+minuteinbox.com
+1secmail.com
+1secmail.net
+1secmail.org
+easytrashmail.com
+throwawaymail.net
+mailhole.de
+tempail.com
+mailsac.com
