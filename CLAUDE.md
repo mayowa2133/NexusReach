@@ -1,8 +1,13 @@
 # NexusReach — Claude Context
 
-Last updated: 2026-07-01
+Last updated: 2026-07-23
 
 This file mirrors `AGENTS.md` so Claude and Codex see the same project state. If these files ever drift, update both together.
+
+## Branch layout
+
+- **`main`** — canonical branch; the shipped product. Includes the keyless Jina Reader page-fetch fallback (`backend/app/clients/jina_reader_client.py`, wired into `public_page_client.fetch_page`, LinkedIn-guarded, on by default). Its real-world value is being measured — see the `REVIEW 2026-08-06` note in `public_page_client._log_retrieval_outcome`.
+- **`demo-mode`** (`origin/demo-mode`) — **in-progress, NOT merged.** A fail-closed synthetic "demo mode" for local browser-product testing: it only starts against loopback e2e/demo databases, forces dev auth, and refuses every external provider/telemetry credential. Lives entirely on this branch — `main` does NOT contain it. Files: `backend/app/middleware/demo_mode.py`, `demo_mode` + `_validate_demo_config` in `backend/app/config.py`, `backend/scripts/demo_reset.py`, `scripts/demo_*.sh`, `e2e/playwright.demo.config.ts` + `e2e/tests-demo/`, `frontend/src/lib/demoMode.ts` (+ test), plus edits to `main.py`, `routers/profile.py`, `jobs/command_center.py`, `AppLayout.tsx`, `main.tsx`, `README.md`, and the `.env` examples. It was branched off `main` after Jina landed, so it depends on `main`'s `jina_reader_enabled` config — keep it rebased on `main`. To work on demo mode: `git checkout demo-mode`.
 
 ## What this product is
 
