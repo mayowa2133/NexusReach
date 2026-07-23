@@ -190,5 +190,6 @@ for module_name in (
     "app.tasks.outreach_reconcile",
     "app.tasks.reverify",
     "app.tasks.render",
+    "app.tasks.referrals",
 ):
     import_module(module_name)

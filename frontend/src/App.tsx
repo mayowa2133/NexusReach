@@ -27,6 +27,7 @@ const TriagePage = lazy(() => import('@/pages/TriagePage').then((m) => ({ defaul
 const PrivacyPage = lazy(() => import('@/pages/PrivacyPage').then((m) => ({ default: m.PrivacyPage })));
 const TermsPage = lazy(() => import('@/pages/TermsPage').then((m) => ({ default: m.TermsPage })));
 const LandingPage = lazy(() => import('@/pages/LandingPage').then((m) => ({ default: m.LandingPage })));
+const ReferralDashboardPage = lazy(() => import('@/pages/ReferralDashboardPage').then((m) => ({ default: m.ReferralDashboardPage })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -76,6 +77,7 @@ function AppRoutes() {
       <Route path="/signup" element={<SignupPage />} />
       <Route path="/privacy" element={<PageSuspense><PrivacyPage /></PageSuspense>} />
       <Route path="/terms" element={<PageSuspense><TermsPage /></PageSuspense>} />
+      <Route path="/r/:code" element={<PageSuspense><ReferralDashboardPage /></PageSuspense>} />
 
       <Route
         element={

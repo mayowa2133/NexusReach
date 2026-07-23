@@ -11,8 +11,18 @@ class WaitlistSignupCreate(BaseModel):
     target_role: str | None = Field(default=None, max_length=300)
     note: str | None = Field(default=None, max_length=2000)
     source: str | None = Field(default=None, max_length=100)
+    # Public referral code of whoever invited this person (from the ?ref= link).
+    referred_by_code: str | None = Field(default=None, max_length=16)
 
-    @field_validator("name", "linkedin_url", "current_title", "target_role", "note", "source")
+    @field_validator(
+        "name",
+        "linkedin_url",
+        "current_title",
+        "target_role",
+        "note",
+        "source",
+        "referred_by_code",
+    )
     @classmethod
     def _strip(cls, v: str | None) -> str | None:
         if v is None:
@@ -21,11 +31,32 @@ class WaitlistSignupCreate(BaseModel):
         return v or None
 
 
-class WaitlistSignupResponse(BaseModel):
-    """Confirmation returned to the browser. Deliberately minimal."""
+class ReferralStatus(BaseModel):
+    """The referral state shown on the post-signup panel and the dashboard."""
+
+    referral_code: str
+    position: int
+    total_verified: int
+    launch_target: int
+    share_url: str
+    email_verified: bool
+    verified_referral_count: int
+    earned_tier: int
+    tier_thresholds: list[int]
+    name: str | None = None
+
+
+class WaitlistSignupResponse(ReferralStatus):
+    """Confirmation returned to the browser on join.
+
+    Extends :class:`ReferralStatus` with the one-time secret ``access_token``
+    (the browser stores it to reach the dashboard / verification link) and the
+    idempotency flag.
+    """
 
     ok: bool = True
     already_on_list: bool = False
+    access_token: str
 
 
 class WaitlistEntry(BaseModel):
@@ -41,6 +72,12 @@ class WaitlistEntry(BaseModel):
     source: str | None
     invited: bool
     created_at: str
+    # Referral fields — so rewards can be honored manually at launch.
+    referral_code: str
+    referred_by_id: str | None
+    email_verified: bool
+    verified_referral_count: int
+    earned_tier: int
 
     model_config = {"from_attributes": True}
 

@@ -10,7 +10,7 @@ This project is committed to this production stack for the mid-June launch:
 - Celery beat: Railway, project root `backend`, config `backend/railway.beat.toml`
 - Database and auth: Supabase hosted Postgres and Supabase Auth
 - Redis: Railway Redis, shared by Celery broker/result backend and search cache
-- Search metasearch: SearXNG on Railway or a private reachable host
+- Search: authenticated SERP APIs (Google CSE, Serper, Brave, Tavily). SearXNG is **local-dev only**, not a production service (datacenter IPs are blocked — see the SearXNG section)
 
 The backend production image is built from `backend/Dockerfile`. It installs
 `pdflatex` through TeX Live so resume PDF generation does not depend on an
@@ -25,8 +25,7 @@ Vercel frontend
       -> Railway Redis
       -> Railway Celery worker
       -> Railway Celery beat
-      -> SearXNG
-      -> external providers: Apollo, Proxycurl, Hunter, Tavily, Serper, Brave, LLMs, Gmail, Microsoft Graph
+      -> external providers: Apollo, Hunter, Tavily, Serper, Brave, Google CSE, LLMs, Gmail, Microsoft Graph
 ```
 
 Only one Celery beat instance should be active in production. Beat schedules job
@@ -128,7 +127,14 @@ Use the async SQLAlchemy URL form in Railway:
 NEXUSREACH_DATABASE_URL=postgresql+asyncpg://...
 ```
 
-### SearXNG
+### SearXNG (local dev only)
+
+> **Local development only — not part of the production deploy.** SearXNG is a
+> datacenter non-provider: its scraping engines are CAPTCHA'd/blocked on cloud
+> IPs and it returns 0 results (see the warning below), so production relies on
+> the authenticated search APIs and sets the provider orders without `searxng`.
+> This section applies **only** to running SearXNG on a residential IP / behind a
+> rotating proxy in local dev. Skip it entirely for a production deploy.
 
 SearXNG is a free metasearch engine the backend can use as a search provider. It
 is **not** bundled in the app — it runs as its own service reached over HTTP.
@@ -217,7 +223,6 @@ NEXUSREACH_GROQ_API_KEY=<optional-key>
 
 NEXUSREACH_APOLLO_API_KEY=<key>
 NEXUSREACH_APOLLO_MASTER_API_KEY=<optional-key>
-NEXUSREACH_PROXYCURL_API_KEY=<key>
 NEXUSREACH_HUNTER_API_KEY=<key>
 NEXUSREACH_HUNTER_PATTERN_MONTHLY_BUDGET=25
 NEXUSREACH_GITHUB_TOKEN=<key>
@@ -226,16 +231,23 @@ NEXUSREACH_ADZUNA_APP_ID=<key>
 NEXUSREACH_ADZUNA_API_KEY=<key>
 NEXUSREACH_DICE_API_KEY=<rotated-key>   # optional; old committed key must be rotated
 
-NEXUSREACH_SEARXNG_BASE_URL=http://nexusreach-searxng.railway.internal:8080  # see SearXNG section
+NEXUSREACH_GOOGLE_CSE_ID=<google-cse-id>                     # best LinkedIn x-ray recall; leads the LinkedIn orders
 NEXUSREACH_SERPER_API_KEY=<optional-key>
 NEXUSREACH_BRAVE_API_KEY=<optional-key>
 NEXUSREACH_TAVILY_API_KEY=<key>
+NEXUSREACH_YOUCOM_API_KEY=<optional-key>                     # off until set; datacenter-safe LinkedIn x-ray fallback
+NEXUSREACH_EXA_API_KEY=<optional-key>                        # off until set; neural people-search fallback
 NEXUSREACH_SEARCH_CACHE_TTL_SECONDS=86400
-NEXUSREACH_SEARCH_LINKEDIN_PROVIDER_ORDER=searxng,serper,brave,google_cse
-NEXUSREACH_SEARCH_EXACT_LINKEDIN_PROVIDER_ORDER=searxng,brave,serper,google_cse
-NEXUSREACH_SEARCH_HIRING_TEAM_PROVIDER_ORDER=searxng,serper,brave
-NEXUSREACH_SEARCH_PUBLIC_PROVIDER_ORDER=searxng,serper,brave,tavily
-NEXUSREACH_SEARCH_EMPLOYMENT_PROVIDER_ORDER=tavily,searxng,serper,brave
+# Authenticated SERP APIs are primary. SearXNG is NOT a production provider —
+# on a datacenter IP its engines get CAPTCHA'd/blocked and return 0 results, so
+# it is absent from every order below. (It remains a local-dev-only option on a
+# residential IP; see the SearXNG section.) Google-backed sources have the best
+# `site:linkedin.com/in` recall, so the LinkedIn orders lead with Google CSE.
+NEXUSREACH_SEARCH_LINKEDIN_PROVIDER_ORDER=google_cse,serper,brave,youcom,exa
+NEXUSREACH_SEARCH_EXACT_LINKEDIN_PROVIDER_ORDER=google_cse,serper,brave,youcom
+NEXUSREACH_SEARCH_HIRING_TEAM_PROVIDER_ORDER=serper,brave
+NEXUSREACH_SEARCH_PUBLIC_PROVIDER_ORDER=brave,serper,tavily
+NEXUSREACH_SEARCH_EMPLOYMENT_PROVIDER_ORDER=tavily,brave,serper
 
 NEXUSREACH_GOOGLE_CLIENT_ID=<gmail-oauth-client-id>
 NEXUSREACH_GOOGLE_CLIENT_SECRET=<gmail-oauth-client-secret>
@@ -256,6 +268,16 @@ NEXUSREACH_EMPLOYMENT_VERIFY_TOP_N=10
 NEXUSREACH_EMPLOYMENT_VERIFY_TIMEOUT_SECONDS=20
 NEXUSREACH_LINKEDIN_GRAPH_SYNC_SESSION_TTL_SECONDS=900
 NEXUSREACH_LINKEDIN_GRAPH_MAX_IMPORT_BATCH_SIZE=250
+
+# Pre-launch waitlist + referral loop (all optional / fail-soft — see note below)
+NEXUSREACH_WAITLIST_ADMIN_TOKEN=<random-secret>              # gates GET /api/waitlist export; unset => 404
+NEXUSREACH_RESEND_API_KEY=<resend-api-key>                   # sends the double-opt-in verification email
+NEXUSREACH_RESEND_FROM_EMAIL=Solomon <hello@<domain>>        # verified Resend sender (SPF/DKIM on <domain>)
+NEXUSREACH_REFERRAL_PUBLIC_BASE_URL=https://<vercel-production-domain>  # base for referral/verify links; falls back to FRONTEND_URL
+NEXUSREACH_REFERRAL_LAUNCH_TARGET=3000
+NEXUSREACH_REFERRAL_TIER_THRESHOLDS=1,3,5,10
+NEXUSREACH_REFERRAL_SIGNUP_IP_DAILY_LIMIT=50
+NEXUSREACH_WAITLIST_SHEET_MIRROR_URL=                        # optional Apps Script /exec URL; mirrors signups to the Google Sheet
 ```
 
 Generate the token encryption key with:
@@ -270,6 +292,20 @@ has been rotated or disconnected.
 
 The Supabase service role key is required for account deletion. Keep it only in
 Railway backend services; never expose it to Vercel or the browser.
+
+The referral waitlist email + Sheet mirror are fail-soft, so the waitlist itself
+keeps working while these are unset: with `NEXUSREACH_RESEND_API_KEY` /
+`NEXUSREACH_RESEND_FROM_EMAIL` unset the verification link is logged (worker)
+instead of emailed, and with `NEXUSREACH_WAITLIST_SHEET_MIRROR_URL` unset signups
+simply aren't mirrored to the Google Sheet. Resend needs the sending domain
+verified (SPF/DKIM) before real emails deliver. Set
+`NEXUSREACH_REFERRAL_PUBLIC_BASE_URL` to the production frontend origin so `?ref=`
+share links and `/r/:code` verify links resolve; it falls back to
+`NEXUSREACH_FRONTEND_URL` when unset. The Sheet mirror URL is the same Apps Script
+`/exec` URL used by the frontend `VITE_WAITLIST_ENDPOINT` offline fallback — the
+two never double-write (backend up => mirror; backend unreachable => frontend
+fallback). Referrals require the backend sink, so signups now land in Postgres,
+not the Sheet, in normal operation.
 
 ## OAuth Redirects
 
@@ -345,6 +381,7 @@ Run this after every production deployment:
 - Draft staging creates a provider draft.
 - Optional auto-send can be enabled, schedules a delayed send, and can be cancelled before it sends.
 - Privacy Policy and Terms pages load publicly from Vercel.
+- Waitlist signup (`POST /api/waitlist`) returns a `referral_code` + `position`, the landing page shows the referral panel, and the verification link (`/r/:code?t=...&verify=1`) confirms the email and credits the referrer. If Resend is configured, the verification email arrives; if the Sheet mirror is configured, the signup appears in the Google Sheet.
 - Account export downloads JSON with OAuth tokens and stored API keys redacted.
 - Account deletion works for a disposable production test account and removes the Supabase auth identity.
 - Celery worker logs show task execution.
@@ -386,7 +423,7 @@ Configure alerts before opening public access:
 - Vercel: build failures, production deployment failures, elevated frontend errors.
 - Sentry: new issue spikes, unhandled backend exceptions, frontend error spikes, release regressions.
 - PostHog: pageview/event ingestion, onboarding completion drop-off, export/delete event volume.
-- External providers: quota exhaustion for Hunter, Proxycurl, Apollo, Tavily, Serper, Brave, LLM provider.
+- External providers: quota exhaustion for Hunter, Apollo, Tavily, Serper, Brave, LLM provider.
 - Uptime monitor: public frontend URL and API `/api/health`.
 
 Until a first-party alerting integration is added to the codebase, use platform
@@ -437,7 +474,7 @@ Provider rollback:
 
 Launch is blocked until all of these are true:
 
-- Production services exist for web, worker, beat, Redis, SearXNG, Supabase, and Vercel.
+- Production services exist for web, worker, beat, Redis, Supabase, and Vercel.
 - `scripts/production-smoke.sh` passes locally.
 - Cloud smoke passes against the production Railway API.
 - A production resume PDF can be generated.

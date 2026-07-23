@@ -30,7 +30,10 @@ jobs:
         run: |
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
-          pip install ruff
+          # Pin ruff: an unpinned `pip install ruff` auto-upgrades to the latest
+          # release, which periodically enables new default rules and flags the
+          # whole repo, breaking CI on unrelated PRs. Bump this deliberately.
+          pip install ruff==0.15.6
 
       - name: Lint with ruff
         run: ruff check app tests conftest.py

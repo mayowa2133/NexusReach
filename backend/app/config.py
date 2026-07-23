@@ -40,6 +40,27 @@ class Settings(BaseSettings):
     # (GET /api/waitlist). Unset => export is disabled (returns 404).
     waitlist_admin_token: str = ""
 
+    # --- Referral waitlist -------------------------------------------------
+    # Transactional email (Resend) for double-opt-in verification. This is the
+    # ONLY system-email path in the backend (all other email is user-OAuth
+    # mailbox sending). Both unset => verification email is skipped and the link
+    # is logged instead (fail-soft dev mode); the waitlist still works.
+    resend_api_key: str = ""
+    resend_from_email: str = ""  # e.g. "Solomon <hello@solomon.app>"
+    # Origin used to build referral + verification links inside emails and
+    # server-rendered responses. Falls back to ``frontend_url`` when empty.
+    referral_public_base_url: str = ""
+    # Displayed launch goal ("launches at N verified members").
+    referral_launch_target: int = 3_000
+    # Verified-referral thresholds that unlock the reward ladder rungs.
+    referral_tier_thresholds: str = "1,3,5,10"
+    # Anti-fraud: max signups accepted from one IP in 24h.
+    referral_signup_ip_daily_limit: int = 50
+    # Optional server-side mirror of each signup to a Google Apps Script /exec
+    # URL, so the pre-launch Google Sheet stays populated now that the backend
+    # is the primary sink. Unset => no mirror. Best-effort; never blocks signup.
+    waitlist_sheet_mirror_url: str = ""
+
     # External APIs (populated later per phase)
     apollo_api_key: str = ""
     apollo_master_api_key: str = ""

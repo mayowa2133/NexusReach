@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, String, Text, DateTime, func
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text, DateTime, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -16,6 +16,13 @@ class WaitlistSignup(Base):
     creating migration so the anon/authenticated Supabase roles cannot read it;
     only the backend (postgres owner) and the token-gated admin export endpoint
     can access rows.
+
+    It also backs the pre-launch **referral loop**: each signup gets a public,
+    shareable ``referral_code`` (surfaced in ``?ref=`` links) and a *secret*
+    ``access_token_hash`` (the owner-only key for their referral dashboard and
+    the one-click email-verification link). A referral only *counts* once the
+    invited person verifies their email — ``verified_referral_count`` is the
+    denormalized tally of verified invitees and the sort key for queue position.
     """
 
     __tablename__ = "waitlist_signups"
@@ -39,6 +46,39 @@ class WaitlistSignup(Base):
 
     # Which CTA / page section the submission came from (analytics).
     source: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    # --- Referral loop ---------------------------------------------------
+    # PUBLIC, shareable code (appears in the referrer's ?ref= link). Minted at
+    # signup; backfilled for pre-referral rows by migration 061.
+    referral_code: Mapped[str] = mapped_column(
+        String(16), nullable=False, unique=True, index=True
+    )
+    # Who referred this signup (self-FK). NULL for organic signups.
+    referred_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("waitlist_signups.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    # Double-opt-in gate: a referral only counts once the invitee verifies.
+    email_verified: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Denormalized count of *verified* invitees; also the queue-position sort key.
+    verified_referral_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    # SECRET owner key (SHA-256 of an ``nrw_`` token, plaintext returned once).
+    # Authenticates the referral dashboard + the verification link. NULL for
+    # grandfathered pre-referral rows (they never received a link).
+    access_token_hash: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, unique=True, index=True
+    )
+    # Peer IP at signup — for per-IP anti-fraud caps only.
+    signup_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     # Whether the launch invite has been sent (owner flips this at launch).
     invited: Mapped[bool] = mapped_column(
