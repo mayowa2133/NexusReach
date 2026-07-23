@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -90,6 +91,11 @@ async def test_fetch_page_falls_back_to_crawl4ai_when_direct_fails():
             return_value=True,
         ),
         patch(
+            "app.clients.public_page_client.jina_reader_client.fetch_url",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
             "app.clients.public_page_client.firecrawl_client.scrape_url",
             new_callable=AsyncMock,
         ) as mock_firecrawl,
@@ -131,6 +137,11 @@ async def test_fetch_page_uses_firecrawl_as_optional_last_fallback():
             return_value=True,
         ),
         patch(
+            "app.clients.public_page_client.jina_reader_client.fetch_url",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
             "app.clients.public_page_client.crawl4ai_client.fetch_url",
             new_callable=AsyncMock,
             return_value=None,
@@ -153,6 +164,97 @@ async def test_fetch_page_uses_firecrawl_as_optional_last_fallback():
     assert page is not None
     assert page["retrieval_method"] == "firecrawl"
     mock_firecrawl.assert_awaited_once()
+
+
+async def test_fetch_page_uses_jina_before_rendered_stack_disabled():
+    """Jina runs even when the (egress-gated) rendered stack is off — its only
+    outbound hop is to r.jina.ai, so it carries no SSRF risk from our egress."""
+    jina_page = {
+        "url": "https://example.com/profile",
+        "title": "Example",
+        "content": "Currently serving as an Engineering Manager at Twitch since 2022. " * 3,
+        "html": "",
+        "markdown": "Currently serving as an Engineering Manager at Twitch.",
+        "retrieval_method": "jina_reader",
+    }
+    with (
+        patch.object(settings, "rendered_page_fetch_enabled", False),
+        patch.object(settings, "rendered_page_egress_policy_enforced", False),
+        patch(
+            "app.clients.public_page_client.fetch_direct_page",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "app.clients.public_page_client.is_safe_public_url_async",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch(
+            "app.clients.public_page_client.jina_reader_client.fetch_url",
+            new_callable=AsyncMock,
+            return_value=dict(jina_page),
+        ) as mock_jina,
+        patch(
+            "app.clients.public_page_client.crawl4ai_client.fetch_url",
+            new_callable=AsyncMock,
+        ) as mock_crawl4ai,
+        patch(
+            "app.clients.public_page_client.firecrawl_client.scrape_url",
+            new_callable=AsyncMock,
+        ) as mock_firecrawl,
+    ):
+        page = await public_page_client.fetch_page("https://example.com/profile")
+
+    assert page is not None
+    assert page["retrieval_method"] == "jina_reader"
+    assert page["fallback_used"] is False
+    mock_jina.assert_awaited_once()
+    # Rendered stack stays gated off; Jina alone recovered the page.
+    mock_crawl4ai.assert_not_awaited()
+    mock_firecrawl.assert_not_awaited()
+
+
+async def test_fetch_page_logs_jina_rescue_outcome(caplog):
+    """The instrumentation must emit one greppable retrieval line flagging the
+    Jina rescue, so its real hit-rate is measurable from production logs."""
+    jina_page = {
+        "url": "https://example.com/profile",
+        "title": "Example",
+        "content": "Currently serving as an Engineering Manager at Twitch since 2022. " * 3,
+        "html": "",
+        "markdown": "Currently serving as an Engineering Manager at Twitch.",
+        "retrieval_method": "jina_reader",
+    }
+    with (
+        patch.object(settings, "rendered_page_fetch_enabled", False),
+        patch.object(settings, "rendered_page_egress_policy_enforced", False),
+        patch(
+            "app.clients.public_page_client.fetch_direct_page",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "app.clients.public_page_client.is_safe_public_url_async",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch(
+            "app.clients.public_page_client.jina_reader_client.fetch_url",
+            new_callable=AsyncMock,
+            return_value=dict(jina_page),
+        ),
+    ):
+        with caplog.at_level(logging.INFO, logger="app.clients.public_page_client"):
+            page = await public_page_client.fetch_page("https://example.com/profile")
+
+    assert page is not None and page["retrieval_method"] == "jina_reader"
+    lines = [r.getMessage() for r in caplog.records if "public_page.retrieval" in r.getMessage()]
+    assert len(lines) == 1
+    assert "host=example.com" in lines[0]
+    assert "method=jina_reader" in lines[0]
+    assert "direct_sufficient=False" in lines[0]
+    assert "jina_rescued=True" in lines[0]
 
 
 async def test_fetch_page_returns_direct_result_when_fallbacks_fail():

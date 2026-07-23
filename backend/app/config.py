@@ -74,6 +74,15 @@ class Settings(BaseSettings):
     firecrawl_base_url: str = ""
     firecrawl_api_key: str = ""
     scrapegraph_api_key: str = ""
+    # Jina Reader (https://r.jina.ai) — keyless, free page-to-text fallback used
+    # when a direct fetch is blocked or JS-rendered. Jina proxies the fetch from
+    # its own infra (our only outbound connection is to r.jina.ai), so it adds no
+    # SSRF surface and needs no rendered-page egress gate — it runs even when the
+    # rendered stack is disabled. Target URLs are sent to a third party, so it is
+    # disable-able. An optional API key only raises the rate limit.
+    jina_reader_enabled: bool = True
+    jina_reader_api_key: str = ""
+    jina_reader_base_url: str = "https://r.jina.ai"
     # Optional dedicated Google CSE restricted to linkedin.com, used only for the
     # LinkedIn x-ray queries. A site-restricted CSE keeps working free after
     # Google sunsets whole-web CSE search (2027-01-01) and has the best
