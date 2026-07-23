@@ -128,7 +128,6 @@ export function LandingPage() {
             <a className="nav-link" href="#trust">Trust</a>
             <a className="nav-link" href="#faq">FAQ</a>
             <a className="nav-link" href="#contact">Contact</a>
-            <Link className="nav-link" to="/login">Log in</Link>
             <button className="btn btn-primary" onClick={() => openWaitlist('nav')}>
               Join the waitlist
             </button>
@@ -950,7 +949,6 @@ export function LandingPage() {
             <a href="#contact">Contact</a>
             <Link to="/privacy">Privacy</Link>
             <Link to="/terms">Terms</Link>
-            <Link to="/login">Log in</Link>
             <button className="lp-foot-link-btn" onClick={() => openWaitlist('footer')}>
               Join the waitlist
             </button>
