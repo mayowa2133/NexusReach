@@ -159,6 +159,44 @@ NexusReach/
 
 ## Local setup
 
+### Safe local product-capture demo
+
+Use the isolated demo launcher when testing NexusReach with Gideon or another
+browser agent. It uses a loopback-only `nexusreach_e2e` database, an ephemeral
+Redis on port 6381, development auth bypass, deterministic synthetic fixtures,
+and backend-enforced blocks for discovery/provider calls, email/OAuth,
+LinkedIn import/sync, automation settings, and account deletion.
+
+```bash
+./scripts/demo_start.sh
+```
+
+The returning-user fixture serves the app at `http://127.0.0.1:5173`. To test
+onboarding from a blank synthetic account instead:
+
+```bash
+./scripts/demo_start.sh --scenario onboarding
+```
+
+Reset a running or stopped demo database deterministically with:
+
+```bash
+./scripts/demo_reset.sh returning
+./scripts/demo_reset.sh onboarding
+```
+
+Run the real-browser safety and reset smoke test with:
+
+```bash
+cd e2e
+npm run test:demo
+```
+
+Both reset paths are guarded: demo configuration validation refuses non-loopback
+database/Redis hosts, database names without `e2e`/`demo`, production auth, or
+configured external provider and telemetry credentials. Do not use ordinary
+`backend/.env` startup for automated product capture.
+
 ### Prerequisites
 - Node.js 20+
 - Python 3.12+

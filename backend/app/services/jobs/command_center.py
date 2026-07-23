@@ -30,6 +30,7 @@ from datetime import timedelta
 import uuid
 from app.services.jobs import normalize
 from app.services.jobs import search as _search_mod
+from app.config import settings
 
 
 logger = logging.getLogger(__name__)
@@ -307,7 +308,7 @@ async def update_job_stage(
     await db.refresh(job)
 
     # Auto-draft outreach when moving to 'applied' (if enabled)
-    if stage == "applied" and old_stage != "applied":
+    if stage == "applied" and old_stage != "applied" and not settings.demo_mode:
         try:
             from app.services.settings_service import get_auto_prospect  # noqa: PLC0415
 

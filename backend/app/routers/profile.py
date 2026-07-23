@@ -319,7 +319,7 @@ async def update_profile(
         seeded = await _seed_saved_searches(db, user_id, profile)
         # First time we enroll this user into background ingestion — fill the feed
         # right away so jobs appear on their next Jobs visit without a button.
-        if seeded:
+        if seeded and not settings.demo_mode:
             from app.tasks.jobs import discover_for_user  # noqa: PLC0415
             discover_for_user.delay(str(user_id))
 
@@ -328,7 +328,7 @@ async def update_profile(
         "target_roles", "target_locations", "target_industries", "target_occupations",
         "job_preferences",
     }
-    if scoring_fields & set(update_data.keys()):
+    if scoring_fields & set(update_data.keys()) and not settings.demo_mode:
         from app.tasks.jobs import rescore_user_jobs  # noqa: PLC0415
         rescore_user_jobs.delay(str(user_id))
 

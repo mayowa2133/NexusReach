@@ -19,6 +19,7 @@ from app.middleware.error_handler import (
 )
 from app.middleware.rate_limit import limiter
 from app.middleware.request_size import RequestSizeLimitMiddleware
+from app.middleware.demo_mode import DemoModeSafetyMiddleware
 from app.routers import (
     auth,
     profile,
@@ -86,6 +87,7 @@ app.state.limiter = limiter
 # and error responses keep their CORS headers. Text JSON compresses ~10x.
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.add_middleware(RequestSizeLimitMiddleware)
+app.add_middleware(DemoModeSafetyMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),
