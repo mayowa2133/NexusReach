@@ -256,6 +256,16 @@ NEXUSREACH_EMPLOYMENT_VERIFY_TOP_N=10
 NEXUSREACH_EMPLOYMENT_VERIFY_TIMEOUT_SECONDS=20
 NEXUSREACH_LINKEDIN_GRAPH_SYNC_SESSION_TTL_SECONDS=900
 NEXUSREACH_LINKEDIN_GRAPH_MAX_IMPORT_BATCH_SIZE=250
+
+# Pre-launch waitlist + referral loop (all optional / fail-soft — see note below)
+NEXUSREACH_WAITLIST_ADMIN_TOKEN=<random-secret>              # gates GET /api/waitlist export; unset => 404
+NEXUSREACH_RESEND_API_KEY=<resend-api-key>                   # sends the double-opt-in verification email
+NEXUSREACH_RESEND_FROM_EMAIL=Solomon <hello@<domain>>        # verified Resend sender (SPF/DKIM on <domain>)
+NEXUSREACH_REFERRAL_PUBLIC_BASE_URL=https://<vercel-production-domain>  # base for referral/verify links; falls back to FRONTEND_URL
+NEXUSREACH_REFERRAL_LAUNCH_TARGET=3000
+NEXUSREACH_REFERRAL_TIER_THRESHOLDS=1,3,5,10
+NEXUSREACH_REFERRAL_SIGNUP_IP_DAILY_LIMIT=50
+NEXUSREACH_WAITLIST_SHEET_MIRROR_URL=                        # optional Apps Script /exec URL; mirrors signups to the Google Sheet
 ```
 
 Generate the token encryption key with:
@@ -270,6 +280,20 @@ has been rotated or disconnected.
 
 The Supabase service role key is required for account deletion. Keep it only in
 Railway backend services; never expose it to Vercel or the browser.
+
+The referral waitlist email + Sheet mirror are fail-soft, so the waitlist itself
+keeps working while these are unset: with `NEXUSREACH_RESEND_API_KEY` /
+`NEXUSREACH_RESEND_FROM_EMAIL` unset the verification link is logged (worker)
+instead of emailed, and with `NEXUSREACH_WAITLIST_SHEET_MIRROR_URL` unset signups
+simply aren't mirrored to the Google Sheet. Resend needs the sending domain
+verified (SPF/DKIM) before real emails deliver. Set
+`NEXUSREACH_REFERRAL_PUBLIC_BASE_URL` to the production frontend origin so `?ref=`
+share links and `/r/:code` verify links resolve; it falls back to
+`NEXUSREACH_FRONTEND_URL` when unset. The Sheet mirror URL is the same Apps Script
+`/exec` URL used by the frontend `VITE_WAITLIST_ENDPOINT` offline fallback — the
+two never double-write (backend up => mirror; backend unreachable => frontend
+fallback). Referrals require the backend sink, so signups now land in Postgres,
+not the Sheet, in normal operation.
 
 ## OAuth Redirects
 
@@ -345,6 +369,7 @@ Run this after every production deployment:
 - Draft staging creates a provider draft.
 - Optional auto-send can be enabled, schedules a delayed send, and can be cancelled before it sends.
 - Privacy Policy and Terms pages load publicly from Vercel.
+- Waitlist signup (`POST /api/waitlist`) returns a `referral_code` + `position`, the landing page shows the referral panel, and the verification link (`/r/:code?t=...&verify=1`) confirms the email and credits the referrer. If Resend is configured, the verification email arrives; if the Sheet mirror is configured, the signup appears in the Google Sheet.
 - Account export downloads JSON with OAuth tokens and stored API keys redacted.
 - Account deletion works for a disposable production test account and removes the Supabase auth identity.
 - Celery worker logs show task execution.
