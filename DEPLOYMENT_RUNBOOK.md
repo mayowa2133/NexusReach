@@ -10,7 +10,7 @@ This project is committed to this production stack for the mid-June launch:
 - Celery beat: Railway, project root `backend`, config `backend/railway.beat.toml`
 - Database and auth: Supabase hosted Postgres and Supabase Auth
 - Redis: Railway Redis, shared by Celery broker/result backend and search cache
-- Search metasearch: SearXNG on Railway or a private reachable host
+- Search: authenticated SERP APIs (Google CSE, Serper, Brave, Tavily). SearXNG is **local-dev only**, not a production service (datacenter IPs are blocked — see the SearXNG section)
 
 The backend production image is built from `backend/Dockerfile`. It installs
 `pdflatex` through TeX Live so resume PDF generation does not depend on an
@@ -25,8 +25,7 @@ Vercel frontend
       -> Railway Redis
       -> Railway Celery worker
       -> Railway Celery beat
-      -> SearXNG
-      -> external providers: Apollo, Hunter, Tavily, Serper, Brave, LLMs, Gmail, Microsoft Graph
+      -> external providers: Apollo, Hunter, Tavily, Serper, Brave, Google CSE, LLMs, Gmail, Microsoft Graph
 ```
 
 Only one Celery beat instance should be active in production. Beat schedules job
@@ -128,7 +127,14 @@ Use the async SQLAlchemy URL form in Railway:
 NEXUSREACH_DATABASE_URL=postgresql+asyncpg://...
 ```
 
-### SearXNG
+### SearXNG (local dev only)
+
+> **Local development only — not part of the production deploy.** SearXNG is a
+> datacenter non-provider: its scraping engines are CAPTCHA'd/blocked on cloud
+> IPs and it returns 0 results (see the warning below), so production relies on
+> the authenticated search APIs and sets the provider orders without `searxng`.
+> This section applies **only** to running SearXNG on a residential IP / behind a
+> rotating proxy in local dev. Skip it entirely for a production deploy.
 
 SearXNG is a free metasearch engine the backend can use as a search provider. It
 is **not** bundled in the app — it runs as its own service reached over HTTP.
@@ -468,7 +474,7 @@ Provider rollback:
 
 Launch is blocked until all of these are true:
 
-- Production services exist for web, worker, beat, Redis, SearXNG, Supabase, and Vercel.
+- Production services exist for web, worker, beat, Redis, Supabase, and Vercel.
 - `scripts/production-smoke.sh` passes locally.
 - Cloud smoke passes against the production Railway API.
 - A production resume PDF can be generated.
