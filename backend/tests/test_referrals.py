@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from app.config import settings
 from app.models.waitlist import WaitlistSignup
 from app.services import referral_service as rs
 
@@ -330,3 +331,56 @@ async def test_verify_endpoint_bad_token_404(client):
     ):
         resp = await client.get("/api/referrals/verify?code=NOPE&t=nrw_x")
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Google Sheet mirror
+# ---------------------------------------------------------------------------
+
+
+async def test_sheet_mirror_noop_when_unconfigured(monkeypatch):
+    from app.clients import sheets_mirror_client
+
+    monkeypatch.setattr(settings, "waitlist_sheet_mirror_url", "")
+    assert sheets_mirror_client.is_configured() is False
+    # No network call, just a fast False.
+    assert await sheets_mirror_client.mirror_signup({"email": "x@y.com"}) is False
+
+
+async def test_join_waitlist_mirrors_to_sheet_when_configured(client):
+    entry = _signup(name="Jordan Rivera", email_verified=False)
+    with (
+        patch(
+            "app.routers.waitlist.upsert_waitlist_signup",
+            new_callable=AsyncMock,
+            return_value=(entry, False, "nrw_secret"),
+        ),
+        patch(
+            "app.routers.waitlist.referral_service.enforce_signup_ip_limit",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "app.routers.waitlist.referral_service.referral_status_payload",
+            new_callable=AsyncMock,
+            return_value=dict(_STATUS_PAYLOAD),
+        ),
+        patch("app.routers.waitlist.send_verification_email.delay"),
+        patch(
+            "app.routers.waitlist.sheets_mirror_client.is_configured",
+            return_value=True,
+        ),
+        patch(
+            "app.routers.waitlist.sheets_mirror_client.mirror_signup",
+            new_callable=AsyncMock,
+        ) as mock_mirror,
+    ):
+        resp = await client.post(
+            "/api/waitlist",
+            json={"name": "Jordan Rivera", "email": "jordan@example.com"},
+        )
+
+    assert resp.status_code == 200
+    # Background task ran (Starlette awaits it within the ASGI response cycle).
+    mock_mirror.assert_awaited_once()
+    assert mock_mirror.await_args.args[0]["email"] == entry.email
+    assert mock_mirror.await_args.args[0]["referral_code"] == entry.referral_code

@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     referral_tier_thresholds: str = "1,3,5,10"
     # Anti-fraud: max signups accepted from one IP in 24h.
     referral_signup_ip_daily_limit: int = 50
+    # Optional server-side mirror of each signup to a Google Apps Script /exec
+    # URL, so the pre-launch Google Sheet stays populated now that the backend
+    # is the primary sink. Unset => no mirror. Best-effort; never blocks signup.
+    waitlist_sheet_mirror_url: str = ""
 
     # External APIs (populated later per phase)
     apollo_api_key: str = ""

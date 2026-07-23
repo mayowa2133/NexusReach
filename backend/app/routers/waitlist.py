@@ -12,9 +12,18 @@ import hmac
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    Header,
+    HTTPException,
+    Request,
+    status,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.clients import sheets_mirror_client
 from app.config import settings
 from app.database import get_db
 from app.middleware.rate_limit import limiter
@@ -42,6 +51,7 @@ async def join_waitlist(
     request: Request,
     payload: WaitlistSignupCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
+    background_tasks: BackgroundTasks,
 ) -> WaitlistSignupResponse:
     """Capture a landing-page waitlist submission (idempotent per email)."""
     email = str(payload.email).strip().lower()
@@ -64,6 +74,27 @@ async def join_waitlist(
             send_verification_email.delay(str(entry.id), access_token)
         except Exception:  # broker down must never break the signup
             logger.warning("Could not queue verification email", exc_info=True)
+
+    # Best-effort mirror to the Google Sheet (after the response, never blocking).
+    if sheets_mirror_client.is_configured():
+        background_tasks.add_task(
+            sheets_mirror_client.mirror_signup,
+            {
+                "name": entry.name,
+                "email": entry.email,
+                "linkedin_url": entry.linkedin_url,
+                "current_title": entry.current_title,
+                "target_role": entry.target_role,
+                "note": entry.note,
+                "source": entry.source,
+                "referral_code": entry.referral_code,
+                "referred_by_id": (
+                    str(entry.referred_by_id) if entry.referred_by_id else None
+                ),
+                "email_verified": entry.email_verified,
+                "already_on_list": already,
+            },
+        )
 
     payload_out = await referral_service.referral_status_payload(db, entry)
     return WaitlistSignupResponse(
