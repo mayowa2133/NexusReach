@@ -1,8 +1,10 @@
 import uuid
 from datetime import datetime
 
+from typing import Any
+
 from sqlalchemy import Boolean, ForeignKey, Integer, String, Text, DateTime, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -46,6 +48,37 @@ class WaitlistSignup(Base):
 
     # Which CTA / page section the submission came from (analytics).
     source: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    # --- Goals ------------------------------------------------------------
+    # Selected goal keys from the signup form's chips (see
+    # ``app.utils.waitlist_goals.WAITLIST_GOAL_KEYS``). The free-text detail
+    # reuses ``note`` above rather than adding a redundant column.
+    goals: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+
+    # --- Optional resume --------------------------------------------------
+    # The original file lives in Supabase Storage; only its object path and
+    # metadata are stored here. Parsing happens asynchronously in the Celery
+    # worker (never inline — the sandboxed parser can use 512 MiB, which would
+    # be an OOM surface on the public endpoint's web service).
+    resume_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    resume_filename: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    resume_content_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    resume_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    resume_uploaded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # none | pending | ready | failed
+    resume_parse_status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="none", server_default="none"
+    )
+    # Deferred: the extracted text can be ~1 MB, and these are never needed by
+    # the hot referral-status / admin-export reads (cf. defer(Job.description)).
+    resume_text: Mapped[str | None] = mapped_column(
+        Text, nullable=True, deferred=True
+    )
+    resume_parsed: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB, nullable=True, deferred=True
+    )
 
     # --- Referral loop ---------------------------------------------------
     # PUBLIC, shareable code (appears in the referrer's ?ref= link). Minted at

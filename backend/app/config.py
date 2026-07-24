@@ -60,6 +60,16 @@ class Settings(BaseSettings):
     # URL, so the pre-launch Google Sheet stays populated now that the backend
     # is the primary sink. Unset => no mirror. Best-effort; never blocks signup.
     waitlist_sheet_mirror_url: str = ""
+    # Private Supabase Storage bucket holding optional waitlist resume uploads.
+    # Must be created manually (see DEPLOYMENT_RUNBOOK). Uses supabase_url +
+    # supabase_service_role_key; unset key => uploads are skipped, fail-soft.
+    supabase_storage_bucket: str = "waitlist-resumes"
+    # Decoded resume cap for the PUBLIC waitlist route — deliberately smaller
+    # than the authenticated 10 MiB limit (typical resumes are well under 1 MiB).
+    max_waitlist_resume_bytes: int = 5 * 1024 * 1024  # 5 MiB
+    # Whole-request cap for POST /api/waitlist: the resume rides as base64
+    # (~33% inflation) alongside the form fields. See middleware/request_size.
+    max_waitlist_request_bytes: int = 7 * 1024 * 1024  # 7 MiB
 
     # External APIs (populated later per phase)
     apollo_api_key: str = ""

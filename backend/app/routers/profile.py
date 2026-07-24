@@ -22,6 +22,7 @@ from app.schemas.profile import (
     ResumeUploadJsonRequest,
 )
 from app.services.profile_linkedin_import import merge_linkedin_profile
+from app.utils.resume_upload import normalize_resume_content_type
 from app.utils.sandboxed_process import run_in_sandbox_async
 from app.utils.uploads import read_upload_capped
 
@@ -116,32 +117,10 @@ async def _seed_saved_searches(
     return True
 
 
-ALLOWED_CONTENT_TYPES = {
-    "application/pdf",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-}
-
-ALLOWED_EXTENSIONS = {
-    ".pdf": "application/pdf",
-    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-}
-
-
-def _normalize_resume_content_type(content_type: str | None, filename: str | None) -> str:
-    normalized = (content_type or "").strip().lower()
-    if normalized in ALLOWED_CONTENT_TYPES:
-        return normalized
-
-    lowered_name = (filename or "").lower()
-    for extension, inferred_type in ALLOWED_EXTENSIONS.items():
-        if lowered_name.endswith(extension):
-            return inferred_type
-
-    allowed = ", ".join(sorted(ALLOWED_EXTENSIONS))
-    raise HTTPException(
-        status_code=400,
-        detail=f"Unsupported file type: {content_type}. Upload a {allowed} resume.",
-    )
+# Resume upload validation lives in app/utils/resume_upload.py so the public
+# waitlist route can reuse it without importing this router. Re-exported under
+# the historical private name to keep existing call sites unchanged.
+_normalize_resume_content_type = normalize_resume_content_type
 
 
 async def _get_profile_or_404(db: AsyncSession, user_id: uuid.UUID) -> Profile:

@@ -13,6 +13,15 @@ class WaitlistSignupCreate(BaseModel):
     source: str | None = Field(default=None, max_length=100)
     # Public referral code of whoever invited this person (from the ?ref= link).
     referred_by_code: str | None = Field(default=None, max_length=16)
+    # Selected goal chips. Unknown keys are dropped server-side (see
+    # app.utils.waitlist_goals.clean_goals); the free-text detail uses `note`.
+    goals: list[str] | None = Field(default=None, max_length=20)
+    # Optional resume, carried as base64 in the JSON body — mirroring
+    # /api/profile/resume-json, which the codebase adopted because multipart was
+    # flaky in production browsers (and FastAPI can't mix File() with a body model).
+    resume_filename: str | None = Field(default=None, max_length=300)
+    resume_content_type: str | None = Field(default=None, max_length=120)
+    resume_file_base64: str | None = Field(default=None)
 
     @field_validator(
         "name",
@@ -22,6 +31,8 @@ class WaitlistSignupCreate(BaseModel):
         "note",
         "source",
         "referred_by_code",
+        "resume_filename",
+        "resume_content_type",
     )
     @classmethod
     def _strip(cls, v: str | None) -> str | None:
@@ -78,6 +89,11 @@ class WaitlistEntry(BaseModel):
     email_verified: bool
     verified_referral_count: int
     earned_tier: int
+    # Goals + resume, for segmenting the list pre-launch.
+    goals: list[str] | None
+    has_resume: bool
+    resume_filename: str | None
+    resume_parse_status: str
 
     model_config = {"from_attributes": True}
 

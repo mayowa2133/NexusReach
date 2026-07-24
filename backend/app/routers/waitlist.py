@@ -33,12 +33,13 @@ from app.schemas.waitlist import (
     WaitlistSignupCreate,
     WaitlistSignupResponse,
 )
-from app.services import referral_service
+from app.services import referral_service, waitlist_resume_service
 from app.services.waitlist_service import (
     list_waitlist_signups,
     upsert_waitlist_signup,
 )
 from app.tasks.referrals import send_verification_email
+from app.tasks.waitlist_resume import parse_waitlist_resume
 
 logger = logging.getLogger(__name__)
 
@@ -61,12 +62,29 @@ async def join_waitlist(
             detail="Please use a permanent email address.",
         )
 
+    # Validate any attached resume BEFORE creating the signup: invalid input is
+    # the visitor's to fix, so tell them rather than silently dropping the file.
+    resume = waitlist_resume_service.decode_and_validate(payload)
+
     client_ip = request.client.host if request.client else None
     await referral_service.enforce_signup_ip_limit(client_ip)
 
     entry, already, access_token = await upsert_waitlist_signup(
         db, payload, signup_ip=client_ip
     )
+
+    # Store the file (fail-soft) and queue the out-of-band parse.
+    if resume is not None:
+        resume_bytes, resume_content_type = resume
+        await waitlist_resume_service.attach_resume(
+            entry, resume_bytes, resume_content_type, payload.resume_filename
+        )
+        await db.commit()
+        if entry.resume_path:
+            try:
+                parse_waitlist_resume.delay(str(entry.id))
+            except Exception:  # broker down must never break the signup
+                logger.warning("Could not queue resume parse", exc_info=True)
 
     # Send (or, in dev, log) the verification email for anyone not yet verified.
     if not entry.email_verified:
@@ -93,6 +111,9 @@ async def join_waitlist(
                 ),
                 "email_verified": entry.email_verified,
                 "already_on_list": already,
+                "goals": ", ".join(entry.goals or []),
+                # Flag only — never the file bytes (Apps Script has a 10s timeout).
+                "has_resume": bool(entry.resume_path),
             },
         )
 
@@ -145,6 +166,10 @@ async def export_waitlist(
                 email_verified=r.email_verified,
                 verified_referral_count=r.verified_referral_count,
                 earned_tier=referral_service.earned_tier(r.verified_referral_count),
+                goals=r.goals,
+                has_resume=bool(r.resume_path),
+                resume_filename=r.resume_filename,
+                resume_parse_status=r.resume_parse_status,
             )
             for r in rows
         ],
