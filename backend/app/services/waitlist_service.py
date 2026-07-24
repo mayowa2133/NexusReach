@@ -24,6 +24,7 @@ from app.services.referral_service import (
     mint_unique_referral_code,
     resolve_referrer,
 )
+from app.utils.waitlist_goals import clean_goals
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,7 @@ async def upsert_waitlist_signup(
         existing.target_role = payload.target_role or existing.target_role
         existing.note = payload.note or existing.note
         existing.source = payload.source or existing.source
+        existing.goals = clean_goals(payload.goals) or existing.goals
         # Rotate the secret token so a returning visitor always gets a working
         # dashboard/verify link back. The PUBLIC referral_code (already shared)
         # is intentionally left unchanged so existing ?ref= links keep working.
@@ -75,6 +77,7 @@ async def upsert_waitlist_signup(
         target_role=payload.target_role,
         note=payload.note,
         source=payload.source,
+        goals=clean_goals(payload.goals),
         referral_code=await mint_unique_referral_code(db),
         referred_by_id=referrer.id if referrer is not None else None,
         access_token_hash=hash_token(raw_token),

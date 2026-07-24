@@ -127,6 +127,21 @@ Use the async SQLAlchemy URL form in Railway:
 NEXUSREACH_DATABASE_URL=postgresql+asyncpg://...
 ```
 
+**Storage bucket for waitlist resumes (required for that feature).** The waitlist
+accepts an optional resume; the file is stored in Supabase Storage and parsed
+out-of-band by the Celery worker. Create it once:
+
+1. Supabase dashboard → **Storage → New bucket**, name `waitlist-resumes`
+   (must match `NEXUSREACH_SUPABASE_STORAGE_BUCKET`).
+2. Leave it **private** — do not make it public. The backend reads/writes it with
+   the service-role key; no policies are needed, and RLS-style public access must
+   stay off since resumes are personal data.
+3. Typical sizing: a resume is ~100–500 KB, so a few thousand signups is ~1–3 GB
+   against the Pro plan's 100 GB. Uploads are ingress and don't consume egress.
+
+If the bucket or `NEXUSREACH_SUPABASE_SERVICE_ROLE_KEY` is missing, signups still
+succeed — the resume is simply marked `failed` and nothing is stored (fail-soft).
+
 ### SearXNG (local dev only)
 
 > **Local development only — not part of the production deploy.** SearXNG is a
@@ -278,6 +293,9 @@ NEXUSREACH_REFERRAL_LAUNCH_TARGET=3000
 NEXUSREACH_REFERRAL_TIER_THRESHOLDS=1,3,5,10
 NEXUSREACH_REFERRAL_SIGNUP_IP_DAILY_LIMIT=50
 NEXUSREACH_WAITLIST_SHEET_MIRROR_URL=                        # optional Apps Script /exec URL; mirrors signups to the Google Sheet
+NEXUSREACH_SUPABASE_STORAGE_BUCKET=waitlist-resumes          # PRIVATE bucket for optional resume uploads (create it manually)
+NEXUSREACH_MAX_WAITLIST_RESUME_BYTES=5242880                 # 5 MiB decoded resume cap
+NEXUSREACH_MAX_WAITLIST_REQUEST_BYTES=7340032                # 7 MiB body cap (base64 inflates ~33%)
 ```
 
 Generate the token encryption key with:
@@ -382,6 +400,7 @@ Run this after every production deployment:
 - Optional auto-send can be enabled, schedules a delayed send, and can be cancelled before it sends.
 - Privacy Policy and Terms pages load publicly from Vercel.
 - Waitlist signup (`POST /api/waitlist`) returns a `referral_code` + `position`, the landing page shows the referral panel, and the verification link (`/r/:code?t=...&verify=1`) confirms the email and credits the referrer. If Resend is configured, the verification email arrives; if the Sheet mirror is configured, the signup appears in the Google Sheet.
+- Waitlist goals + resume: selecting goal chips persists them on the row, and attaching a PDF stores the object in the `waitlist-resumes` bucket with `resume_parse_status` going `pending` → `ready` once the Celery worker parses it. A file that isn't a real PDF/DOCX is rejected with 422, and a Storage outage still returns a successful signup (status `failed`).
 - Account export downloads JSON with OAuth tokens and stored API keys redacted.
 - Account deletion works for a disposable production test account and removes the Supabase auth identity.
 - Celery worker logs show task execution.

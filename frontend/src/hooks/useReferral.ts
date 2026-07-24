@@ -6,13 +6,27 @@ import type {
   WaitlistJoinResponse,
 } from '@/types/referral';
 
-/** Error carrying the HTTP status so callers can map 422/429 to copy. */
+/** Error carrying the HTTP status plus the server's message, when it sent one. */
 export class WaitlistError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  /** Server-supplied `detail`, e.g. why a resume was rejected. */
+  detail?: string;
+  constructor(status: number, message: string, detail?: string) {
     super(message);
     this.status = status;
+    this.detail = detail;
     this.name = 'WaitlistError';
+  }
+}
+
+/** Pull FastAPI's `detail` out of an error response, if it's a plain string. */
+async function readErrorDetail(res: Response): Promise<string | undefined> {
+  try {
+    const body = await res.json();
+    const detail = (body as { detail?: unknown })?.detail;
+    return typeof detail === 'string' ? detail : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -30,7 +44,11 @@ export async function joinWaitlistBackend(
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
-    throw new WaitlistError(res.status, `Waitlist join failed (${res.status})`);
+    throw new WaitlistError(
+      res.status,
+      `Waitlist join failed (${res.status})`,
+      await readErrorDetail(res)
+    );
   }
   return (await res.json()) as WaitlistJoinResponse;
 }

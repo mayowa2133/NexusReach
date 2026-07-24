@@ -34,4 +34,10 @@ export interface WaitlistJoinPayload {
   note?: string | null;
   source?: string | null;
   referred_by_code?: string | null;
+  /** Selected goal keys (unknown keys are dropped server-side). */
+  goals?: string[] | null;
+  /** Optional resume, sent as base64 in the JSON body (mirrors /profile/resume-json). */
+  resume_filename?: string | null;
+  resume_content_type?: string | null;
+  resume_file_base64?: string | null;
 }

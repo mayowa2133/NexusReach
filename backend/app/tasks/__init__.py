@@ -191,5 +191,6 @@ for module_name in (
     "app.tasks.reverify",
     "app.tasks.render",
     "app.tasks.referrals",
+    "app.tasks.waitlist_resume",
 ):
     import_module(module_name)
