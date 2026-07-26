@@ -5,10 +5,15 @@ from __future__ import annotations
 import re
 from typing import Any
 
+import logging
+
 import httpx
 
 from app.clients import brave_search_client
+from app.clients import search_provider_health
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 SERPER_SEARCH_URL = "https://google.serper.dev/search"
 
@@ -46,11 +51,22 @@ async def _run_serper_query(query: str, num: int) -> list[dict]:
                 headers=headers,
                 json=payload,
             )
-            if resp.status_code in (401, 403, 429):
+            if resp.status_code >= 400:
+                # Includes 400 "Not enough credits" — previously swallowed by
+                # raise_for_status() + a bare except, which made an exhausted
+                # account indistinguishable from a query with no hits
+                # (audit 2026-07-26).
+                body = (resp.text or "")[:200].replace("\n", " ")
+                logger.warning(
+                    "serper rejected a query: HTTP %s — %s", resp.status_code, body
+                )
+                await search_provider_health.record(
+                    "serper", "error", detail=f"HTTP {resp.status_code}: {body}"
+                )
                 return []
-            resp.raise_for_status()
             data = resp.json()
-    except httpx.HTTPError:
+    except httpx.HTTPError as exc:
+        logger.warning("serper request failed: %s", exc)
         return []
 
     return data.get("organic", []) or []

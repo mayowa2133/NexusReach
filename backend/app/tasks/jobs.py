@@ -856,3 +856,82 @@ def repair_job_apply_urls(user_id: str, job_ids: list[str]) -> int:
             uuid.UUID(user_id), [uuid.UUID(job_id) for job_id in job_ids]
         )
     )
+
+
+async def _monitor_search_provider_health() -> dict:
+    """Escalate a *sustained* search-provider outage to one aggregated alert.
+
+    The counterpart to ``_monitor_source_health``, for the other half of the
+    product. A 2026-07-26 audit found Google CSE returning "API Key not found"
+    and Serper returning "Not enough credits" — for an unknown period — while
+    every LinkedIn query silently fell through to the weakest provider in the
+    chain. Nothing alerted, because a broken credential and a quiet query both
+    produced ``[]``.
+
+    Only *configured* providers are judged: an unset key is a deployment choice,
+    not an outage.
+    """
+    from app.clients import search_provider_health  # noqa: PLC0415
+    from app.config import settings  # noqa: PLC0415
+
+    configured: list[str] = []
+    if settings.google_api_key:
+        configured.append("google_cse")
+    if settings.serper_api_key:
+        configured.append("serper")
+    if settings.brave_api_key:
+        configured.append("brave")
+    if settings.tavily_api_key:
+        configured.append("tavily")
+    if not configured:
+        return {"checked": 0, "degraded": []}
+
+    health = await search_provider_health.snapshot(configured)
+    verdicts = search_provider_health.evaluate(health)
+    degraded = [v for v in verdicts if v["status"] in ("errors", "no_results")]
+
+    for v in degraded:
+        logger.error(
+            "Search provider DOWN: '%s' status=%s over the last %dh "
+            "(hits=%d empty=%d errors=%d). Last error: %s",
+            v["provider"],
+            v["status"],
+            search_provider_health.WINDOW_SECONDS // 3600,
+            v.get("hit", 0),
+            v.get("empty", 0),
+            v.get("error", 0),
+            (v.get("last_error") or "n/a")[:300],
+        )
+    logger.info(
+        "Search provider health: %d checked, %d degraded%s",
+        len(verdicts),
+        len(degraded),
+        f" ({', '.join(v['provider'] for v in degraded)})" if degraded else "",
+    )
+    return {"checked": len(verdicts), "degraded": [v["provider"] for v in degraded]}
+
+
+@celery_app.task(
+    name="app.tasks.jobs.monitor_search_provider_health",
+    autoretry_for=(Exception,),
+    retry_backoff=60,
+    retry_backoff_max=600,
+    max_retries=3,
+)
+def monitor_search_provider_health() -> dict:
+    """Celery task: alert on search providers that are configured but broken."""
+    return run_async(_monitor_search_provider_health())
+
+
+@celery_app.task(name="app.tasks.jobs.beat_heartbeat")
+def beat_heartbeat() -> dict:
+    """Prove Celery beat is alive.
+
+    Beat now gates occupation tagging (targeting) and waitlist retention
+    (privacy). Both fail silently when it stops, so this stamps a timestamp that
+    ``GET /api/ready`` reports as ok/stale.
+    """
+    from app.clients import search_provider_health  # noqa: PLC0415
+
+    run_async(search_provider_health.record_beat_heartbeat())
+    return {"ok": True}

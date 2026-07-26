@@ -251,3 +251,86 @@ def test_team_keywords_for_department_falls_back_to_engineering() -> None:
     assert "engineering" in eng
     unknown = team_keywords_for_department("totally_not_a_department")
     assert unknown == eng
+
+
+# ---------------------------------------------------------------------------
+# Classifier coverage (functionality audit 2026-07-26)
+#
+# The feed filter is an exact tag match, so an unclassified job is invisible to
+# EVERY occupation chip — not merely ranked lower. These pin the titles that
+# were measured missing from a real 575-job feed.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("title", [
+    "Staff Product Engineer",
+    "Product Growth Engineer",
+    "Integration Engineer",
+    "Senior Cloud Engineer - Product Metrics",
+    "Customer Engineer",
+    "Design Verification Engineer Intern",
+    "Staff/Sr. Staff Electrical Test Engineer",
+    "Forward Deployed Engineer, Professional Services",
+    "Backend API Engineer",
+])
+def test_mainstream_engineer_titles_are_classified(title):
+    assert "software_engineering" in classify_title(title), title
+
+
+@pytest.mark.parametrize("title,expected", [
+    ("Partner Development Manager", "sales"),
+    ("Technical Partner Manager", "sales"),
+    ("Deal Strategist", "sales"),
+    ("People Consultant", "human_resources"),
+    ("Payments Fraud Investigator", "legal_compliance"),
+    ("Manager, Global Sanctions", "legal_compliance"),
+])
+def test_previously_unclassifiable_business_titles(title, expected):
+    assert expected in classify_title(title), title
+
+
+def test_description_fallback_requires_real_evidence():
+    """A single incidental mention must not tag the job.
+
+    Accepting any alias hit in the lead tagged "Engineering Manager, Payments"
+    as human_resources (one mention of hiring). A wrong tag is worse than none:
+    it puts the job in front of the wrong person.
+    """
+    one_mention = "You will partner with recruiting on hiring for the team."
+    assert classify_title("Zorble Wrangler", one_mention) == []
+
+
+def test_description_fallback_assigns_one_confident_tag():
+    lead = (
+        "Own the sales pipeline, manage the deal desk, run account executive "
+        "forecasting and partner development across the sales organisation."
+    )
+    tags = classify_title("Zorble Wrangler", lead)
+    assert tags == ["sales"], tags
+
+
+def test_description_fallback_never_scattershots():
+    """Only the single best-evidenced occupation is taken, never a spray."""
+    mixed = (
+        "Work with software engineers, marketing, recruiting, legal counsel, "
+        "supply chain and finance partners across the company."
+    )
+    assert len(classify_title("Zorble Wrangler", mixed)) <= 1
+
+
+def test_title_match_still_wins_over_description():
+    tags = classify_title("Software Engineer", "marketing campaigns and brand strategy")
+    assert tags == ["software_engineering"]
+
+
+def test_operations_token_stays_out_of_the_engineering_vocab():
+    """Guards the Muse distinctiveness gate.
+
+    Adding a "…operations engineer" alias pushes the "operations" token's
+    document frequency over the gate's ceiling and silently breaks
+    business_analyst matching. See the comment in the sales aliases.
+    """
+    from app.services.occupation_taxonomy import OCCUPATIONS
+
+    swe = next(o for o in OCCUPATIONS if o.key == "software_engineering")
+    assert not [a for a in swe.aliases if "operations" in a]

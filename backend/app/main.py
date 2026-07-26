@@ -194,12 +194,22 @@ async def readiness(
     status_code = 200 if healthy else 503
     from fastapi.responses import JSONResponse
 
+    from app.clients import search_provider_health
     from app.utils.client_ip import client_ip
+
+    # Beat liveness is reported, not gated: a stopped beat doesn't make the API
+    # unready, but it silently narrows occupation targeting and stops waitlist
+    # PII expiring, so it must be answerable without shelling into the host.
+    try:
+        beat = await search_provider_health.beat_liveness()
+    except Exception:
+        beat = {"status": "unknown", "age_seconds": None}
 
     return JSONResponse(
         content={
             "status": "ok" if healthy else "degraded",
             "checks": checks,
+            "celery_beat": beat,
             # Verification aid, not a health signal — see the docstring.
             "client_ip": client_ip(request),
             "trusted_proxy_hops": settings.trusted_proxy_hops,
