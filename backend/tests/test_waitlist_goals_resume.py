@@ -7,7 +7,7 @@ Follows the repo convention: pure helpers tested directly, DB mocked with
 import base64
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -208,11 +208,19 @@ _STATUS_PAYLOAD = {
 
 def _patched_join(entry):
     """Common patches for the join endpoint."""
+    from app.services.waitlist_service import WaitlistUpsertResult
+
     return (
         patch(
             "app.routers.waitlist.upsert_waitlist_signup",
             new_callable=AsyncMock,
-            return_value=(entry, False, "nrw_secret"),
+            return_value=WaitlistUpsertResult(
+                entry=entry,
+                already_on_list=False,
+                access_token="nrw_secret",
+                emailed_access_token=None,
+                verification_token="nrv_secret",
+            ),
         ),
         patch(
             "app.routers.waitlist.referral_service.enforce_signup_ip_limit",
@@ -257,6 +265,81 @@ async def test_join_with_resume_stores_and_queues_parse(client):
     assert resp.status_code == 200
     assert entry.resume_parse_status == "pending"
     mock_parse.assert_called_once()
+
+
+async def test_resubmission_cannot_overwrite_an_existing_resume(client):
+    """A stranger must not be able to replace someone's stored resume.
+
+    The Storage object path is derived from the row id and uploads use
+    `x-upsert`, so attaching on the existing-row branch overwrites the owner's
+    file in place. The upload must not be attempted at all.
+    """
+    from app.services.waitlist_service import WaitlistUpsertResult
+
+    entry = _signup()
+    entry.resume_path = f"{entry.id}/resume.pdf"
+    entry.resume_filename = "owners-real-resume.pdf"
+    entry.resume_parse_status = "ready"
+
+    with (
+        patch(
+            "app.routers.waitlist.upsert_waitlist_signup",
+            new_callable=AsyncMock,
+            return_value=WaitlistUpsertResult(
+                entry=entry,
+                already_on_list=True,
+                access_token=None,
+                emailed_access_token=None,
+                verification_token="nrv_secret",
+            ),
+        ),
+        patch(
+            "app.routers.waitlist.referral_service.enforce_signup_ip_limit",
+            new_callable=AsyncMock,
+        ),
+        patch("app.routers.waitlist.send_verification_email.delay"),
+        patch(
+            "app.services.waitlist_resume_service.supabase_storage_client.upload_object",
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as mock_upload,
+        patch("app.routers.waitlist.parse_waitlist_resume.delay") as mock_parse,
+    ):
+        resp = await client.post(
+            "/api/waitlist",
+            json={
+                "name": "Attacker",
+                "email": "jordan@example.com",
+                "resume_filename": "attacker.pdf",
+                "resume_content_type": "application/pdf",
+                "resume_file_base64": _b64(PDF_BYTES),
+            },
+        )
+
+    assert resp.status_code == 200  # the form still succeeds for the visitor
+    mock_upload.assert_not_awaited()
+    mock_parse.assert_not_called()
+    assert entry.resume_filename == "owners-real-resume.pdf"
+    assert entry.resume_parse_status == "ready"
+
+
+async def test_resubmission_still_reports_an_invalid_resume(client):
+    """Validation runs before the branch, so the error contract is identical.
+
+    Diverging here would turn a malformed upload into an "is this email already
+    registered?" oracle.
+    """
+    resp = await client.post(
+        "/api/waitlist",
+        json={
+            "name": "Someone",
+            "email": "jordan@example.com",
+            "resume_filename": "resume.pdf",
+            "resume_content_type": "application/pdf",
+            "resume_file_base64": _b64(b"<html>not a pdf</html>"),
+        },
+    )
+    assert resp.status_code == 422
 
 
 async def test_join_still_succeeds_when_storage_fails(client):
@@ -318,3 +401,108 @@ async def test_join_without_resume_is_unaffected(client):
         )
     assert resp.status_code == 200
     mp.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Retention + erasure (finding #10)
+# ---------------------------------------------------------------------------
+
+
+async def test_delete_signup_removes_the_stored_resume_too():
+    """Erasure must not leave an orphaned object in the private bucket."""
+    from app.services import waitlist_retention_service as wrs
+
+    entry = _signup()
+    entry.resume_path = f"{entry.id}/resume.pdf"
+    db = AsyncMock()
+
+    with patch(
+        "app.services.waitlist_retention_service.supabase_storage_client.delete_object",
+        new_callable=AsyncMock,
+        return_value=True,
+    ) as mock_delete:
+        result = await wrs.delete_signup(db, entry)
+
+    mock_delete.assert_awaited_once_with(entry.resume_path)
+    db.delete.assert_awaited_once_with(entry)
+    assert result == {"deleted": True, "resume_deleted": True}
+
+
+async def test_delete_signup_without_a_resume_touches_no_storage():
+    from app.services import waitlist_retention_service as wrs
+
+    entry = _signup()
+    db = AsyncMock()
+
+    with patch(
+        "app.services.waitlist_retention_service.supabase_storage_client.delete_object",
+        new_callable=AsyncMock,
+    ) as mock_delete:
+        result = await wrs.delete_signup(db, entry)
+
+    mock_delete.assert_not_awaited()
+    assert result["resume_deleted"] is False
+
+
+async def test_retention_keeps_the_row_when_storage_delete_fails():
+    """A failed object delete must not orphan the file.
+
+    Clearing the metadata anyway would leave the row claiming "no resume" while
+    the file is still in the bucket, and nothing would ever retry it.
+    """
+    from app.services import waitlist_retention_service as wrs
+
+    entry = _signup()
+    entry.resume_path = f"{entry.id}/resume.pdf"
+    entry.resume_filename = "cv.pdf"
+    entry.resume_parse_status = "ready"
+
+    db = AsyncMock()
+    scalars = MagicMock()
+    scalars.all.return_value = [entry]
+    result_obj = MagicMock()
+    result_obj.scalars.return_value = scalars
+    db.execute.return_value = result_obj
+
+    with patch(
+        "app.services.waitlist_retention_service.supabase_storage_client.delete_object",
+        new_callable=AsyncMock,
+        return_value=False,
+    ):
+        cleared = await wrs.purge_expired_resumes(db)
+
+    assert cleared == 0
+    assert entry.resume_path is not None
+    assert entry.resume_filename == "cv.pdf"
+    db.commit.assert_not_awaited()
+
+
+async def test_delete_endpoint_requires_the_owner_token(client):
+    with patch(
+        "app.routers.referrals.referral_service.resolve_signup_by_token",
+        new_callable=AsyncMock,
+        return_value=None,
+    ):
+        resp = await client.delete("/api/referrals/me?code=ABCDEFGHJK&t=nrw_wrong")
+    assert resp.status_code == 404
+
+
+async def test_delete_endpoint_erases_with_a_valid_token(client):
+    entry = _signup()
+    with (
+        patch(
+            "app.routers.referrals.referral_service.resolve_signup_by_token",
+            new_callable=AsyncMock,
+            return_value=entry,
+        ),
+        patch(
+            "app.routers.referrals.waitlist_retention_service.delete_signup",
+            new_callable=AsyncMock,
+            return_value={"deleted": True, "resume_deleted": True},
+        ) as mock_delete,
+    ):
+        resp = await client.delete("/api/referrals/me?code=ABCDEFGHJK&t=nrw_ok")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"deleted": True, "resume_deleted": True}
+    mock_delete.assert_awaited_once()

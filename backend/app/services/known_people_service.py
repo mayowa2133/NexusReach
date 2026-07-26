@@ -18,9 +18,10 @@ import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models.known_person import KnownPerson, KnownPersonCompany
 
 logger = logging.getLogger(__name__)
@@ -346,6 +347,62 @@ async def mark_stale_records(
         "expired": expired_result.rowcount,
         "stale": stale_result.rowcount,
     }
+
+
+async def purge_expired_records(
+    db: AsyncSession,
+    *,
+    purge_days: int | None = None,
+) -> int:
+    """Delete cache rows nobody has re-verified in a long time. Returns the count.
+
+    Marking a row "expired" stops us trusting it but keeps the data forever, and
+    every row here describes a **third party** who never used the product and
+    never consented — so an unbounded cache is the part of this schema least
+    defensible to keep. Once a record is old enough that we would re-derive it
+    from scratch anyway, holding it buys nothing.
+
+    Rows are re-created on next discovery if the person is still relevant, so
+    this costs a little repeat work and nothing else.
+    """
+    days = purge_days if purge_days is not None else settings.known_people_purge_days
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    result = await db.execute(
+        delete(KnownPerson).where(
+            KnownPerson.last_discovered_at <= cutoff,
+            KnownPerson.last_verified_at <= cutoff,
+        )
+    )
+    await db.commit()
+    return result.rowcount or 0
+
+
+async def erase_known_person(
+    db: AsyncSession,
+    *,
+    linkedin_url: str | None = None,
+    full_name: str | None = None,
+) -> int:
+    """Remove a specific person from the shared cache. Returns rows deleted.
+
+    The erasure path for someone who asks not to be in a cache they never opted
+    into. Matches on LinkedIn URL (exact, the strongest identifier) or on the
+    normalized name when no URL is known. Driven by
+    ``scripts/erase_known_person.py`` — deliberately not an HTTP endpoint, since
+    these requests are rare, manual, and should not add public attack surface.
+    """
+    if not linkedin_url and not full_name:
+        raise ValueError("Provide a linkedin_url or a full_name to erase.")
+
+    conditions = []
+    if linkedin_url:
+        conditions.append(KnownPerson.linkedin_url == linkedin_url.strip())
+    if full_name:
+        conditions.append(KnownPerson.normalized_name == _normalize_name(full_name))
+
+    result = await db.execute(delete(KnownPerson).where(or_(*conditions)))
+    await db.commit()
+    return result.rowcount or 0
 
 
 # ---------------------------------------------------------------------------

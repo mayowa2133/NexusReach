@@ -9,7 +9,6 @@ const connectedView = document.getElementById("connected-view");
 const connectBtn = document.getElementById("connect-btn");
 const refreshBtn = document.getElementById("refresh-btn");
 const disconnectBtn = document.getElementById("disconnect-btn");
-const apiUrlInput = document.getElementById("api-url");
 const authTokenInput = document.getElementById("auth-token");
 const autofillToggle = document.getElementById("autofill-toggle");
 const autosyncToggle = document.getElementById("autosync-toggle");
@@ -71,9 +70,9 @@ function renderProfile(p) {
 // ---------------------------------------------------------------------------
 
 async function init() {
-  // Load saved API URL (falling back to the build's default origin)
-  const data = await chrome.storage.local.get(["apiUrl", "autofillEnabled"]);
-  apiUrlInput.value = data.apiUrl || NR_DEFAULTS.apiUrl;
+  // The API origin is pinned at build time (see background.js) — there is
+  // deliberately no field to override it.
+  const data = await chrome.storage.local.get(["autofillEnabled"]);
   autofillToggle.checked = data.autofillEnabled !== false; // default on
 
   // Check connection status
@@ -114,7 +113,6 @@ async function init() {
 // ---------------------------------------------------------------------------
 
 connectBtn.addEventListener("click", async () => {
-  const apiUrl = apiUrlInput.value.trim().replace(/\/+$/, "");
   const token = authTokenInput.value.trim();
 
   if (!token) {
@@ -124,8 +122,6 @@ connectBtn.addEventListener("click", async () => {
 
   connectBtn.textContent = "Connecting...";
   connectBtn.disabled = true;
-
-  await chrome.storage.local.set({ apiUrl });
 
   chrome.runtime.sendMessage({ type: "SET_TOKEN", token }, (resp) => {
     connectBtn.textContent = "Connect";

@@ -47,8 +47,11 @@ class KnownPerson(Base):
     linkedin_url: Mapped[str | None] = mapped_column(String(500), unique=True)
     github_url: Mapped[str | None] = mapped_column(String(500))
 
-    # Contact (only from public sources like Apollo/Hunter)
-    work_email: Mapped[str | None] = mapped_column(String(255))
+    # No contact column by design. This table is GLOBAL — a row describes a
+    # third party, shared across every user — so a discovered/guessed work email
+    # must stay on the finding user's own `Person` row (audit H4). The legacy
+    # `work_email` column was nulled by migration 048 and dropped by 064 so it
+    # cannot be quietly repopulated.
 
     # External IDs
     apollo_id: Mapped[str | None] = mapped_column(String(100), unique=True)

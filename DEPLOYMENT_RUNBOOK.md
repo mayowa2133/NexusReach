@@ -110,6 +110,65 @@ This URL is used by:
 - search-provider cache
 - discovery rate limiting
 
+### Client IP resolution (required for every per-IP limit)
+
+`NEXUSREACH_TRUSTED_PROXY_HOPS` is the number of proxies you control between the
+internet and the API container. Railway's edge is one, so the web service sets
+`1` (see `backend/railway.web.toml`); raise it to `2` if you put a CDN in front.
+The production config validator refuses to boot the API at `0`.
+
+This matters more than it looks. The API only ever receives connections from the
+edge, so the socket peer *is* the proxy — at `0`, every visitor keys into the
+same rate-limit bucket and `REFERRAL_SIGNUP_IP_DAILY_LIMIT` stops being a per-IP
+anti-fraud cap and becomes a site-wide ceiling that locks out real signups once
+it trips.
+
+**Do not "fix" this with uvicorn `--forwarded-allow-ips='*'`.** That mode trusts
+the *leftmost* `X-Forwarded-For` entry, which is written by the client, so any
+caller could pick their own rate-limit key with one header. Resolution is done
+in `backend/app/utils/client_ip.py` instead, which reads the Nth entry from the
+right and falls back to the socket peer if the chain is shorter than configured.
+
+Verify after deploy, and after any change to the proxy topology:
+
+```bash
+curl -s -H "X-Readiness-Token: $NEXUSREACH_READINESS_TOKEN" https://<api-host>/api/ready
+```
+
+`client_ip` must be your own public address. If it shows an internal/edge
+address, the hop count is too low; if it echoes a value you can spoof by sending
+your own `X-Forwarded-For`, it is too high.
+
+### Data retention (runs on the beat worker)
+
+Two datasets belong to people the account-deletion flow cannot reach, so they
+expire on a schedule instead. Both are driven by Celery beat — if the beat
+service is down, nothing expires, so treat a stalled beat as a privacy issue and
+not just a freshness one.
+
+| Data | Setting | Default | Job |
+|---|---|---|---|
+| Waitlist `signup_ip` | `NEXUSREACH_WAITLIST_SIGNUP_IP_RETENTION_DAYS` | 30d | `purge-waitlist-pii` (daily 03:15 UTC) |
+| Waitlist resumes (Storage + columns) | `NEXUSREACH_WAITLIST_RESUME_RETENTION_DAYS` | 180d | same |
+| Known-people cache rows | `NEXUSREACH_KNOWN_PEOPLE_PURGE_DAYS` | 180d | `maintain-known-people-cache` (every 8h) |
+
+Erasure requests:
+
+- **A waitlist member** deletes their own entry and resume from their referral
+  dashboard (`/r/:code`), or via `DELETE /api/referrals/me?code=…&t=…`.
+- **Someone in the known-people cache** who asks to be removed:
+
+  ```bash
+  cd backend && python scripts/erase_known_person.py --linkedin-url <profile-url> --dry-run
+  ```
+
+  Drop `--dry-run` to erase. The row reappears if that person is discovered
+  again by a later search; there is no permanent denylist yet.
+
+Note the admin export (`GET /api/waitlist`) is rate-limited to 5/min and the
+production config refuses to boot with an admin token shorter than 32
+characters — generate one with `openssl rand -hex 32`.
+
 ### Supabase
 
 Create a Supabase project and configure:

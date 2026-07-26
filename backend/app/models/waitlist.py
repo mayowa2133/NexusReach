@@ -20,11 +20,13 @@ class WaitlistSignup(Base):
     can access rows.
 
     It also backs the pre-launch **referral loop**: each signup gets a public,
-    shareable ``referral_code`` (surfaced in ``?ref=`` links) and a *secret*
-    ``access_token_hash`` (the owner-only key for their referral dashboard and
-    the one-click email-verification link). A referral only *counts* once the
-    invited person verifies their email — ``verified_referral_count`` is the
-    denormalized tally of verified invitees and the sort key for queue position.
+    shareable ``referral_code`` (surfaced in ``?ref=`` links) and two *separate*
+    secrets — ``access_token_hash`` (the owner-only key that reads their referral
+    dashboard) and ``verification_token_hash`` (single-use, delivered only by
+    email). Keeping them apart is what makes the double-opt-in gate real: a
+    referral only *counts* once the invited person proves mailbox control, and
+    ``verified_referral_count`` is the denormalized tally of verified invitees
+    and the sort key for queue position.
     """
 
     __tablename__ = "waitlist_signups"
@@ -105,9 +107,19 @@ class WaitlistSignup(Base):
         Integer, nullable=False, default=0, server_default="0"
     )
     # SECRET owner key (SHA-256 of an ``nrw_`` token, plaintext returned once).
-    # Authenticates the referral dashboard + the verification link. NULL for
-    # grandfathered pre-referral rows (they never received a link).
+    # Authenticates *reads* of the referral dashboard only. Issued when the row
+    # is created, and re-issued to the mailbox on verification / resubmission —
+    # never handed back for an email that already exists, which would make it an
+    # unauthenticated takeover of someone else's signup. NULL for grandfathered
+    # pre-referral rows (they never received a link).
     access_token_hash: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, unique=True, index=True
+    )
+    # SECRET single-use key (SHA-256 of an ``nrv_`` token) authorizing the
+    # one-click email-verification link. Delivered ONLY by email — it must never
+    # appear in an HTTP response, or the double-opt-in gate becomes decorative
+    # and referral counts become self-serviceable. Cleared on use.
+    verification_token_hash: Mapped[str | None] = mapped_column(
         String(64), nullable=True, unique=True, index=True
     )
     # Peer IP at signup — for per-IP anti-fraud caps only.

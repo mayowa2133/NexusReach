@@ -58,10 +58,26 @@ def _signup(**kw) -> WaitlistSignup:
         verified_at=None,
         verified_referral_count=0,
         access_token_hash=None,
+        verification_token_hash=None,
         created_at=_now(),
     )
     defaults.update(kw)
     return WaitlistSignup(**defaults)
+
+
+def _upsert_result(entry, **kw):
+    """A ``WaitlistUpsertResult`` with new-signup defaults."""
+    from app.services.waitlist_service import WaitlistUpsertResult
+
+    fields = dict(
+        entry=entry,
+        already_on_list=False,
+        access_token="nrw_secret",
+        emailed_access_token=None,
+        verification_token="nrv_secret",
+    )
+    fields.update(kw)
+    return WaitlistUpsertResult(**fields)
 
 
 # ---------------------------------------------------------------------------
@@ -104,8 +120,15 @@ def test_tier_thresholds_and_earned_tier():
 def test_link_builders():
     assert rs.build_share_url("ABC").endswith("/?ref=ABC")
     assert "/r/ABC?t=nrw_tok" in rs.build_dashboard_url("ABC", "nrw_tok")
-    verify = rs.build_verify_url("ABC", "nrw_tok")
-    assert verify.endswith("/r/ABC?t=nrw_tok&verify=1")
+    # The confirmation link carries the single-use token under a distinct
+    # parameter, so the two secrets can't be confused at either end.
+    assert rs.build_verify_url("ABC", "nrv_tok").endswith("/r/ABC?v=nrv_tok")
+
+
+def test_verification_token_has_its_own_prefix():
+    token = rs.mint_verification_token()
+    assert token.startswith(rs.VERIFICATION_TOKEN_PREFIX)
+    assert not token.startswith(rs.ACCESS_TOKEN_PREFIX)
 
 
 # ---------------------------------------------------------------------------
@@ -149,43 +172,61 @@ async def test_resolve_signup_by_token_rejects_wrong_prefix_without_db():
 
 
 async def test_verify_signup_flips_and_credits_referrer():
-    token = rs.mint_access_token()
+    token = rs.mint_verification_token()
     referrer_id = uuid.uuid4()
     signup = _signup(
         referred_by_id=referrer_id,
-        access_token_hash=rs.hash_token(token),
+        verification_token_hash=rs.hash_token(token),
     )
-    # execute #1 = resolve_signup_by_token, #2 = referrer increment UPDATE.
+    # execute #1 = resolve by verification token, #2 = referrer increment UPDATE.
     db = _db_returning(signup, None)
 
     out = await rs.verify_signup(db, signup.referral_code, token)
 
-    assert out is signup
+    assert out is not None
+    verified, access_token = out
+    assert verified is signup
     assert signup.email_verified is True
     assert signup.verified_at is not None
+    # The confirmation key is single-use; a dashboard key is issued in exchange.
+    assert signup.verification_token_hash is None
+    assert access_token.startswith(rs.ACCESS_TOKEN_PREFIX)
+    assert signup.access_token_hash == rs.hash_token(access_token)
     assert db.execute.await_count == 2  # resolve + increment
     db.commit.assert_awaited()
 
 
-async def test_verify_signup_is_idempotent():
-    token = rs.mint_access_token()
+async def test_verify_signup_rejects_the_dashboard_access_token():
+    """The owner key must not double as a confirmation key.
+
+    This is the whole point of the two-token split: the access token is handed
+    to the browser on join, so accepting it here would let anyone confirm any
+    address they typed into the form and farm referral credit.
+    """
+    access_token = rs.mint_access_token()
     signup = _signup(
         referred_by_id=uuid.uuid4(),
-        email_verified=True,
-        access_token_hash=rs.hash_token(token),
+        access_token_hash=rs.hash_token(access_token),
     )
-    db = _db_returning(signup)  # only the resolve query
+    db = _db_returning(signup, None)
 
-    out = await rs.verify_signup(db, signup.referral_code, token)
+    assert await rs.verify_signup(db, signup.referral_code, access_token) is None
+    db.execute.assert_not_awaited()  # rejected on the prefix, before any query
+    assert signup.email_verified is False
+    db.commit.assert_not_awaited()
 
-    assert out is signup
-    assert db.execute.await_count == 1  # no second increment query
+
+async def test_verify_signup_replayed_link_does_not_double_count():
+    """A second click finds nothing: the token was consumed by the first."""
+    db = _db_returning(None)  # token hash no longer matches any row
+    token = rs.mint_verification_token()
+    assert await rs.verify_signup(db, "ABCDEFGHJK", token) is None
     db.commit.assert_not_awaited()
 
 
 async def test_verify_signup_unknown_token_returns_none():
     db = _db_returning(None)
-    token = rs.mint_access_token()
+    token = rs.mint_verification_token()
     assert await rs.verify_signup(db, "NOPE", token) is None
     db.commit.assert_not_awaited()
 
@@ -236,7 +277,7 @@ async def test_join_waitlist_returns_referral_payload(client):
         patch(
             "app.routers.waitlist.upsert_waitlist_signup",
             new_callable=AsyncMock,
-            return_value=(entry, False, "nrw_secret"),
+            return_value=_upsert_result(entry),
         ),
         patch(
             "app.routers.waitlist.referral_service.enforce_signup_ip_limit",
@@ -257,11 +298,128 @@ async def test_join_waitlist_returns_referral_payload(client):
     assert resp.status_code == 200
     body = resp.json()
     assert body["access_token"] == "nrw_secret"
-    assert body["referral_code"] == "ABCDEFGHJK"
-    assert body["position"] == 42
+    assert body["referral"]["referral_code"] == "ABCDEFGHJK"
+    assert body["referral"]["position"] == 42
     assert body["already_on_list"] is False
-    # Unverified signup => verification email queued.
+    # Unverified signup => verification email queued with the emailed-only token.
     mock_delay.assert_called_once()
+    assert mock_delay.call_args.args[1] == "nrv_secret"
+
+
+async def test_join_waitlist_existing_email_discloses_nothing(client):
+    """Submitting an address already on the list must not leak or grant anything.
+
+    The endpoint is unauthenticated, so this branch is reachable by anyone who
+    guesses an email. Returning that row's owner token, name or queue position
+    would be an account takeover plus an enumeration oracle.
+    """
+    entry = _signup(name="Jordan Rivera", email_verified=False)
+    with (
+        patch(
+            "app.routers.waitlist.upsert_waitlist_signup",
+            new_callable=AsyncMock,
+            return_value=_upsert_result(
+                entry, already_on_list=True, access_token=None
+            ),
+        ),
+        patch(
+            "app.routers.waitlist.referral_service.enforce_signup_ip_limit",
+            new_callable=AsyncMock,
+        ),
+        patch("app.routers.waitlist.send_verification_email.delay"),
+    ):
+        resp = await client.post(
+            "/api/waitlist",
+            json={"name": "Attacker", "email": "jordan@example.com"},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body == {"ok": True, "already_on_list": True, "access_token": None, "referral": None}
+    serialized = resp.text
+    assert "Jordan Rivera" not in serialized
+    assert "ABCDEFGHJK" not in serialized
+    assert "nrw_" not in serialized and "nrv_" not in serialized
+
+
+async def test_resubmission_does_not_mutate_the_existing_row():
+    """An unauthenticated caller must not be able to rewrite someone's entry.
+
+    Anyone can submit any address here, so a "helpful" merge of the submitted
+    details is really a stranger editing the owner's name, LinkedIn URL and
+    note — visible to them on their own dashboard.
+    """
+    from app.schemas.waitlist import WaitlistSignupCreate
+    from app.services.waitlist_service import upsert_waitlist_signup
+
+    existing = _signup(
+        name="Real Owner",
+        email="owner@example.com",
+        linkedin_url="https://linkedin.com/in/real-owner",
+        current_title="Staff Engineer",
+        target_role="Engineering Manager",
+        note="Original note",
+        source="landing",
+        goals=["warm_intros"],
+    )
+    db = _db_returning(existing)
+
+    result = await upsert_waitlist_signup(
+        db,
+        WaitlistSignupCreate(
+            name="Attacker Overwrite",
+            email="owner@example.com",
+            linkedin_url="https://evil.example/profile",
+            current_title="Nonsense",
+            target_role="Nonsense",
+            note="Graffiti",
+            source="attack",
+            goals=["internships"],
+        ),
+    )
+
+    assert result.already_on_list is True
+    assert existing.name == "Real Owner"
+    assert existing.linkedin_url == "https://linkedin.com/in/real-owner"
+    assert existing.current_title == "Staff Engineer"
+    assert existing.target_role == "Engineering Manager"
+    assert existing.note == "Original note"
+    assert existing.source == "landing"
+    assert existing.goals == ["warm_intros"]
+
+
+async def test_join_waitlist_verified_resubmission_emails_dashboard_link(client):
+    """A returning verified member is re-authenticated through their mailbox."""
+    entry = _signup(name="Jordan Rivera", email_verified=True)
+    with (
+        patch(
+            "app.routers.waitlist.upsert_waitlist_signup",
+            new_callable=AsyncMock,
+            return_value=_upsert_result(
+                entry,
+                already_on_list=True,
+                access_token=None,
+                emailed_access_token="nrw_emailed",
+                verification_token=None,
+            ),
+        ),
+        patch(
+            "app.routers.waitlist.referral_service.enforce_signup_ip_limit",
+            new_callable=AsyncMock,
+        ),
+        patch("app.routers.waitlist.send_verification_email.delay") as mock_verify,
+        patch("app.routers.waitlist.send_dashboard_link_email.delay") as mock_link,
+    ):
+        resp = await client.post(
+            "/api/waitlist",
+            json={"name": "Jordan Rivera", "email": "jordan@example.com"},
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["access_token"] is None
+    mock_verify.assert_not_called()
+    mock_link.assert_called_once()
+    assert mock_link.call_args.args[1] == "nrw_emailed"
 
 
 async def test_join_waitlist_rejects_disposable_email(client):
@@ -309,7 +467,7 @@ async def test_verify_endpoint_credits_and_returns_status(client):
         patch(
             "app.routers.referrals.referral_service.verify_signup",
             new_callable=AsyncMock,
-            return_value=signup,
+            return_value=(signup, "nrw_fresh"),
         ),
         patch(
             "app.routers.referrals.referral_service.referral_status_payload",
@@ -317,10 +475,14 @@ async def test_verify_endpoint_credits_and_returns_status(client):
             return_value=verified_payload,
         ),
     ):
-        resp = await client.get("/api/referrals/verify?code=ABCDEFGHJK&t=nrw_x")
+        resp = await client.get("/api/referrals/verify?code=ABCDEFGHJK&v=nrv_x")
 
     assert resp.status_code == 200
-    assert resp.json()["email_verified"] is True
+    body = resp.json()
+    assert body["email_verified"] is True
+    # Clicking the emailed link proves mailbox control, so the dashboard key is
+    # issued here rather than at signup.
+    assert body["access_token"] == "nrw_fresh"
 
 
 async def test_verify_endpoint_bad_token_404(client):
@@ -329,8 +491,59 @@ async def test_verify_endpoint_bad_token_404(client):
         new_callable=AsyncMock,
         return_value=None,
     ):
-        resp = await client.get("/api/referrals/verify?code=NOPE&t=nrw_x")
+        resp = await client.get("/api/referrals/verify?code=NOPE&v=nrv_x")
     assert resp.status_code == 404
+
+
+async def test_verify_endpoint_requires_the_v_parameter(client):
+    """The old ``?t=`` shape carried the access token — it must not verify."""
+    resp = await client.get("/api/referrals/verify?code=ABCDEFGHJK&t=nrw_x")
+    assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Email templates
+# ---------------------------------------------------------------------------
+
+
+def test_verification_email_escapes_the_submitted_name():
+    """``name`` is untrusted free text from a public form.
+
+    These messages go out over our own verified sending domain, so an unescaped
+    value would let anyone mail arbitrary markup — an attacker-chosen link in a
+    message recipients have every reason to trust — to any address they name.
+    """
+    from app.tasks.referrals import _render_verification_email
+
+    html = _render_verification_email(
+        '</p><a href="https://evil.example">Click here</a><p>',
+        "https://solomon.test/r/ABCDEFGHJK?v=nrv_token",
+    )
+
+    assert "<a href=\"https://evil.example\">" not in html
+    assert "&lt;/p&gt;&lt;a href=" in html
+    # The one legitimate anchor is ours.
+    assert html.count("https://evil.example") == 1  # inert, inside escaped text
+
+
+def test_dashboard_link_email_escapes_the_submitted_name():
+    from app.tasks.referrals import _render_dashboard_link_email
+
+    html = _render_dashboard_link_email(
+        "<img src=x onerror=alert(1)>",
+        "https://solomon.test/r/ABCDEFGHJK?t=nrw_token",
+    )
+
+    assert "<img" not in html
+    assert "&lt;img src=x onerror=alert(1)&gt;" in html
+
+
+def test_email_greeting_handles_a_missing_name():
+    from app.tasks.referrals import _greeting
+
+    assert _greeting(None) == "Hi,"
+    assert _greeting("   ") == "Hi,"
+    assert _greeting("Jordan") == "Hi Jordan,"
 
 
 # ---------------------------------------------------------------------------
@@ -353,7 +566,7 @@ async def test_join_waitlist_mirrors_to_sheet_when_configured(client):
         patch(
             "app.routers.waitlist.upsert_waitlist_signup",
             new_callable=AsyncMock,
-            return_value=(entry, False, "nrw_secret"),
+            return_value=_upsert_result(entry),
         ),
         patch(
             "app.routers.waitlist.referral_service.enforce_signup_ip_limit",
@@ -384,3 +597,59 @@ async def test_join_waitlist_mirrors_to_sheet_when_configured(client):
     mock_mirror.assert_awaited_once()
     assert mock_mirror.await_args.args[0]["email"] == entry.email
     assert mock_mirror.await_args.args[0]["referral_code"] == entry.referral_code
+
+
+# ---------------------------------------------------------------------------
+# Admin export hardening (finding #8)
+# ---------------------------------------------------------------------------
+
+
+async def test_admin_export_rejects_a_bad_token(client, monkeypatch):
+    monkeypatch.setattr(settings, "waitlist_admin_token", "x" * 40)
+    resp = await client.get("/api/waitlist", headers={"X-Admin-Token": "wrong"})
+    assert resp.status_code == 403
+
+
+async def test_admin_export_is_404_when_unconfigured(client, monkeypatch):
+    """Unset => the endpoint's existence isn't advertised at all."""
+    monkeypatch.setattr(settings, "waitlist_admin_token", "")
+    resp = await client.get("/api/waitlist", headers={"X-Admin-Token": "anything"})
+    assert resp.status_code == 404
+
+
+def test_production_rejects_a_short_admin_token():
+    """A guessable secret guarding the whole signup list must not deploy."""
+    import pytest
+
+    from app.config import MIN_ADMIN_TOKEN_LENGTH
+
+    with pytest.raises(ValueError, match="WAITLIST_ADMIN_TOKEN"):
+        _prod_settings_for_admin_token("short")
+
+    # At the boundary it is accepted.
+    s = _prod_settings_for_admin_token("a" * MIN_ADMIN_TOKEN_LENGTH)
+    assert len(s.waitlist_admin_token) == MIN_ADMIN_TOKEN_LENGTH
+
+
+def _prod_settings_for_admin_token(token: str):
+    from cryptography.fernet import Fernet
+
+    from app.config import Settings
+
+    return Settings(
+        _env_file=None,
+        environment="production",
+        auth_mode="supabase",
+        database_url="postgresql+asyncpg://db.example/app",
+        redis_url="redis://redis.example:6379/0",
+        supabase_url="https://proj.supabase.co",
+        supabase_key="anon",
+        supabase_jwt_secret="secret",
+        supabase_service_role_key="role",
+        sentry_dsn="https://x@sentry.io/1",
+        token_encryption_primary_version="v1",
+        token_encryption_keys={"v1": Fernet.generate_key().decode()},
+        render_remote_enabled=True,
+        trusted_proxy_hops=1,
+        waitlist_admin_token=token,
+    )

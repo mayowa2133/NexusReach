@@ -2,22 +2,32 @@
 // which build.mjs rewrites in the production package.
 importScripts("config.js");
 
-const DEFAULT_API_URL = NR_DEFAULTS.apiUrl;
+// The API origin is PINNED to the build-time value and is never taken from a
+// message. `apiRequest` sends the long-lived companion token to whatever this
+// resolves to, so a caller-supplied origin would be a token-exfiltration
+// primitive — and one that persists in chrome.storage.local long after whatever
+// injected it is gone. To point the companion at a different backend, edit
+// config.js (dev) or rebuild with NR_API_ORIGIN (prod).
+const API_URL = NR_DEFAULTS.apiUrl;
 const LINKEDIN_CONNECTIONS_URL =
   "https://www.linkedin.com/mynetwork/invite-connect/connections/";
 const LINKEDIN_FOLLOWING_PEOPLE_URL =
   "https://www.linkedin.com/mynetwork/network-manager/people-follow/following/";
 
+// Older builds accepted an apiUrl over the wire and persisted it. Drop any such
+// value on start so an already-poisoned install heals on update rather than
+// keeping the attacker's endpoint forever.
+chrome.storage.local.remove("apiUrl").catch(() => {});
+
 async function getConfig() {
   const data = await chrome.storage.local.get([
-    "apiUrl",
     "authToken",
     "profile",
     "appUrl",
     "needsReconnect",
   ]);
   return {
-    apiUrl: data.apiUrl || DEFAULT_API_URL,
+    apiUrl: API_URL,
     authToken: data.authToken || null,
     profile: data.profile || null,
     appUrl: data.appUrl || null,
@@ -25,9 +35,8 @@ async function getConfig() {
   };
 }
 
-async function setConfig({ apiUrl, authToken, appUrl }) {
+async function setConfig({ authToken, appUrl }) {
   const update = {};
-  if (apiUrl) update.apiUrl = apiUrl.replace(/\/+$/, "");
   if (appUrl) update.appUrl = appUrl.replace(/\/+$/, "");
   if (authToken) {
     // A fresh token (long-lived companion token minted by the app) clears any
@@ -591,12 +600,10 @@ async function runGraphRefresh(payload) {
   const scrapeOpts = { background, deadline };
 
   // Only overwrite stored auth when the caller actually passed a token — the
-  // background path relies on the already-stored companion token.
-  if (payload.apiUrl || payload.authToken) {
-    await setConfig({
-      apiUrl: payload.apiUrl,
-      authToken: payload.authToken,
-    });
+  // background path relies on the already-stored companion token. Any apiUrl in
+  // the payload is ignored: the API origin is pinned at build time.
+  if (payload.authToken) {
+    await setConfig({ authToken: payload.authToken });
   }
 
   const connectionTabId = await createAndWaitForTab(LINKEDIN_CONNECTIONS_URL, { active });
@@ -665,7 +672,127 @@ async function finalizeGraphRefresh(payload, connectionResult, peopleFollowResul
   };
 }
 
+// --- Message authorization ------------------------------------------------
+//
+// The background worker holds the companion token and can call the API as the
+// user, so it must not act on a message just because it arrived. Two rules:
+//
+//   1. Only our own extension pages (popup) and our own content scripts may
+//      talk to it at all.
+//   2. A content script may only send the message types its page legitimately
+//      needs. This is what stops a script running on the web app — injected by
+//      an XSS, a malicious dependency, or a compromised third-party tag — from
+//      reaching past the connect handshake into `SET_TOKEN` (swap in the
+//      attacker's account) or the LinkedIn scrape/capture handlers.
+//
+// The page itself cannot call chrome.runtime directly (no externally_connectable
+// and content scripts run in an isolated world); it reaches us only by
+// postMessage to app-bridge.js, which forwards a matching allowlist. This check
+// is the authoritative one — app-bridge's is defense in depth.
+
+// Message types each content script is allowed to send, keyed by its file. The
+// origins come from that file's own manifest `matches`, so this cannot drift
+// from where the script is actually injected.
+const ALLOWED_TYPES_BY_SCRIPT = {
+  // The web app, via app-bridge.js. Note SET_TOKEN / LOGOUT are absent: the app
+  // connects by minting a token server-side and sending NR_EXTENSION_CONNECT.
+  "app-bridge.js": [
+    "NR_EXTENSION_PING",
+    "NR_EXTENSION_CONNECT",
+    "NR_LINKEDIN_ASSIST",
+    "NR_LINKEDIN_GRAPH_REFRESH",
+    "NR_CAPTURE_SELF_PROFILE",
+  ],
+  "linkedin-content.js": [
+    "CAPTURE_PROFILE",
+    "GET_STATUS",
+    "SHOULD_PROMPT_STALE_GRAPH",
+    "START_OPPORTUNISTIC_SYNC",
+    "SUBMIT_HIRING_TEAM",
+  ],
+  // Job-board pages only ever read the profile for autofill.
+  "content.js": ["GET_PROFILE"],
+};
+
+function escapeForRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Compile a manifest match pattern into a regex over the page's ORIGIN. */
+function originRegexForPattern(pattern) {
+  const parsed = /^(\*|https?):\/\/([^/]+)\//.exec(pattern);
+  if (!parsed) return null;
+  const scheme = parsed[1] === "*" ? "https?" : parsed[1];
+  const rawHost = parsed[2];
+  let host;
+  if (rawHost === "*") {
+    host = "[^/]+";
+  } else if (rawHost.startsWith("*.")) {
+    // Chrome's "*.example.com" also matches the bare apex.
+    host = `(?:[^/]+\\.)?${escapeForRegex(rawHost.slice(2))}`;
+  } else {
+    host = escapeForRegex(rawHost);
+  }
+  return new RegExp(`^${scheme}://${host}$`);
+}
+
+let contentScriptRulesCache = null;
+
+/** [{ origin: RegExp, types: Set<string> }] built from the live manifest. */
+function contentScriptRules() {
+  if (contentScriptRulesCache) return contentScriptRulesCache;
+  const rules = [];
+  for (const entry of chrome.runtime.getManifest().content_scripts || []) {
+    for (const file of entry.js || []) {
+      const allowed = ALLOWED_TYPES_BY_SCRIPT[file];
+      if (!allowed) continue;
+      for (const pattern of entry.matches || []) {
+        const origin = originRegexForPattern(pattern);
+        if (origin) rules.push({ origin, types: new Set(allowed) });
+      }
+    }
+  }
+  contentScriptRulesCache = rules;
+  return rules;
+}
+
+function senderOrigin(sender) {
+  if (sender?.origin) return sender.origin;
+  try {
+    return sender?.url ? new URL(sender.url).origin : null;
+  } catch {
+    return null;
+  }
+}
+
+function isAuthorizedMessage(message, sender) {
+  const type = message?.type;
+  if (typeof type !== "string") return false;
+  // Anything claiming to be from another extension is not ours to trust.
+  if (sender?.id && sender.id !== chrome.runtime.id) return false;
+  // No tab => one of our own extension pages (the popup). Fully trusted: it is
+  // packaged with us and not reachable by web content.
+  if (!sender?.tab) return true;
+
+  const origin = senderOrigin(sender);
+  if (!origin) return false;
+  return contentScriptRules().some(
+    (rule) => rule.origin.test(origin) && rule.types.has(type),
+  );
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (!isAuthorizedMessage(message, sender)) {
+    console.warn(
+      "Solomon Companion: refusing message",
+      message?.type,
+      "from",
+      senderOrigin(sender) || "unknown origin",
+    );
+    sendResponse({ ok: false, error: "Message not permitted from this page." });
+    return false;
+  }
+
   if (message.type === "GET_PROFILE") {
     getConfig().then(({ profile }) => {
       if (profile) {
@@ -754,10 +881,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === "NR_EXTENSION_CONNECT") {
     setConfig({
-      apiUrl: message.payload?.apiUrl,
+      // `message.payload.apiUrl` is deliberately NOT read — see API_URL.
       authToken: message.payload?.authToken,
       // Remember which NexusReach origin connected us so the popup can link
-      // back to the app (works for both localhost dev and production).
+      // back to the app (works for both localhost dev and production). Taken
+      // from the vetted sender, never from the payload.
       appUrl: sender?.origin || null,
     }).then(async () => {
       const profile = await fetchProfile();

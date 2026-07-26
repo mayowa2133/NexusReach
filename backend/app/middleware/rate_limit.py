@@ -7,21 +7,25 @@ belongs in the async authentication dependency, never in this request hook.
 import logging
 
 from slowapi import Limiter
-from slowapi.util import get_remote_address
 from starlette.requests import Request
 
 from app.config import settings
+from app.utils.client_ip import client_ip
 
 logger = logging.getLogger(__name__)
 
 
 def _get_user_key(request: Request) -> str:
-    """Return the peer IP for the outer, pre-authentication request budget.
+    """Return the client IP for the outer, pre-authentication request budget.
+
+    Resolved through ``utils.client_ip`` rather than slowapi's
+    ``get_remote_address``, which reads only ``request.client.host`` — behind an
+    edge proxy that is the proxy, so every caller would share one budget.
 
     Authenticated provider/daily budgets are enforced after verification. This
     function must never parse a bearer token or trigger a JWKS request.
     """
-    return get_remote_address(request)
+    return client_ip(request)
 
 
 def _build_limiter() -> Limiter:

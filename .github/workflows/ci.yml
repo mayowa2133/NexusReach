@@ -79,6 +79,43 @@ jobs:
         env:
           VITE_API_URL: "https://placeholder.api.com"
 
+  extension-test:
+    name: Companion Extension Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "24"
+
+      # No bundler and no dependencies — the suite loads the real background.js
+      # into a vm with stubbed chrome.*. Covers the auto-sync guards and the
+      # message-authorization rules that keep page script away from the
+      # companion token, so it needs to gate merges like everything else.
+      - name: Run extension tests
+        run: node --test "extension/tests/*.test.mjs"
+
+      # The packager rewrites manifest origins and strips localhost; the message
+      # rules are derived from that manifest at runtime, so a broken build would
+      # silently widen who can talk to the worker.
+      - name: Verify production packaging
+        run: |
+          NR_APP_ORIGIN=https://app.example.com \
+          NR_API_ORIGIN=https://api.example.com \
+          node extension/build.mjs
+          node -e "
+            const m = require('./extension/dist/prod/manifest.json');
+            const all = JSON.stringify(m);
+            if (all.includes('localhost') || all.includes('127.0.0.1')) {
+              throw new Error('production manifest still references localhost');
+            }
+            const bridge = m.content_scripts.find(c => c.js.includes('app-bridge.js'));
+            if (JSON.stringify(bridge.matches) !== JSON.stringify(['https://app.example.com/*'])) {
+              throw new Error('app-bridge is not scoped to the app origin');
+            }
+          "
+
   e2e-real:
     name: Real Browser E2E
     runs-on: ubuntu-latest

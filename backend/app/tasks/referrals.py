@@ -1,12 +1,23 @@
-"""Celery task: send the waitlist double-opt-in verification email.
+"""Celery tasks: the two waitlist emails that carry a secret link.
 
-Triggered ``.delay(signup_id, access_token)`` from the join handler. The raw
-access token can't be recovered from its stored hash, so it rides through the
-broker as a task arg to build the one-click verify link. Fail-soft: when Resend
-is unconfigured (dev), the verification link is logged instead of sent so the
-flow is still exercisable locally.
+* ``send_verification_email`` — double-opt-in confirmation, triggered on join.
+* ``send_dashboard_link_email`` — "here's your referral link again" for an
+  already-verified member who resubmitted the form.
+
+Both take their token as a task argument because the raw value can't be
+recovered from its stored hash. Neither token is ever returned over HTTP: the
+email *is* the delivery channel, which is what makes clicking the link evidence
+that the recipient owns the address. Fail-soft: when Resend is unconfigured
+(dev), the link is logged instead of sent so the flow stays exercisable locally.
+
+Every interpolation into these templates goes through ``html.escape``. ``name``
+is attacker-controlled free text from a public, unauthenticated form, and these
+messages are sent from our own verified sending domain — an unescaped value
+would turn the signup endpoint into a way to mail arbitrary markup, from a
+domain recipients trust, to any address the submitter names.
 """
 
+import html
 import logging
 import uuid
 
@@ -15,60 +26,117 @@ from sqlalchemy import select
 from app.clients import resend_client
 from app.database import async_session
 from app.models.waitlist import WaitlistSignup
-from app.services.referral_service import build_verify_url
+from app.services.referral_service import build_dashboard_url, build_verify_url
 from app.tasks import celery_app, run_async
 
 logger = logging.getLogger(__name__)
 
 
-def _render_email(name: str, verify_url: str) -> str:
-    greeting = f"Hi {name}," if name else "Hi,"
+def _greeting(name: str | None) -> str:
+    safe_name = html.escape(name or "", quote=False).strip()
+    return f"Hi {safe_name}," if safe_name else "Hi,"
+
+
+def _shell(greeting: str, body: str) -> str:
     return f"""\
 <div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;\
 max-width:520px;margin:0 auto;color:#1B1A17;">
   <p style="font-size:16px;line-height:1.5;">{greeting}</p>
+{body}
+</div>"""
+
+
+def _link_block(url: str, label: str) -> str:
+    # The URL is server-built, but escape it anyway: it lands in an href
+    # attribute and in text, and nothing here should depend on a caller's
+    # discipline to stay safe.
+    safe_url = html.escape(url, quote=True)
+    return f"""\
+  <p style="margin:28px 0;">
+    <a href="{safe_url}"
+       style="background:#0C6B4B;color:#fff;text-decoration:none;padding:12px 22px;\
+border-radius:6px;font-size:15px;display:inline-block;">
+      {label}
+    </a>
+  </p>
+  <p style="font-size:13px;line-height:1.5;color:#6b6b6b;">
+    If the button doesn't work, paste this link into your browser:<br>
+    <a href="{safe_url}" style="color:#0C6B4B;">{safe_url}</a>
+  </p>"""
+
+
+def _render_verification_email(name: str | None, verify_url: str) -> str:
+    return _shell(
+        _greeting(name),
+        f"""\
   <p style="font-size:16px;line-height:1.5;">
     Thanks for joining the <strong>Solomon</strong> waitlist. Confirm your email
     to lock in your spot — and unlock your personal referral link so you can move
     up the line.
   </p>
-  <p style="margin:28px 0;">
-    <a href="{verify_url}"
-       style="background:#0C6B4B;color:#fff;text-decoration:none;padding:12px 22px;\
-border-radius:6px;font-size:15px;display:inline-block;">
-      Confirm my spot &rarr;
-    </a>
-  </p>
-  <p style="font-size:13px;line-height:1.5;color:#6b6b6b;">
-    If the button doesn't work, paste this link into your browser:<br>
-    <a href="{verify_url}" style="color:#0C6B4B;">{verify_url}</a>
-  </p>
+{_link_block(verify_url, "Confirm my spot &rarr;")}
   <p style="font-size:13px;line-height:1.5;color:#6b6b6b;">
     Didn't sign up? You can safely ignore this email.
+  </p>""",
+    )
+
+
+def _render_dashboard_link_email(name: str | None, dashboard_url: str) -> str:
+    return _shell(
+        _greeting(name),
+        f"""\
+  <p style="font-size:16px;line-height:1.5;">
+    You're already on the <strong>Solomon</strong> waitlist — no need to sign up
+    twice. Here's your personal referral link and your place in the queue.
   </p>
-</div>"""
+{_link_block(dashboard_url, "Open my referral dashboard &rarr;")}
+  <p style="font-size:13px;line-height:1.5;color:#6b6b6b;">
+    Didn't request this? You can safely ignore this email — nothing changed.
+  </p>""",
+    )
 
 
-async def _run(signup_id: str, access_token: str) -> dict:
+async def _load_signup(db, signup_id: str) -> WaitlistSignup | None:
+    result = await db.execute(
+        select(WaitlistSignup).where(WaitlistSignup.id == uuid.UUID(signup_id))
+    )
+    return result.scalar_one_or_none()
+
+
+async def _run_verification(signup_id: str, verification_token: str) -> dict:
     async with async_session() as db:
-        result = await db.execute(
-            select(WaitlistSignup).where(WaitlistSignup.id == uuid.UUID(signup_id))
-        )
-        signup = result.scalar_one_or_none()
+        signup = await _load_signup(db, signup_id)
         if signup is None:
             return {"sent": False, "reason": "signup_not_found"}
         if signup.email_verified:
             return {"sent": False, "reason": "already_verified"}
 
-        verify_url = build_verify_url(signup.referral_code, access_token)
+        verify_url = build_verify_url(signup.referral_code, verification_token)
         sent = await resend_client.send_email(
             to=signup.email,
             subject="Confirm your spot on the Solomon waitlist",
-            html=_render_email(signup.name, verify_url),
+            html=_render_verification_email(signup.name, verify_url),
         )
         if not sent:
             # Dev / provider-down: surface the link so verification is testable.
             logger.info("Verification link for %s: %s", signup.email, verify_url)
+        return {"sent": sent}
+
+
+async def _run_dashboard_link(signup_id: str, access_token: str) -> dict:
+    async with async_session() as db:
+        signup = await _load_signup(db, signup_id)
+        if signup is None:
+            return {"sent": False, "reason": "signup_not_found"}
+
+        dashboard_url = build_dashboard_url(signup.referral_code, access_token)
+        sent = await resend_client.send_email(
+            to=signup.email,
+            subject="Your Solomon referral link",
+            html=_render_dashboard_link_email(signup.name, dashboard_url),
+        )
+        if not sent:
+            logger.info("Dashboard link for %s: %s", signup.email, dashboard_url)
         return {"sent": sent}
 
 
@@ -79,8 +147,22 @@ async def _run(signup_id: str, access_token: str) -> dict:
     retry_backoff_max=600,
     max_retries=3,
 )
-def send_verification_email(signup_id: str, access_token: str) -> dict:
-    """Send (or log) the verification email for a waitlist signup."""
-    result = run_async(_run(signup_id, access_token))
+def send_verification_email(signup_id: str, verification_token: str) -> dict:
+    """Send (or log) the double-opt-in email for a waitlist signup."""
+    result = run_async(_run_verification(signup_id, verification_token))
     logger.info("Verification email task complete: %s", result)
+    return result
+
+
+@celery_app.task(
+    name="app.tasks.referrals.send_dashboard_link_email",
+    autoretry_for=(Exception,),
+    retry_backoff=60,
+    retry_backoff_max=600,
+    max_retries=3,
+)
+def send_dashboard_link_email(signup_id: str, access_token: str) -> dict:
+    """Re-send a verified member's referral dashboard link to their mailbox."""
+    result = run_async(_run_dashboard_link(signup_id, access_token))
+    logger.info("Dashboard link email task complete: %s", result)
     return result

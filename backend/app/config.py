@@ -4,6 +4,10 @@ from cryptography.fernet import Fernet
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Roughly 128 bits of base64/hex entropy. Enough that the rate-limited export
+# endpoint cannot be searched online, even given unlimited time.
+MIN_ADMIN_TOKEN_LENGTH = 32
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -37,7 +41,10 @@ class Settings(BaseSettings):
     dev_user_email: str = "dev@nexusreach.local"
 
     # Shared secret guarding the waitlist admin export endpoint
-    # (GET /api/waitlist). Unset => export is disabled (returns 404).
+    # (GET /api/waitlist). Unset => export is disabled (returns 404). When set
+    # in production it must be at least MIN_ADMIN_TOKEN_LENGTH characters: it is
+    # the only thing standing between the public internet and the entire signup
+    # list, so a short/guessable value is worse than leaving the export off.
     waitlist_admin_token: str = ""
 
     # --- Referral waitlist -------------------------------------------------
@@ -70,6 +77,14 @@ class Settings(BaseSettings):
     # Whole-request cap for POST /api/waitlist: the resume rides as base64
     # (~33% inflation) alongside the form fields. See middleware/request_size.
     max_waitlist_request_bytes: int = 7 * 1024 * 1024  # 7 MiB
+    # Retention for waitlist PII (waitlist members have no account, so the
+    # normal /api/account/delete path cannot reach them — see
+    # services/waitlist_retention_service). `signup_ip` only feeds the 24h per-IP
+    # signup cap, so it is kept briefly for forensics and then dropped. Resumes
+    # are the most sensitive thing the product stores; they are kept long enough
+    # to be useful pre-launch, then deleted from Storage and the row.
+    waitlist_signup_ip_retention_days: int = 30
+    waitlist_resume_retention_days: int = 180
 
     # External APIs (populated later per phase)
     apollo_api_key: str = ""
@@ -161,6 +176,17 @@ class Settings(BaseSettings):
     # App
     environment: str = "development"
     service_role: str = "api"  # api | worker | beat | renderer
+    # Number of proxies we control between the internet and this process. Every
+    # per-IP control (slowapi burst limits, the per-IP daily signup cap,
+    # `signup_ip`) resolves the caller through `utils.client_ip`, which reads the
+    # Nth-from-right `X-Forwarded-For` entry. 0 = directly exposed, use the
+    # socket peer (correct for local dev). 1 = one edge proxy, e.g. Railway.
+    # Getting this too HIGH is fail-safe (falls back to the peer, everyone shares
+    # a bucket); too LOW would trust a client-supplied entry, so the resolver
+    # refuses rather than guessing. NB: do NOT also pass uvicorn
+    # `--forwarded-allow-ips='*'` — it trusts the leftmost, client-written entry
+    # and would reintroduce a spoofable bypass. See utils/client_ip.py.
+    trusted_proxy_hops: int = 0
     app_release: str = ""
     frontend_url: str = "http://localhost:5173"
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
@@ -203,6 +229,12 @@ class Settings(BaseSettings):
     # Daily cap on LinkedIn graph sync sessions per user — bounds how often the
     # companion (auto-sync included) can scrape LinkedIn on a user's behalf.
     companion_sync_daily_limit: int = 6
+
+    # Global known-people cache retention. Rows describe third parties who never
+    # used the product, so the cache is purged rather than kept indefinitely:
+    # anything neither re-discovered nor re-verified within this window is
+    # deleted and simply re-created on next discovery if still relevant.
+    known_people_purge_days: int = 180
 
     # Stale contact re-verification
     reverify_stale_days: int = 14
@@ -284,6 +316,24 @@ class Settings(BaseSettings):
             errors.append("NEXUSREACH_DEV_AUTH_BYPASS_ENABLED must not be true in production")
         if self.service_role == "api" and not self.render_remote_enabled:
             errors.append("NEXUSREACH_RENDER_REMOTE_ENABLED must be true for the production API")
+        if (
+            self.waitlist_admin_token
+            and len(self.waitlist_admin_token) < MIN_ADMIN_TOKEN_LENGTH
+        ):
+            errors.append(
+                "NEXUSREACH_WAITLIST_ADMIN_TOKEN must be at least "
+                f"{MIN_ADMIN_TOKEN_LENGTH} characters (it guards the full signup "
+                "export; generate one with `openssl rand -hex 32`)"
+            )
+        if self.service_role == "api" and self.trusted_proxy_hops < 1:
+            # The production API only ever receives connections through an edge
+            # proxy, so the socket peer is that proxy. Left at 0, every per-IP
+            # limit silently collapses into one global bucket — the daily signup
+            # cap becomes a site-wide ceiling. Fail fast rather than ship it.
+            errors.append(
+                "NEXUSREACH_TRUSTED_PROXY_HOPS must be >= 1 for the production API "
+                "(the edge proxy is the socket peer; see utils/client_ip.py)"
+            )
         if not self.sentry_dsn:
             errors.append("NEXUSREACH_SENTRY_DSN is empty")
         if not self.token_encryption_keys:

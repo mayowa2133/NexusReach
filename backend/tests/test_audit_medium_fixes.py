@@ -316,6 +316,7 @@ def _prod_settings(**overrides):
         token_encryption_primary_version="v1",
         token_encryption_keys={"v1": Fernet.generate_key().decode()},
         render_remote_enabled=True,
+        trusted_proxy_hops=1,
     )
     base.update(overrides)
     return Settings(**base)
@@ -339,6 +340,23 @@ def test_production_rejects_dev_auth_bypass_enabled():
 def test_production_api_requires_isolated_remote_renderer():
     with pytest.raises(ValueError, match="RENDER_REMOTE_ENABLED"):
         _prod_settings(render_remote_enabled=False)
+
+
+def test_production_api_requires_a_trusted_proxy_hop_count():
+    """Left at 0, every per-IP limit silently becomes one global bucket.
+
+    The production API is only reachable through an edge proxy, so the socket
+    peer is that proxy. The failure is invisible until the daily signup cap
+    locks out the whole site, so it fails the config validator instead.
+    """
+    with pytest.raises(ValueError, match="TRUSTED_PROXY_HOPS"):
+        _prod_settings(trusted_proxy_hops=0)
+
+
+def test_worker_role_does_not_need_a_proxy_hop_count():
+    """Only the API terminates HTTP; the worker has no client IPs to resolve."""
+    s = _prod_settings(service_role="worker", trusted_proxy_hops=0)
+    assert s.service_role == "worker"
 
 
 def test_renderer_role_rejects_application_credentials():

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router';
 import { WaitlistModal } from '@/components/WaitlistModal';
 import { BrandMark } from '@/components/BrandLogo';
 import './landing.css';

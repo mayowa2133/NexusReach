@@ -3,7 +3,17 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "sh -c 'export NEXUSREACH_SERVICE_ROLE=api NEXUSREACH_RENDER_REMOTE_ENABLED=true; cd /app && python -m alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port $PORT'"
+# TRUSTED_PROXY_HOPS=1: Railway's edge is the only proxy in front of this
+# container, so it is the socket peer and the real caller is the last
+# X-Forwarded-For entry (see backend/app/utils/client_ip.py). Raise it to 2 if a
+# CDN is ever put in front of Railway. Verify after any topology change with
+#   curl -H "X-Readiness-Token: $NEXUSREACH_READINESS_TOKEN" https://<api>/api/ready
+# and confirm `client_ip` is your own address, not an internal one.
+#
+# Deliberately NOT passing uvicorn --forwarded-allow-ips: its '*' mode trusts
+# the LEFTMOST, client-written X-Forwarded-For entry, which would make every
+# rate limit bypassable with a single request header.
+startCommand = "sh -c 'export NEXUSREACH_SERVICE_ROLE=api NEXUSREACH_RENDER_REMOTE_ENABLED=true NEXUSREACH_TRUSTED_PROXY_HOPS=${NEXUSREACH_TRUSTED_PROXY_HOPS:-1}; cd /app && python -m alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port $PORT'"
 healthcheckPath = "/api/health"
 healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"

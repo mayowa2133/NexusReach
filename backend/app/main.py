@@ -2,7 +2,7 @@ import hmac
 import logging
 
 import posthog
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -143,6 +143,7 @@ async def health():
 
 @app.get("/api/ready")
 async def readiness(
+    request: Request,
     x_readiness_token: str | None = Header(default=None),
 ):
     """Token-protected dependency readiness check for internal deployment use.
@@ -151,6 +152,14 @@ async def readiness(
     of the dependencies it must report as unavailable.  The non-empty internal
     token and constant-time comparison keep the expensive checks inaccessible
     to unauthenticated public callers.
+
+    It also reports how the deployment resolves the caller's IP, so
+    ``NEXUSREACH_TRUSTED_PROXY_HOPS`` can be *verified* against the real proxy
+    chain instead of assumed.  A misconfigured hop count is silent and severe —
+    it collapses every per-IP limit into one global bucket — and the only honest
+    check is curling this from a known address and confirming ``client_ip``
+    matches.  Safe to expose here: the endpoint is already token-gated, and the
+    value is the caller's own address.
     """
     if not settings.readiness_token or not x_readiness_token or not hmac.compare_digest(
         x_readiness_token, settings.readiness_token
@@ -185,8 +194,17 @@ async def readiness(
     status_code = 200 if healthy else 503
     from fastapi.responses import JSONResponse
 
+    from app.utils.client_ip import client_ip
+
     return JSONResponse(
-        content={"status": "ok" if healthy else "degraded", "checks": checks},
+        content={
+            "status": "ok" if healthy else "degraded",
+            "checks": checks,
+            # Verification aid, not a health signal — see the docstring.
+            "client_ip": client_ip(request),
+            "trusted_proxy_hops": settings.trusted_proxy_hops,
+            "socket_peer": request.client.host if request.client else None,
+        },
         status_code=status_code,
     )
 

@@ -687,6 +687,33 @@ body:has(.lp) { background: #FAF9F5; }
   background: var(--lp-green-tint); border: 1px solid rgba(12, 107, 75, 0.2);
   border-radius: var(--lp-r-s); padding: 10px 12px; margin: 0 0 18px; text-align: center;
 }
+
+/* Erasure control. Waitlist members have no account, so this is their only
+   route to deleting their data (and their uploaded resume). Deliberately
+   understated — present and findable, never competing with the share CTA. */
+.lp-ref-danger {
+  border-top: 1px solid var(--lp-line); margin-top: 22px; padding-top: 16px;
+  text-align: center;
+}
+.lp-ref-danger p {
+  font-size: 13px; color: var(--lp-ink-55); margin: 0 auto 12px; max-width: 44ch;
+}
+.lp-ref-danger-trigger {
+  background: none; border: none; cursor: pointer; padding: 4px;
+  font-size: 13px; color: var(--lp-ink-55); text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.lp-ref-danger-trigger:hover { color: var(--lp-ink); }
+.lp-ref-danger-actions {
+  display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;
+}
+.lp-ref-danger-confirm {
+  background: #b42318; color: #fff; border: none; cursor: pointer;
+  border-radius: var(--lp-r-s); padding: 9px 16px; font-size: 14px; font-weight: 500;
+}
+.lp-ref-danger-confirm:disabled { opacity: 0.6; cursor: default; }
+.lp-ref-danger-error { color: #b42318; margin-top: 10px; }
+
 @media (max-width: 480px) {
   .lp-ref-rung { grid-template-columns: 1fr; gap: 6px; }
   .lp-ref-share { flex-direction: column; }
