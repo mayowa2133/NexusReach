@@ -111,6 +111,32 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "qa engineer",
             "quality assurance",
             "sdet",
+            # Engineer titles that carry no "software"/"backend" token but are
+            # mainstream SWE roles. Measured 2026-07-26: these accounted for the
+            # largest block of unclassifiable titles in a real feed, which made
+            # the jobs invisible to every occupation chip (the feed filter is an
+            # exact tag match, so an unclassified job matches nothing).
+            "product engineer",
+            "product engineering",
+            # Aliases match as contiguous phrases, so "Product Growth Engineer"
+            # is not covered by "product engineer" — it needs its own entry.
+            "growth engineer",
+            "integration engineer",
+            "cloud engineer",
+            "customer engineer",
+            "api engineer",
+            "systems engineer",
+            "test engineer",
+            "verification engineer",
+            "forward deployed engineer",
+            "solutions engineer",
+            "applications engineer",
+            # NB: no "…operations engineer" alias here. Introducing an
+            # "operations" token into this vocab pushes its document frequency
+            # over the Muse relevance gate's distinctiveness ceiling and
+            # silently breaks business_analyst matching — the same trap the
+            # "revops" comment in `sales` documents. Covered by
+            # test_relevance_gate_drops_off_category_noise.
         ),
         default_search_queries=(
             "Software Engineer",
@@ -644,6 +670,8 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "compensation analyst",
             "compensation manager",
             "compensation and benefits",
+            "people consultant",
+            "people partner",
         ),
         default_search_queries=(
             "Human Resources",
@@ -848,6 +876,11 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             "compliance officer",
             "legal analyst",
             "regulatory affairs",
+            # Financial-crime / risk titles are compliance work in practice.
+            "sanctions",
+            "fraud investigator",
+            "risk strategy",
+            "credit risk",
         ),
         default_search_queries=(
             "Attorney",
@@ -910,6 +943,14 @@ OCCUPATIONS: tuple[Occupation, ...] = (
             # gate (its archetypal titles depend on "operations" being
             # distinctive). RevOps long-form titles keep their analyst tags.
             "revops",
+            # Partner/BD titles were the largest unclassified sales block in
+            # a real feed (measured 2026-07-26). None of these introduce an
+            # "operations" token, for the reason described above.
+            "partner development",
+            "partner manager",
+            "solutions architect",
+            "deal strategist",
+            "deal desk",
         ),
         default_search_queries=(
             "Account Executive",
@@ -1410,6 +1451,12 @@ def _alias_pattern(alias: str) -> re.Pattern[str]:
     return pattern
 
 
+# Minimum distinct alias hits in the description lead before the last-resort
+# fallback will assign an occupation. Two is enough to separate a real
+# responsibility section from one incidental mention in boilerplate.
+_DESC_FALLBACK_MIN_HITS = 2
+
+
 def classify_title(title: str | None, description: str | None = None) -> list[str]:
     """Return occupation keys whose aliases match the job title (or description).
 
@@ -1432,27 +1479,43 @@ def classify_title(title: str | None, description: str | None = None) -> list[st
     if matched:
         return matched
 
-    # A non-empty but generic title ("Associate II", "Coordinator", "Manager")
-    # is not useful evidence. Use the responsibility text only in that case;
-    # specific unmatched titles remain unclassified rather than inheriting a
-    # category from company boilerplate.
-    title_words = [
-        token for token in re.findall(r"[a-z]+", haystack_title.lower())
-        if token not in _TITLE_NOISE_WORDS
-    ]
-    generic_title = (
-        not haystack_title
-        or (bool(title_words) and len(title_words) <= 2 and all(
-            token in _GENERIC_TITLE_WORDS for token in title_words
-        ))
-    )
-    if generic_title and haystack_desc:
-        # Lead responsibilities carry more role signal than footer/benefits
-        # boilerplate and keep the classifier bounded on long scraped pages.
+    # The title matched nothing. Fall back to the responsibility text.
+    #
+    # This used to run only for *generic* titles ("Coordinator", "Associate II"),
+    # on the reasoning that a specific unmatched title shouldn't inherit a
+    # category from company boilerplate. In practice that reasoning had the cost
+    # backwards: an unmatched specific title ("Deal Strategist", "Science
+    # Intercept") is exactly the case where we have no other evidence, and the
+    # feed filter is an exact tag match — so leaving it unclassified doesn't make
+    # the job rank lower, it removes the job from every occupation chip
+    # entirely. Measured on a real 575-job feed (2026-07-26), that silently hid
+    # ~19% of inventory even after the alias expansion above.
+    #
+    # The boilerplate risk the old rule guarded against is real — accepting any
+    # alias hit in the lead tagged "Engineering Manager, Payments" as HR (one
+    # incidental mention of hiring) and "Tax Technology Lead" as ML. So the
+    # fallback demands *evidence*, not a single hit: score occupations by how
+    # many distinct aliases appear, then take the single best one, and only when
+    # it clears _DESC_FALLBACK_MIN_HITS and strictly beats the runner-up. One
+    # confident tag beats four speculative ones — a wrong tag is worse than no
+    # tag, because it puts the job in front of the wrong person.
+    if haystack_desc:
         description_lead = haystack_desc[:2400]
-        for occ in OCCUPATIONS:
-            if any(_alias_pattern(alias).search(description_lead) for alias in occ.aliases):
-                matched.append(occ.key)
+        scores: list[tuple[int, int, str]] = []
+        for index, occ in enumerate(OCCUPATIONS):
+            hits = sum(
+                1 for alias in occ.aliases
+                if _alias_pattern(alias).search(description_lead)
+            )
+            if hits:
+                # index keeps ties resolving in canonical order, deterministically
+                scores.append((hits, -index, occ.key))
+        if scores:
+            scores.sort(reverse=True)
+            best_hits, _, best_key = scores[0]
+            runner_up = scores[1][0] if len(scores) > 1 else 0
+            if best_hits >= _DESC_FALLBACK_MIN_HITS and best_hits > runner_up:
+                matched.append(best_key)
     return matched
 
 

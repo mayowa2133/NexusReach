@@ -7,6 +7,7 @@ Apollo people search is unavailable.
 Free quota: 100 queries/day (each query returns up to 10 results).
 """
 
+import logging
 import re
 
 import httpx
@@ -14,6 +15,22 @@ import httpx
 from app.clients import brave_search_client
 from app.config import settings
 from app.utils.linkedin import parse_linkedin_serp_title
+
+logger = logging.getLogger(__name__)
+
+
+def _record_error(provider: str, detail: str) -> None:
+    """Fire-and-forget health counter so a sustained outage can be alerted on."""
+    import asyncio  # noqa: PLC0415
+
+    from app.clients import search_provider_health  # noqa: PLC0415
+
+    try:
+        asyncio.get_running_loop().create_task(
+            search_provider_health.record(provider, "error", detail=detail)
+        )
+    except RuntimeError:
+        pass
 
 GOOGLE_CSE_URL = "https://www.googleapis.com/customsearch/v1"
 
@@ -77,6 +94,22 @@ def _parse_linkedin_result(item: dict, company_name: str) -> dict | None:
             "location_source": "serp_snippet" if location else None,
         },
     }
+
+
+
+def _log_provider_error(resp, query: str) -> None:
+    """Surface a provider rejection instead of silently returning no results.
+
+    The body is where the actionable text lives ("API Key not found", "Not
+    enough credits"), so include a snippet — never the key, which is only ever
+    sent as a request param.
+    """
+    body = (resp.text or "")[:200].replace("\n", " ")
+    logger.warning(
+        "google_cse rejected a query: HTTP %s — %s (query=%r)",
+        resp.status_code, body, query[:80],
+    )
+    _record_error("google_cse", f"HTTP {resp.status_code}: {body}")
 
 
 async def search_people(
@@ -150,8 +183,16 @@ async def search_people(
                     },
                 )
                 if resp.status_code in (403, 429):
+                    _log_provider_error(resp, query)
                     return results
-                resp.raise_for_status()
+                if resp.status_code >= 400:
+                    # A 400 here is almost always a revoked/mistyped key or a
+                    # bad cx. This used to fall through to raise_for_status()
+                    # and get swallowed by `except httpx.HTTPError` with no log
+                    # at all, so a dead credential looked exactly like a quiet
+                    # query and went unnoticed (audit 2026-07-26).
+                    _log_provider_error(resp, query)
+                    return results
                 data = resp.json()
                 for item in data.get("items", []):
                     person = _parse_linkedin_result(item, company_name)
@@ -171,7 +212,8 @@ async def search_people(
                     results.append(person)
                 if len(results) >= limit:
                     break
-    except httpx.HTTPError:
+    except httpx.HTTPError as exc:
+        logger.warning("google_cse request failed: %s", exc)
         return results
 
     return results[:limit]

@@ -172,6 +172,20 @@ celery_app.conf.update(
             "task": "app.tasks.jobs.monitor_source_health",
             "schedule": crontab(minute=50, hour="*/1"),  # hourly at :50 (sustained-outage alerts)
         },
+        "beat-heartbeat": {
+            # Liveness only. Beat silently gates targeting (occupation retag)
+            # and privacy (waitlist retention), so "is beat running?" must be
+            # answerable from GET /api/ready.
+            "task": "app.tasks.jobs.beat_heartbeat",
+            "schedule": crontab(minute="*/5"),
+        },
+        "monitor-search-provider-health": {
+            # People discovery degrades silently when a provider's key is
+            # revoked or its credits run out — the fallback chain masks it.
+            # This is the only thing that makes that visible.
+            "task": "app.tasks.jobs.monitor_search_provider_health",
+            "schedule": crontab(minute=25, hour="*/6"),
+        },
         "purge-waitlist-pii": {
             # Waitlist members have no account, so nothing else ages their data
             # out. Daily, off-peak; the sweep is a no-op once caught up.

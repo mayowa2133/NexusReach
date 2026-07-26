@@ -19,6 +19,7 @@ from app.clients import (
     tavily_search_client,
     youcom_search_client,
 )
+from app.clients import search_provider_health
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -240,6 +241,7 @@ async def _run_family(
             timeout_seconds=timeout_seconds,
         )
         if not results:
+            await search_provider_health.record(provider, "empty")
             logger.info(
                 "search provider empty",
                 extra={"provider": provider, "family": family, "fallback_depth": depth, "cache_hit": cache_hit},
@@ -261,6 +263,7 @@ async def _run_family(
             for item in results
         ]
         aggregated = _dedupe_results(family, aggregated + annotated)
+        await search_provider_health.record(provider, "hit")
         logger.info(
             "search provider hit",
             extra={
