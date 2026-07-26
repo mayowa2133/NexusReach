@@ -7,6 +7,9 @@ let pendingOAuthCallback: OAuthCallbackPayload | null = null;
 
 const SENSITIVE_QUERY_KEYS = new Set([
   'code', 'state', 'token', 'access_token', 'refresh_token', 'session_token',
+  // Referral dashboard secrets: `t` is the owner key, `v` the single-use email
+  // confirmation token. Short names, but they authenticate a waitlist member.
+  't', 'v',
 ]);
 
 export function sanitizeTelemetryUrl(raw: string): string {

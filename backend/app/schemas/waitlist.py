@@ -57,16 +57,31 @@ class ReferralStatus(BaseModel):
     name: str | None = None
 
 
-class WaitlistSignupResponse(ReferralStatus):
+class WaitlistSignupResponse(BaseModel):
     """Confirmation returned to the browser on join.
 
-    Extends :class:`ReferralStatus` with the one-time secret ``access_token``
-    (the browser stores it to reach the dashboard / verification link) and the
-    idempotency flag.
+    Deliberately NOT a flat :class:`ReferralStatus`: ``referral`` and
+    ``access_token`` are populated only when this request *created* the row. For
+    an address already on the list both stay ``None`` and the response carries
+    nothing but the idempotency flag — the endpoint is unauthenticated, so
+    anyone can submit anyone's email, and returning that row's owner token,
+    name, or queue position would be an account takeover and an enumeration
+    oracle. Returning members get their link by email instead.
     """
 
     ok: bool = True
     already_on_list: bool = False
+    access_token: str | None = None
+    referral: ReferralStatus | None = None
+
+
+class ReferralVerifyResponse(ReferralStatus):
+    """Result of confirming an email.
+
+    Carries the dashboard ``access_token``: clicking the emailed link is proof
+    of mailbox control, which is exactly when issuing the owner key is safe.
+    """
+
     access_token: str
 
 
@@ -101,3 +116,10 @@ class WaitlistEntry(BaseModel):
 class WaitlistExportResponse(BaseModel):
     count: int
     entries: list[WaitlistEntry]
+
+
+class WaitlistDeleteResponse(BaseModel):
+    """Result of a member erasing their own waitlist data."""
+
+    deleted: bool
+    resume_deleted: bool

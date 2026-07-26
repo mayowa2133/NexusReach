@@ -16,11 +16,30 @@ export interface ReferralStatus {
   name?: string | null;
 }
 
-/** Response from POST /api/waitlist — status plus the one-time secret token. */
-export interface WaitlistJoinResponse extends ReferralStatus {
+/**
+ * Response from POST /api/waitlist.
+ *
+ * `referral` and `access_token` arrive only when this request *created* the
+ * row. For an address already on the list both are null by design — the
+ * endpoint is unauthenticated, so returning that person's owner key or queue
+ * position would hand their signup to anyone who guesses their email. Returning
+ * members get their link emailed instead.
+ */
+export interface WaitlistJoinResponse {
   ok: boolean;
   already_on_list: boolean;
-  /** Secret owner key (store client-side to reach the dashboard/verify link). */
+  /** Secret owner key — new signups only. Store it to reach the dashboard. */
+  access_token: string | null;
+  referral: ReferralStatus | null;
+}
+
+/**
+ * Response from GET /api/referrals/verify.
+ *
+ * Clicking the emailed link is the proof of mailbox control, so this is where
+ * the owner key is issued. The single-use `v` token is spent by the request.
+ */
+export interface ReferralVerifyResponse extends ReferralStatus {
   access_token: string;
 }
 

@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 
 const sections = [
   {
@@ -42,7 +42,17 @@ const sections = [
       'You can export your account data from Settings as JSON.',
       'You can delete your account from Settings. Deletion removes your Supabase auth identity and app-owned Solomon data, including encrypted email tokens and imported LinkedIn graph rows.',
       'You can disconnect Gmail or Outlook, clear LinkedIn graph data, and cancel scheduled delayed sends before they go out.',
+      'If you joined the pre-launch waitlist you have no account, so account deletion does not apply. Use the "Delete my data" control on your referral dashboard to remove your waitlist entry and any resume you uploaded.',
+      'If you appear in Solomon\u2019s directory of publicly discoverable professionals and want to be removed, contact us and we will erase those records.',
       'Some provider logs, backups, and security records may persist for a limited period when required for reliability, fraud prevention, billing, legal, or abuse-response reasons.',
+    ],
+  },
+  {
+    title: 'Information About People You Research',
+    body: [
+      'To show you who is behind a job posting, Solomon builds a directory of professional contact information gathered from public sources: public web and search results, public LinkedIn result snippets, company websites and team pages, public GitHub activity, organizational-chart sites, and business-data providers. These people are not Solomon users and have not signed up.',
+      'This directory holds professional information only \u2014 name, job title, employer, and links to public professional profiles. It does not store personal or work email addresses; any email Solomon finds for you stays in your own account and is never shared with other users.',
+      'Solomon relies on legitimate interests in operating a professional networking product, balanced against the limited, professional nature of the information and the fact that it is already public. Records are deleted automatically once they have not been re-confirmed for an extended period, and are removed on request.',
     ],
   },
   {
@@ -51,6 +61,8 @@ const sections = [
       'OAuth refresh tokens are encrypted at rest with versioned application keys.',
       'Production access requires Supabase authentication. Development bypasses must not be used for public deployment.',
       'Solomon keeps account data while your account is active and deletes app-owned data when you request account deletion, subject to backups and legally required retention.',
+      'Waitlist data has its own limits: the IP address recorded for signup anti-fraud is erased after 30 days, and an uploaded waitlist resume is deleted after 180 days, or immediately when you delete your waitlist entry.',
+      'Records in the directory of publicly discoverable professionals are deleted once they have not been re-confirmed for 180 days.',
     ],
   },
 ];

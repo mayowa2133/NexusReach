@@ -80,6 +80,35 @@ async def upload_object(path: str, data: bytes, content_type: str) -> bool:
         return False
 
 
+async def delete_object(path: str) -> bool:
+    """Delete an object. Returns True when it is gone (404 counts as gone).
+
+    Used by the retention sweep and by a member erasing their own data, so a
+    missing object is success, not failure — the desired end state is "not
+    stored", and re-raising on 404 would strand the DB row.
+    """
+    if not is_configured():
+        return False
+
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
+            resp = await client.delete(_object_url(path), headers=_headers())
+        if resp.status_code == 404:
+            return True
+        if resp.status_code >= 400:
+            logger.error(
+                "Supabase Storage delete failed (%s) for %s: %s",
+                resp.status_code,
+                path,
+                resp.text[:300],
+            )
+            return False
+        return True
+    except httpx.HTTPError:
+        logger.error("Supabase Storage delete errored for %s", path, exc_info=True)
+        return False
+
+
 async def download_object(path: str) -> bytes | None:
     """Fetch an object's bytes, or ``None`` when missing/unconfigured/failed."""
     if not is_configured():

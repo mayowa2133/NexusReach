@@ -1,7 +1,11 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { joinWaitlistBackend, WaitlistError } from '@/hooks/useReferral';
+import {
+  joinWaitlistBackend,
+  storeReferralOwner,
+  WaitlistError,
+} from '@/hooks/useReferral';
 import { ReferralPanel } from '@/components/ReferralPanel';
-import type { WaitlistJoinResponse } from '@/types/referral';
+import type { ReferralStatus } from '@/types/referral';
 
 // The referral loop needs the backend sink: a signup returns a referral code +
 // queue position that power the "refer your friends" panel. The Google Apps
@@ -81,7 +85,7 @@ export function WaitlistModal({ onClose, source, referredByCode }: WaitlistModal
   const [state, setState] = useState<SubmitState>('idle');
   const [error, setError] = useState<string | null>(null);
   const [alreadyOnList, setAlreadyOnList] = useState(false);
-  const [referral, setReferral] = useState<WaitlistJoinResponse | null>(null);
+  const [referral, setReferral] = useState<ReferralStatus | null>(null);
   const [goals, setGoals] = useState<string[]>([]);
   const [resume, setResume] = useState<PickedResume | null>(null);
   const [resumeError, setResumeError] = useState<string | null>(null);
@@ -183,16 +187,16 @@ export function WaitlistModal({ onClose, source, referredByCode }: WaitlistModal
       // Backend sink first — it returns the referral code + queue position that
       // hydrate the "refer your friends" panel.
       const result = await joinWaitlistBackend(payload);
-      setReferral(result);
       setAlreadyOnList(Boolean(result.already_on_list));
-      try {
-        // Remember the owner's dashboard keys so a return visit can reopen it.
-        localStorage.setItem(
-          'nr_wl',
-          JSON.stringify({ code: result.referral_code, token: result.access_token })
-        );
-      } catch {
-        /* private-mode storage failure is non-fatal */
+      // The referral panel only appears for a signup this request created. For
+      // an address already on the list the server returns nothing about it (it
+      // can't tell us apart from someone guessing the email) and mails the
+      // owner their link instead — so we fall through to the plain confirmation.
+      if (result.referral && result.access_token) {
+        setReferral(result.referral);
+        storeReferralOwner(result.referral.referral_code, result.access_token);
+      } else {
+        setReferral(null);
       }
       setState('success');
     } catch (err) {
@@ -265,15 +269,7 @@ export function WaitlistModal({ onClose, source, referredByCode }: WaitlistModal
           <div className="lp-wl-success">
             {referral ? (
               <>
-                <ReferralPanel
-                  status={referral}
-                  titleId={titleId}
-                  heading={
-                    alreadyOnList
-                      ? "You're already on the list — keep climbing"
-                      : undefined
-                  }
-                />
+                <ReferralPanel status={referral} titleId={titleId} />
                 <button className="btn btn-ghost lp-ref-done" onClick={onClose}>
                   Done
                 </button>
@@ -286,7 +282,7 @@ export function WaitlistModal({ onClose, source, referredByCode }: WaitlistModal
                 </h3>
                 <p>
                   {alreadyOnList
-                    ? "We've got your details — no need to sign up twice. We'll email you the moment Solomon opens."
+                    ? "We've got your details — no need to sign up twice. Check your inbox: we've just sent your personal referral link so you can move up the queue."
                     : "Thanks for joining. We'll email you the moment Solomon opens — you'll be among the first invited."}
                 </p>
                 <button className="btn btn-primary" onClick={onClose}>

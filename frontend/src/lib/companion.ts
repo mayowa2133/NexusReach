@@ -1,4 +1,4 @@
-import { api, API_URL } from '@/lib/api';
+import { api } from '@/lib/api';
 import type { LinkedInGraphSyncSession, MessageWarmPath } from '@/types';
 
 // Chrome Web Store listing URL for the Solomon Companion. Empty until the
@@ -153,12 +153,12 @@ export async function connectCompanion() {
   // the hour and silently disconnected the companion.
   const grant = await api.post<CompanionTokenGrant>('/api/companion/token');
 
+  // Only the token travels. The extension pins its API origin at build time and
+  // ignores any apiUrl sent here — a caller-supplied origin would be a way to
+  // redirect the companion token to another host.
   return sendCompanionRequest<CompanionStatus>(
     'NR_EXTENSION_CONNECT',
-    {
-      apiUrl: API_URL,
-      authToken: grant.token,
-    },
+    { authToken: grant.token },
     15000,
   );
 }
@@ -213,11 +213,10 @@ export async function refreshLinkedInGraphInCompanion(
 ) {
   // No authToken here: the extension uses its stored companion token.
   // Passing the Supabase JWT would overwrite that token with one that
-  // expires within the hour.
+  // expires within the hour. No apiUrl either — the extension pins its own.
   return sendCompanionRequest<LinkedInGraphRefreshResult>(
     'NR_LINKEDIN_GRAPH_REFRESH',
     {
-      apiUrl: API_URL,
       sessionToken: syncSession.session_token,
       maxBatchSize: syncSession.max_batch_size,
     },

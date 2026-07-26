@@ -1,5 +1,5 @@
 import { CheckCircle2, Circle, MailPlus, Search, Send, UserRoundSearch } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';

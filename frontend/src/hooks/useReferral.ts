@@ -2,9 +2,13 @@ import { useQuery } from '@tanstack/react-query';
 import { API_URL } from '@/lib/api';
 import type {
   ReferralStatus,
+  ReferralVerifyResponse,
   WaitlistJoinPayload,
   WaitlistJoinResponse,
 } from '@/types/referral';
+
+/** localStorage key holding the owner's `{code, token}` for return visits. */
+export const REFERRAL_OWNER_KEY = 'nr_wl';
 
 /** Error carrying the HTTP status plus the server's message, when it sent one. */
 export class WaitlistError extends Error {
@@ -27,6 +31,28 @@ async function readErrorDetail(res: Response): Promise<string | undefined> {
     return typeof detail === 'string' ? detail : undefined;
   } catch {
     return undefined;
+  }
+}
+
+/** Remember the owner key so a return visit can reopen the dashboard. */
+export function storeReferralOwner(code: string, token: string): void {
+  try {
+    localStorage.setItem(REFERRAL_OWNER_KEY, JSON.stringify({ code, token }));
+  } catch {
+    /* private-mode storage failure is non-fatal */
+  }
+}
+
+/** The stored owner token, but only for the code being viewed. */
+export function readReferralOwnerToken(code: string | undefined): string | null {
+  if (!code) return null;
+  try {
+    const raw = localStorage.getItem(REFERRAL_OWNER_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { code?: string; token?: string };
+    return parsed.code === code && parsed.token ? parsed.token : null;
+  } catch {
+    return null;
   }
 }
 
@@ -53,36 +79,87 @@ export async function joinWaitlistBackend(
   return (await res.json()) as WaitlistJoinResponse;
 }
 
-async function fetchReferralStatus(
-  code: string,
-  token: string,
-  verify: boolean
-): Promise<ReferralStatus> {
-  const path = verify ? 'verify' : 'status';
+async function fetchStatus(code: string, token: string): Promise<ReferralStatus> {
   const url =
-    `${API_URL}/api/referrals/${path}` +
+    `${API_URL}/api/referrals/status` +
     `?code=${encodeURIComponent(code)}&t=${encodeURIComponent(token)}`;
   const res = await fetch(url);
   if (!res.ok) {
-    throw new WaitlistError(res.status, `Referral ${path} failed (${res.status})`);
+    throw new WaitlistError(res.status, `Referral status failed (${res.status})`);
   }
   return (await res.json()) as ReferralStatus;
 }
 
 /**
- * Load a returning user's referral status. When `verify` is true it hits the
- * idempotent `/verify` endpoint once (the email-confirmation link), which flips
- * the signup to verified and credits the referrer before returning status.
+ * Spend the single-use confirmation token from the email. Succeeds once: the
+ * server consumes `v` and hands back the durable owner key, which we persist so
+ * the token never has to travel in a URL again.
+ */
+async function verifyAndClaim(
+  code: string,
+  verifyToken: string
+): Promise<ReferralStatus> {
+  const url =
+    `${API_URL}/api/referrals/verify` +
+    `?code=${encodeURIComponent(code)}&v=${encodeURIComponent(verifyToken)}`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new WaitlistError(res.status, `Referral verify failed (${res.status})`);
+  }
+  const data = (await res.json()) as ReferralVerifyResponse;
+  storeReferralOwner(code, data.access_token);
+  return data;
+}
+
+/** Forget the locally stored owner key (after erasure, or on request). */
+export function clearReferralOwner(): void {
+  try {
+    localStorage.removeItem(REFERRAL_OWNER_KEY);
+  } catch {
+    /* private-mode storage failure is non-fatal */
+  }
+}
+
+/**
+ * Erase this waitlist signup and its stored resume.
+ *
+ * Waitlist members have no account, so the authenticated account-deletion path
+ * can't reach them — this is their only way out, authorized by the same owner
+ * token that reads the dashboard.
+ */
+export async function deleteWaitlistData(
+  code: string,
+  token: string
+): Promise<void> {
+  const url =
+    `${API_URL}/api/referrals/me` +
+    `?code=${encodeURIComponent(code)}&t=${encodeURIComponent(token)}`;
+  const res = await fetch(url, { method: 'DELETE' });
+  if (!res.ok) {
+    throw new WaitlistError(res.status, `Delete failed (${res.status})`);
+  }
+  clearReferralOwner();
+}
+
+/**
+ * Load a returning member's referral status.
+ *
+ * With `verifyToken` (the `?v=` in a confirmation email) it confirms the
+ * address first, which credits the referrer and returns a dashboard key.
+ * Otherwise it reads status with the owner `token`.
  */
 export function useReferralStatus(
   code: string | undefined,
   token: string | null,
-  verify: boolean
+  verifyToken: string | null
 ) {
   return useQuery({
-    queryKey: ['referral-status', code, token, verify],
-    queryFn: () => fetchReferralStatus(code as string, token as string, verify),
-    enabled: Boolean(code && token),
+    queryKey: ['referral-status', code, token, verifyToken],
+    queryFn: () =>
+      verifyToken
+        ? verifyAndClaim(code as string, verifyToken)
+        : fetchStatus(code as string, token as string),
+    enabled: Boolean(code && (token || verifyToken)),
     retry: false,
     staleTime: 30_000,
   });

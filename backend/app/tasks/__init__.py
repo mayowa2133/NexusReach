@@ -172,6 +172,12 @@ celery_app.conf.update(
             "task": "app.tasks.jobs.monitor_source_health",
             "schedule": crontab(minute=50, hour="*/1"),  # hourly at :50 (sustained-outage alerts)
         },
+        "purge-waitlist-pii": {
+            # Waitlist members have no account, so nothing else ages their data
+            # out. Daily, off-peak; the sweep is a no-op once caught up.
+            "task": "app.tasks.waitlist_retention.purge_waitlist_pii",
+            "schedule": crontab(minute=15, hour=3),  # daily 03:15 UTC
+        },
     },
 )
 
@@ -192,5 +198,6 @@ for module_name in (
     "app.tasks.render",
     "app.tasks.referrals",
     "app.tasks.waitlist_resume",
+    "app.tasks.waitlist_retention",
 ):
     import_module(module_name)

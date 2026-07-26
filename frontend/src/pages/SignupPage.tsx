@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Link, Navigate } from 'react-router-dom';
+import { Link, Navigate } from 'react-router';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
