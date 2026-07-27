@@ -32,8 +32,8 @@ Railway before acting on #1.
 | 5 | Medium | ~18% of surfaced contacts are unusable (post text as job title, empty names) | **Fixed 2026-07-26** |
 | 6 | Medium | 25% of the feed is in countries the product doesn't target | **Fixed 2026-07-26 (20% → 12%)** |
 | 7 | Medium | 90% of jobs come from one source; the non-tech breadth source is absent | **Not a defect — sources verified healthy** |
-| 8 | Low | ~73s cold latency from job → contact → email | Open |
-| 9 | Low | 15 jobs sat in `people_prewarm_status='pending'` for 7 days | Open |
+| 8 | Low | ~73s cold latency from job → contact → email | **Improved 2026-07-26 — not resolved** |
+| 9 | Low | 15 jobs sat in `people_prewarm_status='pending'` for 7 days | **Fixed 2026-07-26** |
 
 ### Remediation — 2026-07-26
 
@@ -151,6 +151,51 @@ non-tech breadth, since unclassified non-tech roles were being discarded the
 same way. Worth re-measuring against production before treating it as real.
 
 Verified: 1893 backend tests, ruff clean, 30 new regression tests.
+
+### Remediation — lows, 2026-07-26
+
+**#9 — stuck pre-warms: fixed.** `prewarm_job_people_batch` always flips a job
+to `ready` (even on failure or zero results), and `_maybe_prewarm_people`
+already un-sticks jobs whose enqueue raised — so a job left `pending` means the
+task reached the broker and then never completed (worker crash, lost message,
+mid-deploy restart). Nothing retried those; the audit found 15 pending for
+nearly seven days, visible in the feed but with no people behind them and no
+path to ever getting any.
+
+`auto_prospect.recover_stuck_prewarms` (hourly) re-queues jobs pending beyond 30
+minutes — comfortably past the 3-minute reveal timeout, so it never races a warm
+that is simply still running — in bounded batches. Anything pending beyond 24
+hours is retired to `ready` instead: at that point the task plainly never ran,
+and retrying forever is worse than accepting there are no people for that job.
+
+**#8 — cold latency: improved, not resolved. Being precise about this.**
+
+Two independent, network-bound enrichment steps (`_gather_nontech_leaders`,
+`_gather_company_site_recruiters`) ran sequentially in *both* the People-page
+and job-aware flows — the second being the path a user hits from a job. They now
+run concurrently.
+
+Measured in isolation on a cold cache: 8.7s + 4.2s serial, so concurrency saves
+roughly the shorter leg, **~4s per cold search**.
+
+I nearly reported a much better number. A full search after the change came back
+at 11.9s against the 40.1s baseline, which looks like a 70% win — but that run
+was served largely from the 24h Redis search cache warmed by earlier identical
+queries. A genuinely cold search against an untouched company still takes
+**55.4s**. The parallelisation is structurally right and worth keeping, but it
+is a few seconds off a total dominated by provider round trips and employment
+verification, not a fix for the finding.
+
+Actually resolving #8 needs the streaming approach the finding proposed —
+returning each bucket as it resolves instead of awaiting all three, and starting
+the email lookup speculatively for the top contact. That is a real API and UI
+change and is left open deliberately rather than half-done.
+
+Note the baseline was also measured while two of three search providers were
+failing; each dead provider costs a round trip before falling through. Re-measure
+after the credentials are fixed.
+
+Verified: 1893 backend tests, ruff clean.
 
 ---
 

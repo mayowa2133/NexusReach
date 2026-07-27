@@ -172,6 +172,13 @@ celery_app.conf.update(
             "task": "app.tasks.jobs.monitor_source_health",
             "schedule": crontab(minute=50, hour="*/1"),  # hourly at :50 (sustained-outage alerts)
         },
+        "recover-stuck-prewarms": {
+            # A pre-warm that never completes leaves a job visible with no
+            # people behind it and nothing to retry. Audit 2026-07-26 found 15
+            # stuck for ~7 days.
+            "task": "app.tasks.auto_prospect.recover_stuck_prewarms",
+            "schedule": crontab(minute=35),  # hourly at :35
+        },
         "beat-heartbeat": {
             # Liveness only. Beat silently gates targeting (occupation retag)
             # and privacy (waitlist retention), so "is beat running?" must be

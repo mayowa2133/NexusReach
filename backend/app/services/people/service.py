@@ -350,19 +350,20 @@ async def search_people_at_company(
     # non-engineering roles; the People-page company browse needs the same
     # recall so a non-tech seeker exploring a company isn't left with x-ray-only
     # results. Deduped into the manager bucket and gated by function downstream.
-    nontech_leaders = await _gather_nontech_leaders(
-        company_name,
-        company.domain if getattr(company, "domain", None) else None,
-        roles_context,
+    # These two are independent — one feeds the manager bucket, the other the
+    # recruiter bucket — and both are network-bound (company site + SERPs). Run
+    # concurrently: sequentially they added both round trips to every cold
+    # search, on a path measured at ~40s end to end (audit 2026-07-26).
+    company_domain = company.domain if getattr(company, "domain", None) else None
+    nontech_leaders, site_recruiters = await asyncio.gather(
+        _gather_nontech_leaders(company_name, company_domain, roles_context),
+        # Recruiting/TA-team page (own-domain recruiters). All role types.
+        _gather_company_site_recruiters(company_name, company_domain),
     )
     combined_leaders = nontech_leaders["site"] + nontech_leaders["news"] + nontech_leaders["footprint"]
     if combined_leaders:
         manager_candidates = _dedupe_candidates(manager_candidates, combined_leaders)
 
-    # Recruiting/TA-team page (own-domain recruiters). Runs for all role types.
-    site_recruiters = await _gather_company_site_recruiters(
-        company_name, company.domain if getattr(company, "domain", None) else None
-    )
     if site_recruiters:
         recruiter_candidates = _dedupe_candidates(recruiter_candidates, site_recruiters)
 
@@ -1236,7 +1237,14 @@ async def search_people_for_job(
     # engineers; bounded, cached, fail-soft.
     nontech_started_at = time.monotonic()
     site_domain = company.domain if getattr(company, "domain", None) else None
-    nontech = await _gather_nontech_leaders(job.company_name, site_domain, context)
+    # Independent and both network-bound (company site + SERPs): one feeds the
+    # manager bucket, the other the recruiter bucket. Run them together — this
+    # is the path a user hits from a job, so the serial round trips were paid on
+    # every cold "Find People" (audit 2026-07-26).
+    nontech, site_recruiters = await asyncio.gather(
+        _gather_nontech_leaders(job.company_name, site_domain, context),
+        _gather_company_site_recruiters(job.company_name, site_domain),
+    )
     site_leaders = nontech["site"]
     news_leaders = nontech["news"]
     footprint_leaders = nontech["footprint"]
@@ -1253,7 +1261,6 @@ async def search_people_for_job(
             debug["searches"]["public_footprint_leaders"] = [
                 _debug_candidate_summary(c) for c in footprint_leaders
             ]
-    site_recruiters = await _gather_company_site_recruiters(job.company_name, site_domain)
     if site_recruiters:
         recruiter_candidates = _dedupe_candidates(recruiter_candidates, site_recruiters)
         if debug is not None:
