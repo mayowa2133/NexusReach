@@ -5,6 +5,7 @@ import {
   WaitlistError,
 } from '@/hooks/useReferral';
 import { ReferralPanel } from '@/components/ReferralPanel';
+import { trackFunnelEvent } from '@/lib/observability';
 import type { ReferralStatus } from '@/types/referral';
 
 // The referral loop needs the backend sink: a signup returns a referral code +
@@ -183,6 +184,19 @@ export function WaitlistModal({ onClose, source, referredByCode }: WaitlistModal
       resume_file_base64: resume?.base64 ?? null,
     };
 
+    // Funnel properties. Deliberately shape-only: counts, booleans, and the
+    // fixed goal-key vocabulary. Never the email, name, note, LinkedIn URL,
+    // resume filename, or the referral code — analytics has no need for any of
+    // it, and this form now collects sensitive personal data.
+    const funnelProps = {
+      source: source || 'landing',
+      referred: Boolean(referredByCode),
+      has_resume: Boolean(resume),
+      goals_count: goals.length,
+      goals,
+    };
+    trackFunnelEvent('waitlist_submitted', funnelProps);
+
     try {
       // Backend sink first — it returns the referral code + queue position that
       // hydrate the "refer your friends" panel.
@@ -198,6 +212,14 @@ export function WaitlistModal({ onClose, source, referredByCode }: WaitlistModal
       } else {
         setReferral(null);
       }
+      trackFunnelEvent('waitlist_joined', {
+        ...funnelProps,
+        sink: 'backend',
+        already_on_list: Boolean(result.already_on_list),
+        // Whether this visitor actually reached the referral panel — an
+        // already-listed address doesn't, and that changes share rates.
+        saw_referral_panel: Boolean(result.referral && result.access_token),
+      });
       setState('success');
     } catch (err) {
       if (err instanceof WaitlistError) {
@@ -213,6 +235,25 @@ export function WaitlistModal({ onClose, source, referredByCode }: WaitlistModal
             message = 'Too many attempts. Please wait a moment and try again.';
           }
         }
+        // Category, not the message — the server's `detail` can quote user
+        // input, which must not reach analytics.
+        const reason =
+          err.status === 422
+            ? 'invalid_input'
+            : err.status === 413
+              ? 'file_too_large'
+              : err.status === 429
+                ? 'rate_limited'
+                : err.status === 400
+                  ? 'bad_upload'
+                  : err.status >= 500
+                    ? 'server_error'
+                    : 'rejected';
+        trackFunnelEvent('waitlist_submit_failed', {
+          ...funnelProps,
+          reason,
+          status: err.status,
+        });
         setError(message);
         setState('error');
         return;
@@ -236,12 +277,24 @@ export function WaitlistModal({ onClose, source, referredByCode }: WaitlistModal
           });
           setReferral(null);
           setAlreadyOnList(false);
+          // Captured, but with no referral features — worth separating so a
+          // backend outage doesn't read as healthy signups.
+          trackFunnelEvent('waitlist_joined', {
+            ...funnelProps,
+            sink: 'sheet_fallback',
+            already_on_list: false,
+            saw_referral_panel: false,
+          });
           setState('success');
           return;
         } catch {
           /* fall through to the connection error */
         }
       }
+      trackFunnelEvent('waitlist_submit_failed', {
+        ...funnelProps,
+        reason: 'network',
+      });
       setError('Could not reach the server. Please check your connection.');
       setState('error');
     }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { WaitlistModal } from '@/components/WaitlistModal';
 import { BrandMark } from '@/components/BrandLogo';
+import { trackFunnelEvent } from '@/lib/observability';
 import './landing.css';
 
 // The product inbox doesn't exist yet. Set this to the real address (e.g.
@@ -59,10 +60,25 @@ export function LandingPage() {
     }
   }, [refFromUrl]);
 
-  const openWaitlist = useCallback((source: string) => {
-    setWaitlistSource(source);
-    setWaitlistOpen(true);
-  }, []);
+  // Top of the funnel. `referred` (never the code itself — that identifies a
+  // person) is what separates referral traffic from everything else.
+  const arrivedReferred = Boolean(referredByCode);
+  useEffect(() => {
+    trackFunnelEvent('waitlist_landing_viewed', { referred: arrivedReferred });
+  }, [arrivedReferred]);
+
+  const openWaitlist = useCallback(
+    (source: string) => {
+      setWaitlistSource(source);
+      setWaitlistOpen(true);
+      // Which CTA opens the modal — tells you where on the page intent forms.
+      trackFunnelEvent('waitlist_modal_opened', {
+        source,
+        referred: arrivedReferred,
+      });
+    },
+    [arrivedReferred]
+  );
   const closeWaitlist = useCallback(() => setWaitlistOpen(false), []);
 
   useEffect(() => {
