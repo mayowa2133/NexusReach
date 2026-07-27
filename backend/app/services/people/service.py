@@ -4,6 +4,7 @@ import asyncio
 import logging
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from sqlalchemy import select
@@ -735,6 +736,41 @@ async def search_people_at_company(
     }
 
 
+
+def _partial_payload(
+    *,
+    company: Any,
+    recruiters: list[dict],
+    hiring_managers: list[dict],
+    peers: list[dict],
+) -> dict:
+    """Preview shape for the streaming endpoint's first emission.
+
+    Only fields that are already trustworthy at this point: the candidate has
+    been through company matching, the occupation gate and ranking, but not
+    verification, recovery or persistence. No id, no email — nothing the UI
+    could offer an action on. `provisional: True` is explicit so a consumer
+    cannot mistake these for final contacts.
+    """
+    def preview(candidate: dict) -> dict:
+        return {
+            "full_name": candidate.get("full_name"),
+            "title": candidate.get("title"),
+            "linkedin_url": candidate.get("linkedin_url"),
+            "match_quality": candidate.get("match_quality"),
+            "current_company_verified": bool(candidate.get("current_company_verified")),
+            "provisional": True,
+        }
+
+    return {
+        "type": "partial",
+        "company_name": getattr(company, "name", None),
+        "recruiters": [preview(c) for c in recruiters],
+        "hiring_managers": [preview(c) for c in hiring_managers],
+        "peers": [preview(c) for c in peers],
+    }
+
+
 async def search_people_for_job(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -743,8 +779,25 @@ async def search_people_for_job(
     min_relevance_score: int = 1,
     target_count_per_bucket: int = DEFAULT_TARGET_COUNT_PER_BUCKET,
     include_debug: bool = False,
+    on_partial: Callable[[dict], Awaitable[None]] | None = None,
 ) -> dict:
-    """Find people at a company using extracted job context."""
+    """Find people at a company using extracted job context.
+
+    ``on_partial`` is an optional async callback invoked ONCE, as soon as the
+    initial searches have been prepared into ranked buckets — roughly a third of
+    the way through a cold run. It exists for the streaming endpoint: profiling
+    (2026-07-26) put the initial searches at ~17s of a ~51s cold total, with the
+    rest spent on conditional recovery and verification that only *refine* what
+    is already there. Showing the user those first contacts turns a 51-second
+    blank screen into an 18-second one.
+
+    The payload is a lightweight preview, deliberately not the final shape:
+    these candidates are not persisted yet (persistence happens after recovery
+    and verification), so they have no Person id and nothing actionable can be
+    offered on them. Callers must treat them as display-only until the final
+    result arrives. A callback that raises is swallowed — a broken consumer must
+    never fail the search.
+    """
     total_started_at = time.monotonic()
     target_count_per_bucket = _clamp_target_count_per_bucket(target_count_per_bucket)
     search_limit = _search_limit_for_target(target_count_per_bucket)
@@ -1399,6 +1452,20 @@ async def search_people_for_job(
         manager_results=len(manager_results),
         peer_results=len(peer_results),
     )
+    if on_partial is not None:
+        try:
+            await on_partial(
+                _partial_payload(
+                    company=company,
+                    recruiters=recruiter_results,
+                    hiring_managers=manager_results,
+                    peers=peer_results,
+                )
+            )
+        except Exception:
+            # A streaming consumer that disconnected or errored must never take
+            # the search down with it — the full result still gets persisted.
+            logger.debug("Partial-results callback failed", exc_info=True)
     recruiter_targeted_recovery_needed = _should_run_recruiter_targeted_recovery(
         recruiter_results,
         context=context,

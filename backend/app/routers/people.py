@@ -1,8 +1,11 @@
 import logging
+import asyncio
+import json
 import uuid
 from datetime import datetime, timezone
 from typing import Annotated, Literal
 
+from fastapi.responses import StreamingResponse
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -455,3 +458,111 @@ async def hiring_team_capture(
         "recruiters": result["recruiters"],
         "hiring_managers": result["hiring_managers"],
     }
+
+
+@router.post("/search/stream")
+@limiter.limit("10/minute")
+async def search_people_stream(
+    request: Request,
+    body: PeopleSearchRequest,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _rate_check: Annotated[None, Depends(check_discovery_rate_limit)],
+):
+    """Job-aware people search that streams provisional results, then the final set.
+
+    Why this exists: profiling a cold search (2026-07-26) put the initial bucket
+    searches at ~17s of a ~51s total, with the remainder spent on conditional
+    recovery and verification that only *refine* contacts already found. The
+    non-streaming endpoint makes the user wait the full 51s staring at nothing.
+    This emits the first ranked contacts as soon as they exist.
+
+    Transport is newline-delimited JSON over POST, not SSE: `EventSource` cannot
+    set an Authorization header, and putting the bearer token in a query string
+    is exactly the mistake the 2026-07-25 security audit cleaned up elsewhere.
+    A `fetch` + `response.body.getReader()` consumer handles NDJSON fine.
+
+    Frames, in order:
+      {"type":"partial", recruiters/hiring_managers/peers: [preview...]}  (~18s)
+      {"type":"final",   ...the same payload /search returns...}
+      {"type":"error",   "message": ...}                                (on failure)
+
+    Partial rows carry `provisional: true` and no id — they are display-only
+    until the final frame replaces them.
+    """
+    if not body.job_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Streaming search requires a job_id.",
+        )
+    try:
+        job_uuid = uuid.UUID(body.job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid job_id format") from exc
+
+    async def frames():
+        queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+        async def on_partial(payload: dict) -> None:
+            await queue.put(json.dumps(payload))
+
+        async def run() -> None:
+            try:
+                result = await search_people_for_job(
+                    db=db,
+                    user_id=user_id,
+                    job_id=job_uuid,
+                    search_depth=body.search_depth,
+                    min_relevance_score=body.min_relevance_score,
+                    target_count_per_bucket=body.target_count_per_bucket,
+                    include_debug=body.include_debug,
+                    on_partial=on_partial,
+                )
+                response = _serialize_people_search_result(result)
+                try:
+                    await save_job_research_snapshot(
+                        db,
+                        user_id=user_id,
+                        job_id=job_uuid,
+                        payload=response.model_dump(mode="json"),
+                    )
+                except Exception:
+                    logger.debug("Snapshot save failed after stream", exc_info=True)
+                capture_event(str(user_id), "people_searched", properties={
+                    "recruiters_found": len(response.recruiters),
+                    "hiring_managers_found": len(response.hiring_managers),
+                    "peers_found": len(response.peers),
+                    "has_job_context": True,
+                    "streamed": True,
+                })
+                await queue.put(
+                    json.dumps({"type": "final", **response.model_dump(mode="json")})
+                )
+            except ValueError:
+                await queue.put(json.dumps({"type": "error", "message": "Job not found"}))
+            except Exception:
+                logger.exception("Streaming people search failed")
+                await queue.put(
+                    json.dumps({"type": "error", "message": "People search failed"})
+                )
+            finally:
+                await queue.put(None)  # sentinel: closes the stream
+
+        task = asyncio.create_task(run())
+        try:
+            while True:
+                frame = await queue.get()
+                if frame is None:
+                    break
+                yield frame + "\n"
+        finally:
+            # Client hung up mid-search: stop the work rather than letting it
+            # run on against paid providers for a response nobody will read.
+            if not task.done():
+                task.cancel()
+
+    return StreamingResponse(
+        frames(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    )

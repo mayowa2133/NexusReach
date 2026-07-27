@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { streamPeopleSearch, type PeopleSearchPartial } from '@/lib/peopleSearchStream';
 import { trackFirstFunnelEvent, trackFunnelEvent } from '@/lib/observability';
 import type { Person, PersonFeedback, PeopleSearchResult, PaginatedResponse, SearchLogEntry } from '@/types';
 
@@ -21,7 +22,25 @@ export function usePeopleSearch() {
       include_debug?: boolean;
       // Bypass the snapshot cache and force a live search.
       force_refresh?: boolean;
-    }) => api.post<PeopleSearchResult>('/api/people/search', params),
+      /**
+       * Opt into streaming. When supplied alongside a `job_id`, the search runs
+       * over the NDJSON endpoint and this fires once with provisional contacts
+       * (~17s in) before the mutation resolves with the final result (~50s).
+       *
+       * The mutation's contract is unchanged either way — it still resolves
+       * with the full `PeopleSearchResult` — so callers that don't pass this
+       * behave exactly as before.
+       */
+      onPartial?: (partial: PeopleSearchPartial) => void;
+    }) => {
+      const { onPartial, ...body } = params;
+      // Streaming only exists for the job-aware path: the company-level search
+      // has no equivalent seam to emit from.
+      if (onPartial && body.job_id) {
+        return streamPeopleSearch(body, onPartial);
+      }
+      return api.post<PeopleSearchResult>('/api/people/search', body);
+    },
     onSuccess: (data, variables) => {
       const resultCount = peopleSearchCount(data);
       trackFunnelEvent('people_search_completed', {
