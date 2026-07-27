@@ -730,3 +730,96 @@ async def _process_pending_sends() -> dict:
 def process_pending_sends() -> dict:
     """Celery beat task: process scheduled auto-sends every 5 minutes."""
     return run_async(_process_pending_sends())
+
+
+# How long a job may sit in `pending` before we treat the pre-warm as lost.
+# Well past PEOPLE_PREWARM_REVEAL_TIMEOUT (3 min) so this never races a warm
+# that is simply still running.
+_PREWARM_STUCK_AFTER = timedelta(minutes=30)
+
+# Past this we stop retrying and just mark the job ready. The warm always sets
+# `ready` itself — even on failure — so a job still pending this long means the
+# task never ran at all (worker crash, lost broker message, mid-deploy restart).
+# Retrying forever would be worse than accepting we have no people for it.
+_PREWARM_GIVE_UP_AFTER = timedelta(hours=24)
+
+# Bound the requeue so a large backlog can't flood the prewarm queue in one tick.
+_PREWARM_RECOVERY_MAX_JOBS = 100
+
+
+async def _recover_stuck_prewarms() -> dict:
+    """Re-queue (or retire) job pre-warms that never finished.
+
+    ``prewarm_job_people_batch`` always flips a job to ``ready``, even when the
+    search fails or finds nobody, and `_maybe_prewarm_people` already un-sticks
+    jobs whose enqueue raised. So a job left in ``pending`` means the task was
+    accepted by the broker and then never completed.
+
+    Nothing retried those. A 2026-07-26 audit found 15 jobs pending for nearly
+    seven days: still visible (the 3-minute reveal timeout shows them anyway),
+    but with no people behind them and no path to ever getting any — silently
+    failing the product's core promise for those jobs.
+    """
+    from sqlalchemy import select, update  # noqa: PLC0415
+
+    from app.models.job import Job  # noqa: PLC0415
+
+    now = datetime.now(timezone.utc)
+    stuck_before = now - _PREWARM_STUCK_AFTER
+    give_up_before = now - _PREWARM_GIVE_UP_AFTER
+
+    async with async_session() as db:
+        # Old enough that retrying is pointless — make them honest instead of
+        # leaving a status that claims a warm is still coming.
+        retired = await db.execute(
+            update(Job)
+            .where(
+                Job.people_prewarm_status == "pending",
+                Job.updated_at <= give_up_before,
+            )
+            .values(people_prewarm_status="ready")
+        )
+        await db.commit()
+
+        rows = (
+            await db.execute(
+                select(Job.id, Job.user_id)
+                .where(
+                    Job.people_prewarm_status == "pending",
+                    Job.updated_at <= stuck_before,
+                )
+                .order_by(Job.updated_at)
+                .limit(_PREWARM_RECOVERY_MAX_JOBS)
+            )
+        ).all()
+
+    by_user: dict[uuid.UUID, list[str]] = {}
+    for job_id, user_id in rows:
+        by_user.setdefault(user_id, []).append(str(job_id))
+
+    requeued = 0
+    for user_id, job_ids in by_user.items():
+        for start in range(0, len(job_ids), 5):
+            batch = job_ids[start : start + 5]
+            try:
+                prewarm_job_people_batch.delay(str(user_id), batch)
+                requeued += len(batch)
+            except Exception:
+                logger.warning("Could not re-queue stuck pre-warm", exc_info=True)
+
+    result = {"requeued": requeued, "retired": retired.rowcount or 0}
+    if result["requeued"] or result["retired"]:
+        logger.info("Stuck pre-warm recovery: %s", result)
+    return result
+
+
+@celery_app.task(
+    name="app.tasks.auto_prospect.recover_stuck_prewarms",
+    autoretry_for=(Exception,),
+    retry_backoff=60,
+    retry_backoff_max=600,
+    max_retries=3,
+)
+def recover_stuck_prewarms() -> dict:
+    """Celery task: re-queue or retire job pre-warms that never completed."""
+    return run_async(_recover_stuck_prewarms())
