@@ -479,6 +479,8 @@ body:has(.lp) { background: #FAF9F5; }
   font-family: var(--lp-mono); font-size: 10.5px; letter-spacing: 0.03em;
   color: var(--lp-ink-40); text-align: center; margin-top: 2px;
 }
+.lp-wl-fine-link { color: var(--lp-ink-55); text-decoration: underline; }
+.lp-wl-fine-link:hover { color: var(--lp-green); }
 .lp-wl-success { text-align: center; padding: 8px 4px 4px; }
 .lp-wl-success .stamp { display: inline-block; margin-bottom: 14px; }
 .lp-wl-success h3 { font-size: 23px; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 10px; }

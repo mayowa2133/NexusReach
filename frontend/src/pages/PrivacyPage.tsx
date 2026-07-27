@@ -4,6 +4,8 @@ const sections = [
   {
     title: 'Data Solomon Collects',
     body: [
+      'Pre-launch waitlist entries. Joining the waitlist does not create an account. The form collects your name and email address, and optionally your LinkedIn URL, current role, target role, goals, and a short note. Your IP address is recorded solely to rate-limit signups and detect referral fraud.',
+      'A resume you choose to attach to a waitlist entry. The resume is optional — the waitlist works without it. The file is held in private cloud storage that is not publicly readable, and its text is extracted into structured fields so your profile can be pre-filled if you join at launch. It is not shared with other users, is never used to contact you, and is deleted when you delete your waitlist entry.',
       'Account and authentication data, including your email address and Supabase user identifier.',
       'Profile, goals, resume content, stories, job preferences, saved jobs, saved companies, contacts, message drafts, outreach activity, notifications, and generated artifacts you create or import.',
       'Email integration metadata and encrypted Gmail or Outlook refresh tokens when you connect an inbox. OAuth refresh tokens are not included in account exports.',
@@ -14,6 +16,7 @@ const sections = [
   {
     title: 'How Data Is Used',
     body: [
+      'To operate the pre-launch waitlist: confirm that you own the email address you gave, work out your place in the queue, attribute referrals you make, send you your referral link and tell you when a referral moves you up, and invite you when Solomon opens.',
       'To import jobs, discover relevant people, rank warm paths, draft outreach, stage email drafts, schedule optional delayed sends, and maintain your lightweight networking CRM.',
       'To secure the service, debug failures, measure product usage, improve onboarding, and detect abusive or unsafe behavior.',
       'To comply with account export, deletion, security, legal, and operational obligations.',
@@ -22,7 +25,8 @@ const sections = [
   {
     title: 'Processors and Integrations',
     body: [
-      'Solomon uses Supabase for authentication and hosted Postgres, Railway for backend services, Vercel for frontend hosting, Redis for queues and caching, Sentry for error monitoring, and PostHog for privacy-conscious product analytics.',
+      'Solomon uses Supabase for authentication, hosted Postgres, and the private storage that holds waitlist resumes; Railway for backend services; Vercel for frontend hosting; Redis for queues and caching; Resend to send waitlist confirmation and referral emails; Sentry for error monitoring; and PostHog for privacy-conscious product analytics. Analytics events record the shape of an action — counts, selections, and outcomes — never the contents of your form or resume.',
+      'Where the operator has configured it, a copy of waitlist signup details (excluding any resume file) is mirrored to a private Google Sheet used to manage the pre-launch list.',
       'When enabled or configured, Solomon may call Gmail, Microsoft Graph, Apollo, SearXNG, Serper, Brave Search, Tavily, Hunter, GitHub, Crawl4AI, Firecrawl, and supported job boards or ATS providers to deliver product features.',
       'Third-party services receive only the data needed for the specific feature request, such as a company, job URL, search query, public profile URL, email candidate, or email draft action.',
     ],
@@ -77,12 +81,13 @@ export function PrivacyPage() {
           </Link>
           <div className="space-y-2">
             <h1 className="text-3xl font-semibold tracking-tight">Privacy Policy</h1>
-            <p className="text-sm text-muted-foreground">Effective July 13, 2026</p>
+            <p className="text-sm text-muted-foreground">Effective July 27, 2026</p>
           </div>
           <p className="text-muted-foreground">
-            Solomon is a job-seeker networking assistant. This policy
-            explains what data the app collects, why it is used, and which
-            controls are available to account holders.
+            Solomon is a job-seeker networking assistant. This policy explains
+            what data the app collects, why it is used, and which controls are
+            available — both to account holders and to anyone who has only
+            joined the pre-launch waitlist.
           </p>
         </header>
 

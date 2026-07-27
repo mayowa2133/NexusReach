@@ -511,8 +511,22 @@ export function WaitlistModal({ onClose, source, referredByCode }: WaitlistModal
                 {state === 'submitting' ? 'Joining…' : 'Join the waitlist'}
                 <span className="arrow">→</span>
               </button>
+              {/* Must stay true to what the system actually sends: a
+                  confirmation link, referral updates, and the launch invite —
+                  not the single launch email this promised before the referral
+                  loop existed. */}
               <p className="lp-wl-fine">
-                No spam. One email at launch. Your details are never sold.
+                No spam. We email you to confirm your address, when a referral
+                lands, and at launch. Your details are never sold.{' '}
+                <a
+                  href="/privacy"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="lp-wl-fine-link"
+                >
+                  How we handle your data
+                </a>
+                .
               </p>
             </form>
           </>
