@@ -334,3 +334,51 @@ def test_operations_token_stays_out_of_the_engineering_vocab():
 
     swe = next(o for o in OCCUPATIONS if o.key == "software_engineering")
     assert not [a for a in swe.aliases if "operations" in a]
+
+
+# ---------------------------------------------------------------------------
+# Discovery must degrade targeting, not delete inventory (audit #4/#2)
+# ---------------------------------------------------------------------------
+
+
+def test_unclassified_results_are_kept_not_discarded():
+    """"Unclassified" and "off_category" are different verdicts.
+
+    off_category = we identified the role and it's something else (drop it).
+    unclassified = we couldn't tell. Dropping those threw away 237 of 660
+    curated early-career jobs on a software_engineering discover.
+    """
+    from app.services.jobs.search import _occupation_relevance
+
+    accepted, reason, keys = _occupation_relevance(
+        {"title": "Zorble Wrangler", "description": ""}, "software_engineering"
+    )
+    assert accepted is True
+    assert reason == "unclassified"
+    assert keys == []  # no occupation claimed
+
+
+def test_off_category_results_are_still_rejected():
+    from app.services.jobs.search import _occupation_relevance
+
+    accepted, reason, _ = _occupation_relevance(
+        {"title": "Senior Brand Marketing Manager", "description": ""},
+        "software_engineering",
+    )
+    assert accepted is False
+    assert reason == "off_category"
+
+
+def test_a_kept_unclassified_job_is_not_stamped_with_the_searched_occupation():
+    """The mis-tagging trap: engineering jobs appearing under Marketing.
+
+    A job we could not classify must be stored with NO occupation tag, so the
+    exact-match feed filter still won't surface it under the wrong chip.
+    """
+    from app.services.jobs import storage
+
+    data = {"title": "Zorble Wrangler", "description": "", "_occupation_hint": "marketing"}
+    # search.py strips the hint for this reason before inferring tags.
+    data.pop("_occupation_hint", None)
+    storage._infer_occupation_tags_for_job(data)
+    assert not [t for t in (data.get("tags") or []) if str(t).startswith("occupation:")]

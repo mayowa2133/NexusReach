@@ -26,6 +26,7 @@ from app.services.occupation_taxonomy import (
     outreach_playbook_for_keys as _outreach_playbook_for_keys,
 )
 from app.utils.job_context import extract_job_context
+from app.services.people import contact_quality
 from app.services.message_safety import (
     assess_generated_message_safety,
     detect_untrusted_prompt_injection,
@@ -349,6 +350,13 @@ def _build_user_context(profile: Profile) -> str:
 def _build_person_context(person: Person) -> str:
     """Build the target person context section."""
     parts = [f"Name: {person.full_name or 'Unknown'}"]
+
+    # LinkedIn truncates surnames for out-of-network profiles ("Christopher K."),
+    # and a draft that opens "Hi Christopher K." is an obvious tell that the
+    # message was generated. Give the model the name to actually greet with.
+    greeting = contact_quality.greeting_name(person.full_name)
+    if greeting and greeting != (person.full_name or "").strip():
+        parts.append(f"Greet them as: {greeting}")
 
     if person.title:
         parts.append(f"Title: {person.title}")

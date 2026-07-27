@@ -28,12 +28,26 @@ def test_targeted_job_rejects_classified_off_category_result():
     assert "software_engineering" in keys
 
 
-def test_targeted_job_rejects_unclassified_query_hint():
+def test_unclassified_job_is_kept_but_claims_no_occupation():
+    """Query text is provenance, not evidence — but that shouldn't delete jobs.
+
+    This used to assert ``accepted is False``. Rejecting outright threw away
+    real inventory: measured 2026-07-26, a software_engineering discover
+    discarded 237 of 660 curated early-career jobs purely because the classifier
+    didn't recognise their titles.
+
+    The invariant that actually mattered is unchanged and asserted here — the
+    job claims NO occupation (``keys == []``), and `search.py` strips the query
+    hint before tagging, so the exact-match feed filter still cannot surface it
+    under the searched chip. The job is kept, the targeting is not faked.
+    """
     accepted, reason, keys = _occupation_relevance(
         {"title": "Associate II", "description": "Join our growing team."},
         "sales",
     )
-    assert (accepted, reason, keys) == (False, "unclassified", [])
+    assert accepted is True
+    assert reason == "unclassified"
+    assert keys == []
 
 
 def test_trusted_explicit_source_category_can_accept_generic_title():
