@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import secrets
+import uuid
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -198,19 +199,25 @@ def issue_verification_token(signup: WaitlistSignup) -> str:
 
 async def verify_signup(
     db: AsyncSession, code: str, token: str
-) -> tuple[WaitlistSignup, str] | None:
+) -> tuple[WaitlistSignup, str, uuid.UUID | None] | None:
     """Confirm an email, credit the referrer, and return a dashboard key.
 
     ``token`` must be the emailed ``nrv_`` verification token — the dashboard
     ``nrw_`` access token is rejected, which is what keeps a referral countable
     only by someone who can read the invitee's mail.
 
-    Returns ``(signup, access_token)`` on success, ``None`` when the code/token
-    doesn't resolve. The verification token is consumed (cleared) on first use
-    and the referrer is credited exactly once, in the same transaction, so a
-    re-clicked link can never double-count. Because the token is single-use, a
-    second click no longer resolves; the caller renders that as an expired link
-    and the visitor still has the dashboard key from the first click.
+    Returns ``(signup, access_token, credited_referrer_id)`` on success, ``None``
+    when the code/token doesn't resolve. The verification token is consumed
+    (cleared) on first use and the referrer is credited exactly once, in the same
+    transaction, so a re-clicked link can never double-count. Because the token
+    is single-use, a second click no longer resolves; the caller renders that as
+    an expired link and the visitor still has the dashboard key from the first
+    click.
+
+    ``credited_referrer_id`` is set only on the confirmation that actually
+    incremented someone's tally — the caller uses it to notify that referrer, and
+    its being ``None`` on every other path is what stops a replay from mailing
+    them again.
     """
     if not token or not token.startswith(VERIFICATION_TOKEN_PREFIX):
         return None
@@ -228,6 +235,7 @@ async def verify_signup(
     signup.verification_token_hash = None
     access_token = issue_access_token(signup)
 
+    credited_referrer_id: uuid.UUID | None = None
     if not signup.email_verified:
         signup.email_verified = True
         signup.verified_at = datetime.now(timezone.utc)
@@ -240,10 +248,11 @@ async def verify_signup(
                     verified_referral_count=WaitlistSignup.verified_referral_count + 1
                 )
             )
+            credited_referrer_id = signup.referred_by_id
 
     await db.commit()
     await db.refresh(signup)
-    return signup, access_token
+    return signup, access_token, credited_referrer_id
 
 
 # --- Status: position, total, tier ---------------------------------------
@@ -276,6 +285,19 @@ def build_share_url(code: str) -> str:
 def build_dashboard_url(code: str, access_token: str) -> str:
     """The owner-only referral dashboard link (email delivery only)."""
     return f"{_base_url()}/r/{code}?t={access_token}"
+
+
+def build_dashboard_home_url(code: str) -> str:
+    """The dashboard link with **no** secret in it.
+
+    For mail we send to an existing member without being asked (the
+    "your referral was credited" nudge). Minting a token to deep-link them would
+    call ``issue_access_token``, which *rotates* the stored hash and would sign
+    them out of the dashboard they may have open — so we link to the bare page
+    and let it read the key it already holds in ``localStorage``. On a device
+    that has none, the page asks them to open their emailed link.
+    """
+    return f"{_base_url()}/r/{code}"
 
 
 def build_verify_url(code: str, verification_token: str) -> str:

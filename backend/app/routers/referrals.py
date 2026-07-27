@@ -9,6 +9,7 @@ formality any form submitter could complete. No account / JWT is involved —
 waitlist signups have none.
 """
 
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -22,6 +23,9 @@ from app.schemas.waitlist import (
     WaitlistDeleteResponse,
 )
 from app.services import referral_service, waitlist_retention_service
+from app.tasks.referrals import send_referral_credited_email
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/referrals", tags=["referrals"])
 
@@ -60,7 +64,16 @@ async def verify_referral(
     verified = await referral_service.verify_signup(db, code, v)
     if verified is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    signup, access_token = verified
+    signup, access_token, credited_referrer_id = verified
+
+    # Tell the referrer they moved up. Only set on the confirmation that actually
+    # credited them, so a replayed link can't mail them twice.
+    if credited_referrer_id is not None:
+        try:
+            send_referral_credited_email.delay(str(credited_referrer_id))
+        except Exception:  # a broker outage must not fail the confirmation
+            logger.warning("Could not queue referral-credited email", exc_info=True)
+
     payload = await referral_service.referral_status_payload(db, signup)
     return ReferralVerifyResponse(
         name=signup.name, access_token=access_token, **payload

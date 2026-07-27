@@ -184,7 +184,7 @@ async def test_verify_signup_flips_and_credits_referrer():
     out = await rs.verify_signup(db, signup.referral_code, token)
 
     assert out is not None
-    verified, access_token = out
+    verified, access_token, credited_referrer_id = out
     assert verified is signup
     assert signup.email_verified is True
     assert signup.verified_at is not None
@@ -194,6 +194,37 @@ async def test_verify_signup_flips_and_credits_referrer():
     assert signup.access_token_hash == rs.hash_token(access_token)
     assert db.execute.await_count == 2  # resolve + increment
     db.commit.assert_awaited()
+    # Reported so the caller can notify exactly the person who was credited.
+    assert credited_referrer_id == referrer_id
+
+
+async def test_verify_signup_reports_no_credit_for_an_organic_signup():
+    """Nobody to notify when the member wasn't referred."""
+    token = rs.mint_verification_token()
+    signup = _signup(referred_by_id=None, verification_token_hash=rs.hash_token(token))
+    db = _db_returning(signup)
+
+    out = await rs.verify_signup(db, signup.referral_code, token)
+
+    assert out is not None
+    assert out[2] is None
+
+
+async def test_verify_signup_reports_no_credit_on_re_confirmation():
+    """An already-verified row must not re-credit — nor re-notify — its referrer."""
+    token = rs.mint_verification_token()
+    signup = _signup(
+        referred_by_id=uuid.uuid4(),
+        email_verified=True,
+        verification_token_hash=rs.hash_token(token),
+    )
+    db = _db_returning(signup)
+
+    out = await rs.verify_signup(db, signup.referral_code, token)
+
+    assert out is not None
+    assert out[2] is None
+    assert db.execute.await_count == 1  # resolve only; no increment
 
 
 async def test_verify_signup_rejects_the_dashboard_access_token():
@@ -463,17 +494,21 @@ async def test_referral_status_unknown_token_404(client):
 async def test_verify_endpoint_credits_and_returns_status(client):
     signup = _signup(name="Jordan", email_verified=True, verified_referral_count=1)
     verified_payload = dict(_STATUS_PAYLOAD, email_verified=True)
+    referrer_id = uuid.uuid4()
     with (
         patch(
             "app.routers.referrals.referral_service.verify_signup",
             new_callable=AsyncMock,
-            return_value=(signup, "nrw_fresh"),
+            return_value=(signup, "nrw_fresh", referrer_id),
         ),
         patch(
             "app.routers.referrals.referral_service.referral_status_payload",
             new_callable=AsyncMock,
             return_value=verified_payload,
         ),
+        patch(
+            "app.routers.referrals.send_referral_credited_email.delay"
+        ) as mock_notify,
     ):
         resp = await client.get("/api/referrals/verify?code=ABCDEFGHJK&v=nrv_x")
 
@@ -483,6 +518,56 @@ async def test_verify_endpoint_credits_and_returns_status(client):
     # Clicking the emailed link proves mailbox control, so the dashboard key is
     # issued here rather than at signup.
     assert body["access_token"] == "nrw_fresh"
+    # The referrer is told they moved up — the nudge that drives the next share.
+    mock_notify.assert_called_once_with(str(referrer_id))
+
+
+async def test_verify_endpoint_does_not_notify_without_a_credit(client):
+    """Organic signup or replayed link => nobody was credited, so no email."""
+    signup = _signup(name="Jordan", email_verified=True)
+    with (
+        patch(
+            "app.routers.referrals.referral_service.verify_signup",
+            new_callable=AsyncMock,
+            return_value=(signup, "nrw_fresh", None),
+        ),
+        patch(
+            "app.routers.referrals.referral_service.referral_status_payload",
+            new_callable=AsyncMock,
+            return_value=dict(_STATUS_PAYLOAD),
+        ),
+        patch(
+            "app.routers.referrals.send_referral_credited_email.delay"
+        ) as mock_notify,
+    ):
+        resp = await client.get("/api/referrals/verify?code=ABCDEFGHJK&v=nrv_x")
+
+    assert resp.status_code == 200
+    mock_notify.assert_not_called()
+
+
+async def test_verify_endpoint_survives_a_broker_outage(client):
+    """A dead queue must not cost the visitor their confirmation."""
+    signup = _signup(name="Jordan", email_verified=True)
+    with (
+        patch(
+            "app.routers.referrals.referral_service.verify_signup",
+            new_callable=AsyncMock,
+            return_value=(signup, "nrw_fresh", uuid.uuid4()),
+        ),
+        patch(
+            "app.routers.referrals.referral_service.referral_status_payload",
+            new_callable=AsyncMock,
+            return_value=dict(_STATUS_PAYLOAD),
+        ),
+        patch(
+            "app.routers.referrals.send_referral_credited_email.delay",
+            side_effect=RuntimeError("broker down"),
+        ),
+    ):
+        resp = await client.get("/api/referrals/verify?code=ABCDEFGHJK&v=nrv_x")
+
+    assert resp.status_code == 200
 
 
 async def test_verify_endpoint_bad_token_404(client):
@@ -544,6 +629,97 @@ def test_email_greeting_handles_a_missing_name():
     assert _greeting(None) == "Hi,"
     assert _greeting("   ") == "Hi,"
     assert _greeting("Jordan") == "Hi Jordan,"
+
+
+def test_referral_credited_email_escapes_the_submitted_name():
+    from app.tasks.referrals import _render_referral_credited_email
+
+    html = _render_referral_credited_email(
+        "<script>alert(1)</script>",
+        42,
+        3,
+        "https://solomon.test/r/ABCDEFGHJK",
+        None,
+    )
+
+    assert "<script>" not in html
+    assert "&lt;script&gt;" in html
+
+
+def test_referral_credited_email_reports_position_and_count():
+    from app.tasks.referrals import _render_referral_credited_email
+
+    html = _render_referral_credited_email("Jordan", 1284, 1, "https://x.test/r/A", None)
+
+    assert "#1,284" in html  # thousands-separated for readability
+    assert "<strong>1</strong> confirmed referral" in html
+    assert "referrals" not in html  # singular at a count of one
+
+
+def test_referral_credited_email_calls_out_a_newly_unlocked_tier():
+    from app.tasks.referrals import _render_referral_credited_email
+
+    html = _render_referral_credited_email(
+        "Jordan", 7, 3, "https://x.test/r/A", "a new reward at 3 referrals"
+    )
+    assert "a new reward at 3 referrals" in html
+
+
+async def test_referral_credited_notice_never_mints_a_fresh_token():
+    """The nudge must not rotate the referrer's dashboard key.
+
+    ``issue_access_token`` overwrites ``access_token_hash``; doing that here
+    would sign the referrer out of a dashboard they may have open, so the email
+    links to the bare ``/r/{code}`` page instead.
+    """
+    from app.tasks import referrals as referral_tasks
+
+    referrer = _signup(
+        name="Ada", email_verified=True, verified_referral_count=2
+    )
+    referrer.access_token_hash = "original-hash"
+
+    with (
+        patch.object(
+            referral_tasks, "_load_signup", new_callable=AsyncMock, return_value=referrer
+        ),
+        patch.object(
+            referral_tasks, "compute_position", new_callable=AsyncMock, return_value=12
+        ),
+        patch.object(
+            referral_tasks.resend_client,
+            "send_email",
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as mock_send,
+    ):
+        result = await referral_tasks._run_referral_credited(str(referrer.id))
+
+    assert result["sent"] is True
+    assert referrer.access_token_hash == "original-hash"  # untouched
+    # No secret is carried in the link.
+    body = mock_send.await_args.kwargs["html"]
+    assert "?t=" not in body and "nrw_" not in body
+
+
+async def test_referral_credited_notice_skips_an_unverified_referrer():
+    """Unsolicited mail only goes to an address whose owner confirmed it."""
+    from app.tasks import referrals as referral_tasks
+
+    referrer = _signup(name="Ada", email_verified=False)
+
+    with (
+        patch.object(
+            referral_tasks, "_load_signup", new_callable=AsyncMock, return_value=referrer
+        ),
+        patch.object(
+            referral_tasks.resend_client, "send_email", new_callable=AsyncMock
+        ) as mock_send,
+    ):
+        result = await referral_tasks._run_referral_credited(str(referrer.id))
+
+    assert result == {"sent": False, "reason": "referrer_unverified"}
+    mock_send.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
