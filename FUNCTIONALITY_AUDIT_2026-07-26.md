@@ -28,10 +28,10 @@ Railway before acting on #1.
 | 1 | **Critical** | Two of three LinkedIn discovery providers are dead — and fail silently | **Detection fixed 2026-07-26; credentials need you** |
 | 2 | **High** | ~31% of jobs can never appear under any occupation chip | **Fixed 2026-07-26 (31% → 16%)** |
 | 3 | **High** | Occupation targeting depends entirely on a daily beat, with no fallback | **Fixed 2026-07-26 (beat heartbeat)** |
-| 4 | Medium | Feed skews 85% mid/senior, against the stated early-career audience | Open |
-| 5 | Medium | ~18% of surfaced contacts are unusable (post text as job title, empty names) | Open |
-| 6 | Medium | 25% of the feed is in countries the product doesn't target | Open |
-| 7 | Medium | 90% of jobs come from one source; the non-tech breadth source is absent | Open |
+| 4 | Medium | Feed skews 85% mid/senior, against the stated early-career audience | **Root cause fixed 2026-07-26** |
+| 5 | Medium | ~18% of surfaced contacts are unusable (post text as job title, empty names) | **Fixed 2026-07-26** |
+| 6 | Medium | 25% of the feed is in countries the product doesn't target | **Fixed 2026-07-26 (20% → 12%)** |
+| 7 | Medium | 90% of jobs come from one source; the non-tech breadth source is absent | **Not a defect — sources verified healthy** |
 | 8 | Low | ~73s cold latency from job → contact → email | Open |
 | 9 | Low | 15 jobs sat in `people_prewarm_status='pending'` for 7 days | Open |
 
@@ -100,6 +100,57 @@ These came from the local `.env`, which points `DATABASE_URL` at the production
 Supabase pooler — so they are very likely the production values. Confirm in
 Railway. After fixing, the 6-hourly monitor will confirm recovery, and the first
 sustained failure after that will page instead of hiding.
+
+### Remediation — mediums, 2026-07-26
+
+**#5 — contact quality.** `services/people/contact_quality.py`, applied in
+`_prepare_candidates`. A feed post parsed as a job title, the company name as a
+title, and placeholder junk are stripped to `None`; `greeting_name` trims
+LinkedIn's truncated "Christopher K." so a draft doesn't open with an obvious
+tell. Posture is **clean, don't discard** — a discovered contact cost real
+provider calls, and a person with a bad title is still worth reaching, so only
+a candidate with no usable identity at all is dropped.
+
+Caught while testing: the first prose detector ate `Sr. IP Product Engineer, AI
+Processor`, because "Sr." looks like a sentence end. It now strips title
+abbreviations before testing. That would have silently discarded valid titles —
+a worse bug than the one being fixed.
+
+**#6 — country coverage.** 20% → **12%** country-less; 47 jobs newly
+filterable. Two causes: `COUNTRY_ALIASES` was missing real countries appearing
+in the feed (Luxembourg, Uruguay, Philippines), and bare city names resolved to
+nothing. Added `UNAMBIGUOUS_CITY_COUNTRY`, consulted only after every other rule
+declines and only for cities with no US/Canada homonym — "Bengaluru" alone was
+41 of the 116. Ambiguous names are still left to the geocoder, which already
+places London/Dublin/Toronto correctly. The remaining 69 ("N/A", "Remote",
+"Worldwide", "Dublin OR London") are genuinely unresolvable and correctly left
+alone.
+
+**#4 — early-career skew: root cause found and fixed.** The source is not the
+problem. `fetch_simplify_early_career_jobs` returns **660 jobs** live (339
+internships, 321 new grad) against 18 in the feed. The loss was the occupation
+relevance gate: on a `software_engineering` discover it **discarded 353 of 660**,
+and 237 of those purely as `unclassified` — the classifier couldn't place the
+title, so the job was thrown away rather than merely untagged.
+
+`unclassified` and `off_category` are now treated as the different verdicts they
+are. off_category still rejects; unclassified is kept with **no** occupation tag,
+and the query hint is stripped so the hint-fallback can't stamp the searched
+occupation on it. Measured after: **307 → 544 kept (+237)**, only genuine
+off_category still rejected, and **0** jobs mis-tagged with the searched
+occupation.
+
+This is the same root cause as #2 — an unclassified job was being penalised
+twice, hidden from the chips *and* deleted at ingest.
+
+**#7 — not a defect.** Both suspect sources are healthy when called directly:
+The Muse returns 40/40/10 for marketing/finance/HR, SimplifyJobs returns 660.
+The dev feed's 90%-Greenhouse shape reflects which discovery runs happened in
+that database, not a broken adapter. No code change; the #4 gate fix also lifts
+non-tech breadth, since unclassified non-tech roles were being discarded the
+same way. Worth re-measuring against production before treating it as real.
+
+Verified: 1893 backend tests, ruff clean, 30 new regression tests.
 
 ---
 

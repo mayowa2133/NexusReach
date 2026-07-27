@@ -56,8 +56,26 @@ def _occupation_relevance(
         if decision.reason in {"invalid_requested_occupation", "unclassified"}
         else list(decision.inference.keys)
     )
+
+    accepted = decision.accepted
+    if not accepted and decision.reason == "unclassified":
+        # "unclassified" and "off_category" are not the same verdict and should
+        # not share a fate. off_category means we identified the role and it is
+        # something else — dropping it is right. unclassified means we simply
+        # could not tell, and dropping *that* discards real inventory: measured
+        # 2026-07-26, a software_engineering discover threw away 237 of 660
+        # curated early-career jobs purely because the classifier didn't
+        # recognise their titles, in a product whose first-named audience is new
+        # grads and interns.
+        #
+        # Keeping them is safe precisely because `classified_keys` stays empty
+        # and the caller strips the query hint: the job is stored with NO
+        # occupation tag, so the exact-match feed filter still won't surface it
+        # under the wrong chip. Degrade the targeting, don't delete the job.
+        accepted = True
+
     return (
-        decision.accepted,
+        accepted,
         reason,
         classified_keys,
     )
@@ -330,6 +348,13 @@ async def search_jobs(
             ) + 1
             stat["details"] = details
             continue
+        if relevance_reason == "unclassified":
+            # Kept despite being unclassifiable (see _occupation_relevance).
+            # Drop the query hint so the hint-fallback inside
+            # _infer_occupation_tags_for_job cannot stamp the *searched*
+            # occupation onto a job we could not actually classify — that is
+            # how engineering roles ended up under Marketing before.
+            data.pop("_occupation_hint", None)
         storage._infer_startup_tags_for_job(data, known_startup_companies)
         storage._infer_occupation_tags_for_job(data)
         data = normalize_job_metadata(data)

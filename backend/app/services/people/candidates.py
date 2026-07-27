@@ -15,6 +15,7 @@ from app.utils.job_context import (
     JobContext,
 )
 
+from app.services.people import contact_quality
 from app.services.people.classify import _classify_org_level, _classify_person
 from app.services.people.occupation_gate import occupation_conflict
 from app.services.people.company_match import PUBLIC_WEB_SOURCES, _candidate_matches_company, _classify_employment_status, _trusted_public_peer_match
@@ -198,6 +199,18 @@ def _prepare_candidates(
     for raw in candidates:
         data = dict(raw)
         decision = _debug_candidate_summary(data)
+        # Scrub SERP noise before anything reads these fields. A discovered
+        # "title" is sometimes a feed post, the company name, or blank; those
+        # values otherwise flow all the way into the outreach draft. Cleaning
+        # (not discarding) keeps the person — recall costs real provider calls.
+        if not contact_quality.is_usable_contact(data):
+            decision["status"] = "dropped"
+            decision["reason"] = "no_usable_identity"
+            decisions.append(decision)
+            continue
+        cleaned_title = contact_quality.clean_title(data.get("title"), company_name)
+        if cleaned_title != (data.get("title") or None):
+            data["title"] = cleaned_title
         title = data.get("title", "") or ""
         snippet = data.get("snippet", "") or ""
         if data.get("_posting_contact") or data.get("_hiring_team_capture") or data.get("_github_team_member"):

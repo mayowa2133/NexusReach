@@ -201,35 +201,52 @@ LOCATION_GAZETTEER: dict[str, LocationGeocode] = {
 }
 
 COUNTRY_ALIASES: dict[str, tuple[str, str]] = {
+    "luxembourg": ("LU", "Luxembourg"),
+    "uruguay": ("UY", "Uruguay"),
+    "philippines": ("PH", "Philippines"),
+    "argentina": ("AR", "Argentina"),
+    "chile": ("CL", "Chile"),
+    "colombia": ("CO", "Colombia"),
+    "costa rica": ("CR", "Costa Rica"),
+    "peru": ("PE", "Peru"),
+    "malaysia": ("MY", "Malaysia"),
+    "indonesia": ("ID", "Indonesia"),
+    "vietnam": ("VN", "Vietnam"),
+    "thailand": ("TH", "Thailand"),
+    "turkey": ("TR", "Turkey"),
+    "greece": ("GR", "Greece"),
+    "hungary": ("HU", "Hungary"),
+    "czechia": ("CZ", "Czechia"),
+    "czech republic": ("CZ", "Czechia"),
+    "new zealand": ("NZ", "New Zealand"),
+    "south africa": ("ZA", "South Africa"),
+    "nigeria": ("NG", "Nigeria"),
+    "kenya": ("KE", "Kenya"),
+    "egypt": ("EG", "Egypt"),
+    "pakistan": ("PK", "Pakistan"),
+    "bangladesh": ("BD", "Bangladesh"),
+    "taiwan": ("TW", "Taiwan"),
+    "hong kong": ("HK", "Hong Kong"),
     "australia": ("AU", "Australia"),
     "austria": ("AT", "Austria"),
     "belgium": ("BE", "Belgium"),
     "brazil": ("BR", "Brazil"),
     "can": ("CA", "Canada"),
     "canada": ("CA", "Canada"),
-    "chile": ("CL", "Chile"),
     "china": ("CN", "China"),
-    "colombia": ("CO", "Colombia"),
-    "czech republic": ("CZ", "Czech Republic"),
     "denmark": ("DK", "Denmark"),
     "england": ("GB", "United Kingdom"),
     "finland": ("FI", "Finland"),
     "france": ("FR", "France"),
     "germany": ("DE", "Germany"),
     "great britain": ("GB", "United Kingdom"),
-    "greece": ("GR", "Greece"),
-    "hong kong": ("HK", "Hong Kong"),
-    "hungary": ("HU", "Hungary"),
     "india": ("IN", "India"),
     "ireland": ("IE", "Ireland"),
     "israel": ("IL", "Israel"),
     "italy": ("IT", "Italy"),
     "japan": ("JP", "Japan"),
-    "kenya": ("KE", "Kenya"),
     "mexico": ("MX", "Mexico"),
     "netherlands": ("NL", "Netherlands"),
-    "new zealand": ("NZ", "New Zealand"),
-    "nigeria": ("NG", "Nigeria"),
     "northern ireland": ("GB", "United Kingdom"),
     "norway": ("NO", "Norway"),
     "poland": ("PL", "Poland"),
@@ -238,13 +255,10 @@ COUNTRY_ALIASES: dict[str, tuple[str, str]] = {
     "saudi arabia": ("SA", "Saudi Arabia"),
     "scotland": ("GB", "United Kingdom"),
     "singapore": ("SG", "Singapore"),
-    "south africa": ("ZA", "South Africa"),
     "south korea": ("KR", "South Korea"),
     "spain": ("ES", "Spain"),
     "sweden": ("SE", "Sweden"),
     "switzerland": ("CH", "Switzerland"),
-    "taiwan": ("TW", "Taiwan"),
-    "turkey": ("TR", "Turkey"),
     "uae": ("AE", "United Arab Emirates"),
     "united arab emirates": ("AE", "United Arab Emirates"),
     "uk": ("GB", "United Kingdom"),
@@ -260,6 +274,90 @@ COUNTRY_ALIASES: dict[str, tuple[str, str]] = {
 }
 
 COUNTRY_CODES_BY_NAME = {name.lower(): code for code, name in COUNTRY_ALIASES.values()}
+
+
+# City-only locations, for cities whose name is unambiguous worldwide.
+#
+# The parser deliberately refuses to guess a country from a bare city (see
+# `_parse_location_piece`) because "London", "Dublin", "Toronto" and "Sydney"
+# all exist in several countries — guessing there would mislabel jobs. But that
+# blanket refusal also left genuinely unambiguous cities with no country at all,
+# which is worse than it sounds: the country filter can only hide or show what
+# it can identify, so those jobs are unfilterable in both directions. Measured
+# 2026-07-26: "Bengaluru" alone accounted for 41 of 116 country-less jobs in a
+# real feed, in a product that targets the US and Canada.
+#
+# Entries here must have NO plausible US/Canada homonym. When in doubt, leave it
+# out — an unfilterable job is better than a wrongly-located one.
+UNAMBIGUOUS_CITY_COUNTRY: dict[str, tuple[str, str]] = {
+    "bengaluru": ("IN", "India"),
+    "bangalore": ("IN", "India"),
+    "hyderabad": ("IN", "India"),
+    "gurgaon": ("IN", "India"),
+    "gurugram": ("IN", "India"),
+    "noida": ("IN", "India"),
+    "pune": ("IN", "India"),
+    "mumbai": ("IN", "India"),
+    "chennai": ("IN", "India"),
+    "kolkata": ("IN", "India"),
+    "cdmx": ("MX", "Mexico"),
+    "guadalajara": ("MX", "Mexico"),
+    "monterrey": ("MX", "Mexico"),
+    "sao paulo": ("BR", "Brazil"),
+    "são paulo": ("BR", "Brazil"),
+    "bogota": ("CO", "Colombia"),
+    "bogotá": ("CO", "Colombia"),
+    "buenos aires": ("AR", "Argentina"),
+    "montevideo": ("UY", "Uruguay"),
+    "stockholm": ("SE", "Sweden"),
+    "copenhagen": ("DK", "Denmark"),
+    "oslo": ("NO", "Norway"),
+    "helsinki": ("FI", "Finland"),
+    "amsterdam": ("NL", "Netherlands"),
+    "reykjavik": ("IS", "Iceland"),
+    "milan": ("IT", "Italy"),
+    "milano": ("IT", "Italy"),
+    "rome": ("IT", "Italy"),
+    "madrid": ("ES", "Spain"),
+    "barcelona": ("ES", "Spain"),
+    "lisbon": ("PT", "Portugal"),
+    "munich": ("DE", "Germany"),
+    "muenchen": ("DE", "Germany"),
+    "hamburg": ("DE", "Germany"),
+    "zurich": ("CH", "Switzerland"),
+    "zürich": ("CH", "Switzerland"),
+    "geneva": ("CH", "Switzerland"),
+    "vienna": ("AT", "Austria"),
+    "prague": ("CZ", "Czechia"),
+    "warsaw": ("PL", "Poland"),
+    "krakow": ("PL", "Poland"),
+    "kraków": ("PL", "Poland"),
+    "budapest": ("HU", "Hungary"),
+    "bucharest": ("RO", "Romania"),
+    "istanbul": ("TR", "Turkey"),
+    "tel aviv": ("IL", "Israel"),
+    "singapore": ("SG", "Singapore"),
+    "tokyo": ("JP", "Japan"),
+    "osaka": ("JP", "Japan"),
+    "seoul": ("KR", "South Korea"),
+    "shanghai": ("CN", "China"),
+    "beijing": ("CN", "China"),
+    "shenzhen": ("CN", "China"),
+    "taipei": ("TW", "Taiwan"),
+    "manila": ("PH", "Philippines"),
+    "jakarta": ("ID", "Indonesia"),
+    "bangkok": ("TH", "Thailand"),
+    "kuala lumpur": ("MY", "Malaysia"),
+    "auckland": ("NZ", "New Zealand"),
+    "nairobi": ("KE", "Kenya"),
+    "lagos": ("NG", "Nigeria"),
+    "cairo": ("EG", "Egypt"),
+    "cape town": ("ZA", "South Africa"),
+    "johannesburg": ("ZA", "South Africa"),
+    "dubai": ("AE", "United Arab Emirates"),
+    "edinburgh": ("GB", "United Kingdom"),
+    "manchester": ("GB", "United Kingdom"),
+}
 
 US_STATE_CODES = {
     "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
@@ -484,6 +582,19 @@ def _parse_location_piece(raw_piece: str) -> dict[str, Any]:
             country = _title_case_country(last)
             country_code = country_code_for_name(country)
             confidence = max(confidence, 0.7 if country_code else 0.45)
+
+    if not country:
+        # Last resort: a bare city name we can place with certainty. Only
+        # consulted once every other rule has declined, and only for cities with
+        # no US/Canada homonym — see UNAMBIGUOUS_CITY_COUNTRY. Without this a
+        # country-less job is invisible to the country filter in both
+        # directions, which is worse for a US/Canada-targeted product than
+        # simply knowing the job is in Bengaluru.
+        for token in (last_norm, _normalize_token(parts[0]) if parts else ""):
+            if token and token in UNAMBIGUOUS_CITY_COUNTRY:
+                country_code, country = UNAMBIGUOUS_CITY_COUNTRY[token]
+                confidence = max(confidence, 0.8)
+                break
 
     if parts:
         first = parts[0]
