@@ -241,6 +241,44 @@ fast. Getting to a genuinely quick result needs the perceived-latency fix —
 emitting usable contacts after the ~17s search phase and refining them as
 enrichment lands — which is an API and UI change, not a scheduling one.
 
+### #8 — measured the 'fast' search before building the streaming UI (2026-07-27)
+
+The streaming backend landed, but the UI binding was held pending a measurement:
+`PeoplePage` already runs the job-aware search twice (`fast`, render, then
+`deep`), so the question was how much blank screen the fast pass actually leaves.
+
+Cold run, fresh company, search cache flushed:
+
+```
+partial frame fires at      15.4s   with 0 contacts
+fast search completes       42.8s   with 4 contacts
+```
+
+Two things fall out, and both argue against building the UI yet.
+
+**1. The "fast" search is not fast.** 42.8s against ~51s for deep. The two-phase
+fast/deep split is buying far less than its name implies, so a user is staring
+at a blank screen for ~43s regardless.
+
+**2. The partial frame was empty.** At the seam — right after the initial bucket
+searches are prepared and ranked — there were *zero* contacts. All four arrived
+later, from the conditional recovery passes. Wiring the UI today would render an
+empty "finding people…" state for 15s and then still nothing until 43s.
+
+The likely cause is finding #1: with Google CSE and Serper both dead, LinkedIn
+x-ray runs on Brave alone, and the initial bucket searches return too little to
+prepare anything. The contacts are being recovered by the later passes instead —
+which is exactly the shape you would expect from degraded primary recall.
+
+**Recommendation: fix the provider credentials, then re-measure.** If initial
+recall recovers, the existing seam starts carrying real contacts and the UI work
+becomes worthwhile as designed. If it does not, the seam is in the wrong place
+and should move after the first recovery pass — which is a different change, and
+one there is no point designing against today's degraded numbers.
+
+The streaming endpoint and transport are merged and tested either way; only the
+UI binding is deferred, and it is deferred for a reason rather than forgotten.
+
 ---
 
 ## 1. Critical — two of three LinkedIn providers are dead, silently
