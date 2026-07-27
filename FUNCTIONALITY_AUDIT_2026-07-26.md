@@ -32,7 +32,7 @@ Railway before acting on #1.
 | 5 | Medium | ~18% of surfaced contacts are unusable (post text as job title, empty names) | **Fixed 2026-07-26** |
 | 6 | Medium | 25% of the feed is in countries the product doesn't target | **Fixed 2026-07-26 (20% → 12%)** |
 | 7 | Medium | 90% of jobs come from one source; the non-tech breadth source is absent | **Not a defect — sources verified healthy** |
-| 8 | Low | ~73s cold latency from job → contact → email | **Improved 2026-07-26 — not resolved** |
+| 8 | Low | ~73s cold latency from job → contact → email | **Improved twice — 61s → 51s; still open** |
 | 9 | Low | 15 jobs sat in `people_prewarm_status='pending'` for 7 days | **Fixed 2026-07-26** |
 
 ### Remediation — 2026-07-26
@@ -196,6 +196,50 @@ failing; each dead provider costs a round trip before falling through. Re-measur
 after the credentials are fixed.
 
 Verified: 1893 backend tests, ruff clean.
+
+### #8 follow-up — profiled, then the actual bottleneck fixed
+
+The finding proposed streaming "per bucket as they resolve rather than awaiting
+all three". Profiling the cold job-aware path showed that premise is wrong: the
+three bucket searches are **already concurrent** and finish together at 17.3s of
+a 61.0s total. The other 72% is a chain of sequential enrichment stages behind
+them. Streaming buckets would have targeted the 28% that was never the problem.
+
+```
+initial_bucket_searches (already concurrent)  17.3s   28%
+theorg_expansion                              10.0s   16%
+linkedin_backfill_top                          8.4s   14%
+employment_verification                        7.2s   12%
+actively_hiring_people_search                  6.6s   11%
+hiring_managers_geo_public                     3.5s    6%
+ambiguous_company_broad_employees              3.5s    6%
+(+6 smaller)                                  ~4.5s    7%
+```
+
+**What was fixed.** Two of those tail stages are unconditional *discovery*, not
+recovery — their inputs (company name, domain, geo terms, team keywords) are all
+resolved before the gather, and neither depends on whether a bucket underfilled.
+They are now folded into the initial gather:
+
+```
+cold, same job, same conditions:   61.0s -> 50.9s   (-10.1s)
+initial_bucket_searches            17.3s -> 17.2s   (absorbed both extra searches)
+contacts returned                      9 -> 9       (no recall lost)
+```
+
+**What was deliberately left sequential.** The remaining tail is
+`theorg_expansion` (10.0s) and `hiring_managers_geo_public` (7.5s) — *conditional
+recovery* passes that only run when the previous one left a bucket short.
+Running those concurrently would spend paid provider quota on work that is
+usually unnecessary; the latency is bought deliberately. `linkedin_backfill_top`
+(7.2s) and `employment_verification` (6.1s) both operate on the final candidate
+set and may be coupled (verification can read a backfilled title), so
+parallelising them needs a correctness check that has not been done.
+
+**#8 stays open.** 51s is better than 61s and it is honest work, but it is not
+fast. Getting to a genuinely quick result needs the perceived-latency fix —
+emitting usable contacts after the ~17s search phase and refining them as
+enrichment lands — which is an API and UI change, not a scheduling one.
 
 ---
 

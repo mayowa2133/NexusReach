@@ -875,10 +875,75 @@ async def search_people_for_job(
         company_name=job.company_name,
     )
 
-    # Run the three initial bucket searches concurrently (audit H2) to match the
-    # company-level path — previously sequential, adding 6-12s of avoidable latency.
+    # Run the initial discovery passes concurrently. The three bucket searches
+    # were already gathered (audit H2); folding in the two *unconditional*
+    # supplementary passes below saves another ~10s of wall clock.
+    #
+    # Those two are safe to hoist because they are additional DISCOVERY, not
+    # recovery: their inputs (company name, domain, geo terms, team keywords)
+    # are all resolved above, and neither depends on whether a bucket
+    # underfilled. The genuinely conditional recovery passes further down
+    # (TheOrg expansion, geo/targeted recovery) deliberately stay sequential —
+    # each only runs when the previous one left a bucket short, so running them
+    # concurrently would burn paid provider quota on work usually not needed.
+    #
+    # Profiled cold 2026-07-26: bucket searches 17.3s, and these two added 3.5s
+    # + 6.6s serially behind them.
+    async def _broad_employees_for_ambiguous_company() -> list[dict]:
+        """Title-free employee sweep — only for company names that are ambiguous.
+
+        Title-specific queries get polluted by unrelated people sharing the
+        company name, so this widens recall for those companies only.
+        """
+        if not (search_domain and is_ambiguous_company_name(job.company_name)):
+            return []
+        return await search_router_client.search_people(
+            job.company_name,
+            titles=None,
+            team_keywords=None,
+            geo_terms=manager_geo_terms or context.job_geo_terms or None,
+            limit=max(search_limit, 15),
+            min_results=5,
+            company_domain=search_domain,
+            debug_traces=broad_employee_traces,
+            search_profile=interactive_search_profile,
+        )
+
+    async def _actively_hiring_people() -> list[dict]:
+        """People publicly signalling they are hiring ("I'm hiring", "join my team").
+
+        Fail-soft: a supplementary signal, never worth failing the search over.
+        """
+        try:
+            return await search_router_client.search_people(
+                job.company_name,
+                titles=["hiring", "join my team", "we're hiring"],
+                team_keywords=context.team_keywords[:2],
+                geo_terms=recruiter_geo_terms or manager_geo_terms,
+                limit=3,
+                min_results=0,
+                debug_traces=hiring_people_traces,
+                search_profile=interactive_search_profile,
+            )
+        except Exception:
+            logger.debug(
+                "Hiring-people supplementary search failed for %s",
+                job.company_name,
+                exc_info=True,
+            )
+            return []
+
+    broad_employee_traces: list[dict[str, Any]] | None = [] if debug is not None else None
+    hiring_people_traces: list[dict[str, Any]] | None = [] if debug is not None else None
+
     initial_searches_started_at = time.monotonic()
-    recruiter_candidates, manager_candidates, peer_candidates = await asyncio.gather(
+    (
+        recruiter_candidates,
+        manager_candidates,
+        peer_candidates,
+        broad_employees,
+        hiring_people_candidates,
+    ) = await asyncio.gather(
         _search_candidates(
             job.company_name,
             titles=recruiter_titles,
@@ -920,6 +985,8 @@ async def search_people_for_job(
             debug_bucket=debug["searches"].setdefault("peers_initial", {}) if debug is not None else None,
             search_profile=interactive_search_profile,
         ),
+        _broad_employees_for_ambiguous_company(),
+        _actively_hiring_people(),
     )
     _record_timing(
         debug,
@@ -928,23 +995,11 @@ async def search_people_for_job(
         recruiter_candidates=len(recruiter_candidates),
         manager_candidates=len(manager_candidates),
         peer_candidates=len(peer_candidates),
+        broad_employees=len(broad_employees),
+        actively_hiring=len(hiring_people_candidates),
     )
-    # For ambiguous companies, run a broad employee discovery without title constraints
-    # since title-specific queries get polluted by people sharing the company name
-    if search_domain and is_ambiguous_company_name(job.company_name):
-        ambiguous_search_started_at = time.monotonic()
-        broad_employee_traces: list[dict[str, Any]] | None = [] if debug is not None else None
-        broad_employees = await search_router_client.search_people(
-            job.company_name,
-            titles=None,
-            team_keywords=None,
-            geo_terms=manager_geo_terms or context.job_geo_terms or None,
-            limit=max(search_limit, 15),
-            min_results=5,
-            company_domain=search_domain,
-            debug_traces=broad_employee_traces,
-            search_profile=interactive_search_profile,
-        )
+    # Merge the ambiguous-company sweep fetched in the gather above.
+    if broad_employees:
         if debug is not None:
             debug["searches"]["ambiguous_company_broad_employees"] = {
                 "provider_traces": broad_employee_traces or [],
@@ -953,12 +1008,6 @@ async def search_people_for_job(
         recruiter_candidates = _dedupe_candidates(recruiter_candidates, broad_employees)
         manager_candidates = _dedupe_candidates(manager_candidates, broad_employees)
         peer_candidates = _dedupe_candidates(peer_candidates, broad_employees)
-        _record_timing(
-            debug,
-            stage="ambiguous_company_broad_employees",
-            started_at=ambiguous_search_started_at,
-            broad_employees=len(broad_employees),
-        )
 
     hiring_team_traces: list[dict[str, Any]] | None = [] if debug is not None else None
     hiring_team_started_at = time.monotonic()
@@ -1060,19 +1109,8 @@ async def search_people_for_job(
     # people like Spencer Chan (Quora) or Abhishek Sehgal (Uber) who post
     # "I'm hiring" or "join my team" — especially valuable at smaller companies
     # where engineers recruit directly.
-    try:
-        hiring_people_started_at = time.monotonic()
-        hiring_people_traces: list[dict[str, Any]] | None = [] if debug is not None else None
-        hiring_people_candidates = await search_router_client.search_people(
-            job.company_name,
-            titles=["hiring", "join my team", "we're hiring"],
-            team_keywords=context.team_keywords[:2],
-            geo_terms=recruiter_geo_terms or manager_geo_terms,
-            limit=3,
-            min_results=0,
-            debug_traces=hiring_people_traces,
-            search_profile=interactive_search_profile,
-        )
+    # Merge the actively-hiring sweep fetched in the gather above.
+    if hiring_people_candidates:
         for candidate in hiring_people_candidates:
             candidate["_actively_hiring"] = True
             candidate["profile_data"] = {
@@ -1085,14 +1123,6 @@ async def search_people_for_job(
                 "provider_traces": hiring_people_traces or [],
                 "returned_candidates": [_debug_candidate_summary(item) for item in hiring_people_candidates[:10]],
             }
-        _record_timing(
-            debug,
-            stage="actively_hiring_people_search",
-            started_at=hiring_people_started_at,
-            candidates=len(hiring_people_candidates),
-        )
-    except Exception:
-        logger.debug("Hiring-people supplementary search failed for %s", job.company_name, exc_info=True)
 
     hiring_team_overrides = await _title_overrides_for(hiring_team_candidates)
     posting_contact_candidates = _posting_contact_candidates(job, context)
