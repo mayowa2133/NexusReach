@@ -1,4 +1,5 @@
 import { toast } from 'sonner';
+import { trackFunnelEvent } from '@/lib/observability';
 import type { ReferralStatus } from '@/types/referral';
 
 /** Reward copy per verified-referral threshold (Solomon's product-value ladder). */
@@ -42,12 +43,28 @@ interface ReferralPanelProps {
   heading?: string;
   /** id for the heading, so an ancestor dialog can aria-labelledby it. */
   titleId?: string;
+  /** Where the panel is rendered — right after signing up, or on a return visit. */
+  context?: 'join' | 'dashboard';
 }
 
-export function ReferralPanel({ status, heading, titleId }: ReferralPanelProps) {
+export function ReferralPanel({
+  status,
+  heading,
+  titleId,
+  context = 'join',
+}: ReferralPanelProps) {
   const links = socialLinks(status.share_url);
 
+  // Share analytics. Only the shape of the action: never the share URL or the
+  // referral code inside it, both of which identify the member.
+  const shareProps = {
+    context,
+    verified: status.email_verified,
+    referral_count: status.verified_referral_count,
+  };
+
   const copyLink = () => {
+    trackFunnelEvent('waitlist_link_copied', shareProps);
     void navigator.clipboard
       .writeText(status.share_url)
       .then(() => toast.success('Referral link copied'))
@@ -96,18 +113,27 @@ export function ReferralPanel({ status, heading, titleId }: ReferralPanelProps) 
       </div>
 
       <div className="lp-ref-socials">
-        <a className="lp-ref-social" href={links.linkedin} target="_blank" rel="noopener noreferrer">
-          LinkedIn
-        </a>
-        <a className="lp-ref-social" href={links.x} target="_blank" rel="noopener noreferrer">
-          X
-        </a>
-        <a className="lp-ref-social" href={links.whatsapp} target="_blank" rel="noopener noreferrer">
-          WhatsApp
-        </a>
-        <a className="lp-ref-social" href={links.email} target="_blank" rel="noopener noreferrer">
-          Email
-        </a>
+        {(
+          [
+            ['linkedin', 'LinkedIn'],
+            ['x', 'X'],
+            ['whatsapp', 'WhatsApp'],
+            ['email', 'Email'],
+          ] as const
+        ).map(([channel, label]) => (
+          <a
+            key={channel}
+            className="lp-ref-social"
+            href={links[channel]}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() =>
+              trackFunnelEvent('waitlist_shared', { ...shareProps, channel })
+            }
+          >
+            {label}
+          </a>
+        ))}
       </div>
 
       <div className="lp-ref-ladder">

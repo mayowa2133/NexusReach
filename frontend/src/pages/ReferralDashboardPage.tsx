@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
 import { BrandMark } from '@/components/BrandLogo';
 import { ReferralPanel } from '@/components/ReferralPanel';
@@ -8,6 +8,7 @@ import {
   storeReferralOwner,
   useReferralStatus,
 } from '@/hooks/useReferral';
+import { trackFunnelEvent } from '@/lib/observability';
 import './landing.css';
 
 /**
@@ -39,6 +40,34 @@ export function ReferralDashboardPage() {
 
   const { data, isLoading, isError } = useReferralStatus(code, token, verifyToken);
   const verified = Boolean(verifyToken && data);
+
+  // Email confirmation is the gate every referral is counted through, so it is
+  // the single most important step to be able to see. A failure here (expired
+  // or already-spent link) is tracked too — silent loss at this step would look
+  // exactly like nobody sharing. Fired once per mount; `data`/`isError` settle
+  // asynchronously, and React may re-render either several times.
+  const reportedRef = useRef(false);
+  useEffect(() => {
+    if (reportedRef.current) return;
+    if (!data && !isError) return;
+    reportedRef.current = true;
+
+    if (verifyToken) {
+      trackFunnelEvent('waitlist_verified', {
+        ok: Boolean(data),
+        // Landing here from the email with a dead token means the click was
+        // real but the confirmation didn't land — a distinct problem to fix.
+        reason: data ? undefined : 'link_expired_or_used',
+      });
+    }
+    if (data) {
+      trackFunnelEvent('waitlist_dashboard_viewed', {
+        via: verifyToken ? 'verification_email' : 'return_visit',
+        referral_count: data.verified_referral_count,
+        earned_tier: data.earned_tier,
+      });
+    }
+  }, [data, isError, verifyToken]);
 
   // Erasure. Two-step because it is irreversible and takes the resume with it.
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -126,6 +155,7 @@ export function ReferralDashboardPage() {
             )}
             <ReferralPanel
               status={data}
+              context="dashboard"
               heading={firstName ? `Welcome back, ${firstName}` : 'Your referral dashboard'}
             />
 
