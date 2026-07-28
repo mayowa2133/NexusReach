@@ -8,6 +8,7 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { AppLayout } from '@/components/AppLayout';
 import { ObservabilityIdentity } from '@/components/ObservabilityIdentity';
 import { RouteAnalytics } from '@/components/RouteAnalytics';
+import { ConsentBanner } from '@/components/ConsentBanner';
 import { LoginPage } from '@/pages/LoginPage';
 import { SignupPage } from '@/pages/SignupPage';
 
@@ -113,6 +114,7 @@ export default function App() {
           <AppRoutes />
           <ObservabilityIdentity />
           <RouteAnalytics />
+          <ConsentBanner />
           <Toaster />
         </BrowserRouter>
       </ErrorBoundary>

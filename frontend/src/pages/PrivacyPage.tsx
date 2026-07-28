@@ -43,6 +43,7 @@ const sections = [
   {
     title: 'User Controls',
     body: [
+      'Analytics consent: where EU/UK rules require it, we ask before any analytics runs, and nothing is stored on your device until you allow it. Declining is respected and everything on the site keeps working. To change your answer later, clear this site\u2019s data in your browser and you will be asked again.',
       'You can export your account data from Settings as JSON.',
       'You can delete your account from Settings. Deletion removes your Supabase auth identity and app-owned Solomon data, including encrypted email tokens and imported LinkedIn graph rows.',
       'You can disconnect Gmail or Outlook, clear LinkedIn graph data, and cancel scheduled delayed sends before they go out.',

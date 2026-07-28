@@ -1,6 +1,8 @@
 import * as Sentry from '@sentry/react';
 import posthog from 'posthog-js';
 
+import { analyticsAllowed } from '@/lib/consent';
+
 export type OAuthCallbackPayload = { code: string; state: string };
 
 let pendingOAuthCallback: OAuthCallbackPayload | null = null;
@@ -99,7 +101,16 @@ if (isSentryEnabled) {
   });
 }
 
-if (isProductAnalyticsEnabled && posthogKey) {
+// PostHog writes a device identifier and contacts a US host the moment it
+// initialises, so consent has to gate `init` itself — suppressing events after
+// the identifier exists would not be consent at all. Deferred behind a function
+// and started immediately only for visitors who don't need to be asked.
+let productAnalyticsStarted = false;
+
+export function startProductAnalytics(): void {
+  if (productAnalyticsStarted) return;
+  if (!isProductAnalyticsEnabled || !posthogKey) return;
+  productAnalyticsStarted = true;
   posthog.init(posthogKey, {
     api_host: posthogHost,
     autocapture: false,
@@ -110,12 +121,21 @@ if (isProductAnalyticsEnabled && posthogKey) {
   });
 }
 
+/** True once PostHog is actually running (config on + permitted + started). */
+export function isProductAnalyticsActive(): boolean {
+  return productAnalyticsStarted;
+}
+
+if (analyticsAllowed()) {
+  startProductAnalytics();
+}
+
 export function setObservabilityUser(userId: string | null): void {
   if (isSentryEnabled) {
     Sentry.setUser(userId ? { id: userId } : null);
   }
 
-  if (!isProductAnalyticsEnabled) return;
+  if (!productAnalyticsStarted) return;
   if (userId) {
     posthog.identify(userId);
   } else {
@@ -135,7 +155,7 @@ export function trackEvent(
   eventName: string,
   properties?: Record<string, unknown>,
 ): void {
-  if (!isProductAnalyticsEnabled) return;
+  if (!productAnalyticsStarted) return;
   posthog.capture(eventName, {
     app_environment: environment,
     ...properties,
@@ -158,7 +178,7 @@ export function trackFirstFunnelEvent(
   eventName: string,
   properties?: Record<string, unknown>,
 ): void {
-  if (!isProductAnalyticsEnabled) return;
+  if (!productAnalyticsStarted) return;
   if (typeof window === 'undefined') return;
 
   const storageKey = storageKeyForFirstEvent(key);
