@@ -45,6 +45,12 @@ class WaitlistSignup(Base):
     current_title: Mapped[str | None] = mapped_column(String(300), nullable=True)
     # What they're looking for (target role / focus).
     target_role: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    # Validated key from the occupation taxonomy — the structured form of the
+    # above. This is what can seed saved searches at launch and group the list
+    # into invite cohorts; the free text above cannot. Nullable because rows
+    # predate it and the picker falls back to free text when the taxonomy
+    # can't be fetched.
+    target_occupation: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Free-form "anything else" / how they heard about us.
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 

@@ -67,6 +67,23 @@ def test_clean_goals_drops_unknown_and_duplicates():
     ]
 
 
+def test_clean_target_occupation_accepts_a_real_taxonomy_key():
+    from app.utils.waitlist_goals import clean_target_occupation
+
+    assert clean_target_occupation('software_engineering') == 'software_engineering'
+    assert clean_target_occupation('  marketing  ') == 'marketing'
+
+
+def test_clean_target_occupation_drops_anything_not_in_the_taxonomy():
+    """A junk key would silently seed the wrong saved searches at launch."""
+    from app.utils.waitlist_goals import clean_target_occupation
+
+    assert clean_target_occupation('definitely_not_an_occupation') is None
+    assert clean_target_occupation('Software Engineer') is None  # label, not key
+    assert clean_target_occupation('') is None
+    assert clean_target_occupation(None) is None
+
+
 def test_clean_goals_empty_is_none():
     assert clean_goals(None) is None
     assert clean_goals([]) is None

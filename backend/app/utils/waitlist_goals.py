@@ -25,6 +25,22 @@ WAITLIST_GOAL_KEYS: frozenset[str] = frozenset(WAITLIST_GOALS)
 MAX_WAITLIST_GOALS = 10
 
 
+def clean_target_occupation(key: str | None) -> str | None:
+    """Keep a target-occupation key only if the taxonomy actually defines it.
+
+    Same posture as :func:`clean_goals`: the value arrives from a public,
+    unauthenticated form, so an unrecognized key is dropped rather than stored.
+    A junk value here would be worse than nothing — it would silently seed the
+    wrong saved searches at launch.
+    """
+    from app.services.occupation_taxonomy import occupation_by_key
+
+    cleaned = (key or "").strip()
+    if not cleaned:
+        return None
+    return cleaned if occupation_by_key(cleaned) else None
+
+
 def clean_goals(goals: list[str] | None) -> list[str] | None:
     """Drop unknown/duplicate keys, preserving order. ``None`` when empty."""
     if not goals:

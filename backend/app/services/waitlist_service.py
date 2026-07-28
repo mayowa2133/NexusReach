@@ -36,7 +36,7 @@ from app.services.referral_service import (
     mint_unique_referral_code,
     resolve_referrer,
 )
-from app.utils.waitlist_goals import clean_goals
+from app.utils.waitlist_goals import clean_goals, clean_target_occupation
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +113,7 @@ async def upsert_waitlist_signup(
         linkedin_url=payload.linkedin_url,
         current_title=payload.current_title,
         target_role=payload.target_role,
+        target_occupation=clean_target_occupation(payload.target_occupation),
         note=payload.note,
         source=payload.source,
         goals=clean_goals(payload.goals),

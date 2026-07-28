@@ -9,6 +9,9 @@ class WaitlistSignupCreate(BaseModel):
     linkedin_url: str | None = Field(default=None, max_length=500)
     current_title: str | None = Field(default=None, max_length=300)
     target_role: str | None = Field(default=None, max_length=300)
+    # Occupation-taxonomy key from the signup picker. Unknown keys are dropped
+    # server-side (see utils.waitlist_goals.clean_target_occupation).
+    target_occupation: str | None = Field(default=None, max_length=64)
     note: str | None = Field(default=None, max_length=2000)
     source: str | None = Field(default=None, max_length=100)
     # Public referral code of whoever invited this person (from the ?ref= link).
@@ -28,6 +31,7 @@ class WaitlistSignupCreate(BaseModel):
         "linkedin_url",
         "current_title",
         "target_role",
+        "target_occupation",
         "note",
         "source",
         "referred_by_code",
@@ -94,6 +98,7 @@ class WaitlistEntry(BaseModel):
     linkedin_url: str | None
     current_title: str | None
     target_role: str | None
+    target_occupation: str | None
     note: str | None
     source: str | None
     invited: bool

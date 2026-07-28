@@ -19,6 +19,17 @@ vi.mock('@/lib/observability', () => ({
   trackEvent: vi.fn(),
 }));
 
+vi.mock('@/hooks/useOccupations', () => ({
+  usePublicOccupations: () => ({
+    data: [
+      { key: 'software_engineering', label: 'Software Engineering' },
+      { key: 'marketing', label: 'Marketing' },
+    ],
+    isLoading: false,
+    isError: false,
+  }),
+}));
+
 const joinWaitlistBackend = vi.fn();
 
 vi.mock('@/hooks/useReferral', () => ({
@@ -85,6 +96,7 @@ describe('waitlist funnel analytics', () => {
       screen.getByPlaceholderText("What you're hoping Solomon helps you with…"),
       SECRETS[3]
     );
+    await user.selectOptions(screen.getByRole('combobox'), 'software_engineering');
     await user.click(screen.getByRole('button', { name: /land my first role/i }));
     await user.click(screen.getByRole('button', { name: /join the waitlist/i }));
 
@@ -114,6 +126,7 @@ describe('waitlist funnel analytics', () => {
       has_resume: false,
       goals_count: 1,
       goals: ['land_first_role'],
+      target_occupation: 'software_engineering',
     });
   });
 
@@ -132,6 +145,7 @@ describe('waitlist funnel analytics', () => {
 
     await user.type(screen.getByPlaceholderText('Jordan Rivera'), SECRETS[1]);
     await user.type(screen.getByPlaceholderText('you@email.com'), SECRETS[0]);
+    await user.selectOptions(screen.getByRole('combobox'), 'marketing');
     await user.click(screen.getByRole('button', { name: /join the waitlist/i }));
 
     await waitFor(() => {
