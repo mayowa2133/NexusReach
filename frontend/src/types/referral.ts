@@ -50,6 +50,8 @@ export interface WaitlistJoinPayload {
   linkedin_url?: string | null;
   current_title?: string | null;
   target_role?: string | null;
+  /** Occupation-taxonomy key from the signup picker (validated server-side). */
+  target_occupation?: string | null;
   note?: string | null;
   source?: string | null;
   referred_by_code?: string | null;

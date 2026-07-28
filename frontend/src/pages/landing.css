@@ -455,19 +455,31 @@ body:has(.lp) { background: #FAF9F5; }
   font-family: var(--lp-mono); font-size: 10px; font-weight: 400;
   color: var(--lp-ink-40); letter-spacing: 0.04em; margin-left: 4px;
 }
-.lp-wl-field input, .lp-wl-field textarea {
+.lp-wl-field input, .lp-wl-field textarea, .lp-wl-field select {
   font-family: var(--lp-sans); font-size: 15px; color: var(--lp-ink);
   background: var(--lp-paper); border: 1px solid var(--lp-line);
   border-radius: var(--lp-r-s); padding: 10px 12px; width: 100%;
   outline: none; transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 .lp-wl-field textarea { resize: vertical; min-height: 44px; line-height: 1.5; }
-.lp-wl-field input:focus, .lp-wl-field textarea:focus {
+.lp-wl-field input:focus, .lp-wl-field textarea:focus, .lp-wl-field select:focus {
   border-color: var(--lp-green);
   box-shadow: 0 0 0 3px var(--lp-green-tint);
   background: var(--lp-card);
 }
 .lp-wl-field input::placeholder, .lp-wl-field textarea::placeholder { color: var(--lp-ink-40); }
+/* Native select needs the arrow drawn back on once appearance is reset, and
+   its own font — it does not inherit like inputs do. */
+.lp-wl-field select.lp-wl-select {
+  appearance: none; cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, var(--lp-ink-40) 50%),
+    linear-gradient(135deg, var(--lp-ink-40) 50%, transparent 50%);
+  background-position: calc(100% - 19px) 50%, calc(100% - 14px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 34px;
+}
+.lp-wl-field select.lp-wl-select:invalid { color: var(--lp-ink-40); }
 .lp-wl-error {
   font-size: 13px; color: #9b1c1c; background: rgba(155, 28, 28, 0.08);
   border: 1px solid rgba(155, 28, 28, 0.2); border-radius: var(--lp-r-s);

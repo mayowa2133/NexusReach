@@ -5,6 +5,7 @@ import {
   WaitlistError,
 } from '@/hooks/useReferral';
 import { ReferralPanel } from '@/components/ReferralPanel';
+import { usePublicOccupations } from '@/hooks/useOccupations';
 import { trackFunnelEvent } from '@/lib/observability';
 import type { ReferralStatus } from '@/types/referral';
 
@@ -47,6 +48,7 @@ interface FormState {
   linkedin_url: string;
   current_title: string;
   target_role: string;
+  target_occupation: string;
   note: string;
 }
 
@@ -56,6 +58,7 @@ const EMPTY_FORM: FormState = {
   linkedin_url: '',
   current_title: '',
   target_role: '',
+  target_occupation: '',
   note: '',
 };
 
@@ -93,6 +96,18 @@ export function WaitlistModal({ onClose, source, referredByCode }: WaitlistModal
   const firstFieldRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const titleId = useId();
+
+  // Fetched lazily with the modal, so the landing page still makes no network
+  // call until someone shows intent.
+  const {
+    data: occupations,
+    isLoading: occupationsLoading,
+    isError: occupationsFailed,
+  } = usePublicOccupations();
+  // Only fall back once we actually know the list isn't coming — an empty array
+  // from a successful response is still "unavailable" for a required field.
+  const occupationsUnavailable =
+    occupationsFailed || (!occupationsLoading && !(occupations ?? []).length);
 
   const toggleGoal = (key: string) => {
     setGoals((prev) =>
@@ -160,7 +175,11 @@ export function WaitlistModal({ onClose, source, referredByCode }: WaitlistModal
 
   const update =
     (field: keyof FormState) =>
-    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    (
+      e: React.ChangeEvent<
+        HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+      >,
+    ) =>
       setForm((f) => ({ ...f, [field]: e.target.value }));
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -175,6 +194,7 @@ export function WaitlistModal({ onClose, source, referredByCode }: WaitlistModal
       linkedin_url: form.linkedin_url.trim() || null,
       current_title: form.current_title.trim() || null,
       target_role: form.target_role.trim() || null,
+      target_occupation: form.target_occupation || null,
       note: form.note.trim() || null,
       source: source || 'landing',
       referred_by_code: referredByCode || null,
@@ -194,6 +214,9 @@ export function WaitlistModal({ onClose, source, referredByCode }: WaitlistModal
       has_resume: Boolean(resume),
       goals_count: goals.length,
       goals,
+      // A fixed taxonomy key, not free text — safe to record and the single
+      // most useful dimension for segmenting the list.
+      target_occupation: form.target_occupation || null,
     };
     trackFunnelEvent('waitlist_submitted', funnelProps);
 
@@ -403,32 +426,56 @@ export function WaitlistModal({ onClose, source, referredByCode }: WaitlistModal
                 />
               </label>
 
-              <div className="lp-wl-row">
-                <label className="lp-wl-field">
-                  <span>
-                    Current role <span className="opt">optional</span>
-                  </span>
-                  <input
-                    type="text"
-                    value={form.current_title}
-                    onChange={update('current_title')}
-                    maxLength={300}
-                    placeholder="New-grad SWE"
-                  />
-                </label>
-                <label className="lp-wl-field">
-                  <span>
-                    Looking for <span className="opt">optional</span>
-                  </span>
+              <label className="lp-wl-field">
+                <span>
+                  What kind of role are you targeting? <em>*</em>
+                </span>
+                {/* Structured beats free text here: this key is what can seed
+                    their job feed at launch and group the list into invite
+                    cohorts. If the taxonomy can't be fetched we fall back to the
+                    old free-text input rather than showing an empty required
+                    dropdown — a backend blip must not block signups. */}
+                {occupationsUnavailable ? (
                   <input
                     type="text"
                     value={form.target_role}
                     onChange={update('target_role')}
                     maxLength={300}
+                    required
                     placeholder="Software Engineer roles"
                   />
-                </label>
-              </div>
+                ) : (
+                  <select
+                    className="lp-wl-select"
+                    value={form.target_occupation}
+                    onChange={update('target_occupation')}
+                    required
+                    disabled={occupationsLoading}
+                  >
+                    <option value="" disabled>
+                      {occupationsLoading ? 'Loading…' : 'Choose a category'}
+                    </option>
+                    {(occupations ?? []).map((occ) => (
+                      <option key={occ.key} value={occ.key}>
+                        {occ.label}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </label>
+
+              <label className="lp-wl-field">
+                <span>
+                  Current role <span className="opt">optional</span>
+                </span>
+                <input
+                  type="text"
+                  value={form.current_title}
+                  onChange={update('current_title')}
+                  maxLength={300}
+                  placeholder="New-grad SWE — leave blank if you're just starting out"
+                />
+              </label>
 
               <div className="lp-wl-field">
                 <span>
