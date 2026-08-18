@@ -16,7 +16,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
 WORKDIR /app
-RUN groupadd --system nexusreach \
+# util-linux is upgraded out of the base image on purpose.
+# CVE-2026-53615 affects nine of its binaries and libraries, Debian has shipped
+# 2.41.5-0+deb13u1, and the python:3.12-slim rebuild carrying it does not exist
+# yet -- the current upstream digest has the same finding as the pinned one, so
+# repinning fixes nothing. Upgrading the one source package here is what clears
+# the runtime scan; drop it when the base image catches up.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends --only-upgrade util-linux \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system nexusreach \
     && useradd --system --gid nexusreach --home-dir /app nexusreach
 
 COPY --from=wheels /wheels /wheels
