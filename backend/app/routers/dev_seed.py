@@ -20,6 +20,7 @@ cannot be probed, and config.py already rejects that mode in production.
 """
 
 import uuid
+from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -34,6 +35,8 @@ from app.models.company import Company
 from app.models.job import Job
 from app.models.message import Message
 from app.models.person import Person
+from app.models.profile import Profile
+from app.services.occupation_taxonomy import OCCUPATION_TAG_PREFIX
 
 router = APIRouter(prefix="/dev", tags=["dev"])
 
@@ -43,6 +46,27 @@ class SeedOpportunity(BaseModel):
     company: str = Field(min_length=1, max_length=255)
     location: str | None = Field(default=None, max_length=255)
     stage: str = Field(default="applied", max_length=50)
+    # Where this row ranks, when the caller needs it surfaced rather than merely
+    # present.
+    #
+    # Seeding an exact record is only half of putting it on a screen. The
+    # dashboard's first-win path renders the top job, and "top" is
+    # match_score DESC NULLS LAST -- so an unscored seed sorts behind every
+    # scored row and the panel shows a different role than the one that was
+    # asked for. A screen recording of that panel then says "Product Engineer"
+    # over a film about a marketing manager, which is the exact class of wrong
+    # data this endpoint exists to prevent.
+    #
+    # Left unset the row stays unscored, which is the honest default: a seeded
+    # job has not been scored by anything.
+    match_score: float | None = Field(default=None, ge=0, le=100)
+    # The occupation this role belongs to, as a taxonomy key ("marketing").
+    #
+    # Ranking is not the only thing that decides what a screen shows. The
+    # dashboard buckets jobs by their occupation tag and round-robins across the
+    # occupations the profile targets, so a job with no tag lands in the
+    # fallback bucket and is never picked at all, whatever it scores.
+    occupation: str | None = Field(default=None, max_length=100)
 
 
 class SeedContact(BaseModel):
@@ -60,6 +84,14 @@ class SeedMessage(BaseModel):
 
 
 class SeedRequest(BaseModel):
+    # Which occupations this persona is chasing, in priority order.
+    #
+    # The angle decides this the same way it decides the role: a film about
+    # landing a marketing manager job is a film about somebody who is looking
+    # for marketing work, and the dashboard reads the profile to know that. A
+    # seeded marketing role on a profile targeting software engineering is a
+    # true row the product will correctly never surface.
+    target_occupations: list[str] | None = None
     opportunity: SeedOpportunity | None = None
     contact: SeedContact | None = None
     message: SeedMessage | None = None
@@ -101,6 +133,15 @@ async def seed_fixture(
     _guard()
     response = SeedResponse()
 
+    if payload.target_occupations is not None:
+        profile = (
+            await db.execute(select(Profile).where(Profile.user_id == user_id))
+        ).scalars().first()
+        if profile is None:
+            raise HTTPException(status_code=404, detail="No profile to target")
+        profile.target_occupations = payload.target_occupations
+        response.updated.append("profile")
+
     if payload.opportunity is not None:
         opportunity = payload.opportunity
         existing = (
@@ -133,6 +174,26 @@ async def seed_fixture(
             existing.location = opportunity.location
             existing.stage = opportunity.stage
             response.updated.append("job")
+
+        # Set on both paths, and only when asked. `scored_at` travels with it
+        # because a score without a time is a row that claims to have been
+        # scored by nobody, ever. `score_breakdown` is deliberately left alone:
+        # it is the scorer's evidence, and inventing one would put a fabricated
+        # rationale behind a number a human chose.
+        if opportunity.match_score is not None:
+            existing.match_score = opportunity.match_score
+            existing.scored_at = datetime.now(timezone.utc)
+        if opportunity.occupation:
+            # Merged, not replaced: `tags` also carries skill tags the seed knows
+            # nothing about, and one occupation key per job is what
+            # `primaryOccupation` reads.
+            tag = f"{OCCUPATION_TAG_PREFIX}{opportunity.occupation}"
+            kept = [
+                value
+                for value in (existing.tags or [])
+                if not value.startswith(OCCUPATION_TAG_PREFIX)
+            ]
+            existing.tags = [tag, *kept]
 
         await db.flush()
         response.job_id = existing.id
