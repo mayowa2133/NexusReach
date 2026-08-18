@@ -116,6 +116,17 @@ app.include_router(insights.router, prefix="/api")
 app.include_router(settings_router.router, prefix="/api")
 app.include_router(usage.router, prefix="/api")
 app.include_router(linkedin_graph.router, prefix="/api")
+
+# Fixture seeding for screen capture, mounted only in dev-auth-bypass mode.
+#
+# Conditional registration rather than an in-handler check: a route that is not
+# mounted cannot be probed, cannot appear in /openapi.json, and cannot be reached
+# by a misconfigured dependency. config.py already refuses this mode in
+# production, so this is the second lock, not the first.
+if settings.auth_mode == "dev" and settings.dev_auth_bypass_enabled:
+    from app.routers import dev_seed
+
+    app.include_router(dev_seed.router, prefix="/api")
 app.include_router(job_alerts.router, prefix="/api")
 app.include_router(known_people.router, prefix="/api")
 app.include_router(stories.router, prefix="/api")
