@@ -34,6 +34,7 @@ from app.dependencies import get_current_user_id
 from app.models.company import Company
 from app.models.job import Job
 from app.models.message import Message
+from app.models.outreach import OutreachLog
 from app.models.person import Person
 from app.models.profile import Profile
 from app.services.occupation_taxonomy import OCCUPATION_TAG_PREFIX
@@ -83,6 +84,20 @@ class SeedMessage(BaseModel):
     goal: str = Field(default="referral", max_length=100)
 
 
+class SeedOutreachEntry(BaseModel):
+    """One past piece of outreach, as the account would already hold it."""
+
+    name: str = Field(min_length=1, max_length=255)
+    role: str = Field(min_length=1, max_length=255)
+    company: str | None = Field(default=None, max_length=255)
+    # draft | sent | connected | responded | met | following_up | closed.
+    # The response rate counts responded/met/closed over everything that is not
+    # a draft, so the status is the whole point of the entry.
+    status: str = Field(default="sent", max_length=50)
+    channel: str = Field(default="email", max_length=50)
+    reply: str | None = Field(default=None, max_length=500)
+
+
 class SeedRequest(BaseModel):
     # Which occupations this persona is chasing, in priority order.
     #
@@ -95,6 +110,16 @@ class SeedRequest(BaseModel):
     opportunity: SeedOpportunity | None = None
     contact: SeedContact | None = None
     message: SeedMessage | None = None
+    # Outreach the account has already done.
+    #
+    # The response rate is computed, not stored: responded over everything that
+    # is not a draft. A workspace seeded with nothing but drafts therefore reads
+    # 0% forever, which is what a capture of it showed -- true of the seed,
+    # false of the product, and the least useful number a demo could put on
+    # screen. Seeding the history rather than the rate keeps the metric the
+    # product's own arithmetic; if these entries are wrong the number is wrong
+    # in the same direction, which is the point.
+    outreach_history: list[SeedOutreachEntry] | None = None
 
 
 class SeedResponse(BaseModel):
@@ -274,6 +299,69 @@ async def seed_fixture(
 
         await db.flush()
         response.message_id = existing_message.id
+
+    if payload.outreach_history:
+        # Each entry becomes a person and a log, reusing either if it is already
+        # there, so re-seeding is idempotent rather than cumulative -- a seed run
+        # twice must not double the denominator of a rate.
+        responded_states = ("responded", "met", "closed")
+        now = datetime.now(timezone.utc)
+        for entry in payload.outreach_history:
+            person = (
+                await db.execute(
+                    select(Person).where(Person.user_id == user_id, Person.full_name == entry.name)
+                )
+            ).scalars().first()
+            company = None
+            if entry.company:
+                normalized = entry.company.strip().lower()
+                company = (
+                    await db.execute(
+                        select(Company).where(Company.user_id == user_id, Company.normalized_name == normalized)
+                    )
+                ).scalars().first()
+                if company is None:
+                    company = Company(
+                        user_id=user_id, name=entry.company, normalized_name=normalized, domain_trusted=False
+                    )
+                    db.add(company)
+                await db.flush()
+            if person is None:
+                person = Person(user_id=user_id, full_name=entry.name, title=entry.role)
+                db.add(person)
+                response.created.append(f"person:{entry.name}")
+            else:
+                person.title = entry.role
+            if company is not None:
+                person.company_id = company.id
+            await db.flush()
+
+            log = (
+                await db.execute(
+                    select(OutreachLog).where(
+                        OutreachLog.user_id == user_id, OutreachLog.person_id == person.id
+                    )
+                )
+            ).scalars().first()
+            if log is None:
+                log = OutreachLog(user_id=user_id, person_id=person.id)
+                db.add(log)
+                response.created.append(f"outreach:{entry.name}")
+            else:
+                response.updated.append(f"outreach:{entry.name}")
+            log.status = entry.status
+            log.channel = entry.channel
+            # The timestamps a real log would carry, kept consistent with the
+            # status: anything past draft has been sent, and only a reply has a
+            # reply time. An inconsistent row would be a demo that teaches the
+            # reader something untrue about the product's own model.
+            replied = entry.status in responded_states
+            log.sent_at = None if entry.status == "draft" else now
+            log.last_contacted_at = log.sent_at
+            log.response_received = replied
+            log.replied_at = now if replied else None
+            log.last_reply_snippet = entry.reply if replied else None
+        await db.flush()
 
     await db.commit()
     return response
