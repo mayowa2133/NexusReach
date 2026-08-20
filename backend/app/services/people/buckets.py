@@ -42,6 +42,24 @@ def _apply_match_metadata(
         match_quality = "next_best"
         match_reason = "Senior leader fallback at the target company."
 
+    # A reason somebody recorded beats a reason we inferred.
+    #
+    # `match_reason` is not a column: it is recomputed from the title on every
+    # read, so a reason written to profile_data was overwritten before anyone
+    # could see it. A saved contact typed `recruiter` whose title said "Head of
+    # Marketing" was shown "Recruiting title at the target company." while
+    # profile_data held "Runs the team this role reports into" -- the product
+    # stating something about a person that its own stored record contradicted.
+    #
+    # The computation stays: it is what a freshly discovered person has, and it
+    # still decides match_quality, which is a ranking signal rather than a
+    # sentence. Only the sentence defers.
+    stored = data.get("profile_data")
+    if isinstance(stored, dict):
+        recorded = stored.get("match_reason")
+        if isinstance(recorded, str) and recorded.strip():
+            match_reason = recorded.strip()
+
     bucket_name = {
         "recruiter": "recruiters",
         "hiring_manager": "hiring_managers",
