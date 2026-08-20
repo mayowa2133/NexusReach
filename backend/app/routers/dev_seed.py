@@ -38,6 +38,7 @@ from app.models.outreach import OutreachLog
 from app.models.person import Person
 from app.models.profile import Profile
 from app.services.occupation_taxonomy import OCCUPATION_TAG_PREFIX
+from app.services.people.classify import _classify_person
 
 router = APIRouter(prefix="/dev", tags=["dev"])
 
@@ -255,12 +256,24 @@ async def seed_fixture(
             await db.flush()
             response.company_id = company.id
 
+        # The bucket follows from the title, using the product's own classifier.
+        #
+        # A seeded Avery Chen carried person_type "recruiter" from an older
+        # fixture while her title said "Head of Marketing", and the people list
+        # recomputes its reason from that bucket -- so the demo told the reader
+        # she was a recruiting contact. A seed that asserts a role and a bucket
+        # separately is two representations of one fact, and this one had already
+        # drifted apart. Assert the role; derive the bucket.
+        person_type = _classify_person(contact.role)
         if existing_person is None:
-            existing_person = Person(user_id=user_id, full_name=contact.name, title=contact.role)
+            existing_person = Person(
+                user_id=user_id, full_name=contact.name, title=contact.role, person_type=person_type
+            )
             db.add(existing_person)
             response.created.append("person")
         else:
             existing_person.title = contact.role
+            existing_person.person_type = person_type
             response.updated.append("person")
         if company is not None:
             existing_person.company_id = company.id

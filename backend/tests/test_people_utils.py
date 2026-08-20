@@ -1071,6 +1071,51 @@ class TestEmploymentAndRanking:
             "Mehdi Mohammadi",
         ]
 
+    def test_recorded_match_reason_survives_the_recompute(self):
+        """A reason somebody wrote down beats one inferred from the title.
+
+        `match_reason` is not a column; it is recomputed on every read. A saved
+        contact typed `recruiter` whose title said "Head of Marketing" was shown
+        "Recruiting title at the target company." while profile_data held
+        "Runs the team this role reports into" -- the product stating something
+        about a person that its own stored record contradicted.
+        """
+        from app.services.people.buckets import _apply_match_metadata
+
+        person = SimpleNamespace(title="Head of Marketing", company=None)
+        recorded = "Runs the team this role reports into"
+        _apply_match_metadata(
+            person,
+            {"title": "Head of Marketing", "snippet": "", "source": "", "profile_data": {"match_reason": recorded}},
+            "recruiter",
+            context=None,
+            company_name="Northstar Labs",
+        )
+        assert person.match_reason == recorded
+
+        # And with nothing recorded the computation still speaks, because a
+        # freshly discovered person has no stored reason to defer to.
+        fresh = SimpleNamespace(title="Head of Marketing", company=None)
+        _apply_match_metadata(
+            fresh,
+            {"title": "Head of Marketing", "snippet": "", "source": "", "profile_data": {}},
+            "recruiter",
+            context=None,
+            company_name="Northstar Labs",
+        )
+        assert fresh.match_reason == "Recruiting title at the target company."
+
+        # Blank is not a reason.
+        blank = SimpleNamespace(title="Head of Marketing", company=None)
+        _apply_match_metadata(
+            blank,
+            {"title": "Head of Marketing", "snippet": "", "source": "", "profile_data": {"match_reason": "   "}},
+            "recruiter",
+            context=None,
+            company_name="Northstar Labs",
+        )
+        assert blank.match_reason == "Recruiting title at the target company."
+
     def test_compute_match_metadata_marks_weak_peer_title_next_best(self):
         match_quality, match_reason = _compute_match_metadata(
             {
