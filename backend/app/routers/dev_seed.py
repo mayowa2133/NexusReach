@@ -77,6 +77,13 @@ class SeedContact(BaseModel):
     role: str = Field(min_length=1, max_length=255)
     company: str | None = Field(default=None, max_length=255)
     reason: str | None = Field(default=None, max_length=500)
+    # A found email, and whether it was checked.
+    #
+    # The dashboard counts a verified email as one that has an address AND a
+    # verified status, so a demo that seeds neither reads "Verified Emails 0"
+    # under a film claiming the product verifies emails.
+    work_email: str | None = Field(default=None, max_length=255)
+    email_verified: bool = False
 
 
 class SeedMessage(BaseModel):
@@ -84,6 +91,10 @@ class SeedMessage(BaseModel):
     body: str = Field(min_length=1)
     channel: str = Field(default="email", max_length=50)
     goal: str = Field(default="referral", max_length=100)
+    # draft | edited | copied | staged | sent. "Staged Drafts" counts this, and
+    # staging is the last step of the product's own first-win path -- a demo
+    # where nothing is ever staged shows a zero beside the claim.
+    status: str = Field(default="draft", max_length=50)
 
 
 class SeedStory(BaseModel):
@@ -330,6 +341,27 @@ async def seed_fixture(
         if contact.reason:
             existing_person.profile_data = {**(existing_person.profile_data or {}), "match_reason": contact.reason}
 
+        if contact.work_email:
+            existing_person.work_email = contact.work_email
+            # The verification fields kept consistent with each other, the way
+            # the outreach timestamps are. A row claiming `email_verified` with
+            # no method, no label and no time is a demo teaching the reader
+            # something untrue about what verification means here.
+            existing_person.email_verified = contact.email_verified
+            existing_person.email_source = "seed"
+            if contact.email_verified:
+                existing_person.email_verification_status = "verified"
+                existing_person.email_verification_method = "smtp"
+                existing_person.email_verification_label = "Verified"
+                existing_person.email_confidence = 95
+                existing_person.email_verified_at = datetime.now(timezone.utc)
+            else:
+                existing_person.email_verification_status = None
+                existing_person.email_verification_method = None
+                existing_person.email_verification_label = None
+                existing_person.email_confidence = None
+                existing_person.email_verified_at = None
+
         await db.flush()
         response.person_id = existing_person.id
 
@@ -356,6 +388,7 @@ async def seed_fixture(
             response.updated.append("message")
         if hasattr(existing_message, "subject"):
             existing_message.subject = message.subject
+        existing_message.status = message.status
 
         await db.flush()
         response.message_id = existing_message.id
