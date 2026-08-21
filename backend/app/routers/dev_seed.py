@@ -108,6 +108,18 @@ class SeedRequest(BaseModel):
     # seeded marketing role on a profile targeting software engineering is a
     # true row the product will correctly never surface.
     target_occupations: list[str] | None = None
+    # The roles and the sentence about the person, which is what anything writing
+    # on their behalf actually reads.
+    #
+    # Seeding occupations alone leaves a profile that contradicts itself: this
+    # workspace was set to {marketing, product_management} while its roles still
+    # said Product Engineer and its bio said "Early-career product engineer", so
+    # the draft generator -- which writes from the bio -- produced a message about
+    # "the Product Engineering position" for a marketing opening. Occupations
+    # decide what is surfaced; the bio decides what is written; a seed that moves
+    # one and not the other moves the demo halfway.
+    target_roles: list[str] | None = None
+    bio: str | None = Field(default=None, max_length=2000)
     opportunity: SeedOpportunity | None = None
     contact: SeedContact | None = None
     message: SeedMessage | None = None
@@ -167,6 +179,18 @@ async def seed_fixture(
             raise HTTPException(status_code=404, detail="No profile to target")
         profile.target_occupations = payload.target_occupations
         response.updated.append("profile")
+
+    if payload.target_roles is not None or payload.bio is not None:
+        profile = (
+            await db.execute(select(Profile).where(Profile.user_id == user_id))
+        ).scalars().first()
+        if profile is None:
+            raise HTTPException(status_code=404, detail="No profile to target")
+        if payload.target_roles is not None:
+            profile.target_roles = payload.target_roles
+        if payload.bio is not None:
+            profile.bio = payload.bio
+        response.updated.append("persona")
 
     if payload.opportunity is not None:
         opportunity = payload.opportunity
