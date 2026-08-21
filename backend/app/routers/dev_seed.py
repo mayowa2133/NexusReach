@@ -36,6 +36,7 @@ from app.models.job import Job
 from app.models.message import Message
 from app.models.outreach import OutreachLog
 from app.models.person import Person
+from app.models.story import Story
 from app.models.profile import Profile
 from app.services.occupation_taxonomy import OCCUPATION_TAG_PREFIX
 from app.services.people.classify import _classify_person
@@ -85,6 +86,21 @@ class SeedMessage(BaseModel):
     goal: str = Field(default="referral", max_length=100)
 
 
+class SeedStory(BaseModel):
+    """One proof point the persona can tell about themselves."""
+
+    title: str = Field(min_length=1, max_length=255)
+    summary: str = Field(min_length=1, max_length=1000)
+    situation: str | None = Field(default=None, max_length=2000)
+    action: str | None = Field(default=None, max_length=2000)
+    result: str | None = Field(default=None, max_length=2000)
+    impact_metric: str | None = Field(default=None, max_length=255)
+    # Scoring reads these. A story with neither is picked only as a fallback,
+    # which is how an untagged engineering story stayed in a marketing draft.
+    role_focus: str | None = Field(default=None, max_length=255)
+    tags: list[str] | None = None
+
+
 class SeedOutreachEntry(BaseModel):
     """One past piece of outreach, as the account would already hold it."""
 
@@ -120,6 +136,13 @@ class SeedRequest(BaseModel):
     # one and not the other moves the demo halfway.
     target_roles: list[str] | None = None
     bio: str | None = Field(default=None, max_length=2000)
+    # The proof points drafting draws on.
+    #
+    # A persona whose bio says one thing and whose only story says another
+    # produces a draft that argues for the wrong person: the marketing draft
+    # cited "Shipped accessibility revamp" because it was the only story there,
+    # and an untagged story is picked as a fallback rather than on merit.
+    stories: list[SeedStory] | None = None
     opportunity: SeedOpportunity | None = None
     contact: SeedContact | None = None
     message: SeedMessage | None = None
@@ -336,6 +359,30 @@ async def seed_fixture(
 
         await db.flush()
         response.message_id = existing_message.id
+
+    if payload.stories:
+        # Reused by title, so re-seeding updates rather than accumulating a
+        # bank of near-duplicates the drafter then has to choose between.
+        for entry in payload.stories:
+            story = (
+                await db.execute(
+                    select(Story).where(Story.user_id == user_id, Story.title == entry.title)
+                )
+            ).scalars().first()
+            if story is None:
+                story = Story(user_id=user_id, title=entry.title)
+                db.add(story)
+                response.created.append(f"story:{entry.title}")
+            else:
+                response.updated.append(f"story:{entry.title}")
+            story.summary = entry.summary
+            story.situation = entry.situation
+            story.action = entry.action
+            story.result = entry.result
+            story.impact_metric = entry.impact_metric
+            story.role_focus = entry.role_focus
+            story.tags = entry.tags or []
+        await db.flush()
 
     if payload.outreach_history:
         # Each entry becomes a person and a log, reusing either if it is already
