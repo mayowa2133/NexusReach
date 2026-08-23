@@ -964,48 +964,62 @@ async def _store_raw_jobs(
     for attempt in range(2):
         stored = []
         refreshed_existing = False
-        dedup_index = (
-            await _prefetch_existing_jobs(db, user_id, prepared) if prepared else None
-        )
-
-        for data, fp in prepared:
-            existing = await _find_existing_job(
-                db,
-                user_id=user_id,
-                source=data.get("source"),
-                ats=data.get("ats"),
-                external_id=data.get("external_id"),
-                url=data.get("url"),
-                fingerprint=fp,
-                index=dedup_index,
+        # The resolve loop and the commit are guarded together.
+        #
+        # Only the commit used to be. The resolve queries autoflush, so a
+        # conflicting pending row raises IntegrityError from inside
+        # `_prefetch_existing_jobs` or `_find_existing_job` rather than from
+        # `commit()` -- outside the guard, leaving the session in a
+        # rolled-back-but-not-reset state. Every later call in the run then
+        # failed with PendingRollbackError, so one conflicting row aborted the
+        # whole discovery run: a startup refresh committed 130 jobs and then
+        # died, and every re-run died in the same place having stored nothing.
+        #
+        # The retry is unchanged in intent -- roll back, re-prefetch, and let
+        # the conflict resolve as a refresh -- it just now covers the place the
+        # conflict actually surfaces.
+        try:
+            dedup_index = (
+                await _prefetch_existing_jobs(db, user_id, prepared) if prepared else None
             )
-            score, breakdown = _score_job(data, profile)
-            experience_level = normalize._experience_level_for_job(data)
-            if existing:
-                _refresh_existing_job(
-                    existing,
-                    data,
+
+            for data, fp in prepared:
+                existing = await _find_existing_job(
+                    db,
+                    user_id=user_id,
+                    source=data.get("source"),
+                    ats=data.get("ats"),
+                    external_id=data.get("external_id"),
+                    url=data.get("url"),
                     fingerprint=fp,
+                    index=dedup_index,
+                )
+                score, breakdown = _score_job(data, profile)
+                experience_level = normalize._experience_level_for_job(data)
+                if existing:
+                    _refresh_existing_job(
+                        existing,
+                        data,
+                        fingerprint=fp,
+                        score=score,
+                        breakdown=breakdown,
+                        experience_level=experience_level,
+                    )
+                    refreshed_existing = True
+                    continue
+
+                job = _build_job(
+                    user_id=user_id,
+                    data=data,
                     score=score,
                     breakdown=breakdown,
-                    experience_level=experience_level,
+                    fingerprint=fp,
                 )
-                refreshed_existing = True
-                continue
+                db.add(job)
+                stored.append(job)
 
-            job = _build_job(
-                user_id=user_id,
-                data=data,
-                score=score,
-                breakdown=breakdown,
-                fingerprint=fp,
-            )
-            db.add(job)
-            stored.append(job)
-
-        if not (stored or refreshed_existing):
-            break
-        try:
+            if not (stored or refreshed_existing):
+                break
             await db.commit()
             break
         except IntegrityError:
