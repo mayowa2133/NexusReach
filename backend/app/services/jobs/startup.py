@@ -151,6 +151,8 @@ async def _discover_startup_ecosystem_entries(
 ) -> int:
     semaphore = asyncio.Semaphore(constants.STARTUP_LINK_RESOLVE_CONCURRENCY)
 
+    db_lock = asyncio.Lock()
+
     async def _process_entry(entry: dict) -> int:
         raw_url = str(entry.get(url_key) or "").strip()
         if not raw_url:
@@ -183,14 +185,30 @@ async def _discover_startup_ecosystem_entries(
         total_new = 0
         for candidate in links[:constants.STARTUP_MAX_RESOLVED_LINKS_PER_COMPANY]:
             try:
-                total_new += await _import_startup_candidate_link(
-                    db,
-                    user_id,
-                    profile,
-                    startup_source=startup_source,
-                    candidate_url=candidate,
-                    queries=queries,
-                )
+                # One session, many coroutines -- so the session is taken under a
+                # lock, one entry at a time.
+                #
+                # These entries run under ``asyncio.gather`` below and every one
+                # of them was handed the same AsyncSession. A session is not safe
+                # for concurrent use: the coroutines interleave at each await, and
+                # a query in one autoflushes the pending rows of another. Two
+                # coroutines then emitted INSERTs for the same pending Job, and
+                # Postgres rejected the statement with a duplicate ``jobs_pkey``
+                # whose id was nowhere in the table -- because the statement that
+                # would have added it is the statement that failed.
+                #
+                # The concurrency that pays for itself is the link resolution
+                # above, which touches the network and not the session; it stays
+                # parallel under its own semaphore.
+                async with db_lock:
+                    total_new += await _import_startup_candidate_link(
+                        db,
+                        user_id,
+                        profile,
+                        startup_source=startup_source,
+                        candidate_url=candidate,
+                        queries=queries,
+                    )
             except Exception:
                 logger.exception(
                     "Failed importing startup candidate link from %s: %s",
