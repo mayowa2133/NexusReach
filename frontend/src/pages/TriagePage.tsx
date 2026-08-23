@@ -123,7 +123,7 @@ function TriageCard({ result }: { result: TriageResult }) {
             {Math.round(result.roi_score)}
           </span>
           <span
-            className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-medium ${cfg.badgeClass}`}
+            className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium ${cfg.badgeClass}`}
           >
             {cfg.label}
           </span>

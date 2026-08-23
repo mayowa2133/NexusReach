@@ -49,7 +49,7 @@
        green = positive/verified, amber = pending/attention, gray = neutral/informational */
     --status-positive: #0C6B4B;
     --status-pending: #93611A;
-    --status-neutral: #75726A;
+    --status-neutral: #706D66;
 
     --radius: 0.75rem;
 
