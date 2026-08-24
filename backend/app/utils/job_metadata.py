@@ -8,6 +8,7 @@ the product can distinguish strong source data from heuristics.
 
 from __future__ import annotations
 
+import html
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -916,6 +917,42 @@ def _clamp_job_string_fields(normalized: dict[str, Any]) -> None:
         value = normalized.get(field)
         if isinstance(value, str) and len(value) > max_len:
             normalized[field] = value[:max_len]
+
+
+def decode_source_html(description: str | None) -> str | None:
+    """Undo a source's HTML-escaping of a description that is really markup.
+
+    Greenhouse returns its ``content`` field HTML-escaped -- the body arrives as
+    ``&lt;div class=&quot;content-intro&quot;&gt;`` rather than as markup -- and
+    storing it verbatim meant the product rendered the tags to the reader. The
+    Job detail page sanitizes and inserts the description as HTML, so escaped
+    input survives sanitizing untouched and lands on screen as angle brackets and
+    tag names. Every one of the 1290 Greenhouse descriptions in the table was
+    affected; Ashby and the rest send real markup and were always fine.
+
+    The test is the content, not the source. Two reasons: Ashby and Jobicy also
+    had a handful of escaped rows, so a per-source rule would have missed them;
+    and a source that changes its encoding would silently break a rule keyed on
+    its name.
+
+    Escaped-ness is decided by ``&lt;`` with no real ``<`` anywhere. The second
+    half is what keeps this safe: a description that already contains markup and
+    *also* contains ``&lt;`` is a document with escaped entities in its content --
+    a posting showing a code sample, say -- and unescaping that would turn the
+    sample the reader is meant to see into tags the browser executes as layout.
+    Measured on the table: 1290 rows purely escaped, 5 rows with both, and the
+    5 are Ashby and Jobicy postings whose markup is genuine.
+
+    Idempotent by construction: decoded text contains a real ``<``, so a second
+    pass leaves it alone.
+    """
+    if not isinstance(description, str) or not description:
+        return description
+    if "&lt;" not in description:
+        return description
+    if "<" in description:
+        return description
+    return html.unescape(description)
 
 
 def normalize_job_metadata(job_data: dict[str, Any]) -> dict[str, Any]:

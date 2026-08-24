@@ -12,7 +12,7 @@ from datetime import datetime
 from app.utils.startup_jobs import has_startup_tag
 from app.utils.startup_jobs import merge_startup_tags
 from app.utils.startup_jobs import merge_tags
-from app.utils.job_metadata import normalize_job_metadata
+from app.utils.job_metadata import decode_source_html, normalize_job_metadata
 from app.services.occupation_taxonomy import (
     infer_job_occupations,
     occupation_tags_for_job,
@@ -927,6 +927,16 @@ async def _store_raw_jobs(
     # raw job (the board crawl stores ~24k rows per run).
     prepared: list[tuple[dict, str]] = []
     for data in raw_jobs:
+        # Decoded before anything reads the description, not alongside the other
+        # normalization below.
+        #
+        # Four things in this loop consume it -- startup tags, occupation tags,
+        # the fingerprint, and the stored column -- and decoding late would leave
+        # some of them looking at escaped markup and the rest at the real thing.
+        # The fingerprint matters most: it is computed from the description, so a
+        # posting fingerprinted before this fix and again after it would come out
+        # as two different jobs.
+        data["description"] = decode_source_html(data.get("description"))
         _infer_startup_tags_for_job(data, known_startup_companies)
         _infer_occupation_tags_for_job(data)
         data = normalize_job_metadata(data)
