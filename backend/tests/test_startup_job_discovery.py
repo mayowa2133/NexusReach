@@ -212,7 +212,14 @@ async def test_search_ats_jobs_merges_startup_tags_into_existing_job():
             extra_tags=["startup", "startup_source:conviction"],
         )
 
-    assert existing_job.tags == ["startup", "startup_source:conviction"]
+    # The occupation tag is the point: a job the user asked for by name used to
+    # arrive with no occupation at all and was therefore invisible to every chip
+    # on the Jobs page. It now gets the same treatment as a crawled job.
+    assert existing_job.tags == [
+        "startup",
+        "startup_source:conviction",
+        "occupation:software_engineering",
+    ]
     db.add.assert_not_called()
 
 

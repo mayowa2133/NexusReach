@@ -69,7 +69,12 @@ def test_description_is_decoded_before_it_is_fingerprinted():
 
     from app.services.jobs import storage
 
-    body = inspect.getsource(storage._store_raw_jobs)
+    body = inspect.getsource(storage.prepare_raw_job)
     decode_at = body.index("decode_source_html")
-    for later in ("_infer_startup_tags_for_job", "_infer_occupation_tags_for_job", "_fingerprint"):
+    for later in ("_infer_startup_tags_for_job", "_infer_occupation_tags_for_job"):
         assert decode_at < body.index(later), f"{later} reads the description before it is decoded"
+
+    # And the fingerprint, which is computed from the description after the
+    # caller has prepared it.
+    caller = inspect.getsource(storage._store_raw_jobs)
+    assert caller.index("prepare_raw_job") < caller.index("_fingerprint")

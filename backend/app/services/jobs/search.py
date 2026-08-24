@@ -13,7 +13,6 @@ from app.clients import jobbank_client
 from app.clients import jsearch_client
 from app.clients import newgrad_jobs_client
 from app.clients import themuse_client
-from app.utils.job_metadata import normalize_job_metadata
 from app.clients import remote_jobs_client
 from sqlalchemy import select
 import uuid
@@ -355,9 +354,7 @@ async def search_jobs(
             # occupation onto a job we could not actually classify — that is
             # how engineering roles ended up under Marketing before.
             data.pop("_occupation_hint", None)
-        storage._infer_startup_tags_for_job(data, known_startup_companies)
-        storage._infer_occupation_tags_for_job(data)
-        data = normalize_job_metadata(data)
+        data = storage.prepare_raw_job(data, known_startup_companies=known_startup_companies)
         if not normalize._job_matches_refresh_filters(data, location=location, remote_only=remote_only):
             stat["skipped_count"] += 1
             continue
@@ -527,8 +524,17 @@ async def search_ats_jobs(
     stored_jobs: list[Job] = []
     board_jobs: list[Job] = []
     seen_job_keys: set[str] = set()
+    # Same preparation the discovery crawl runs: a job a user asked for by name
+    # should be as findable afterwards as one the crawl happened to bring in.
+    known_startup_companies = (
+        await storage._load_known_startup_company_names(db, user_id) if raw_jobs else set()
+    )
     for raw_data in raw_jobs:
-        data = normalize_job_metadata(normalize._with_extra_tags(raw_data, extra_tags))
+        data = storage.prepare_raw_job(
+            raw_data,
+            known_startup_companies=known_startup_companies,
+            extra_tags=extra_tags,
+        )
         fp = normalize._fingerprint(
             data.get("company_name", ""),
             data["title"],
