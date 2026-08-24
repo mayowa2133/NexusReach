@@ -1,5 +1,10 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+/* Job descriptions arrive as third-party markup and are rendered through
+   `prose` in JobDetailPage and JobsPage. The classes were written without the
+   plugin that defines them, so headings rendered at body size and requirement
+   lists lost their bullets -- the part of a posting people actually scan. */
+@plugin "@tailwindcss/typography";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
 
