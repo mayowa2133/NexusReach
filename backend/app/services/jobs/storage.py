@@ -908,6 +908,40 @@ def recompute_occupation_tags(job: Job) -> list[str] | None:
     return non_occupation + fresh
 
 
+def prepare_raw_job(
+    data: dict,
+    *,
+    known_startup_companies: set[str],
+    extra_tags: list[str] | None = None,
+) -> dict:
+    """Turn a raw job dict from any source into the shape that gets stored.
+
+    There are two ways a job enters this database -- the discovery crawl through
+    ``_store_raw_jobs`` and a user naming a company through
+    ``search.search_ats_jobs`` -- and they had grown two different ideas of what
+    "prepare a raw job" means. The crawl inferred occupation and startup tags and
+    decoded source-escaped descriptions; the search did neither.
+
+    The result was a class of job that is in the feed and invisible to it: one
+    ``figma`` career-page search stored 162 rows, every one of them with
+    ``tags = NULL`` -- including "Data Engineer" and "Manager, Software
+    Engineering" -- so not one of them answered an occupation chip, which is the
+    main control on the Jobs page. All 162 also kept Greenhouse's HTML-escaped
+    description, because that fix had been applied to the crawl alone.
+
+    Order is load-bearing and matches the crawl's: the description is decoded
+    first because the tag inference classifies on it and the fingerprint is
+    computed from it, so decoding later would leave those reading escaped markup
+    while the stored column held the real thing.
+    """
+    if extra_tags:
+        data = normalize._with_extra_tags(data, extra_tags)
+    data["description"] = decode_source_html(data.get("description"))
+    _infer_startup_tags_for_job(data, known_startup_companies)
+    _infer_occupation_tags_for_job(data)
+    return normalize_job_metadata(data)
+
+
 async def _store_raw_jobs(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -927,19 +961,7 @@ async def _store_raw_jobs(
     # raw job (the board crawl stores ~24k rows per run).
     prepared: list[tuple[dict, str]] = []
     for data in raw_jobs:
-        # Decoded before anything reads the description, not alongside the other
-        # normalization below.
-        #
-        # Four things in this loop consume it -- startup tags, occupation tags,
-        # the fingerprint, and the stored column -- and decoding late would leave
-        # some of them looking at escaped markup and the rest at the real thing.
-        # The fingerprint matters most: it is computed from the description, so a
-        # posting fingerprinted before this fix and again after it would come out
-        # as two different jobs.
-        data["description"] = decode_source_html(data.get("description"))
-        _infer_startup_tags_for_job(data, known_startup_companies)
-        _infer_occupation_tags_for_job(data)
-        data = normalize_job_metadata(data)
+        data = prepare_raw_job(data, known_startup_companies=known_startup_companies)
         eligibility = hard_eligibility_decision(data, profile)
         provenance = (
             dict(data.get("metadata_provenance"))

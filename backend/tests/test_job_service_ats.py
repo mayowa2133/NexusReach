@@ -103,6 +103,9 @@ async def test_search_ats_jobs_reuses_existing_external_id_without_error():
     db = MagicMock()
     db.execute = AsyncMock(
         side_effect=[
+            # The known-startup-company lookup `prepare_raw_job` needs; one query
+            # per search, not per job.
+            _ScalarResult([]),
             _ScalarResult(None),
             _ScalarResult([existing_job, MagicMock()]),
         ]
