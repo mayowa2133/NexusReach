@@ -1679,7 +1679,12 @@ export function JobDetailPage() {
         <div className="space-y-2">
           <h2 className="text-lg font-semibold">Job Description</h2>
           <div
-            className="text-sm text-muted-foreground prose prose-sm dark:prose-invert max-w-none"
+            // No `max-w-none`. The prose plugin caps a measure at 65ch because
+            // that is the readable range; overriding it here gave 124 characters
+            // per line at a 1440px window, which is roughly twice the width at
+            // which people lose their place between lines. Job descriptions are
+            // the longest prose in the product and the part users actually read.
+            className="text-sm text-muted-foreground prose prose-sm dark:prose-invert"
             dangerouslySetInnerHTML={{ __html: sanitizeHTML(job.description) }}
           />
         </div>
