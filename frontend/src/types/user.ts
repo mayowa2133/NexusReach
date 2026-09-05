@@ -122,7 +122,7 @@ export interface ResumeReuseSettings {
 }
 
 export interface AccountDeleteResponse {
-  deleted: boolean;
-  auth_identity_deleted: boolean;
-  deleted_tables: Record<string, number>;
+  status: 'pending' | 'completed';
+  request_id: string;
+  receipt_token: string;
 }

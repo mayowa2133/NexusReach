@@ -7,7 +7,7 @@ from collections.abc import Coroutine
 from importlib import import_module
 from typing import Any, TypeVar
 
-from celery import Celery
+from celery import Celery, current_task
 from celery.schedules import crontab
 from celery.signals import worker_process_init
 
@@ -61,7 +61,13 @@ def run_async(coro: Coroutine[Any, Any, _T]) -> _T:
     them. Reusing one loop per prefork child prevents pooled connections from
     being reused by a different loop on the next Celery task.
     """
-    return _get_async_runner().run(coro)
+    request = getattr(current_task, "request", None)
+    task_id = getattr(request, "id", None)
+    task_name = getattr(current_task, "name", None)
+    scope = f"celery:{task_name}:{task_id}" if task_id and task_name else None
+    from app.services.paid_context import run_in_operation_scope
+
+    return _get_async_runner().run(run_in_operation_scope(coro, scope))
 
 
 init_sentry("worker")
@@ -113,10 +119,17 @@ celery_app.conf.update(
         "app.tasks.auto_prospect.prewarm_job_people": {"queue": "prewarm"},
         "app.tasks.auto_prospect.prewarm_job_people_batch": {"queue": "prewarm"},
         "app.tasks.auto_prospect.refresh_job_research_snapshot": {"queue": "prewarm"},
-        "app.tasks.render.render_pdf": {"queue": "render"},
-        "app.tasks.render.render_redline_pdf": {"queue": "render"},
     },
     beat_schedule={
+        "deliver-referral-credit-notifications": {
+            "task": "app.tasks.referrals.deliver_pending_credit_notifications",
+            "schedule": 60.0,
+        },
+        "retry-deletions": {"task": "app.tasks.deletions.retry_pending", "schedule": 60.0},
+        "recover-paid-work-reservations": {
+            "task": "app.tasks.paid_work.recover_expired",
+            "schedule": 60.0,
+        },
         "refresh-job-feeds": {
             "task": "app.tasks.jobs.refresh_all_job_feeds",
             # Hourly (was */15). Each refresh dedups every fetched job against the
@@ -216,9 +229,10 @@ for module_name in (
     "app.tasks.linkedin_graph",
     "app.tasks.outreach_reconcile",
     "app.tasks.reverify",
-    "app.tasks.render",
     "app.tasks.referrals",
     "app.tasks.waitlist_resume",
     "app.tasks.waitlist_retention",
+    "app.tasks.deletions",
+    "app.tasks.paid_work",
 ):
     import_module(module_name)

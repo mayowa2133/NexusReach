@@ -17,6 +17,17 @@ from app.dependencies import (
 pytestmark = pytest.mark.asyncio
 
 
+@pytest.fixture(autouse=True)
+def active_identity(monkeypatch):
+    monkeypatch.setattr("app.services.identity_lifecycle.lock_subject", AsyncMock())
+    monkeypatch.setattr(
+        "app.services.identity_lifecycle.assert_subject_active", AsyncMock()
+    )
+    monkeypatch.setattr(
+        "app.services.identity_lifecycle.verify_upstream_identity", AsyncMock()
+    )
+
+
 class _ScalarResult:
     def __init__(self, value):
         self._value = value
@@ -30,7 +41,6 @@ async def test_get_or_create_user_uses_jwt_email_for_new_user():
     db = MagicMock()
     db.execute = AsyncMock(
         side_effect=[
-            _ScalarResult(None),  # advisory lock
             _ScalarResult(None),  # user lookup
         ]
     )
@@ -50,7 +60,6 @@ async def test_get_or_create_user_backfills_blank_email_and_defaults():
     db = MagicMock()
     db.execute = AsyncMock(
         side_effect=[
-            _ScalarResult(None),
             _ScalarResult(existing_user),
             _ScalarResult(None),
             _ScalarResult(None),

@@ -101,9 +101,17 @@ async def _check_smtp(email: str, mx_host: str) -> bool | None:
         False if rejected (5xx response),
         None if inconclusive (timeout, error, 4xx greylisting).
     """
+    from app.utils.url_safety import _resolve_public_address_async
+    try:
+        resolved = await asyncio.wait_for(_resolve_public_address_async(f"http://{mx_host}:25"), timeout=SMTP_TIMEOUT_SECONDS)
+    except (TimeoutError, ValueError):
+        return None
+    if resolved is None:
+        return None
+    pinned_ip = resolved[1]
     try:
         reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(mx_host, 25),
+            asyncio.open_connection(pinned_ip, 25),
             timeout=SMTP_TIMEOUT_SECONDS,
         )
 

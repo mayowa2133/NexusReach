@@ -44,6 +44,10 @@ async def mint_token(
     db: AsyncSession, user_id: uuid.UUID
 ) -> tuple[str, CompanionToken]:
     """Create a new companion token, revoking any previously active ones."""
+    from app.services.identity_lifecycle import lock_subject, assert_subject_active, verify_upstream_identity
+    await lock_subject(db, user_id)
+    await assert_subject_active(db, user_id)
+    await verify_upstream_identity(user_id)
     now = _now()
     await db.execute(
         update(CompanionToken)
@@ -75,6 +79,8 @@ async def resolve_token(db: AsyncSession, token: str) -> uuid.UUID | None:
     row = result.scalar_one_or_none()
     if row is None or row.revoked_at is not None:
         return None
+    from app.services.identity_lifecycle import assert_subject_active
+    await assert_subject_active(db, row.user_id)
     now = _now()
     if row.expires_at <= now:
         return None

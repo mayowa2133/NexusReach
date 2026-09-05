@@ -33,8 +33,9 @@ export function AccountDataPanel() {
 
   const handleDelete = async () => {
     try {
-      await deleteAccount.mutateAsync();
-      toast.success('Account deleted');
+      const receipt = await deleteAccount.mutateAsync();
+      sessionStorage.setItem('nr_deletion_receipt', JSON.stringify(receipt));
+      toast.success('Account access removed. External data deletion is pending.');
       await signOut().catch(() => {});
       window.location.assign('/login');
     } catch (err) {

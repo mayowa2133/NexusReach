@@ -45,6 +45,19 @@ function doPost(e) {
       data = JSON.parse(e.postData.contents);
     }
 
+    if (data.action === 'delete') {
+      var expected = PropertiesService.getScriptProperties().getProperty('DELETE_SECRET');
+      if (!expected || String(data.delete_secret || '') !== expected) return _json({ok:false});
+      var target = String(data.email || '').trim().toLowerCase();
+      var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
+      var values = sheet.getDataRange().getValues();
+      var emailColumn = values.length ? values[0].map(function(x) { return String(x).toLowerCase(); }).indexOf('email') : -1;
+      if (emailColumn < 0) return _json({ok:false});
+      for (var i=values.length-1; i>=1; i--) {
+        if (String(values[i][emailColumn]).trim().toLowerCase() === target) sheet.deleteRow(i+1);
+      }
+      return _json({ok:true, deleted:true});
+    }
     var name = String(data.name || '').trim();
     var email = String(data.email || '').trim().toLowerCase();
     if (!name || !_validEmail(email)) {

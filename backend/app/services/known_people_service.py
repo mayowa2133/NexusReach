@@ -37,7 +37,6 @@ GLOBAL_CACHE_ELIGIBLE_SOURCES = frozenset({
     "brave_hiring_team",
     "serper_hiring_team",
     "searxng_hiring_team",
-    "linkedin_hiring_team",
     "theorg_traversal",
     "brave_search",
     "serper_search",
@@ -53,6 +52,8 @@ GLOBAL_CACHE_ELIGIBLE_SOURCES = frozenset({
 
 GLOBAL_CACHE_BLOCKED_SOURCES = frozenset({
     "local_sync",
+    "linkedin_hiring_team",
+    "client_capture",
     "manual_import",
     "manual",
 })
@@ -61,6 +62,9 @@ GLOBAL_CACHE_BLOCKED_SOURCES = frozenset({
 def is_cache_eligible(candidate: dict) -> bool:
     """Return True only if the candidate's source is in the public allowlist."""
     source = (candidate.get("source") or "").strip().lower()
+    profile = candidate.get("profile_data")
+    if candidate.get("_hiring_team_capture") or (isinstance(profile, dict) and profile.get("hiring_team_capture")):
+        return False
     if source in GLOBAL_CACHE_BLOCKED_SOURCES:
         return False
     return source in GLOBAL_CACHE_ELIGIBLE_SOURCES
@@ -113,13 +117,13 @@ async def lookup_known_people(
         .where(
             KnownPersonCompany.normalized_company_name == normalized,
             KnownPersonCompany.is_current == True,  # noqa: E712
-            KnownPerson.verification_status != "expired",
+            KnownPerson.verification_status.notin_(["expired", "quarantined"]),
             # Age out by when the record was last (re)discovered, not when it was
             # first created — a re-discovered record is fresh (audit pass-2 P13).
             KnownPerson.last_discovered_at >= cutoff,
         )
         .order_by(KnownPerson.discovery_count.desc())
-        .limit(limit)
+        .limit(max(1, min(limit, 100)))
     )
     result = await db.execute(stmt)
     rows = result.all()
@@ -145,7 +149,7 @@ async def get_known_people_count(
         .where(
             KnownPersonCompany.normalized_company_name == normalized,
             KnownPersonCompany.is_current == True,  # noqa: E712
-            KnownPerson.verification_status != "expired",
+            KnownPerson.verification_status.notin_(["expired", "quarantined"]),
         )
     )
     result = await db.execute(stmt)
@@ -267,6 +271,7 @@ async def write_candidates_to_cache(
                 profile_data=_sanitize_profile_data_for_cache(candidate.get("profile_data")),
                 github_data=candidate.get("github_data"),
                 primary_source=source,
+                provenance="server_discovery",
                 all_sources=[source] if source else [],
                 discovery_count=1,
                 last_discovered_at=now,
@@ -325,7 +330,7 @@ async def mark_stale_records(
     expired_result = await db.execute(
         update(KnownPerson)
         .where(
-            KnownPerson.verification_status != "expired",
+            KnownPerson.verification_status.notin_(["expired", "quarantined"]),
             KnownPerson.last_verified_at <= expiry_cutoff,
         )
         .values(verification_status="expired")

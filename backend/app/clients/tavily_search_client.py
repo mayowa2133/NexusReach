@@ -10,6 +10,7 @@ import httpx
 
 from app.clients import brave_search_client
 from app.config import settings
+from app.services.paid_work import provider_request
 
 TAVILY_SEARCH_URL = "https://api.tavily.com/search"
 
@@ -136,7 +137,9 @@ async def _run_tavily_query(
 
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(TAVILY_SEARCH_URL, json=payload)
+            resp = await provider_request(
+                client, "tavily.search", "POST", TAVILY_SEARCH_URL, json=payload
+            )
             if resp.status_code in (401, 403, 429):
                 return []
             resp.raise_for_status()

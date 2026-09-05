@@ -5,6 +5,13 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -47,7 +54,9 @@ jobs:
       - name: Dependency audits
         run: |
           pip-audit --no-deps --disable-pip -r backend/requirements.lock
+          pip-audit --no-deps --disable-pip -r backend/requirements.renderer.lock
           pip-audit --no-deps --disable-pip --format cyclonedx-json --output backend-python.cdx.json -r backend/requirements.lock
+          pip-audit --no-deps --disable-pip --format cyclonedx-json --output renderer-python.cdx.json -r backend/requirements.renderer.lock
           npm audit --omit=dev --prefix frontend
           npm audit --omit=dev --prefix e2e
 
@@ -103,6 +112,7 @@ jobs:
 
           for name in (
               "backend-python.cdx.json",
+              "renderer-python.cdx.json",
               "nexusreach-api.cdx.json",
               "nexusreach-renderer.cdx.json",
           ):

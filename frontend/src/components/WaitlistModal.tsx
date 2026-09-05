@@ -1,19 +1,10 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import {
-  joinWaitlistBackend,
-  storeReferralOwner,
-  WaitlistError,
-} from '@/hooks/useReferral';
-import { ReferralPanel } from '@/components/ReferralPanel';
+import { joinWaitlistBackend, WaitlistError } from '@/hooks/useReferral';
 import { usePublicOccupations } from '@/hooks/useOccupations';
 import { trackFunnelEvent } from '@/lib/observability';
-import type { ReferralStatus } from '@/types/referral';
 
-// The referral loop needs the backend sink: a signup returns a referral code +
-// queue position that power the "refer your friends" panel. The Google Apps
-// Script sink (VITE_WAITLIST_ENDPOINT) can't return that (its no-cors response
-// is unreadable), so it's kept only as an offline fallback when the backend is
-// unreachable — the signup is still captured, just without referral features.
+// The Google Apps Script sink is an offline fallback when the backend is
+// unreachable. Its opaque no-cors response must never expose signup state.
 const SHEET_ENDPOINT = import.meta.env.VITE_WAITLIST_ENDPOINT as string | undefined;
 
 interface WaitlistModalProps {
@@ -88,8 +79,6 @@ export function WaitlistModal({ onClose, source, referredByCode }: WaitlistModal
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [state, setState] = useState<SubmitState>('idle');
   const [error, setError] = useState<string | null>(null);
-  const [alreadyOnList, setAlreadyOnList] = useState(false);
-  const [referral, setReferral] = useState<ReferralStatus | null>(null);
   const [goals, setGoals] = useState<string[]>([]);
   const [resume, setResume] = useState<PickedResume | null>(null);
   const [resumeError, setResumeError] = useState<string | null>(null);
@@ -221,27 +210,10 @@ export function WaitlistModal({ onClose, source, referredByCode }: WaitlistModal
     trackFunnelEvent('waitlist_submitted', funnelProps);
 
     try {
-      // Backend sink first — it returns the referral code + queue position that
-      // hydrate the "refer your friends" panel.
-      const result = await joinWaitlistBackend(payload);
-      setAlreadyOnList(Boolean(result.already_on_list));
-      // The referral panel only appears for a signup this request created. For
-      // an address already on the list the server returns nothing about it (it
-      // can't tell us apart from someone guessing the email) and mails the
-      // owner their link instead — so we fall through to the plain confirmation.
-      if (result.referral && result.access_token) {
-        setReferral(result.referral);
-        storeReferralOwner(result.referral.referral_code, result.access_token);
-      } else {
-        setReferral(null);
-      }
+      await joinWaitlistBackend(payload);
       trackFunnelEvent('waitlist_joined', {
         ...funnelProps,
         sink: 'backend',
-        already_on_list: Boolean(result.already_on_list),
-        // Whether this visitor actually reached the referral panel — an
-        // already-listed address doesn't, and that changes share rates.
-        saw_referral_panel: Boolean(result.referral && result.access_token),
       });
       setState('success');
     } catch (err) {
@@ -298,15 +270,9 @@ export function WaitlistModal({ onClose, source, referredByCode }: WaitlistModal
             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
             body: JSON.stringify(sheetPayload),
           });
-          setReferral(null);
-          setAlreadyOnList(false);
-          // Captured, but with no referral features — worth separating so a
-          // backend outage doesn't read as healthy signups.
           trackFunnelEvent('waitlist_joined', {
             ...funnelProps,
             sink: 'sheet_fallback',
-            already_on_list: false,
-            saw_referral_panel: false,
           });
           setState('success');
           return;
@@ -343,29 +309,16 @@ export function WaitlistModal({ onClose, source, referredByCode }: WaitlistModal
 
         {state === 'success' ? (
           <div className="lp-wl-success">
-            {referral ? (
-              <>
-                <ReferralPanel status={referral} titleId={titleId} />
-                <button className="btn btn-ghost lp-ref-done" onClick={onClose}>
-                  Done
-                </button>
-              </>
-            ) : (
-              <>
-                <span className="stamp stamp-green">YOU'RE ON THE LIST</span>
-                <h3 id={titleId}>
-                  {alreadyOnList ? "You're already on the list." : "You're in."}
-                </h3>
-                <p>
-                  {alreadyOnList
-                    ? "We've got your details — no need to sign up twice. Check your inbox: we've just sent your personal referral link so you can move up the queue."
-                    : "Thanks for joining. We'll email you the moment Solomon opens — you'll be among the first invited."}
-                </p>
-                <button className="btn btn-primary" onClick={onClose}>
-                  Done
-                </button>
-              </>
-            )}
+            <span className="stamp stamp-green">REQUEST RECEIVED</span>
+            <h3 id={titleId}>Check your inbox.</h3>
+            <p>
+              If this address can join or recover an existing signup, we’ll send
+              the next step by email. The confirmation is the same for every
+              request to protect waitlist privacy.
+            </p>
+            <button className="btn btn-primary" onClick={onClose}>
+              Done
+            </button>
           </div>
         ) : (
           <>

@@ -12,7 +12,6 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 
-from app.clients import crawl4ai_client, firecrawl_client
 from app.utils.job_metadata import parse_json_ld_base_salary
 from app.utils.url_safety import is_safe_public_url, safe_get
 from app.clients.ats.html import (
@@ -103,7 +102,6 @@ from app.clients.ats.registry import (
     get_adapter,
     parse_ats_job_url,
 )
-
 
 
 

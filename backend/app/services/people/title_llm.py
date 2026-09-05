@@ -15,6 +15,8 @@ import json
 import logging
 import re
 
+from fastapi import HTTPException
+
 from app.clients import llm_client, search_cache_client
 
 logger = logging.getLogger(__name__)
@@ -98,6 +100,8 @@ async def resolve_ambiguous_titles(titles: list[str]) -> dict[str, str]:
                     )
                 except Exception:
                     logger.debug("title class cache write failed", exc_info=True)
+    except HTTPException:
+        raise
     except Exception:
         logger.warning(
             "LLM title tie-break failed for %d titles; keeping keyword buckets",

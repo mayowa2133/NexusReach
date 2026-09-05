@@ -1,16 +1,7 @@
-"""Tesla Careers job search client.
-
-Tesla's careers site (tesla.com/careers/search) is protected by Akamai Bot
-Manager which blocks standard HTTP requests.  This client uses Crawl4AI
-(headless browser) to render the page and extract job data from the DOM.
-
-Best-effort: requires Crawl4AI (Playwright) to be installed.  Returns an
-empty list if Crawl4AI is unavailable or Tesla blocks the headless browser.
-"""
+"""Tesla Careers parser; remote browser retrieval is disabled in production."""
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 
@@ -28,12 +19,6 @@ _LOCATION_RE = re.compile(
     r'<span[^>]*class="[^"]*location[^"]*"[^>]*>([^<]+)',
     re.IGNORECASE,
 )
-
-
-def _is_missing_playwright_browser(exc: Exception) -> bool:
-    """Return True when Crawl4AI failed only because the Playwright browser is absent."""
-    message = str(exc)
-    return "Executable doesn't exist" in message and "playwright install" in message
 
 
 def _extract_job_id(path: str) -> str:
@@ -84,50 +69,6 @@ async def search_tesla_jobs(
     search_text: str = "",
     limit: int = 20,
 ) -> list[dict]:
-    """Fetch Tesla jobs by rendering their careers page with a headless browser.
-
-    Requires Crawl4AI to be installed.  Returns an empty list if unavailable.
-    """
-    try:
-        from crawl4ai import AsyncWebCrawler  # type: ignore
-    except ImportError:
-        logger.debug("Tesla client: Crawl4AI not installed, skipping")
-        return []
-
-    url = _SEARCH_URL.format(query=search_text or "software")
-
-    try:
-        async with AsyncWebCrawler() as crawler:
-            result = await asyncio.wait_for(
-                crawler.arun(url=url),
-                timeout=30,
-            )
-    except asyncio.TimeoutError:
-        logger.warning("Tesla careers page timed out")
-        return []
-    except Exception as exc:
-        if _is_missing_playwright_browser(exc):
-            logger.warning(
-                "Tesla client: Playwright browser not installed in runtime, skipping Tesla jobs"
-            )
-            return []
-        # This source is best-effort by design: Akamai blocking the headless
-        # browser, Chromium failing to launch under worker resource pressure
-        # ("BrowserType.launch: Connection closed", Sentry PYTHON-1C), or any
-        # other render failure is an environment condition, not a code bug —
-        # WARNING, never a paged error.
-        logger.warning("Tesla careers headless fetch failed: %s", exc)
-        return []
-
-    if not getattr(result, "success", False):
-        logger.debug("Tesla Crawl4AI result unsuccessful")
-        return []
-
-    html = getattr(result, "html", "") or getattr(result, "cleaned_html", "") or ""
-    if not html:
-        logger.debug("Tesla: empty HTML from Crawl4AI")
-        return []
-
-    jobs = _parse_jobs_from_html(html)[:limit]
-    logger.info("Tesla Careers: %d jobs (query=%r)", len(jobs), search_text)
-    return jobs
+    """Return a controlled unavailable result without an unbounded browser."""
+    logger.info("Tesla rendered discovery is unavailable in the hardened runtime")
+    return []

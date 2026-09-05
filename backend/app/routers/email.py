@@ -122,6 +122,7 @@ async def lookup_hiring_manager_email(
     """
     result = await lookup_email(
         db,
+        user_id=user_id,
         linkedin_url=body.linkedin_url,
         first_name=body.first_name,
         last_name=body.last_name,
@@ -351,23 +352,12 @@ async def cancel_scheduled_send(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Cancel a scheduled auto-send for a message."""
-    from app.models.message import Message  # noqa: PLC0415
-
-    result = await db.execute(
-        select(Message).where(
-            Message.id == uuid.UUID(message_id),
-            Message.user_id == user_id,
-        )
-    )
-    message = result.scalar_one_or_none()
-    if not message:
-        raise HTTPException(status_code=404, detail="Message not found.")
-
-    if not message.scheduled_send_at:
-        raise HTTPException(status_code=400, detail="Message has no scheduled send.")
-
-    message.scheduled_send_at = None
-    await db.commit()
+    from app.services.draft_staging_service import cancel_message_schedule
+    try:
+        parsed_id = uuid.UUID(message_id)
+    except ValueError:
+        raise HTTPException(422, "Invalid message ID") from None
+    message = await cancel_message_schedule(db, user_id=user_id, message_id=parsed_id)
 
     return CancelSendResponse(
         message_id=str(message.id),

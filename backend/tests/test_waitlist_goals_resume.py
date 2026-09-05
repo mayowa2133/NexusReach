@@ -7,6 +7,7 @@ Follows the repo convention: pure helpers tested directly, DB mocked with
 import base64
 import uuid
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -279,7 +280,7 @@ async def test_join_with_resume_stores_and_queues_parse(client):
             },
         )
 
-    assert resp.status_code == 200
+    assert resp.status_code == 202
     assert entry.resume_parse_status == "pending"
     mock_parse.assert_called_once()
 
@@ -333,7 +334,7 @@ async def test_resubmission_cannot_overwrite_an_existing_resume(client):
             },
         )
 
-    assert resp.status_code == 200  # the form still succeeds for the visitor
+    assert resp.status_code == 202  # the generic acknowledgement is identical
     mock_upload.assert_not_awaited()
     mock_parse.assert_not_called()
     assert entry.resume_filename == "owners-real-resume.pdf"
@@ -386,7 +387,7 @@ async def test_join_still_succeeds_when_storage_fails(client):
         )
 
     # Infrastructure failure must not cost the visitor their signup.
-    assert resp.status_code == 200
+    assert resp.status_code == 202
     assert entry.resume_parse_status == "failed"
     mock_parse.assert_not_called()
 
@@ -416,7 +417,7 @@ async def test_join_without_resume_is_unaffected(client):
             "/api/waitlist",
             json={"name": "Jordan Rivera", "email": "jordan@example.com"},
         )
-    assert resp.status_code == 200
+    assert resp.status_code == 202
     mp.assert_not_called()
 
 
@@ -426,23 +427,35 @@ async def test_join_without_resume_is_unaffected(client):
 
 
 async def test_delete_signup_removes_the_stored_resume_too():
-    """Erasure must not leave an orphaned object in the private bucket."""
+    """Erasure records storage work durably before removing the local row."""
     from app.services import waitlist_retention_service as wrs
 
     entry = _signup()
     entry.resume_path = f"{entry.id}/resume.pdf"
     db = AsyncMock()
+    request_id = uuid.uuid4()
 
-    with patch(
-        "app.services.waitlist_retention_service.supabase_storage_client.delete_object",
-        new_callable=AsyncMock,
-        return_value=True,
-    ) as mock_delete:
+    with (
+        patch("app.services.deletion_service.lock_subject", new_callable=AsyncMock),
+        patch(
+            "app.services.deletion_service.begin_request",
+            new_callable=AsyncMock,
+            return_value=(
+                SimpleNamespace(id=request_id, status="pending"),
+                "nrd_receipt",
+            ),
+        ) as begin,
+    ):
         result = await wrs.delete_signup(db, entry)
 
-    mock_delete.assert_awaited_once_with(entry.resume_path)
     db.delete.assert_awaited_once_with(entry)
-    assert result == {"deleted": True, "resume_deleted": True}
+    db.commit.assert_awaited_once()
+    assert begin.await_args.args[3] == [("storage", entry.resume_path)]
+    assert result == {
+        "status": "pending",
+        "request_id": str(request_id),
+        "receipt_token": "nrd_receipt",
+    }
 
 
 async def test_delete_signup_without_a_resume_touches_no_storage():
@@ -450,15 +463,23 @@ async def test_delete_signup_without_a_resume_touches_no_storage():
 
     entry = _signup()
     db = AsyncMock()
+    request_id = uuid.uuid4()
 
-    with patch(
-        "app.services.waitlist_retention_service.supabase_storage_client.delete_object",
-        new_callable=AsyncMock,
-    ) as mock_delete:
+    with (
+        patch("app.services.deletion_service.lock_subject", new_callable=AsyncMock),
+        patch(
+            "app.services.deletion_service.begin_request",
+            new_callable=AsyncMock,
+            return_value=(
+                SimpleNamespace(id=request_id, status="pending"),
+                "nrd_receipt",
+            ),
+        ) as begin,
+    ):
         result = await wrs.delete_signup(db, entry)
 
-    mock_delete.assert_not_awaited()
-    assert result["resume_deleted"] is False
+    assert begin.await_args.args[3] == []
+    assert result["status"] == "pending"
 
 
 async def test_retention_keeps_the_row_when_storage_delete_fails():
@@ -500,7 +521,7 @@ async def test_delete_endpoint_requires_the_owner_token(client):
         new_callable=AsyncMock,
         return_value=None,
     ):
-        resp = await client.delete("/api/referrals/me?code=ABCDEFGHJK&t=nrw_wrong")
+        resp = await client.delete("/api/referrals/me?code=ABCDEFGHJK")
     assert resp.status_code == 404
 
 
@@ -515,11 +536,19 @@ async def test_delete_endpoint_erases_with_a_valid_token(client):
         patch(
             "app.routers.referrals.waitlist_retention_service.delete_signup",
             new_callable=AsyncMock,
-            return_value={"deleted": True, "resume_deleted": True},
+            return_value={
+                "status": "pending",
+                "request_id": str(entry.id),
+                "receipt_token": "nrd_receipt",
+            },
         ) as mock_delete,
     ):
-        resp = await client.delete("/api/referrals/me?code=ABCDEFGHJK&t=nrw_ok")
+        resp = await client.delete(
+            "/api/referrals/me?code=ABCDEFGHJK",
+            headers={"Authorization": "Bearer nrw_ok"},
+        )
 
-    assert resp.status_code == 200
-    assert resp.json() == {"deleted": True, "resume_deleted": True}
+    assert resp.status_code == 202
+    assert resp.json()["status"] == "pending"
+    assert resp.json()["receipt_token"] == "nrd_receipt"
     mock_delete.assert_awaited_once()

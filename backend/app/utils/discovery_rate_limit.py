@@ -37,20 +37,16 @@ async def _enforce_daily_limit(key: str, limit: int, exceeded_detail: str) -> No
     r = _client()
     try:
         now = time.time()
-
-        pipe = r.pipeline()
-        pipe.zremrangebyscore(key, 0, now - _WINDOW_SECONDS)
-        pipe.zcard(key)
-        results = await pipe.execute()
-        count: int = results[1]
-
-        if count >= limit:
-            raise HTTPException(status_code=429, detail=exceeded_detail)
-
-        pipe2 = r.pipeline()
-        pipe2.zadd(key, {str(now): now})
-        pipe2.expire(key, _WINDOW_SECONDS + 60)
-        await pipe2.execute()
+        accepted = await r.eval("""
+            redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[1]-ARGV[2])
+            if redis.call('ZCARD', KEYS[1]) >= tonumber(ARGV[3]) then return 0 end
+            redis.call('ZADD', KEYS[1], ARGV[1], ARGV[4])
+            redis.call('EXPIRE', KEYS[1], ARGV[2]+60)
+            return 1
+        """, 1, key, now, _WINDOW_SECONDS, limit, uuid.uuid4().hex)
+        if accepted != 1:
+            raise HTTPException(status_code=429, detail=exceeded_detail,
+                                headers={"Retry-After": str(_WINDOW_SECONDS)})
     except HTTPException:
         raise
     except Exception:
@@ -59,7 +55,7 @@ async def _enforce_daily_limit(key: str, limit: int, exceeded_detail: str) -> No
         # in production. Local development and test environments retain the
         # existing no-Redis workflow.
         logger.error("Rate-limit backend unavailable", exc_info=True)
-        if settings.environment != "production":
+        if settings.environment in {"test", "e2e"}:
             return
         raise HTTPException(
             status_code=503,

@@ -1,12 +1,9 @@
 """Public pre-launch waitlist capture + token-gated admin export.
 
 ``POST /api/waitlist`` is unauthenticated (prospective users have no account)
-and rate-limited by IP. On join it mints the referral primitives and queues a
-double-opt-in verification email. It returns the referral status (so the
-frontend can show the "refer your friends" panel) **only when it created the
-row** — for an address already on the list the response is a bare
-acknowledgement and the link goes to the mailbox, because an unauthenticated
-caller submitting someone else's email must not receive their credentials.
+and rate-limited by IP. On a new join it queues a mailbox-verification email.
+Every accepted submission receives the same acknowledgement; credentials and
+signup state are never returned to an anonymous caller.
 ``GET /api/waitlist`` is
 guarded by a shared-secret header so the owner can export entries at launch; it
 is disabled entirely unless ``NEXUSREACH_WAITLIST_ADMIN_TOKEN`` is configured.
@@ -32,7 +29,6 @@ from app.config import settings
 from app.database import get_db
 from app.middleware.rate_limit import limiter
 from app.schemas.waitlist import (
-    ReferralStatus,
     WaitlistEntry,
     WaitlistExportResponse,
     WaitlistSignupCreate,
@@ -43,7 +39,7 @@ from app.services.waitlist_service import (
     list_waitlist_signups,
     upsert_waitlist_signup,
 )
-from app.tasks.referrals import send_dashboard_link_email, send_verification_email
+from app.tasks.referrals import send_verification_email
 from app.tasks.waitlist_resume import parse_waitlist_resume
 from app.utils.client_ip import client_ip
 
@@ -52,7 +48,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/waitlist", tags=["waitlist"])
 
 
-@router.post("", response_model=WaitlistSignupResponse)
+@router.post("", response_model=WaitlistSignupResponse, status_code=202)
 @limiter.limit("10/minute")
 async def join_waitlist(
     request: Request,
@@ -98,18 +94,17 @@ async def join_waitlist(
             except Exception:  # broker down must never break the signup
                 logger.warning("Could not queue resume parse", exc_info=True)
 
-    # Send (or, in dev, log) whichever link gets this person to their dashboard.
-    # Both tokens are email-delivery only; neither is echoed in the response.
+    # The single-use exchange credential is delivered only to the mailbox. An
+    # existing signup is deliberately a no-op; recovery is a separate endpoint
+    # with recipient and global throttles.
     try:
         if result.verification_token is not None:
             send_verification_email.delay(str(entry.id), result.verification_token)
-        elif result.emailed_access_token is not None:
-            send_dashboard_link_email.delay(str(entry.id), result.emailed_access_token)
     except Exception:  # broker down must never break the signup
         logger.warning("Could not queue waitlist email", exc_info=True)
 
     # Best-effort mirror to the Google Sheet (after the response, never blocking).
-    if sheets_mirror_client.is_configured():
+    if sheets_mirror_client.is_configured() and not already:
         background_tasks.add_task(
             sheets_mirror_client.mirror_signup,
             {
@@ -133,19 +128,7 @@ async def join_waitlist(
             },
         )
 
-    if already:
-        # Bare acknowledgement: no token, no name, no queue position. See the
-        # module docstring — this branch is reachable by anyone who guesses an
-        # address, so it must disclose nothing about the person behind it.
-        return WaitlistSignupResponse(ok=True, already_on_list=True)
-
-    payload_out = await referral_service.referral_status_payload(db, entry)
-    return WaitlistSignupResponse(
-        ok=True,
-        already_on_list=False,
-        access_token=result.access_token,
-        referral=ReferralStatus(name=entry.name, **payload_out),
-    )
+    return WaitlistSignupResponse(ok=True)
 
 
 @router.get("", response_model=WaitlistExportResponse)

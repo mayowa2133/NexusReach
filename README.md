@@ -331,12 +331,16 @@ launch target. The full deployment path is in
 - API: Railway service rooted at `backend`, using `backend/railway.web.toml`
 - Worker: Railway service rooted at `backend`, using `backend/railway.worker.toml`
 - Beat: Railway service rooted at `backend`, using `backend/railway.beat.toml`
+- Renderer: Railway service rooted at `backend`, using `backend/railway.renderer.toml`
 - Database/auth: Supabase
-- Redis: Railway Redis, shared by Celery and search cache
+- Redis: Railway Redis for general Celery/search work, plus a separate
+  renderer-only Redis instance and credentials
 - SearXNG: Railway or private reachable host
 
-The backend production image is `backend/Dockerfile`. It installs TeX Live so
-resume PDF generation has `pdflatex` in production.
+The API, worker, and beat use `backend/Dockerfile`, which contains no TeX
+toolchain. PDF rendering runs only in the credential-free image built from
+`backend/Dockerfile.renderer`; production startup refuses to enable remote
+rendering until separate broker and isolation settings are configured.
 
 Production-path smoke check:
 
@@ -350,7 +354,8 @@ API health check.
 ## Important truths
 
 1. SearXNG is the default primary search provider; Brave and Serper are fallback paths, not the first stop.
-2. Firecrawl is optional. The default page-fetch path is direct `httpx` plus Crawl4AI.
+2. Firecrawl is optional. The default page-fetch path is bounded direct `httpx`;
+   Crawl4AI and its NLTK dependency chain are excluded from production.
 3. Current-company verification and email-domain trust are different concerns.
 4. Imported LinkedIn graph data is separate from saved CRM contacts and from outreach-derived dashboard `warm_paths`.
 5. The server does not store LinkedIn browser auth material. The local connector uploads only normalized connection rows.

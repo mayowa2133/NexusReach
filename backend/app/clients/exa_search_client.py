@@ -16,6 +16,7 @@ import httpx
 
 from app.clients import brave_search_client
 from app.config import settings
+from app.services.paid_work import provider_request
 from app.utils.linkedin import parse_linkedin_serp_title
 
 EXA_SEARCH_URL = "https://api.exa.ai/search"
@@ -59,7 +60,7 @@ async def _run_exa_people(query: str, num: int) -> list[dict]:
         return []
     try:
         async with httpx.AsyncClient(timeout=20) as client:
-            resp = await client.post(
+            resp = await provider_request(client, "exa.search", "POST",
                 EXA_SEARCH_URL,
                 headers={"x-api-key": settings.exa_api_key, "content-type": "application/json"},
                 json={

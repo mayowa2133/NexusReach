@@ -14,6 +14,17 @@ pytestmark = pytest.mark.asyncio
 USER_ID = uuid.UUID("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
 
 
+@pytest.fixture(autouse=True)
+def active_identity(monkeypatch):
+    monkeypatch.setattr("app.services.identity_lifecycle.lock_subject", AsyncMock())
+    monkeypatch.setattr(
+        "app.services.identity_lifecycle.assert_subject_active", AsyncMock()
+    )
+    monkeypatch.setattr(
+        "app.services.identity_lifecycle.verify_upstream_identity", AsyncMock()
+    )
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 

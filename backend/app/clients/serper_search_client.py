@@ -12,6 +12,7 @@ import httpx
 from app.clients import brave_search_client
 from app.clients import search_provider_health
 from app.config import settings
+from app.services.paid_work import provider_request
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ async def _run_serper_query(query: str, num: int) -> list[dict]:
     }
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
+            resp = await provider_request(client, "serper.search", "POST",
                 SERPER_SEARCH_URL,
                 headers=headers,
                 json=payload,

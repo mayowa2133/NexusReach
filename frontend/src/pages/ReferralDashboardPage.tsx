@@ -25,8 +25,20 @@ import './landing.css';
 export function ReferralDashboardPage() {
   const { code } = useParams<{ code: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
-  const verifyToken = searchParams.get('v');
-  const urlToken = searchParams.get('t');
+  const [fragmentTokens] = useState(() => {
+    const fragment = new URLSearchParams(window.location.hash.slice(1));
+    const tokens = { v: fragment.get('v'), t: fragment.get('t') };
+    if (tokens.v || tokens.t) {
+      window.history.replaceState(
+        null,
+        '',
+        window.location.pathname + window.location.search,
+      );
+    }
+    return tokens;
+  });
+  const verifyToken = fragmentTokens.v ?? searchParams.get('v');
+  const urlToken = fragmentTokens.t ?? searchParams.get('t');
 
   // Persist an owner key arriving by URL *before* the cleanup effect strips it,
   // otherwise following the emailed dashboard link would blank the page: the
@@ -85,7 +97,7 @@ export function ReferralDashboardPage() {
   };
 
   // Once a secret has done its job, take it out of the address bar. The owner
-  // key is in localStorage by now (the verify call stores it), so a reload
+  // key is in sessionStorage by now (the verify call stores it), so a reload
   // still works — without the token sitting in history or leaking via Referer.
   useEffect(() => {
     if (!data) return;
@@ -110,10 +122,10 @@ export function ReferralDashboardPage() {
             link" instead of confirming the deletion the user just made. */}
         {deleteState === 'done' ? (
           <div className="lp-ref-page-msg">
-            <h2>Your data has been deleted</h2>
+            <h2>Your deletion request has been accepted</h2>
             <p>
               You&apos;ve been removed from the waitlist and any resume you
-              uploaded has been deleted. Nothing further is stored.
+              uploaded is queued for deletion. External erasure may take time; a minimal campaign fingerprint is retained under the referral policy.
             </p>
             <Link to="/" className="btn btn-primary">
               Back to Solomon

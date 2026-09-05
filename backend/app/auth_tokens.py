@@ -21,18 +21,23 @@ def _get_jwks_client(supabase_url: str) -> jwt.PyJWKClient:
 
 
 def decode_supabase_token(token: str) -> dict[str, Any]:
-    """Verify a Supabase JWT using its declared, explicitly allowed algorithm."""
+    """Verify signature and all identity-bearing Supabase JWT claims."""
     algorithm = jwt.get_unverified_header(token).get("alg")
 
+    if not settings.supabase_url:
+        raise jwt.InvalidTokenError("Supabase URL is not configured")
+    decode_options = {"require": ["exp", "sub", "aud", "iss"]}
+    issuer = f"{settings.supabase_url.rstrip('/')}/auth/v1"
+
     if algorithm == "ES256":
-        if not settings.supabase_url:
-            raise jwt.InvalidTokenError("Supabase URL is not configured")
         signing_key = _get_jwks_client(settings.supabase_url).get_signing_key_from_jwt(token)
         return jwt.decode(
             token,
             signing_key.key,
             algorithms=["ES256"],
             audience="authenticated",
+            issuer=issuer,
+            options=decode_options,
         )
 
     if algorithm == "HS256":
@@ -43,6 +48,8 @@ def decode_supabase_token(token: str) -> dict[str, Any]:
             settings.supabase_jwt_secret,
             algorithms=["HS256"],
             audience="authenticated",
+            issuer=issuer,
+            options=decode_options,
         )
 
     raise jwt.InvalidAlgorithmError(f"Unsupported JWT algorithm: {algorithm}")

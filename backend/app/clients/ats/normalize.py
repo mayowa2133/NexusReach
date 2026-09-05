@@ -446,7 +446,7 @@ def _job_richness_score(job: dict) -> int:
     """Score how much useful content a normalized job dict contains.
 
     Higher = richer.  Used to pick the best result when multiple page
-    candidates (direct, Crawl4AI, Firecrawl) all produce a valid job.
+    candidates (direct and Firecrawl) all produce a valid job.
     """
     score = 0
     desc = job.get("description") or ""

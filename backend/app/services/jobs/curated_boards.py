@@ -214,7 +214,7 @@ async def fetch_curated_ats_source_payloads(
 
         source_fetches.append(run_source(source_key, fetch_proprietary))
 
-    # Browser-based sources (Crawl4AI → headless Chromium) run AFTER the HTTP
+    # Historically browser-based sources run AFTER the HTTP
     # fan-out, one at a time. Launching Chromium while ~24 board fetches hold
     # the worker's threads/memory pushed the child into thread exhaustion
     # (Sentry PYTHON-1C/1D/1E: "can't start new thread" across the crawl +

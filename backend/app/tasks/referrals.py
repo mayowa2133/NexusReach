@@ -20,8 +20,9 @@ domain recipients trust, to any address the submitter names.
 import html
 import logging
 import uuid
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.clients import resend_client
 from app.database import async_session
@@ -155,7 +156,7 @@ async def _run_verification(signup_id: str, verification_token: str) -> dict:
         )
         if not sent:
             # Dev / provider-down: surface the link so verification is testable.
-            logger.info("Verification link for %s: %s", signup.email, verify_url)
+            logger.warning("Referral verification delivery failed")
         return {"sent": sent}
 
 
@@ -172,14 +173,38 @@ async def _run_dashboard_link(signup_id: str, access_token: str) -> dict:
             html=_render_dashboard_link_email(signup.name, dashboard_url),
         )
         if not sent:
-            logger.info("Dashboard link for %s: %s", signup.email, dashboard_url)
+            logger.warning("Referral dashboard delivery failed")
         return {"sent": sent}
 
 
-async def _run_referral_credited(referrer_id: str) -> dict:
+async def _run_referral_credited(credit_id: str) -> dict:
+    from app.models.referral_security import ReferralCredit
+
     async with async_session() as db:
+        credit = (
+            await db.execute(
+                select(ReferralCredit)
+                .where(ReferralCredit.id == uuid.UUID(credit_id))
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if credit is None or credit.notification_status == "sent":
+            return {"sent": False, "reason": "already_delivered"}
+        if credit.referrer_id is None:
+            credit.notification_status = "not_applicable"
+            await db.commit()
+            return {"sent": False, "reason": "referrer_not_found"}
+
+        credit.notification_status = "sending"
+        credit.notification_attempts += 1
+        credit.notification_updated_at = datetime.now(timezone.utc)
+        referrer_id = str(credit.referrer_id)
+        await db.commit()
+
         referrer = await _load_signup(db, referrer_id)
         if referrer is None:
+            credit.notification_status = "not_applicable"
+            await db.commit()
             return {"sent": False, "reason": "referrer_not_found"}
         # Only mail an address that has been confirmed. An unverified referrer
         # never proved they own it, and this is unsolicited (they didn't ask for
@@ -187,6 +212,8 @@ async def _run_referral_credited(referrer_id: str) -> dict:
         # reputation. They still get credited; they just hear about it on the
         # dashboard after confirming.
         if not referrer.email_verified:
+            credit.notification_status = "not_applicable"
+            await db.commit()
             return {"sent": False, "reason": "referrer_unverified"}
 
         count = referrer.verified_referral_count
@@ -208,15 +235,63 @@ async def _run_referral_credited(referrer_id: str) -> dict:
             html=_render_referral_credited_email(
                 referrer.name, position, count, dashboard_url, unlocked
             ),
+            idempotency_key=f"referral-credit-{credit_id}",
         )
         if not sent:
-            logger.info(
-                "Referral-credited notice for %s: #%s (%s referrals)",
-                referrer.email,
-                position,
-                count,
-            )
+            credit.notification_status = "pending"
+            credit.notification_updated_at = datetime.now(timezone.utc)
+            await db.commit()
+            raise RuntimeError("Referral credit notification was not accepted")
+        credit.notification_status = "sent"
+        credit.notification_updated_at = datetime.now(timezone.utc)
+        await db.commit()
         return {"sent": sent, "position": position, "count": count}
+
+
+async def _deliver_pending_credit_notifications() -> dict:
+    """Queue durable outbox rows, recovering claims abandoned before enqueue."""
+    from app.models.referral_security import ReferralCredit
+
+    queued = 0
+    async with async_session() as db:
+        now = datetime.now(timezone.utc)
+        await db.execute(
+            update(ReferralCredit)
+            .where(
+                ReferralCredit.notification_status.in_(["queued", "sending"]),
+                ReferralCredit.notification_updated_at < now - timedelta(minutes=15),
+            )
+            .values(notification_status="pending", notification_updated_at=now)
+        )
+        rows = (
+            await db.execute(
+                select(ReferralCredit)
+                .where(ReferralCredit.notification_status == "pending")
+                .with_for_update(skip_locked=True)
+                .limit(50)
+            )
+        ).scalars().all()
+        for credit in rows:
+            credit.notification_status = "queued"
+            credit.notification_updated_at = now
+        await db.commit()
+
+        for credit in rows:
+            try:
+                send_referral_credited_email.delay(str(credit.id))
+            except Exception:
+                await db.execute(
+                    update(ReferralCredit)
+                    .where(
+                        ReferralCredit.id == credit.id,
+                        ReferralCredit.notification_status == "queued",
+                    )
+                    .values(notification_status="pending", notification_updated_at=now)
+                )
+                await db.commit()
+                continue
+            queued += 1
+    return {"queued": queued}
 
 
 @celery_app.task(
@@ -254,14 +329,19 @@ def send_dashboard_link_email(signup_id: str, access_token: str) -> dict:
     retry_backoff_max=600,
     max_retries=3,
 )
-def send_referral_credited_email(referrer_id: str) -> dict:
-    """Tell a referrer that an invitee confirmed and they moved up.
+def send_referral_credited_email(credit_id: str) -> dict:
+    """Deliver one referral-credit outbox event with provider idempotency.
 
     This is the loop's flywheel: without it a referrer only learns their share
     worked by revisiting the dashboard, so nothing prompts the *next* share.
-    Fired only from the confirmation that actually incremented their tally, so a
-    replayed verify link can't re-notify.
+    The stable credit id is also the provider idempotency key, so task retries
+    cannot create duplicate messages after an ambiguous worker failure.
     """
-    result = run_async(_run_referral_credited(referrer_id))
+    result = run_async(_run_referral_credited(credit_id))
     logger.info("Referral credited email task complete: %s", result)
     return result
+
+
+@celery_app.task(name="app.tasks.referrals.deliver_pending_credit_notifications")
+def deliver_pending_credit_notifications() -> dict:
+    return run_async(_deliver_pending_credit_notifications())
