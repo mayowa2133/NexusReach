@@ -967,6 +967,7 @@ async def draft_message(
     ai_result = await llm_client.generate_message(
         system_prompt=system,
         user_prompt=user_prompt,
+        user_id=user_id,
     )
 
     usage = ai_result.get("usage", {})
@@ -1054,12 +1055,17 @@ async def update_message(
         select(Message).where(
             Message.id == message_id,
             Message.user_id == user_id,
-        )
+        ).with_for_update()
     )
     message = result.scalar_one_or_none()
     if not message:
         raise ValueError("Message not found.")
 
+    from fastapi import HTTPException
+    if message.status in {"sending", "delivery_unknown", "sent"}:
+        raise HTTPException(409, {"code": "send_conflict", "status": message.status})
+    message.scheduled_send_at = None
+    message.schedule_version = (message.schedule_version or 0) + 1
     message.body = body
     if subject is not None:
         message.subject = subject
@@ -1079,12 +1085,14 @@ async def mark_copied(
         select(Message).where(
             Message.id == message_id,
             Message.user_id == user_id,
-        )
+        ).with_for_update()
     )
     message = result.scalar_one_or_none()
     if not message:
         raise ValueError("Message not found.")
 
+    if message.status in {"sending", "delivery_unknown", "sent"}:
+        return message
     message.status = "copied"
     await db.commit()
     await db.refresh(message)

@@ -14,6 +14,7 @@ from bs4 import BeautifulSoup
 from bs4.element import Tag
 
 from app.config import settings
+from app.services.paid_work import provider_request
 
 
 logger = logging.getLogger(__name__)
@@ -187,7 +188,10 @@ async def _search_dice_with_client(
         if location:
             params["location"] = location
 
-        resp = await client.get(
+        resp = await provider_request(
+            client,
+            "dice.search",
+            "GET",
             "https://job-search-api.svc.dhigroupinc.com/v1/dice/jobs/search",
             params=params,
             headers=_dice_headers(),

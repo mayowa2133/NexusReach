@@ -9,6 +9,7 @@ M7 — auto-draft dedupes per (person, job), not per person.
 L4 — production config fails closed for dev-auth bypass.
 """
 
+import time
 import uuid
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -45,7 +46,13 @@ async def test_valid_supabase_jwt_is_accepted(monkeypatch):
     monkeypatch.setattr(settings, "supabase_jwt_secret", "test-secret")
     sub = str(uuid.uuid4())
     token = pyjwt.encode(
-        {"sub": sub, "aud": "authenticated", "email": "Person@Example.com"},
+        {
+            "sub": sub,
+            "aud": "authenticated",
+            "iss": f"{settings.supabase_url.rstrip('/')}/auth/v1",
+            "exp": int(time.time()) + 300,
+            "email": "Person@Example.com",
+        },
         "test-secret",
         algorithm="HS256",
     )
@@ -62,7 +69,13 @@ async def test_es256_supabase_jwt_is_accepted(monkeypatch):
     private_key = ec.generate_private_key(ec.SECP256R1())
     sub = str(uuid.uuid4())
     token = pyjwt.encode(
-        {"sub": sub, "aud": "authenticated", "email": "Person@Example.com"},
+        {
+            "sub": sub,
+            "aud": "authenticated",
+            "iss": "https://project.supabase.co/auth/v1",
+            "exp": int(time.time()) + 300,
+            "email": "Person@Example.com",
+        },
         private_key,
         algorithm="ES256",
         headers={"kid": "test-key"},
@@ -315,7 +328,10 @@ def _prod_settings(**overrides):
         sentry_dsn="https://x@sentry.io/1",
         token_encryption_primary_version="v1",
         token_encryption_keys={"v1": Fernet.generate_key().decode()},
+        deletion_receipt_hmac_key="deletion-receipt-test-key-32-bytes",
         render_remote_enabled=True,
+        renderer_isolation_enforced=True,
+        renderer_redis_url="redis://renderer.example:6379/0",
         trusted_proxy_hops=1,
     )
     base.update(overrides)
@@ -335,6 +351,11 @@ def test_production_rejects_dev_auth_mode():
 def test_production_rejects_dev_auth_bypass_enabled():
     with pytest.raises(ValueError, match="DEV_AUTH_BYPASS_ENABLED must not be true"):
         _prod_settings(dev_auth_bypass_enabled=True)
+
+
+def test_production_requires_a_strong_deletion_receipt_key():
+    with pytest.raises(ValueError, match="DELETION_RECEIPT_HMAC_KEY"):
+        _prod_settings(deletion_receipt_hmac_key="short")
 
 
 def test_production_api_requires_isolated_remote_renderer():

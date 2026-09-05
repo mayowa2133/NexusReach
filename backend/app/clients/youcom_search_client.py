@@ -18,6 +18,7 @@ import httpx
 
 from app.clients import brave_search_client
 from app.config import settings
+from app.services.paid_work import provider_request
 from app.utils.linkedin import parse_linkedin_serp_title
 
 YOUCOM_SEARCH_URL = "https://api.ydc-index.io/search"
@@ -78,7 +79,7 @@ async def _run_youcom_query(query: str, num: int) -> list[dict]:
         return []
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(
+            resp = await provider_request(client, "youcom.search", "GET",
                 YOUCOM_SEARCH_URL,
                 params={"query": query, "num_web_results": min(max(num, 1), 20)},
                 headers={"X-API-Key": settings.youcom_api_key},

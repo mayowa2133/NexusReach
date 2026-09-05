@@ -61,6 +61,8 @@ class KnownPerson(Base):
     github_data: Mapped[dict | None] = mapped_column(JSONB)
 
     # Source tracking — only public discovery sources allowed
+    provenance: Mapped[str | None] = mapped_column(String(50))
+    verification_evidence: Mapped[dict | None] = mapped_column(JSONB)
     primary_source: Mapped[str] = mapped_column(String(50), nullable=False)
     all_sources: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
 

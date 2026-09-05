@@ -1,7 +1,6 @@
 """Tests for proprietary career-site clients (Amazon, Microsoft, Apple, Google, Tesla, Meta)."""
 
 import logging
-from types import SimpleNamespace
 
 import pytest
 
@@ -469,36 +468,14 @@ async def test_tesla_search_without_crawl4ai(monkeypatch):
 
 
 async def test_tesla_search_without_playwright_browser_fails_soft(monkeypatch, caplog):
-    """search_tesla_jobs returns empty list when Crawl4AI lacks a browser binary."""
-    import builtins
+    """The removed browser crawler has no fallback path in production."""
     from app.clients.tesla_client import search_tesla_jobs
-
-    real_import = builtins.__import__
-
-    class _FailingCrawler:
-        async def __aenter__(self):
-            raise Exception(
-                "BrowserType.launch: Executable doesn't exist at "
-                "/root/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome\n"
-                "Please run the following command to download new browsers:\n"
-                "playwright install"
-            )
-
-        async def __aexit__(self, *a):
-            pass
-
-    def _mock_import(name, *args, **kwargs):
-        if name == "crawl4ai":
-            return SimpleNamespace(AsyncWebCrawler=_FailingCrawler)
-        return real_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", _mock_import)
 
     with caplog.at_level(logging.WARNING):
         result = await search_tesla_jobs(search_text="engineer", limit=5)
 
     assert result == []
-    assert "Playwright browser not installed in runtime" in caplog.text
+    assert "playwright" not in caplog.text.lower()
 
 
 class TestTeslaParsing:

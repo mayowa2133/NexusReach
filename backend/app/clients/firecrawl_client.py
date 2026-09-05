@@ -3,6 +3,7 @@
 import httpx
 
 from app.config import settings
+from app.services.paid_work import provider_request
 
 
 async def scrape_url(url: str, *, timeout_seconds: int = 20) -> dict | None:
@@ -20,7 +21,14 @@ async def scrape_url(url: str, *, timeout_seconds: int = 20) -> dict | None:
     async with httpx.AsyncClient(timeout=timeout_seconds) as client:
         for endpoint in ("/v2/scrape", "/v1/scrape"):
             try:
-                resp = await client.post(f"{base_url}{endpoint}", json=payload, headers=headers)
+                resp = await provider_request(
+                    client,
+                    "firecrawl.scrape",
+                    "POST",
+                    f"{base_url}{endpoint}",
+                    json=payload,
+                    headers=headers,
+                )
             except httpx.HTTPError:
                 return None
 

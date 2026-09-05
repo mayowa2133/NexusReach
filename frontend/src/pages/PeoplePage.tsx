@@ -1100,6 +1100,9 @@ function PersonCard({
         </div>
 
         <div className="flex flex-wrap gap-1.5">
+          {person.provenance === 'client_capture' && (
+            <EvidenceChip>Captured by you · employment unverified</EvidenceChip>
+          )}
           {person.source === 'companion_capture' && (
             <EvidenceChip tone="positive">Captured from LinkedIn</EvidenceChip>
           )}

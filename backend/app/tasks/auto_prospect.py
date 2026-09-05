@@ -17,6 +17,9 @@ def _is_missing_messages_table_error(exc: Exception) -> bool:
 
 
 async def _auto_prospect_job(user_id: uuid.UUID, job_id: uuid.UUID) -> dict:
+    from app.services.paid_context import set_subject
+
+    set_subject(user_id)
     """Run people search + email finding for a single job in the background.
 
     1. Run search_people_for_job to find recruiters, hiring managers, peers.
@@ -117,6 +120,9 @@ def auto_prospect_job(user_id: str, job_id: str) -> dict:
 async def _prewarm_job_people(
     user_id: uuid.UUID, job_id: uuid.UUID, target_count_per_bucket: int = 1,
 ) -> dict:
+    from app.services.paid_context import set_subject
+
+    set_subject(user_id)
     """Pre-warm the top contacts for a single job and reveal it in the feed.
 
     Runs the job-aware people search (1 recruiter + 1 hiring manager + 1 next
@@ -294,6 +300,9 @@ SNAPSHOT_REFRESH_DEBOUNCE = timedelta(minutes=2)
 async def _refresh_job_research_snapshot(
     user_id: uuid.UUID, job_id: uuid.UUID, target_count_per_bucket: int = 3,
 ) -> dict:
+    from app.services.paid_context import set_subject
+
+    set_subject(user_id)
     """Re-run the job-aware people search and re-save the snapshot.
 
     Backs the stale-while-revalidate path: the request served the old snapshot
@@ -375,6 +384,9 @@ def refresh_job_research_snapshot(
 
 
 async def _auto_draft_for_job(user_id: uuid.UUID, job_id: uuid.UUID) -> dict:
+    from app.services.paid_context import set_subject
+
+    set_subject(user_id)
     """Draft outreach emails for all contacts found for a job.
 
     Only drafts for people who have an email and no existing draft for this job.
@@ -503,6 +515,7 @@ async def _auto_draft_for_job(user_id: uuid.UUID, job_id: uuid.UUID) -> dict:
                             if not review.get("safe_for_automatic_send"):
                                 stats["quarantined_count"] += 1
                                 continue
+                            msg_obj.schedule_version = (msg_obj.schedule_version or 0) + 1
                             msg_obj.scheduled_send_at = datetime.now(timezone.utc) + timedelta(
                                 minutes=send_delay
                             )
@@ -555,14 +568,14 @@ async def _process_pending_sends() -> dict:
     scheduled_send_at timestamps for that user (cancels queue).
     Rate-limited to 10 sends per user per cycle.
     """
-    from sqlalchemy import select, distinct, update  # noqa: PLC0415
+    from sqlalchemy import select, distinct  # noqa: PLC0415
     from sqlalchemy.exc import ProgrammingError  # noqa: PLC0415
     from app.models.message import Message  # noqa: PLC0415
     from app.models.settings import UserSettings  # noqa: PLC0415
     from app.services.draft_staging_service import (  # noqa: PLC0415
         send_staged_message,
         resolve_connected_provider,
-        claim_message_for_send,
+        expire_unresolved_sends,
     )
     from app.services.notification_service import create_notification  # noqa: PLC0415
 
@@ -619,11 +632,12 @@ async def _process_pending_sends() -> dict:
                     await db.commit()
                     continue
 
+                await expire_unresolved_sends(db)
                 ready_ids = [
-                    row[0]
+                    (row[0], row[1])
                     for row in (
                         await db.execute(
-                            select(Message.id).where(
+                            select(Message.id, Message.schedule_version).where(
                                 Message.user_id == uid,
                                 Message.status == "staged",
                                 Message.scheduled_send_at.isnot(None),
@@ -634,7 +648,7 @@ async def _process_pending_sends() -> dict:
                 ]
 
                 sent_count = 0
-                for msg_id in ready_ids:
+                for msg_id, scheduled_version in ready_ids:
                     # Re-check consent + connection right before each send so a
                     # mid-cycle disable/disconnect takes effect immediately
                     # (audit pass-2 P11/P18), not just at the next 5-min tick.
@@ -680,31 +694,16 @@ async def _process_pending_sends() -> dict:
                         await db.commit()
                         break
 
-                    # Atomic claim BEFORE the network send (audit pass-2 P2/P5).
-                    if not await claim_message_for_send(db, user_id=uid, message_id=msg_id):
-                        continue  # lost the race / already handled — never double-send
-
                     try:
                         await send_staged_message(
                             db=db, user_id=uid, message_id=msg_id, provider=provider,
+                            scheduled_version=scheduled_version,
                         )
                         stats["sent"] += 1
                         sent_count += 1
                     except Exception:
                         stats["errors"] += 1
                         await db.rollback()
-                        # Release the claim: back to staged, unscheduled (visible,
-                        # not auto-retried, never double-sent).
-                        await db.execute(
-                            update(Message)
-                            .where(
-                                Message.id == msg_id,
-                                Message.user_id == uid,
-                                Message.status == "sending",
-                            )
-                            .values(status="staged", scheduled_send_at=None)
-                        )
-                        await db.commit()
                         logger.debug("Auto-send failed: message=%s", msg_id, exc_info=True)
 
                 if sent_count > 0:

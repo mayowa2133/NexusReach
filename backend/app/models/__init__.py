@@ -1,9 +1,13 @@
 from app.models.user import User
+from app.models.referral_security import ReferralCampaign, ReferralCredential, ReferralCredit
+from app.models.paid_work import PaidBudgetBucket, PaidReservation
+from app.models.deletion import AuthTombstone, DeletionRequest, DeletionAction
 from app.models.profile import Profile
 from app.models.settings import UserSettings
 from app.models.company import Company
 from app.models.person import Person
 from app.models.message import Message
+from app.models.send_attempt import SendAttempt
 from app.models.job import Job
 from app.models.job_refresh_run import JobRefreshRun, JobSourceRun
 from app.models.outreach import OutreachLog
@@ -26,4 +30,4 @@ from app.models.resume_artifact import ResumeArtifact
 from app.models.waitlist import WaitlistSignup
 from app.models.companion_token import CompanionToken
 
-__all__ = ["User", "Profile", "UserSettings", "Company", "Person", "Message", "Job", "JobRefreshRun", "JobSourceRun", "OutreachLog", "ApiUsage", "Notification", "SearchPreference", "SmtpDomainResult", "SearchLog", "LinkedInGraphConnection", "LinkedInGraphFollow", "LinkedInGraphSyncRun", "JobAlertPreference", "KnownPerson", "KnownPersonCompany", "JobResearchSnapshot", "Story", "InterviewPrepBrief", "ResumeArtifact", "WaitlistSignup", "CompanionToken"]
+__all__ = ["PaidBudgetBucket", "PaidReservation", "ReferralCampaign", "ReferralCredential", "ReferralCredit", "AuthTombstone", "DeletionRequest", "DeletionAction", "SendAttempt", "User", "Profile", "UserSettings", "Company", "Person", "Message", "Job", "JobRefreshRun", "JobSourceRun", "OutreachLog", "ApiUsage", "Notification", "SearchPreference", "SmtpDomainResult", "SearchLog", "LinkedInGraphConnection", "LinkedInGraphFollow", "LinkedInGraphSyncRun", "JobAlertPreference", "KnownPerson", "KnownPersonCompany", "JobResearchSnapshot", "Story", "InterviewPrepBrief", "ResumeArtifact", "WaitlistSignup", "CompanionToken"]

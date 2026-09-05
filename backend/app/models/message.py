@@ -37,6 +37,7 @@ class Message(Base):
 
     # Status tracking
     status: Mapped[str] = mapped_column(String(50), default="draft")  # draft | edited | copied | staged | sent
+    schedule_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     version: Mapped[int] = mapped_column(Integer, default=1)
     scheduled_send_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

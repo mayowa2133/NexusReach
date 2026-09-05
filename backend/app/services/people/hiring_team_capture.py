@@ -1,12 +1,4 @@
-"""Ingest the LinkedIn "Meet the hiring team" panel captured by the companion.
-
-LinkedIn shows, on a job posting, the actual people who posted the req - the
-literal hiring contact(s). The companion captures that panel from the page the
-user is already viewing in their own browser (same posture as the existing
-profile capture) and posts it here. These are the strongest possible contacts:
-LinkedIn itself attached them to this exact req, so they are stored verified
-and rank at the very top of their bucket.
-"""
+"""Persist client-captured hiring contacts privately, without asserting verification."""
 
 from __future__ import annotations
 
@@ -14,7 +6,11 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
+from fastapi import HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.job import Job
 
 from app.services.people.classify import _classify_person_with_confidence
 from app.services.people.persistence import _store_person, get_or_create_company
@@ -22,7 +18,7 @@ from app.utils.linkedin import normalize_linkedin_url
 
 logger = logging.getLogger(__name__)
 
-CAPTURE_SOURCE = "linkedin_hiring_team"
+CAPTURE_SOURCE = "client_capture"
 MAX_MEMBERS = 6
 
 
@@ -66,10 +62,11 @@ def _member_to_candidate(member: dict, company_name: str, job_title: str | None)
             ),
             "linkedin_url": linkedin_url,
             "_hiring_team_capture": True,
-            "_employment_status": "current",
+            "_employment_status": "ambiguous",
             "profile_data": {
-                "company_match_confidence": "verified",
-                "current_company_verified": True,
+                "company_match_confidence": "unverified",
+                "current_company_verified": False,
+                "provenance": "client_capture",
                 "hiring_team_capture": True,
                 "hiring_team_role_label": role_label or None,
                 "captured_at": datetime.now(timezone.utc).isoformat(),
@@ -87,13 +84,11 @@ async def ingest_hiring_team_capture(
     job_id: uuid.UUID | None = None,
     job_title: str | None = None,
 ) -> dict:
-    """Persist captured hiring-team members as verified contacts.
-
-    Each member is classified, stored as a Person row in the right bucket
-    (deduped by ``_store_person``), and written to the global known-people
-    cache so future searches for this company surface them. Returns per-bucket
-    stored counts and the stored people.
-    """
+    """Store private, unverified contacts; never write client claims to shared cache."""
+    if job_id is not None:
+        owned_job = await db.scalar(select(Job.id).where(Job.id == job_id, Job.user_id == user_id))
+        if owned_job is None:
+            raise HTTPException(status_code=404, detail="Job not found")
     company_name = (company_name or "").strip()
     if not company_name or not members:
         return {"stored": 0, "recruiters": 0, "hiring_managers": 0}
@@ -114,8 +109,15 @@ async def ingest_hiring_team_capture(
             data["job_id"] = str(job_id)
         try:
             person = await _store_person(db, user_id, company, data, bucket)
+            person.provenance = "client_capture"
+            person.current_company_verified = False
+            person.current_company_verification_status = "unverified"
+            person.current_company_verification_source = "client_capture"
+            person.current_company_verification_evidence = None
+            person.current_company_verified_at = None
+            person.current_company_verification_confidence = None
         except Exception:
-            logger.warning("hiring-team member store failed for %s", data.get("full_name"), exc_info=True)
+            logger.warning("hiring-team member store failed", exc_info=True)
             continue
         stored["stored"] += 1
         stored["recruiters" if bucket == "recruiter" else "hiring_managers"] += 1
@@ -123,19 +125,5 @@ async def ingest_hiring_team_capture(
 
     if stored["stored"]:
         await db.commit()
-
-    # Best-effort write to the global known-people cache so future searches
-    # for this company surface these contacts without re-capture.
-    try:
-        from app.services.known_people_service import write_candidates_to_cache
-
-        await write_candidates_to_cache(
-            db,
-            [c["data"] for c in candidates],
-            company_name=company_name,
-            company_domain=company.domain if company else None,
-        )
-    except Exception:
-        logger.debug("hiring-team cache write failed", exc_info=True)
 
     return stored

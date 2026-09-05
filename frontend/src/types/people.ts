@@ -57,6 +57,7 @@ export interface Person {
   fallback_reason?: string | null;
   employment_status?: 'current' | 'ambiguous' | 'former' | null;
   org_level?: 'ic' | 'manager' | 'director_plus' | null;
+  provenance?: string | null;
   current_company_verified?: boolean | null;
   current_company_verification_status?: 'verified' | 'unverified' | 'failed' | 'skipped' | null;
   current_company_verification_source?:

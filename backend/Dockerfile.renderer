@@ -6,8 +6,8 @@ WORKDIR /build
 RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential \
     && rm -rf /var/lib/apt/lists/*
-COPY requirements.lock requirements.txt ./
-RUN pip wheel --no-cache-dir --wheel-dir /wheels -r requirements.lock
+COPY requirements.renderer.lock requirements.renderer.txt ./
+RUN pip wheel --no-cache-dir --wheel-dir /wheels -r requirements.renderer.lock
 
 FROM python:3.12-slim@sha256:423ed6ab25b1921a477529254bfeeabf5855151dc2c3141699a1bfc852199fbf
 
@@ -17,16 +17,18 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     NEXUSREACH_SERVICE_ROLE=renderer
 
 WORKDIR /app
-# util-linux is upgraded out of the base image on purpose.
-# CVE-2026-53615 affects nine of its binaries and libraries, Debian has shipped
-# 2.41.5-0+deb13u1, and the python:3.12-slim rebuild carrying it does not exist
-# yet -- the current upstream digest has the same finding as the pinned one, so
-# repinning fixes nothing. Upgrading the one source package here is what clears
-# the runtime scan; drop it when the base image catches up.
+# Security packages are upgraded out of the pinned base image on purpose. Debian
+# has fixed releases available before the corresponding python:3.12-slim digest
+# has been rebuilt. Keep this list aligned with the daily runtime-image scan and
+# remove entries once a newer pinned base already contains the fixed release.
 RUN groupadd --system nexusreach \
     && useradd --system --gid nexusreach --home-dir /app nexusreach \
     && apt-get update \
-    && apt-get install -y --no-install-recommends --only-upgrade util-linux \
+    && apt-get install -y --no-install-recommends --only-upgrade \
+        util-linux \
+        openssl \
+        libssl3t64 \
+        openssl-provider-legacy \
     && apt-get install -y --no-install-recommends \
         texlive-latex-base \
         texlive-latex-extra \
@@ -35,11 +37,14 @@ RUN groupadd --system nexusreach \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=wheels /wheels /wheels
-COPY requirements.lock .
-RUN pip install --no-index --find-links=/wheels -r requirements.lock \
+COPY requirements.renderer.lock .
+RUN pip install --no-index --find-links=/wheels -r requirements.renderer.lock \
     && rm -rf /wheels
-COPY app ./app
+RUN mkdir -p /app/app
+COPY app/__init__.py ./app/__init__.py
+COPY app/renderer_app.py ./app/renderer_app.py
+COPY app/renderer_runtime.py ./app/renderer_runtime.py
 RUN chown -R nexusreach:nexusreach /app
 
 USER nexusreach
-CMD ["celery", "-A", "app.tasks", "worker", "--loglevel=info", "--concurrency=1", "-Q", "render"]
+CMD ["celery", "-A", "app.renderer_app:renderer_app", "worker", "--loglevel=info", "--concurrency=1", "-Q", "render"]

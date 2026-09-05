@@ -29,7 +29,12 @@ def is_configured() -> bool:
 
 
 async def send_email(
-    *, to: str, subject: str, html: str, text: str | None = None
+    *,
+    to: str,
+    subject: str,
+    html: str,
+    text: str | None = None,
+    idempotency_key: str | None = None,
 ) -> bool:
     """Send a transactional email via Resend.
 
@@ -38,7 +43,7 @@ async def send_email(
     flaky email provider can never break a waitlist signup.
     """
     if not is_configured():
-        logger.info("Resend not configured; not sending email to %s (%r)", to, subject)
+        logger.info("Resend not configured; transactional email skipped")
         return False
 
     payload: dict[str, object] = {
@@ -52,20 +57,22 @@ async def send_email(
 
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
+            headers = {"Authorization": f"Bearer {settings.resend_api_key}"}
+            if idempotency_key:
+                headers["Idempotency-Key"] = idempotency_key
             resp = await client.post(
                 _RESEND_API_URL,
                 json=payload,
-                headers={"Authorization": f"Bearer {settings.resend_api_key}"},
+                headers=headers,
             )
         if resp.status_code >= 400:
             logger.error(
-                "Resend send failed (%s) to %s: %s",
+                "Resend send failed (%s): %s",
                 resp.status_code,
-                to,
                 resp.text[:500],
             )
             return False
         return True
     except httpx.HTTPError:
-        logger.error("Resend send errored for %s", to, exc_info=True)
+        logger.error("Resend send errored", exc_info=True)
         return False

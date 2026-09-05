@@ -78,8 +78,8 @@ async def test_pdf_render_concurrency_is_bounded():
 
 async def test_production_render_dispatches_to_isolated_queue(monkeypatch):
     from app.config import settings
+    from app import render_client
     from app.services.resume_artifact import latex
-    from app.tasks import render
 
     task = SimpleNamespace(
         get=lambda **_kwargs: b"%PDF-remote",
@@ -87,12 +87,12 @@ async def test_production_render_dispatches_to_isolated_queue(monkeypatch):
     )
     apply_async = MagicMock(return_value=task)
     monkeypatch.setattr(settings, "render_remote_enabled", True)
-    monkeypatch.setattr(render.render_pdf, "apply_async", apply_async)
+    monkeypatch.setattr(render_client, "submit_pdf", apply_async)
 
     result = await latex.render_resume_artifact_pdf_async("hello")
 
     assert result == b"%PDF-remote"
-    assert apply_async.call_args.kwargs["queue"] == "render"
+    apply_async.assert_called_once_with("hello")
 
 
 # ---------------------------------------------------------------------------

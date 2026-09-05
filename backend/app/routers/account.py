@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Header
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,11 +37,12 @@ async def export_account_data(
     )
 
 
-@router.post("/delete", response_model=AccountDeleteResponse)
+@router.post("/delete", response_model=AccountDeleteResponse, status_code=202)
 async def delete_account(
     body: AccountDeleteRequest,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    idempotency_key: Annotated[str | None, Header()] = None,
 ) -> AccountDeleteResponse:
     """Delete all app-owned data, then the user's auth identity.
 
@@ -65,18 +66,14 @@ async def delete_account(
     except account_service.AccountDeletionUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    deleted_tables = await account_service.delete_user_data(db, user_id)
-
-    # Data is now gone (the privacy guarantee). A transient failure here is
-    # surfaced as retryable; the user is not locked out and a retry re-runs the
-    # idempotent data delete before retrying identity removal.
-    try:
-        auth_identity_deleted = await account_service.delete_supabase_auth_user(user_id)
-    except account_service.AccountDeletionUnavailableError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-    return AccountDeleteResponse(
-        deleted=True,
-        auth_identity_deleted=auth_identity_deleted,
-        deleted_tables=deleted_tables,
-    )
+    from app.models.deletion import AuthTombstone
+    from app.services.deletion_service import begin_request, receipt_response
+    from app.services.identity_lifecycle import lock_subject
+    await lock_subject(db, user_id)
+    if await db.get(AuthTombstone, user_id) is None:
+        db.add(AuthTombstone(subject=user_id))
+    row, receipt = await begin_request(db, 'account:' + str(user_id), idempotency_key,
+                                      [('auth', str(user_id))])
+    # Cascades revoke companion tokens; the tombstone/outbox commit atomically.
+    await account_service.delete_user_data(db, user_id)
+    return AccountDeleteResponse(**receipt_response(row, receipt))

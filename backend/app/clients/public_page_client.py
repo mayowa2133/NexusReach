@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from app.clients import crawl4ai_client, firecrawl_client, jina_reader_client
+from app.clients import firecrawl_client, jina_reader_client
 from app.config import settings
 from app.utils.url_safety import is_safe_public_url_async, safe_get
 
@@ -143,7 +143,7 @@ def _log_retrieval_outcome(
     so no page-specific or sensitive URL data lands in logs.
 
     REVIEW 2026-08-06 (~2 weeks of traffic): decide whether Jina Reader earns its
-    keep. If ``jina_rescued=True`` is ~never seen (direct/crawl4ai already win
+    keep. If ``jina_rescued=True`` is ~never seen (direct retrieval already wins
     everywhere it's tried), scrap it: set NEXUSREACH_JINA_READER_ENABLED=false to
     disable instantly, or revert the jina_reader_client wiring for full removal.
     Added 2026-07-23 because live n=2 sampling was inconclusive — see the
@@ -171,7 +171,7 @@ async def fetch_page(
     allow_firecrawl: bool = True,
 ) -> dict | None:
     """Fetch a public page using free-first retrieval with optional Firecrawl fallback."""
-    # Crawl4AI and Firecrawl perform their own network requests. Admit the URL
+    # Firecrawl performs its own network requests. Admit the URL
     # once before any provider is allowed to see it, including fallback paths.
     if not await is_safe_public_url_async(url):
         return None
@@ -206,18 +206,6 @@ async def fetch_page(
         _log_retrieval_outcome(url, result, direct_sufficient=False, jina_rescued=False)
         return result
 
-    crawl4ai_page = await crawl4ai_client.fetch_url(
-        url,
-        timeout_seconds=timeout_seconds,
-    )
-    if crawl4ai_page:
-        crawl4ai_page["fallback_used"] = bool(
-            (include_direct and direct_page is not None) or jina_page is not None
-        )
-        if _is_page_sufficient(crawl4ai_page):
-            _log_retrieval_outcome(url, crawl4ai_page, direct_sufficient=False, jina_rescued=False)
-            return crawl4ai_page
-
     if allow_firecrawl:
         firecrawl_page = await firecrawl_client.scrape_url(
             url,
@@ -227,11 +215,10 @@ async def fetch_page(
             firecrawl_page["fallback_used"] = bool(
                 (include_direct and direct_page is not None)
                 or jina_page is not None
-                or crawl4ai_page is not None
             )
             _log_retrieval_outcome(url, firecrawl_page, direct_sufficient=False, jina_rescued=False)
             return firecrawl_page
 
-    result = direct_page or jina_page or crawl4ai_page
+    result = direct_page or jina_page
     _log_retrieval_outcome(url, result, direct_sufficient=False, jina_rescued=False)
     return result

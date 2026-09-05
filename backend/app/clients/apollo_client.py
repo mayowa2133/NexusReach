@@ -9,6 +9,7 @@ Apollo just works without code changes.
 import httpx
 
 from app.config import settings
+from app.services.paid_work import provider_request
 
 # Free-tier endpoints (company search/enrich, contacts)
 APOLLO_API_URL = "https://api.apollo.io/api/v1"
@@ -64,7 +65,7 @@ async def search_people(
 
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
+            resp = await provider_request(client, "apollo.people_search", "POST",
                 f"{APOLLO_API_URL}/mixed_people/api_search",
                 headers={"X-Api-Key": api_key},
                 json=params,
@@ -141,7 +142,7 @@ async def enrich_person(
 
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
+            resp = await provider_request(client, "apollo.people_enrichment", "POST",
                 f"{APOLLO_BASE_URL}/people/match",
                 json=params,
             )
@@ -179,7 +180,7 @@ async def search_company(company_name: str) -> dict | None:
 
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
+            resp = await provider_request(client, "apollo.company_search", "POST",
                 f"{APOLLO_API_URL}/organizations/search",
                 headers={"X-Api-Key": api_key},
                 json={
@@ -222,7 +223,7 @@ async def enrich_company(domain: str) -> dict | None:
 
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(
+            resp = await provider_request(client, "apollo.company_enrichment", "GET",
                 f"{APOLLO_API_URL}/organizations/enrich",
                 headers={"X-Api-Key": api_key},
                 params={"domain": domain},

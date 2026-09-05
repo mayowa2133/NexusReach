@@ -3,6 +3,7 @@
 import httpx
 
 from app.config import settings
+from app.services.paid_work import provider_request
 
 HUNTER_BASE_URL = "https://api.hunter.io/v2"
 
@@ -51,7 +52,7 @@ async def find_email(
         return None
 
     async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.get(
+        resp = await provider_request(client, "hunter.email_finder", "GET",
             f"{HUNTER_BASE_URL}/email-finder",
             params={
                 "api_key": settings.hunter_api_key,
@@ -87,7 +88,7 @@ async def verify_email(email: str) -> dict | None:
         return None
 
     async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.get(
+        resp = await provider_request(client, "hunter.email_verifier", "GET",
             f"{HUNTER_BASE_URL}/email-verifier",
             params={
                 "api_key": settings.hunter_api_key,
@@ -118,7 +119,7 @@ async def domain_search(domain: str, limit: int = 10) -> dict:
         return {"pattern": None, "accept_all": None, "emails": []}
 
     async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.get(
+        resp = await provider_request(client, "hunter.domain_search", "GET",
             f"{HUNTER_BASE_URL}/domain-search",
             params={
                 "api_key": settings.hunter_api_key,

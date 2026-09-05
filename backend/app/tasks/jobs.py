@@ -61,6 +61,9 @@ FEED_REFRESH_LOCK_TTL_SECONDS = 1800
 
 
 async def _refresh_user_feeds(user_id: uuid.UUID) -> int:
+    from app.services.paid_context import set_subject
+
+    set_subject(user_id)
     """Re-run all enabled search preferences for a user and create notifications.
 
     Isolation notes (Sentry PYTHON-Z / PYTHON-16):
@@ -303,6 +306,9 @@ def refresh_single_user_feeds(user_id: str) -> dict:
 
 
 async def _discover_for_user(user_id: uuid.UUID) -> int:
+    from app.services.paid_context import set_subject
+
+    set_subject(user_id)
     """Run a full default + startup discovery pass for one user.
 
     This is the cold-start fill: it populates a user's feed immediately when they
@@ -346,6 +352,9 @@ def discover_for_user(user_id: str) -> dict:
 async def _discover_occupations_for_user(
     user_id: uuid.UUID, occupations: list[str]
 ) -> int:
+    from app.services.paid_context import set_subject
+
+    set_subject(user_id)
     """Run discovery for an explicit set of occupations (chip-driven).
 
     Powers the Jobs-page occupation chips: selecting "Marketing" should *fetch*

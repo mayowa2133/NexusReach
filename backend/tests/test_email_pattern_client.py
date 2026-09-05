@@ -138,6 +138,15 @@ class TestResolveMx:
 
 
 class TestCheckSmtp:
+    @pytest.fixture(autouse=True)
+    def public_mx_resolution(self):
+        with patch(
+            "app.utils.url_safety._resolve_public_address_async",
+            new_callable=AsyncMock,
+            return_value=("mx.example.com", "93.184.216.34"),
+        ):
+            yield
+
     async def test_returns_true_on_250(self):
         """SMTP server accepts the recipient → True."""
         reader = AsyncMock(spec=asyncio.StreamReader)
@@ -161,6 +170,7 @@ class TestCheckSmtp:
             result = await _check_smtp("john@example.com", "mx.example.com")
 
         assert result is True
+        mock_conn.assert_awaited_once_with("93.184.216.34", 25)
 
     async def test_returns_false_on_550(self):
         """SMTP server rejects the recipient → False."""
@@ -184,6 +194,7 @@ class TestCheckSmtp:
             result = await _check_smtp("nobody@example.com", "mx.example.com")
 
         assert result is False
+        mock_conn.assert_awaited_once_with("93.184.216.34", 25)
 
     async def test_returns_none_on_4xx(self):
         """SMTP greylisting (4xx) → None (inconclusive)."""

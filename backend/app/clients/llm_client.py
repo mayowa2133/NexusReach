@@ -4,6 +4,12 @@ Supports Anthropic (Claude), OpenAI (GPT), Google (Gemini), and Groq (Llama).
 Provider is selected globally via NEXUSREACH_LLM_PROVIDER env var.
 """
 
+import math
+import hashlib
+import uuid
+
+from fastapi import HTTPException
+
 from app.config import settings
 
 # Default model per provider
@@ -197,6 +203,9 @@ async def generate_message(
     system_prompt: str,
     user_prompt: str,
     max_tokens: int = 1024,
+    *,
+    user_id: uuid.UUID | None = None,
+    operation_id: str | None = None,
 ) -> dict:
     """Generate a message draft using the configured LLM provider.
 
@@ -209,5 +218,46 @@ async def generate_message(
             "usage": {"input_tokens": int, "output_tokens": int}
         }
     """
+    from app.services import paid_work
+    from app.services.paid_context import get_subject, operation_id as make_operation_id
+
     provider = _resolve_provider()
-    return await _GENERATORS[provider](system_prompt, user_prompt, max_tokens)
+    subject = user_id or get_subject()
+    if subject is None and settings.environment not in {"test", "e2e"}:
+        raise HTTPException(503, "Paid-work account context is unavailable.")
+
+    prompt_fingerprint = hashlib.sha256(
+        f"{provider}\0{max_tokens}\0{system_prompt}\0{user_prompt}".encode("utf-8")
+    ).hexdigest()
+    call_id = operation_id or make_operation_id(f"llm:{provider}", prompt_fingerprint)
+    # This conservative estimate is enforced together with the provider's
+    # maximum output, so a request that cannot fit never reaches the provider.
+    input_estimate = math.ceil((len(system_prompt) + len(user_prompt)) / 4)
+    reservation = None
+    if subject is not None:
+        reservation = await paid_work.reserve(
+            user_id=subject,
+            operation_id=call_id,
+            service=f"llm:{provider}",
+            reserved_tokens=input_estimate + max(0, max_tokens),
+        )
+    if reservation is not None and reservation.state != "reserved":
+        raise HTTPException(409, "Paid-work operation has already been dispatched.")
+
+    try:
+        await paid_work.mark_dispatched(call_id)
+    except Exception:
+        await paid_work.release(call_id)
+        raise
+    try:
+        result = await _GENERATORS[provider](system_prompt, user_prompt, max_tokens)
+    except Exception:
+        await paid_work.mark_unknown(call_id)
+        raise
+
+    usage = result.get("usage") or {}
+    actual_tokens = int(usage.get("input_tokens") or 0) + int(
+        usage.get("output_tokens") or 0
+    )
+    await paid_work.settle(call_id, actual_tokens)
+    return result
