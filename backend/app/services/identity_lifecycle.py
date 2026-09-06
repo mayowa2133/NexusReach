@@ -20,6 +20,14 @@ async def assert_subject_active(db, subject: uuid.UUID):
 async def verify_upstream_identity(subject: uuid.UUID):
     if settings.auth_mode == 'dev' and settings.dev_auth_bypass_enabled:
         return
+    # No Supabase project backs the test/e2e harnesses, so there is nothing to
+    # ask; the same guard the rest of the remediation uses (paid_work.reserve,
+    # url_safety._fetch_capacity, referral_credentials.recovery_allowed). This
+    # widens nothing on a real deployment: every production gate in config.py is
+    # itself keyed on `environment == "production"`, so an environment set to
+    # `e2e` has already opted out of all of them, not just this one.
+    if settings.environment in {'test', 'e2e'}:
+        return
     if not settings.supabase_service_role_key or not settings.supabase_url:
         raise HTTPException(503, 'Identity verification unavailable')
     try:
