@@ -18,6 +18,11 @@ permissions:
 
 jobs:
   security:
+    # Display name must stay "Security": that is the context main's branch
+    # protection lists as a required status check. The job id alone produces
+    # a lowercase "security" context, which never satisfies the rule and
+    # blocks every pull request into main.
+    name: Security
     runs-on: ubuntu-latest
     services:
       postgres:
