@@ -43,6 +43,9 @@ def _fake_request(authorization: str, ip: str = "203.0.113.7") -> SimpleNamespac
 
 async def test_valid_supabase_jwt_is_accepted(monkeypatch):
     monkeypatch.setattr(settings, "auth_mode", "supabase")
+    # Pin the URL: the issuer is now a validated claim, and leaving this to the
+    # ambient setting made the test pass only where a .env supplied one.
+    monkeypatch.setattr(settings, "supabase_url", "https://project.supabase.co")
     monkeypatch.setattr(settings, "supabase_jwt_secret", "test-secret")
     sub = str(uuid.uuid4())
     token = pyjwt.encode(

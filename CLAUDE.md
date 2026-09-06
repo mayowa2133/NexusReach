@@ -626,7 +626,7 @@ VITE_WAITLIST_ENDPOINT=
 
 ## Critical implementation truths
 
-1. `backend/.env` is loaded relative to the current working directory. Running scripts from the repo root can miss backend config.
+1. `backend/.env` is loaded relative to the current working directory. Running scripts from the repo root can miss backend config. **That cuts both ways, and it is how you reproduce CI locally**: CI has no `.env`, so a test that reads an ambient setting instead of pinning it passes from `backend/` and fails on a runner (`test_valid_supabase_jwt_is_accepted` built its `iss` claim from `settings.supabase_url` and did exactly this). Run `python -m pytest backend/tests` **from the repo root** to get CI's configuration — every setting at its default — and pin what a test depends on with `monkeypatch.setattr(settings, ...)`.
 2. Apollo free-tier company endpoints are useful; person search is still not something to depend on blindly.
 3. SearXNG is no longer a production search provider — self-hosted SearXNG on a cloud/datacenter IP returns 0 results (engines block the IP; verified 2026-06-23). Authenticated APIs are primary; SearXNG is local-dev-only (residential IP). See the Search-provider routing section.
 4. For LinkedIn x-ray the order is Google CSE → Serper → Brave (Google-backed sources have the best `site:linkedin.com/in` recall; Brave's independent index is weak for LinkedIn). Brave leads only the general-web chains.
