@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 import httpx
 
 from app.config import settings
+from app.services.paid_work import provider_request
 from app.utils.company_identity import extract_public_identity_hints
 from app.utils.linkedin import parse_linkedin_serp_title
 
@@ -279,7 +280,7 @@ async def _run_brave_query(query: str, count: int) -> list[dict]:
 
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(
+            resp = await provider_request(client, "brave.search", "GET",
                 BRAVE_SEARCH_URL,
                 headers={"X-Subscription-Token": settings.brave_api_key},
                 params={"q": query, "count": min(count, 20)},

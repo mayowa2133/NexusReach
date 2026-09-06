@@ -29,12 +29,16 @@ class Settings(BaseSettings):
 
     # Redis
     redis_url: str = "redis://localhost:6379/0"
+    renderer_redis_url: str = ""
 
     # Supabase
     supabase_url: str = ""
     supabase_key: str = ""
     supabase_jwt_secret: str = ""
     supabase_service_role_key: str = ""
+    # Maximum lifetime configured for Supabase access JWTs. Tombstones remain
+    # longer than this value so a signed token cannot outlive revocation state.
+    supabase_access_token_max_lifetime_seconds: int = 3600
     auth_mode: str = "supabase"
     dev_auth_bypass_enabled: bool = False
     dev_user_id: uuid.UUID = uuid.UUID("00000000-0000-0000-0000-000000000001")
@@ -58,6 +62,8 @@ class Settings(BaseSettings):
     # server-rendered responses. Falls back to ``frontend_url`` when empty.
     referral_public_base_url: str = ""
     # Displayed launch goal ("launches at N verified members").
+    referral_campaign_id: str = "prelaunch-2026"
+    referral_recovery_hourly_limit: int = 100
     referral_launch_target: int = 3_000
     # Verified-referral thresholds that unlock the reward ladder rungs.
     referral_tier_thresholds: str = "1,3,5,10"
@@ -66,6 +72,11 @@ class Settings(BaseSettings):
     # Optional server-side mirror of each signup to a Google Apps Script /exec
     # URL, so the pre-launch Google Sheet stays populated now that the backend
     # is the primary sink. Unset => no mirror. Best-effort; never blocks signup.
+    waitlist_sheet_delete_secret: str = ""
+    # Dedicated server-side key for deterministic, unguessable deletion receipts.
+    # A stable key lets an idempotent retry return the same bearer while the
+    # database retains only its hash.
+    deletion_receipt_hmac_key: str = ""
     waitlist_sheet_mirror_url: str = ""
     # Private Supabase Storage bucket holding optional waitlist resume uploads.
     # Must be created manually (see DEPLOYMENT_RUNBOOK). Uses supabase_url +
@@ -203,6 +214,11 @@ class Settings(BaseSettings):
     # Usage limits
     daily_llm_token_limit: int = 100_000
     daily_api_call_limit: int = 50
+    global_daily_llm_token_limit: int = 1_000_000
+    global_daily_api_call_limit: int = 500
+    account_paid_concurrency: int = 2
+    global_paid_concurrency: int = 6
+    paid_reservation_ttl_seconds: int = 300
     hunter_pattern_monthly_budget: int = 25
     employment_verify_top_n: int = 10
     employment_verify_timeout_seconds: int = 20
@@ -260,6 +276,7 @@ class Settings(BaseSettings):
     parser_sandbox_output_bytes: int = 16 * 1024 * 1024
     latex_render_timeout_seconds: int = 15
     render_remote_enabled: bool = False
+    renderer_isolation_enforced: bool = False
     render_task_timeout_seconds: int = 30
     max_docx_entries: int = 200
     max_docx_uncompressed_bytes: int = 50 * 1024 * 1024
@@ -288,6 +305,7 @@ class Settings(BaseSettings):
                 "NEXUSREACH_OPENAI_API_KEY": self.openai_api_key,
                 "NEXUSREACH_ANTHROPIC_API_KEY": self.anthropic_api_key,
                 "NEXUSREACH_HUNTER_API_KEY": self.hunter_api_key,
+                "NEXUSREACH_DELETION_RECEIPT_HMAC_KEY": self.deletion_receipt_hmac_key,
             }
             for name, value in forbidden.items():
                 if value:
@@ -310,12 +328,24 @@ class Settings(BaseSettings):
             errors.append("NEXUSREACH_SUPABASE_JWT_SECRET is empty")
         if not self.supabase_service_role_key:
             errors.append("NEXUSREACH_SUPABASE_SERVICE_ROLE_KEY is empty")
+        if self.supabase_access_token_max_lifetime_seconds <= 0:
+            errors.append(
+                "NEXUSREACH_SUPABASE_ACCESS_TOKEN_MAX_LIFETIME_SECONDS must be positive"
+            )
         if self.auth_mode == "dev":
             errors.append("NEXUSREACH_AUTH_MODE=dev must not be used in production")
         if self.dev_auth_bypass_enabled:
             errors.append("NEXUSREACH_DEV_AUTH_BYPASS_ENABLED must not be true in production")
         if self.service_role == "api" and not self.render_remote_enabled:
             errors.append("NEXUSREACH_RENDER_REMOTE_ENABLED must be true for the production API")
+        if self.service_role == "api" and not self.renderer_isolation_enforced:
+            errors.append(
+                "NEXUSREACH_RENDERER_ISOLATION_ENFORCED must confirm renderer containment"
+            )
+        if self.service_role == "api" and not self.renderer_redis_url:
+            errors.append("NEXUSREACH_RENDERER_REDIS_URL is empty")
+        if self.renderer_redis_url and self.renderer_redis_url == self.redis_url:
+            errors.append("Renderer and general workers must use separate Redis instances")
         if (
             self.waitlist_admin_token
             and len(self.waitlist_admin_token) < MIN_ADMIN_TOKEN_LENGTH
@@ -350,6 +380,10 @@ class Settings(BaseSettings):
                     errors.append(
                         f"NEXUSREACH_TOKEN_ENCRYPTION_KEYS[{version}] is invalid"
                     )
+        if self.service_role == "api" and len(self.deletion_receipt_hmac_key) < 32:
+            errors.append(
+                "NEXUSREACH_DELETION_RECEIPT_HMAC_KEY must be at least 32 characters"
+            )
         if errors:
             raise ValueError(
                 "Production configuration errors:\n  - " + "\n  - ".join(errors)

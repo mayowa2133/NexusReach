@@ -9,6 +9,6 @@ class AccountDeleteRequest(BaseModel):
 
 
 class AccountDeleteResponse(BaseModel):
-    deleted: bool
-    auth_identity_deleted: bool
-    deleted_tables: dict[str, int]
+    status: str
+    request_id: str
+    receipt_token: str

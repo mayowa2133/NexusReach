@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.clients import crawl4ai_client, public_page_client, search_router_client
+from app.clients import public_page_client, search_router_client
 from app.config import settings
 from app.models.person import Person
 from app.utils.company_identity import (
@@ -127,7 +127,7 @@ def _analyze_linkedin_content(content: str, company_name: str) -> EmploymentVeri
         return EmploymentVerificationResult(
             current_company_verified=False,
             current_company_verification_status="unverified",
-            current_company_verification_source="crawl4ai_linkedin",
+            current_company_verification_source="public_linkedin",
             current_company_verification_confidence=5,
             current_company_verification_evidence="Conflicting company variant found in public profile evidence.",
             current_company_verified_at=None,
@@ -147,7 +147,7 @@ def _analyze_linkedin_content(content: str, company_name: str) -> EmploymentVeri
         return EmploymentVerificationResult(
             current_company_verified=False,
             current_company_verification_status="unverified",
-            current_company_verification_source="crawl4ai_linkedin",
+            current_company_verification_source="public_linkedin",
             current_company_verification_confidence=confidence,
             current_company_verification_evidence=evidence,
             current_company_verified_at=None,
@@ -167,7 +167,7 @@ def _analyze_linkedin_content(content: str, company_name: str) -> EmploymentVeri
         return EmploymentVerificationResult(
             current_company_verified=True,
             current_company_verification_status="verified",
-            current_company_verification_source="crawl4ai_linkedin",
+            current_company_verification_source="public_linkedin",
             current_company_verification_confidence=confidence,
             current_company_verification_evidence=evidence,
             current_company_verified_at=datetime.now(timezone.utc),
@@ -177,7 +177,7 @@ def _analyze_linkedin_content(content: str, company_name: str) -> EmploymentVeri
     return EmploymentVerificationResult(
         current_company_verified=False,
         current_company_verification_status="unverified",
-        current_company_verification_source="crawl4ai_linkedin",
+        current_company_verification_source="public_linkedin",
         current_company_verification_confidence=35 if company_normalized in haystack else 20,
         current_company_verification_evidence=None,
         current_company_verified_at=None,
@@ -392,9 +392,10 @@ async def _verify_person(
     linkedin_result = _skipped_result("No LinkedIn URL available for verification.")
 
     if person.linkedin_url:
-        linkedin_page = await crawl4ai_client.fetch_profile(
+        linkedin_page = await public_page_client.fetch_page(
             person.linkedin_url,
             timeout_seconds=settings.employment_verify_timeout_seconds,
+            allow_firecrawl=False,
         )
         if linkedin_page and linkedin_page.get("content"):
             linkedin_result = _analyze_linkedin_content(linkedin_page["content"], company_name)
@@ -511,7 +512,7 @@ async def verify_people_current_company(
     shortlisted_ids = {person.id for person in shortlist}
 
     # Bound concurrent verification so we don't open 10+ simultaneous HTTP
-    # connections across providers (Crawl4AI, search_router, public_page) and
+    # connections across providers (search_router and public_page) and
     # trip rate limits (audit M7). Mirrors the bounded LinkedIn backfill.
     semaphore = asyncio.Semaphore(max(1, settings.employment_verify_concurrency))
 

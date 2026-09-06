@@ -14,6 +14,7 @@ import httpx
 
 from app.clients import brave_search_client
 from app.config import settings
+from app.services.paid_work import provider_request
 from app.utils.linkedin import parse_linkedin_serp_title
 
 logger = logging.getLogger(__name__)
@@ -173,7 +174,7 @@ async def search_people(
             if debug_trace is not None:
                 debug_trace["queries"] = unique_queries
             for query_index, query in enumerate(unique_queries):
-                resp = await client.get(
+                resp = await provider_request(client, "google_cse.search", "GET",
                     GOOGLE_CSE_URL,
                     params={
                         "q": query,
@@ -264,7 +265,7 @@ async def search_exact_linkedin_profile(
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             for query in queries:
-                resp = await client.get(
+                resp = await provider_request(client, "google_cse.search", "GET",
                     GOOGLE_CSE_URL,
                     params={
                         "q": query,

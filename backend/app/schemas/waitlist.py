@@ -62,21 +62,7 @@ class ReferralStatus(BaseModel):
 
 
 class WaitlistSignupResponse(BaseModel):
-    """Confirmation returned to the browser on join.
-
-    Deliberately NOT a flat :class:`ReferralStatus`: ``referral`` and
-    ``access_token`` are populated only when this request *created* the row. For
-    an address already on the list both stay ``None`` and the response carries
-    nothing but the idempotency flag — the endpoint is unauthenticated, so
-    anyone can submit anyone's email, and returning that row's owner token,
-    name, or queue position would be an account takeover and an enumeration
-    oracle. Returning members get their link by email instead.
-    """
-
     ok: bool = True
-    already_on_list: bool = False
-    access_token: str | None = None
-    referral: ReferralStatus | None = None
 
 
 class ReferralVerifyResponse(ReferralStatus):
@@ -124,7 +110,6 @@ class WaitlistExportResponse(BaseModel):
 
 
 class WaitlistDeleteResponse(BaseModel):
-    """Result of a member erasing their own waitlist data."""
-
-    deleted: bool
-    resume_deleted: bool
+    status: str
+    request_id: str
+    receipt_token: str

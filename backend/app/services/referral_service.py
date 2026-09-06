@@ -24,12 +24,13 @@ from __future__ import annotations
 
 import hashlib
 import secrets
-import uuid
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, delete
+from sqlalchemy.dialects.postgresql import insert
+from app.models.referral_security import ReferralCredential, ReferralCredit
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -166,13 +167,20 @@ async def resolve_signup_by_token(
     """
     if not token or not token.startswith(ACCESS_TOKEN_PREFIX):
         return None
-    result = await db.execute(
-        select(WaitlistSignup).where(
-            WaitlistSignup.referral_code == code,
-            WaitlistSignup.access_token_hash == hash_token(token),
-        )
-    )
-    return result.scalar_one_or_none()
+    now = datetime.now(timezone.utc)
+    result = await db.execute(select(WaitlistSignup).join(ReferralCredential,
+        ReferralCredential.signup_id == WaitlistSignup.id).where(
+        WaitlistSignup.referral_code == code, ReferralCredential.token_hash == hash_token(token),
+        ReferralCredential.kind == 'owner', ReferralCredential.expires_at > now))
+    signup = result.scalar_one_or_none()
+    if signup is not None:
+        return signup
+    from app.services.referral_credentials import legacy_allowed
+
+    if await legacy_allowed(db):
+        return (await db.execute(select(WaitlistSignup).where(
+            WaitlistSignup.referral_code == code, WaitlistSignup.access_token_hash == hash_token(token)))).scalar_one_or_none()
+    return None
 
 
 def issue_access_token(signup: WaitlistSignup) -> str:
@@ -197,62 +205,40 @@ def issue_verification_token(signup: WaitlistSignup) -> str:
     return token
 
 
-async def verify_signup(
-    db: AsyncSession, code: str, token: str
-) -> tuple[WaitlistSignup, str, uuid.UUID | None] | None:
-    """Confirm an email, credit the referrer, and return a dashboard key.
-
-    ``token`` must be the emailed ``nrv_`` verification token — the dashboard
-    ``nrw_`` access token is rejected, which is what keeps a referral countable
-    only by someone who can read the invitee's mail.
-
-    Returns ``(signup, access_token, credited_referrer_id)`` on success, ``None``
-    when the code/token doesn't resolve. The verification token is consumed
-    (cleared) on first use and the referrer is credited exactly once, in the same
-    transaction, so a re-clicked link can never double-count. Because the token
-    is single-use, a second click no longer resolves; the caller renders that as
-    an expired link and the visitor still has the dashboard key from the first
-    click.
-
-    ``credited_referrer_id`` is set only on the confirmation that actually
-    incremented someone's tally — the caller uses it to notify that referrer, and
-    its being ``None`` on every other path is what stops a replay from mailing
-    them again.
-    """
+async def verify_signup(db: AsyncSession, code: str, token: str):
+    from app.services.referral_credentials import campaign, fingerprint, issue
     if not token or not token.startswith(VERIFICATION_TOKEN_PREFIX):
         return None
-    result = await db.execute(
-        select(WaitlistSignup).where(
-            WaitlistSignup.referral_code == code,
-            WaitlistSignup.verification_token_hash == hash_token(token),
-        )
-    )
-    signup = result.scalar_one_or_none()
+    campaign_row, key = await campaign(db)
+    signup = (await db.execute(select(WaitlistSignup).where(
+        WaitlistSignup.referral_code == code).with_for_update())).scalar_one_or_none()
     if signup is None:
         return None
-
-    # Consume the single-use token whether or not this is the first confirmation.
-    signup.verification_token_hash = None
-    access_token = issue_access_token(signup)
-
-    credited_referrer_id: uuid.UUID | None = None
-    if not signup.email_verified:
-        signup.email_verified = True
-        signup.verified_at = datetime.now(timezone.utc)
-
-        if signup.referred_by_id is not None:
-            await db.execute(
-                WaitlistSignup.__table__.update()
-                .where(WaitlistSignup.id == signup.referred_by_id)
-                .values(
-                    verified_referral_count=WaitlistSignup.verified_referral_count + 1
-                )
-            )
-            credited_referrer_id = signup.referred_by_id
-
+    now = datetime.now(timezone.utc)
+    consumed = await db.execute(delete(ReferralCredential).where(
+        ReferralCredential.signup_id == signup.id, ReferralCredential.token_hash == hash_token(token),
+        ReferralCredential.kind == 'exchange', ReferralCredential.expires_at > now
+    ).returning(ReferralCredential.token_hash))
+    if consumed.scalar_one_or_none() is None:
+        if not (now < campaign_row.legacy_until
+                and signup.verification_token_hash == hash_token(token)):
+            return None
+        signup.verification_token_hash = None
+    new_credit = await db.execute(insert(ReferralCredit).values(
+        campaign_id=campaign_row.id, fingerprint=fingerprint(key, signup.email),
+        referrer_id=signup.referred_by_id,
+        notification_status="pending" if signup.referred_by_id else "not_applicable",
+    ).on_conflict_do_nothing().returning(ReferralCredit.id))
+    credited = signup.referred_by_id if new_credit.scalar_one_or_none() is not None else None
+    if credited is not None:
+        await db.execute(WaitlistSignup.__table__.update().where(WaitlistSignup.id == credited)
+            .values(verified_referral_count=WaitlistSignup.verified_referral_count+1))
+    signup.email_verified = True
+    signup.verified_at = signup.verified_at or now
+    access_token = await issue(db, signup, 'owner')
     await db.commit()
     await db.refresh(signup)
-    return signup, access_token, credited_referrer_id
+    return signup, access_token, credited
 
 
 # --- Status: position, total, tier ---------------------------------------
@@ -284,7 +270,7 @@ def build_share_url(code: str) -> str:
 
 def build_dashboard_url(code: str, access_token: str) -> str:
     """The owner-only referral dashboard link (email delivery only)."""
-    return f"{_base_url()}/r/{code}?t={access_token}"
+    return f"{_base_url()}/r/{code}#t={access_token}"
 
 
 def build_dashboard_home_url(code: str) -> str:
@@ -307,7 +293,7 @@ def build_verify_url(code: str, verification_token: str) -> str:
     a dashboard key. Distinct from ``t`` so the two secrets never get confused
     at either end.
     """
-    return f"{_base_url()}/r/{code}?v={verification_token}"
+    return f"{_base_url()}/r/{code}#v={verification_token}"
 
 
 async def compute_position(db: AsyncSession, signup: WaitlistSignup) -> int:

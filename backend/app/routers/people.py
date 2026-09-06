@@ -425,9 +425,8 @@ async def hiring_team_capture(
 ):
     """Ingest the LinkedIn 'Meet the hiring team' panel from the companion.
 
-    Stores the captured contacts as verified people in the right bucket and
-    caches them for the company. These are the literal req owners LinkedIn
-    attached to the posting.
+    Stores client assertions privately and unverified. Authentication does
+    not establish the provenance of browser-submitted content.
     """
     job_uuid: uuid.UUID | None = None
     if body.job_id:

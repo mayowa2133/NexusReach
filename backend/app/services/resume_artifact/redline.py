@@ -289,12 +289,15 @@ async def render_resume_artifact_redline_pdf_async(
     """Async wrapper around ``render_resume_artifact_redline_pdf`` (audit H1)."""
     async with _PDF_RENDER_SEMAPHORE:
         if settings.render_remote_enabled:
-            from app.tasks.render import render_redline_pdf
+            from app.render_client import submit_pdf
 
-            task = render_redline_pdf.apply_async(
-                args=[content, rewrites, decisions, auto_accept_inferred],
-                queue="render",
+            redline_content = _build_redline_resume_artifact_content(
+                content,
+                rewrites,
+                decisions,
+                auto_accept_inferred=auto_accept_inferred,
             )
+            task = submit_pdf(redline_content)
             try:
                 result = await asyncio.to_thread(
                     task.get,

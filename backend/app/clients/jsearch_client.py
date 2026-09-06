@@ -3,6 +3,7 @@
 import httpx
 
 from app.config import settings
+from app.services.paid_work import provider_request
 
 JSEARCH_BASE_URL = "https://jsearch.p.rapidapi.com"
 
@@ -86,7 +87,7 @@ async def search_jobs(
         params["remote_jobs_only"] = "true"
 
     async with httpx.AsyncClient(timeout=20) as client:
-        resp = await client.get(
+        resp = await provider_request(client, "jsearch.search", "GET",
             f"{JSEARCH_BASE_URL}/search",
             params=params,
             headers=_headers(),

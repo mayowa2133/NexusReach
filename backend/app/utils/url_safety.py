@@ -12,9 +12,16 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import socket
+import time
+import uuid
+import zlib
+from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 
 import httpx
+from fastapi import HTTPException
+
+from app.config import settings
 
 # Hostnames that resolve to cloud-metadata or internal services on some platforms.
 _BLOCKED_HOSTNAMES = {
@@ -196,55 +203,150 @@ async def is_safe_public_host_async(host: str | None) -> bool:
     return await loop.run_in_executor(None, is_safe_public_host, host)
 
 
-async def safe_get(
-    url: str,
-    *,
-    headers: dict | None = None,
-    timeout_seconds: float = 20,
-    max_redirects: int = 5,
-    client: httpx.AsyncClient | None = None,
-) -> httpx.Response | None:
-    """GET a URL with SSRF protection on the initial host and every redirect hop.
+MAX_PAGE_BYTES = 5 * 1024 * 1024
+_FETCH_SLOTS = asyncio.Semaphore(10)
 
-    Returns None if any hop targets a non-public host. Redirects are followed
-    manually so each ``Location`` is validated before connecting — a public URL
-    that 302s to ``169.254.169.254`` is refused. An existing ``client`` may be
-    passed (it must have ``follow_redirects=False``); otherwise one is created
-    and closed here.
-    """
+_ACQUIRE_FETCH_SLOT = """
+local now = tonumber(ARGV[1])
+local expires = tonumber(ARGV[2])
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now)
+redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', now)
+if redis.call('ZCARD', KEYS[1]) >= 10 or redis.call('ZCARD', KEYS[2]) >= 2 then
+  return 0
+end
+redis.call('ZADD', KEYS[1], expires, ARGV[3])
+redis.call('ZADD', KEYS[2], expires, ARGV[3])
+redis.call('EXPIRE', KEYS[1], 30)
+redis.call('EXPIRE', KEYS[2], 30)
+return 1
+"""
+
+
+@asynccontextmanager
+async def _fetch_capacity():
+    """Enforce two fetches per account and ten across all API workers."""
+    if settings.environment in {"test", "e2e"}:
+        async with _FETCH_SLOTS:
+            yield
+        return
+    from app.services.paid_context import get_subject
+    from app.utils.discovery_rate_limit import _client
+
+    subject = get_subject()
+    if subject is None:
+        raise HTTPException(503, "Retrieval account context is unavailable.")
+    lease = uuid.uuid4().hex
+    account_key = f"nr:fetch:account:{subject}"
+    global_key = "nr:fetch:global"
+    try:
+        redis = _client()
+        now = time.time()
+        accepted = await redis.eval(
+            _ACQUIRE_FETCH_SLOT,
+            2,
+            global_key,
+            account_key,
+            now,
+            now + 25,
+            lease,
+        )
+        if accepted != 1:
+            raise HTTPException(
+                429,
+                "Too many page retrievals are already running.",
+                headers={"Retry-After": "5"},
+            )
+        try:
+            yield
+        finally:
+            await redis.zrem(global_key, lease)
+            await redis.zrem(account_key, lease)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(503, "Retrieval capacity could not be established.") from None
+
+
+async def _bounded_body(response: httpx.Response) -> bytes:
+    """Bound wire bytes and incremental decompression independently."""
+    length = response.headers.get("content-length")
+    if length and int(length) > MAX_PAGE_BYTES:
+        raise ValueError("Page too large")
+    if response.is_stream_consumed:
+        # In-memory transports can provide pre-read bodies; real sends stream.
+        if len(response.content) > MAX_PAGE_BYTES:
+            raise ValueError("Page too large")
+        return response.content
+    encoding = response.headers.get("content-encoding", "identity").lower()
+    if encoding not in {"identity", "gzip", "deflate"}:
+        raise ValueError("Unsupported page encoding")
+    decoder = zlib.decompressobj(31 if encoding == "gzip" else 15) if encoding != "identity" else None
+    body = bytearray()
+    wire = 0
+    async for chunk in response.aiter_raw(chunk_size=65536):
+        wire += len(chunk)
+        if wire > MAX_PAGE_BYTES:
+            raise ValueError("Page too large")
+        decoded = decoder.decompress(chunk, MAX_PAGE_BYTES-len(body)+1) if decoder else chunk
+        body.extend(decoded)
+        if len(body) > MAX_PAGE_BYTES or (decoder and decoder.unconsumed_tail):
+            raise ValueError("Decoded page too large")
+    if decoder:
+        if not decoder.eof or decoder.unused_data:
+            raise ValueError("Invalid compressed page")
+    return bytes(body)
+
+
+async def safe_get(
+    url: str, *, headers: dict | None = None, timeout_seconds: float = 20,
+    max_redirects: int = 5, client: httpx.AsyncClient | None = None,
+) -> httpx.Response | None:
+    """Fetch only public pinned addresses under one time and byte budget."""
     own_client = client is None
     if own_client:
         client = httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=False)
     try:
-        current = url
-        for _ in range(max_redirects + 1):
-            resolved = await _resolve_public_address_async(current)
-            if not resolved:
-                return None
-            original_host, resolved_ip = resolved
-            try:
+        async with asyncio.timeout(min(timeout_seconds, 20)), _fetch_capacity():
+            current = url
+            for _ in range(min(max_redirects, 5) + 1):
+                resolved = await _resolve_public_address_async(current)
+                if not resolved:
+                    return None
+                original_host, resolved_ip = resolved
                 if isinstance(client, httpx.AsyncClient):
                     original_url = httpx.URL(current)
-                    connect_url = original_url.copy_with(host=resolved_ip)
                     request_headers = dict(headers or {})
-                    request_headers["Host"] = original_url.netloc.decode("ascii")
-                    request_headers["Connection"] = "close"
-                    request = client.build_request("GET", connect_url, headers=request_headers)
+                    request_headers.update({"Host": original_url.netloc.decode("ascii"),
+                                            "Connection": "close", "Accept-Encoding": "gzip, deflate"})
+                    request = client.build_request("GET", original_url.copy_with(host=resolved_ip), headers=request_headers)
                     request.extensions["sni_hostname"] = original_host
-                    resp = await client.send(request)
-                    request.url = original_url
+                    response = await client.send(request, stream=True, follow_redirects=False)
+                    try:
+                        if response.status_code in {301, 302, 303, 307, 308}:
+                            location = response.headers.get("location")
+                            if not location:
+                                return None
+                            current = str(original_url.join(location))
+                            continue
+                        content = await _bounded_body(response)
+                        response_headers = {k: v for k, v in response.headers.items()
+                                            if k.lower() not in {"content-encoding", "content-length"}}
+                        request.url = original_url
+                        return httpx.Response(response.status_code, headers=response_headers, content=content, request=request)
+                    finally:
+                        await response.aclose()
                 else:
-                    # Test doubles do not open a socket and keep a small .get API.
-                    resp = await client.get(current, headers=headers)
-            except httpx.HTTPError:
-                return None
-            if resp.status_code in {301, 302, 303, 307, 308}:
-                location = resp.headers.get("location")
-                if not location:
-                    return resp
-                current = str(httpx.URL(current).join(location))
-                continue
-            return resp
+                    # Legacy non-network test doubles; production uses AsyncClient.
+                    response = await client.get(current, headers=headers)
+                    if response.status_code in {301, 302, 303, 307, 308}:
+                        location = response.headers.get("location")
+                        if not location:
+                            return response
+                        current = str(httpx.URL(current).join(location))
+                        continue
+                    return response
+            return None
+    except (httpx.HTTPError, TimeoutError, ValueError, zlib.error):
         return None
     finally:
         if own_client:

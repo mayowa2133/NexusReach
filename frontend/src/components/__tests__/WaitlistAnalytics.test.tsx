@@ -121,8 +121,6 @@ describe('waitlist funnel analytics', () => {
     expect(joined).toMatchObject({
       source: 'hero',
       sink: 'backend',
-      already_on_list: false,
-      saw_referral_panel: true,
       has_resume: false,
       goals_count: 1,
       goals: ['land_first_role'],

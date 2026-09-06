@@ -41,6 +41,7 @@ class Person(Base):
     person_type: Mapped[str | None] = mapped_column(String(50))
     profile_data: Mapped[dict | None] = mapped_column(JSONB)
     github_data: Mapped[dict | None] = mapped_column(JSONB)
+    provenance: Mapped[str | None] = mapped_column(String(50))
     source: Mapped[str | None] = mapped_column(String(50))
     apollo_id: Mapped[str | None] = mapped_column(String(100))
     relevance_score: Mapped[int | None] = mapped_column(Integer, nullable=True)

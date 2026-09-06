@@ -45,9 +45,28 @@ def test_worker_runtime_defaults_limit_prefetch_and_child_reuse():
     assert routes["app.tasks.auto_prospect.prewarm_job_people"] == {"queue": "prewarm"}
     assert routes["app.tasks.auto_prospect.prewarm_job_people_batch"] == {"queue": "prewarm"}
     assert routes["app.tasks.auto_prospect.refresh_job_research_snapshot"] == {"queue": "prewarm"}
-    assert routes["app.tasks.render.render_pdf"] == {"queue": "render"}
-    assert routes["app.tasks.render.render_redline_pdf"] == {"queue": "render"}
+    assert all("render" not in task_name for task_name in routes)
     assert Settings.model_fields["reverify_batch_size"].default == 5
+
+
+def test_dedicated_renderer_registers_only_its_bounded_task(monkeypatch):
+    import importlib
+    import sys
+
+    monkeypatch.setenv("NEXUSREACH_RENDERER_REDIS_URL", "redis://renderer:6379/0")
+    monkeypatch.setenv("NEXUSREACH_ENVIRONMENT", "test")
+    sys.modules.pop("app.renderer_app", None)
+    module = importlib.import_module("app.renderer_app")
+    module.renderer_app.finalize(auto=True)
+    # Celery's in-process registry is global, so this test process has already
+    # imported general worker tasks. The renderer image copies none of those
+    # modules; its own app has no discovery imports and routes one task only.
+    assert module.renderer_app.conf.imports == ()
+    assert module.renderer_app.conf.include == ()
+    assert module.renderer_app.conf.task_routes == {
+        "renderer.render_pdf": {"queue": "render"}
+    }
+    assert "renderer.render_pdf" in module.renderer_app.tasks
 
 
 def test_linkedin_cleanup_uses_shared_async_runner(monkeypatch):

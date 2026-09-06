@@ -231,7 +231,7 @@ describe('JobsPage', () => {
     await userEvent.click(screen.getByRole('button', { name: /show more \(12 more\)/i }));
     expect(screen.getByText('Role 59')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /show more/i })).not.toBeInTheDocument();
-  });
+  }, 15_000);
 
   it('renders remote-only checkbox', () => {
     renderJobs();

@@ -6,7 +6,7 @@ from typing import Annotated
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import auth_tokens
@@ -90,14 +90,16 @@ async def get_or_create_user(
     # authenticated requests immediately after sign-in; without this
     # transaction-scoped lock they can all observe a missing row and race the
     # primary/unique keys. PostgreSQL releases the lock on commit or rollback.
-    lock_key = int.from_bytes(user_id.bytes[:8], byteorder="big", signed=True)
-    await db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
+    from app.services.identity_lifecycle import lock_subject, assert_subject_active, verify_upstream_identity
+    await lock_subject(db, user_id)
+    await assert_subject_active(db, user_id)
 
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     changed = False
 
     if user is None:
+        await verify_upstream_identity(user_id)
         user = User(id=user_id, email=desired_email)
         db.add(user)
         changed = True
@@ -136,6 +138,9 @@ async def get_current_user_id(
     user: Annotated[User, Depends(get_or_create_user)],
 ) -> uuid.UUID:
     """Compatibility dependency that returns the current bootstrapped user ID."""
+    from app.services.paid_context import set_subject
+
+    set_subject(user.id)
     return user.id
 
 

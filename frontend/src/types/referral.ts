@@ -16,25 +16,19 @@ export interface ReferralStatus {
   name?: string | null;
 }
 
-/**
- * Response from POST /api/waitlist.
- *
- * `referral` and `access_token` arrive only when this request *created* the
- * row. For an address already on the list both are null by design — the
- * endpoint is unauthenticated, so returning that person's owner key or queue
- * position would hand their signup to anyone who guesses their email. Returning
- * members get their link emailed instead.
- */
+/** Generic response from POST /api/waitlist; it never reveals signup state. */
 export interface WaitlistJoinResponse {
   ok: boolean;
-  already_on_list: boolean;
-  /** Secret owner key — new signups only. Store it to reach the dashboard. */
-  access_token: string | null;
-  referral: ReferralStatus | null;
+}
+
+export interface DeletionReceipt {
+  status: 'pending' | 'completed';
+  request_id: string;
+  receipt_token: string;
 }
 
 /**
- * Response from GET /api/referrals/verify.
+ * Response from POST /api/referrals/exchange.
  *
  * Clicking the emailed link is the proof of mailbox control, so this is where
  * the owner key is issued. The single-use `v` token is spent by the request.

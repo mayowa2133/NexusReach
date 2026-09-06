@@ -52,7 +52,7 @@ def test_analyze_linkedin_content_verifies_current_company():
 
     assert result.current_company_verified is True
     assert result.current_company_verification_status == "verified"
-    assert result.current_company_verification_source == "crawl4ai_linkedin"
+    assert result.current_company_verification_source == "public_linkedin"
 
 
 def test_analyze_linkedin_content_marks_unclear_result_unverified():

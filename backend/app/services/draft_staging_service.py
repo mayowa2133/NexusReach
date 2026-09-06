@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
+from datetime import datetime, timezone, timedelta
+
+from fastapi import HTTPException
 import uuid
+import httpx
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.message import Message
+from app.models.send_attempt import SendAttempt
 from app.models.outreach import OutreachLog
 from app.models.person import Person
 from app.models.settings import UserSettings
@@ -20,29 +27,47 @@ logger = logging.getLogger(__name__)
 
 
 async def claim_message_for_send(
-    db: AsyncSession, *, user_id: uuid.UUID, message_id: uuid.UUID
+    db: AsyncSession, *, user_id: uuid.UUID, message_id: uuid.UUID,
+    scheduled_version: int | None = None, commit: bool = True,
 ) -> bool:
-    """Atomically claim a staged message for sending (audit pass-2 P2/P5).
-
-    Transitions ``staged -> sending`` in a single ``UPDATE ... WHERE status='staged'``
-    and commits it **before** the network send. Returns True only for the caller
-    that won the claim (rowcount == 1); a concurrent worker or a redelivered task
-    loses the claim and must not send. Because the scheduler only selects
-    ``status='staged'`` rows, a message left ``sending`` after a crash/failed
-    commit is never re-selected — closing both the double-send race and the
-    commit-after-send window.
-    """
-    result = await db.execute(
-        update(Message)
-        .where(
-            Message.id == message_id,
-            Message.user_id == user_id,
-            Message.status == "staged",
-        )
-        .values(status="sending", scheduled_send_at=None)
-    )
-    await db.commit()
+    """Compare-and-set claim; scheduled work must retain its exact due generation."""
+    conditions = [Message.id == message_id, Message.user_id == user_id,
+                  Message.status.in_(["staged", "send_failed"])]
+    if scheduled_version is not None:
+        conditions.extend([Message.status == "staged",
+            Message.schedule_version == scheduled_version,
+            Message.scheduled_send_at.isnot(None),
+            Message.scheduled_send_at <= datetime.now(timezone.utc)])
+    result = await db.execute(update(Message).where(*conditions).values(
+        status="sending", scheduled_send_at=None))
+    if commit:
+        await db.commit()
     return (result.rowcount or 0) == 1
+
+
+async def cancel_message_schedule(db: AsyncSession, *, user_id: uuid.UUID, message_id: uuid.UUID) -> Message:
+    message = (await db.execute(select(Message).where(
+        Message.id == message_id, Message.user_id == user_id).with_for_update())).scalar_one_or_none()
+    if message is None:
+        raise HTTPException(404, "Message not found")
+    if message.status != "staged":
+        raise HTTPException(409, {"code": "send_in_progress", "status": message.status})
+    message.scheduled_send_at = None
+    message.schedule_version += 1
+    await db.commit()
+    return message
+
+
+async def expire_unresolved_sends(db: AsyncSession) -> None:
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
+    result = await db.execute(update(SendAttempt).where(
+        SendAttempt.outcome == "sending", SendAttempt.created_at < cutoff
+    ).values(outcome="delivery_unknown").returning(SendAttempt.message_id))
+    ids = list(result.scalars())
+    if ids:
+        await db.execute(update(Message).where(Message.id.in_(ids), Message.status == "sending")
+                         .values(status="delivery_unknown", scheduled_send_at=None))
+    await db.commit()
 
 
 def _message_job_id(message: Message) -> uuid.UUID | None:
@@ -139,11 +164,13 @@ async def stage_message_draft(
         select(Message).where(
             Message.id == message_id,
             Message.user_id == user_id,
-        )
+        ).with_for_update()
     )
     message = result.scalar_one_or_none()
     if not message:
         raise ValueError("Message not found.")
+    if message.status in {"sending", "delivery_unknown", "sent"}:
+        raise HTTPException(409, {"code": "send_conflict", "status": message.status})
     if message.channel != "email":
         raise ValueError("Only email messages can be staged as drafts.")
 
@@ -289,6 +316,7 @@ async def send_staged_message(
     user_id: uuid.UUID,
     message_id: uuid.UUID,
     provider: str | None = None,
+    scheduled_version: int | None = None,
 ) -> dict:
     """Send a staged message via connected email provider.
 
@@ -298,17 +326,22 @@ async def send_staged_message(
         select(Message).where(
             Message.id == message_id,
             Message.user_id == user_id,
-        )
+        ).with_for_update()
     )
     message = result.scalar_one_or_none()
     if not message:
         raise ValueError("Message not found.")
     if message.status == "sent":
-        raise ValueError("Message already sent.")
+        previous = (await db.execute(select(SendAttempt).where(
+            SendAttempt.message_id == message_id, SendAttempt.user_id == user_id,
+            SendAttempt.outcome == "sent").order_by(SendAttempt.created_at.desc()).limit(1))).scalar_one_or_none()
+        return {"message_id": str(message.id), "provider": previous.provider if previous else (provider or "unknown"), "status": "sent"}
+    if message.status not in {"staged", "send_failed"}:
+        raise HTTPException(409, {"code": "send_conflict", "status": message.status})
     if message.channel != "email":
         raise ValueError("Only email messages can be sent.")
 
-    result = await db.execute(select(Person).where(Person.id == message.person_id))
+    result = await db.execute(select(Person).where(Person.id == message.person_id, Person.user_id == user_id))
     person = result.scalar_one_or_none()
     if not person or not person.work_email:
         raise ValueError("Recipient has no email address.")
@@ -318,8 +351,21 @@ async def send_staged_message(
     if not provider:
         raise ValueError("No email provider connected. Connect Gmail or Outlook in Settings.")
 
+    if provider not in {"gmail", "outlook"}:
+        raise ValueError("Unsupported email provider")
     subject = message.subject or "No subject"
-    send_result = await _send_via_provider(
+    if not await claim_message_for_send(db, user_id=user_id, message_id=message_id,
+                                        scheduled_version=scheduled_version, commit=False):
+        raise HTTPException(409, {"code": "send_conflict"})
+    attempt = SendAttempt(user_id=user_id, message_id=message_id, provider=provider,
+        payload_digest=hashlib.sha256(json.dumps([person.work_email, subject, message.body]).encode()).hexdigest(),
+        outcome="sending")
+    db.add(attempt)
+    await db.flush()
+    attempt_id = attempt.id
+    await db.commit()
+    try:
+        send_result = await _send_via_provider(
         db=db,
         user_id=user_id,
         provider=provider,
@@ -328,6 +374,19 @@ async def send_staged_message(
         body=message.body,
     )
 
+    except Exception as exc:
+        # Only definitive pre-dispatch errors or explicit rejections are retryable.
+        rejected = isinstance(exc, ValueError) or (isinstance(exc, httpx.HTTPStatusError)
+            and 400 <= exc.response.status_code < 500 and exc.response.status_code != 408)
+        outcome = "send_failed" if rejected else "delivery_unknown"
+        await db.rollback()
+        await db.execute(update(SendAttempt).where(SendAttempt.id == attempt_id).values(outcome=outcome, completed_at=datetime.now(timezone.utc)))
+        await db.execute(update(Message).where(Message.id == message_id, Message.user_id == user_id).values(status=outcome))
+        await db.commit()
+        raise HTTPException(409, {"code": outcome, "status": outcome}) from None
+    attempt.outcome = "sent"
+    attempt.provider_reference = send_result.get("message_id")
+    attempt.completed_at = datetime.now(timezone.utc)
     message.status = "sent"
     message.scheduled_send_at = None
 
@@ -340,7 +399,6 @@ async def send_staged_message(
     )
     outreach_log = outreach_result.scalar_one_or_none()
     if outreach_log:
-        from datetime import datetime, timezone  # noqa: PLC0415
 
         outreach_log.status = "sent"
         outreach_log.sent_at = datetime.now(timezone.utc)

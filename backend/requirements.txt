@@ -22,7 +22,6 @@ slowapi==0.1.9
 orjson==3.11.6
 sentry-sdk[fastapi]==2.54.0
 aiodns==4.0.0
-crawl4ai==0.9.1
 beautifulsoup4==4.12.3
 lxml==6.1.0
 posthog==5.4.0

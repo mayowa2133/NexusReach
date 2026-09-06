@@ -99,20 +99,6 @@ def _clear_resume_fields(row: WaitlistSignup) -> None:
     row.resume_parse_status = "none"
 
 
-async def delete_signup(db: AsyncSession, signup: WaitlistSignup) -> dict:
-    """Erase a waitlist member: their stored file and their row.
-
-    Referrals they made are preserved as attribution: `referred_by_id` is
-    ``ON DELETE SET NULL``, so an invitee's row survives with the link dropped,
-    and the referrer's `verified_referral_count` is left as-is (it is a tally,
-    not a pointer). Deleting someone must not silently demote other people's
-    queue positions.
-    """
-    had_resume = bool(signup.resume_path)
-    if had_resume:
-        await supabase_storage_client.delete_object(signup.resume_path)
-
-    await db.delete(signup)
-    await db.commit()
-    logger.info("Waitlist signup erased on request (had_resume=%s)", had_resume)
-    return {"deleted": True, "resume_deleted": had_resume}
+async def delete_signup(db: AsyncSession, signup: WaitlistSignup, request_key: str | None = None) -> dict:
+    from app.services.deletion_service import delete_waitlist
+    return await delete_waitlist(db, signup, request_key)

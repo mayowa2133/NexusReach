@@ -1,18 +1,11 @@
-"""Public referral endpoints for the pre-launch waitlist.
-
-Both endpoints are unauthenticated but token-guarded, and they take *different*
-secrets on purpose. ``/status`` needs the PUBLIC ``code`` plus the dashboard
-access token ``t``. ``/verify`` needs the ``code`` plus the single-use
-confirmation token ``v``, which exists only inside the email we sent — that is
-what makes confirming an address evidence of mailbox control rather than a
-formality any form submitter could complete. No account / JWT is involved —
-waitlist signups have none.
-"""
+"""Mailbox-proven referral access and generic public recovery."""
 
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Header, Query, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -23,11 +16,26 @@ from app.schemas.waitlist import (
     WaitlistDeleteResponse,
 )
 from app.services import referral_service, waitlist_retention_service
-from app.tasks.referrals import send_referral_credited_email
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/referrals", tags=["referrals"])
+owner_bearer = HTTPBearer(auto_error=False)
+
+
+class ReferralExchangeRequest(BaseModel):
+    code: str = Field(min_length=1, max_length=16)
+    token: str = Field(min_length=8, max_length=128)
+
+
+class ReferralRecoveryRequest(BaseModel):
+    email: EmailStr
+
+
+def _bearer_token(credentials: HTTPAuthorizationCredentials | None) -> str:
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    return credentials.credentials
 
 
 @router.get("/status", response_model=ReferralStatus)
@@ -36,23 +44,26 @@ async def referral_status(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
     code: Annotated[str, Query(max_length=16)],
-    t: Annotated[str, Query(max_length=128)],
+    credentials: Annotated[
+        HTTPAuthorizationCredentials | None, Depends(owner_bearer)
+    ],
 ) -> ReferralStatus:
     """Live referral status for the owner's dashboard (position, tier, link)."""
-    signup = await referral_service.resolve_signup_by_token(db, code, t)
+    signup = await referral_service.resolve_signup_by_token(
+        db, code, _bearer_token(credentials)
+    )
     if signup is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     payload = await referral_service.referral_status_payload(db, signup)
     return ReferralStatus(name=signup.name, **payload)
 
 
-@router.get("/verify", response_model=ReferralVerifyResponse)
+@router.post("/exchange", response_model=ReferralVerifyResponse)
 @limiter.limit("30/minute")
 async def verify_referral(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
-    code: Annotated[str, Query(max_length=16)],
-    v: Annotated[str, Query(max_length=128)],
+    body: ReferralExchangeRequest,
 ) -> ReferralVerifyResponse:
     """Confirm an email, credit the referrer, and hand back a dashboard key.
 
@@ -61,18 +72,10 @@ async def verify_referral(
     ``/status`` reads. A replayed link 404s — by then the browser already holds
     the access token from the first click.
     """
-    verified = await referral_service.verify_signup(db, code, v)
+    verified = await referral_service.verify_signup(db, body.code, body.token)
     if verified is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    signup, access_token, credited_referrer_id = verified
-
-    # Tell the referrer they moved up. Only set on the confirmation that actually
-    # credited them, so a replayed link can't mail them twice.
-    if credited_referrer_id is not None:
-        try:
-            send_referral_credited_email.delay(str(credited_referrer_id))
-        except Exception:  # a broker outage must not fail the confirmation
-            logger.warning("Could not queue referral-credited email", exc_info=True)
+    signup, access_token, _credited_referrer_id = verified
 
     payload = await referral_service.referral_status_payload(db, signup)
     return ReferralVerifyResponse(
@@ -80,13 +83,48 @@ async def verify_referral(
     )
 
 
-@router.delete("/me", response_model=WaitlistDeleteResponse)
+@router.post("/recover", status_code=status.HTTP_202_ACCEPTED)
+@limiter.limit("10/minute")
+async def recover_referral_access(
+    request: Request,
+    body: ReferralRecoveryRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict[str, bool]:
+    """Mail a recovery exchange without revealing whether the address exists."""
+    from sqlalchemy import func, select
+
+    from app.models.waitlist import WaitlistSignup
+    from app.services.referral_credentials import issue, recovery_allowed
+    from app.tasks.referrals import send_verification_email
+
+    email = str(body.email).strip().lower()
+    if not await recovery_allowed(db, email):
+        return {"ok": True}
+    signup = (
+        await db.execute(
+            select(WaitlistSignup).where(func.lower(WaitlistSignup.email) == email)
+        )
+    ).scalar_one_or_none()
+    if signup is not None:
+        token = await issue(db, signup, "exchange")
+        await db.commit()
+        try:
+            send_verification_email.delay(str(signup.id), token)
+        except Exception:
+            logger.warning("Could not queue referral recovery", exc_info=True)
+    return {"ok": True}
+
+
+@router.delete("/me", response_model=WaitlistDeleteResponse, status_code=202)
 @limiter.limit("10/minute")
 async def delete_my_waitlist_data(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
     code: Annotated[str, Query(max_length=16)],
-    t: Annotated[str, Query(max_length=128)],
+    credentials: Annotated[
+        HTTPAuthorizationCredentials | None, Depends(owner_bearer)
+    ],
+    idempotency_key: Annotated[str | None, Header()] = None,
 ) -> WaitlistDeleteResponse:
     """Erase this waitlist signup and its stored resume.
 
@@ -95,11 +133,13 @@ async def delete_my_waitlist_data(
     that reads the dashboard. Removes the Storage object alongside the row so
     erasure never leaves an orphaned file in the bucket.
 
-    Idempotent from the caller's side: once the row is gone the token no longer
-    resolves and a repeat call 404s.
+    The durable receipt remains usable after the signup and owner token are
+    removed, so callers can verify external erasure completion.
     """
-    signup = await referral_service.resolve_signup_by_token(db, code, t)
+    signup = await referral_service.resolve_signup_by_token(
+        db, code, _bearer_token(credentials)
+    )
     if signup is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    result = await waitlist_retention_service.delete_signup(db, signup)
+    result = await waitlist_retention_service.delete_signup(db, signup, idempotency_key)
     return WaitlistDeleteResponse(**result)

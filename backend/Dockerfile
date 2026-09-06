@@ -16,14 +16,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
 WORKDIR /app
-# util-linux is upgraded out of the base image on purpose.
-# CVE-2026-53615 affects nine of its binaries and libraries, Debian has shipped
-# 2.41.5-0+deb13u1, and the python:3.12-slim rebuild carrying it does not exist
-# yet -- the current upstream digest has the same finding as the pinned one, so
-# repinning fixes nothing. Upgrading the one source package here is what clears
-# the runtime scan; drop it when the base image catches up.
+# Security packages are upgraded out of the pinned base image on purpose. Debian
+# has fixed releases available before the corresponding python:3.12-slim digest
+# has been rebuilt. Keep this list aligned with the daily runtime-image scan and
+# remove entries once a newer pinned base already contains the fixed release.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends --only-upgrade util-linux \
+    && apt-get install -y --no-install-recommends --only-upgrade \
+        util-linux \
+        openssl \
+        libssl3t64 \
+        openssl-provider-legacy \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system nexusreach \
     && useradd --system --gid nexusreach --home-dir /app nexusreach

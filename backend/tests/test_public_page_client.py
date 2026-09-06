@@ -64,7 +64,7 @@ async def test_fetch_direct_page_extracts_title_and_text():
     assert page["retrieval_method"] == "direct"
 
 
-async def test_fetch_page_falls_back_to_crawl4ai_when_direct_fails():
+async def test_fetch_page_falls_back_to_jina_when_direct_fails():
     with (
         patch.object(settings, "rendered_page_fetch_enabled", True),
         patch.object(settings, "rendered_page_egress_policy_enforced", True),
@@ -74,18 +74,6 @@ async def test_fetch_page_falls_back_to_crawl4ai_when_direct_fails():
             return_value=None,
         ),
         patch(
-            "app.clients.public_page_client.crawl4ai_client.fetch_url",
-            new_callable=AsyncMock,
-            return_value={
-                "url": "https://example.com/profile",
-                "title": "Example",
-                "content": "Currently working at Twitch as an engineer",
-                "html": "<html></html>",
-                "markdown": "Currently working at Twitch as an engineer",
-                "retrieval_method": "crawl4ai",
-            },
-        ) as mock_crawl4ai,
-        patch(
             "app.clients.public_page_client.is_safe_public_url_async",
             new_callable=AsyncMock,
             return_value=True,
@@ -93,8 +81,15 @@ async def test_fetch_page_falls_back_to_crawl4ai_when_direct_fails():
         patch(
             "app.clients.public_page_client.jina_reader_client.fetch_url",
             new_callable=AsyncMock,
-            return_value=None,
-        ),
+            return_value={
+                "url": "https://example.com/profile",
+                "title": "Example",
+                "content": "Currently working at Twitch as an engineer",
+                "html": "",
+                "markdown": "Currently working at Twitch as an engineer",
+                "retrieval_method": "jina_reader",
+            },
+        ) as mock_jina,
         patch(
             "app.clients.public_page_client.firecrawl_client.scrape_url",
             new_callable=AsyncMock,
@@ -103,22 +98,20 @@ async def test_fetch_page_falls_back_to_crawl4ai_when_direct_fails():
         page = await public_page_client.fetch_page("https://example.com/profile")
 
     assert page is not None
-    assert page["retrieval_method"] == "crawl4ai"
-    mock_crawl4ai.assert_awaited_once()
+    assert page["retrieval_method"] == "jina_reader"
+    mock_jina.assert_awaited_once()
     mock_firecrawl.assert_not_awaited()
 
 
 async def test_fetch_page_does_not_hand_unsafe_url_to_fallback_crawlers():
     with (
         patch("app.clients.public_page_client.is_safe_public_url_async", new_callable=AsyncMock) as safe,
-        patch("app.clients.public_page_client.crawl4ai_client.fetch_url", new_callable=AsyncMock) as crawl,
         patch("app.clients.public_page_client.firecrawl_client.scrape_url", new_callable=AsyncMock) as firecrawl,
     ):
         safe.return_value = False
         page = await public_page_client.fetch_page("http://127.0.0.1/internal")
 
     assert page is None
-    crawl.assert_not_awaited()
     firecrawl.assert_not_awaited()
 
 
@@ -138,11 +131,6 @@ async def test_fetch_page_uses_firecrawl_as_optional_last_fallback():
         ),
         patch(
             "app.clients.public_page_client.jina_reader_client.fetch_url",
-            new_callable=AsyncMock,
-            return_value=None,
-        ),
-        patch(
-            "app.clients.public_page_client.crawl4ai_client.fetch_url",
             new_callable=AsyncMock,
             return_value=None,
         ),
@@ -196,10 +184,6 @@ async def test_fetch_page_uses_jina_before_rendered_stack_disabled():
             return_value=dict(jina_page),
         ) as mock_jina,
         patch(
-            "app.clients.public_page_client.crawl4ai_client.fetch_url",
-            new_callable=AsyncMock,
-        ) as mock_crawl4ai,
-        patch(
             "app.clients.public_page_client.firecrawl_client.scrape_url",
             new_callable=AsyncMock,
         ) as mock_firecrawl,
@@ -211,7 +195,6 @@ async def test_fetch_page_uses_jina_before_rendered_stack_disabled():
     assert page["fallback_used"] is False
     mock_jina.assert_awaited_once()
     # Rendered stack stays gated off; Jina alone recovered the page.
-    mock_crawl4ai.assert_not_awaited()
     mock_firecrawl.assert_not_awaited()
 
 
@@ -279,7 +262,7 @@ async def test_fetch_page_returns_direct_result_when_fallbacks_fail():
             return_value=True,
         ),
         patch(
-            "app.clients.public_page_client.crawl4ai_client.fetch_url",
+            "app.clients.public_page_client.jina_reader_client.fetch_url",
             new_callable=AsyncMock,
             return_value=None,
         ),

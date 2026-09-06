@@ -44,6 +44,7 @@ from app.routers import (
     waitlist,
     referrals,
     companion,
+    deletions,
 )
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def sensitive_flow_headers(request: Request, call_next):
+    """Prevent capability-bearing referral and deletion responses from caching."""
+    response = await call_next(request)
+    if request.url.path.startswith(("/api/referrals", "/api/deletions")):
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Pragma"] = "no-cache"
+    return response
+
 # --- Exception handlers ---
 app.add_exception_handler(HTTPException, http_exception_handler)
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
@@ -134,6 +146,7 @@ app.include_router(cadence.router, prefix="/api")
 app.include_router(interview_prep.router, prefix="/api")
 app.include_router(triage.router, prefix="/api")
 app.include_router(occupations.router, prefix="/api")
+app.include_router(deletions.router, prefix="/api")
 app.include_router(account.router, prefix="/api")
 app.include_router(waitlist.router, prefix="/api")
 app.include_router(referrals.router, prefix="/api")

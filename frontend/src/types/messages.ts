@@ -13,7 +13,7 @@ export type MessageGoal =
   | 'interview'
   | 'warm_intro';
 
-export type MessageStatus = 'draft' | 'edited' | 'copied' | 'staged' | 'sent';
+export type MessageStatus = 'draft' | 'edited' | 'copied' | 'staged' | 'sending' | 'send_failed' | 'delivery_unknown' | 'sent';
 
 export type RecipientStrategy = 'recruiter' | 'hiring_manager' | 'peer';
 

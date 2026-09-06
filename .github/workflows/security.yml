@@ -5,12 +5,24 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
   security:
+    # Display name must stay "Security": that is the context main's branch
+    # protection lists as a required status check. The job id alone produces
+    # a lowercase "security" context, which never satisfies the rule and
+    # blocks every pull request into main.
+    name: Security
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -47,7 +59,9 @@ jobs:
       - name: Dependency audits
         run: |
           pip-audit --no-deps --disable-pip -r backend/requirements.lock
+          pip-audit --no-deps --disable-pip -r backend/requirements.renderer.lock
           pip-audit --no-deps --disable-pip --format cyclonedx-json --output backend-python.cdx.json -r backend/requirements.lock
+          pip-audit --no-deps --disable-pip --format cyclonedx-json --output renderer-python.cdx.json -r backend/requirements.renderer.lock
           npm audit --omit=dev --prefix frontend
           npm audit --omit=dev --prefix e2e
 
@@ -61,7 +75,11 @@ jobs:
           curl -fsSLO https://github.com/gitleaks/gitleaks/releases/download/v8.28.0/gitleaks_8.28.0_linux_x64.tar.gz
           curl -fsSL https://github.com/gitleaks/gitleaks/releases/download/v8.28.0/gitleaks_8.28.0_checksums.txt | grep 'gitleaks_8.28.0_linux_x64.tar.gz' | sha256sum -c -
           tar -xzf gitleaks_8.28.0_linux_x64.tar.gz gitleaks
-          ./gitleaks git . --log-opts=--all --redact --no-banner
+          # --verbose prints the file, line, rule and fingerprint of each
+          # finding. Without it the step fails with only "leaks found: N",
+          # which cannot be triaged or turned into a .gitleaksignore entry.
+          # --redact keeps the matched value itself out of the log.
+          ./gitleaks git . --log-opts=--all --redact --verbose --no-banner
 
       - name: Verify migrated database RLS
         working-directory: backend
@@ -103,6 +121,7 @@ jobs:
 
           for name in (
               "backend-python.cdx.json",
+              "renderer-python.cdx.json",
               "nexusreach-api.cdx.json",
               "nexusreach-renderer.cdx.json",
           ):

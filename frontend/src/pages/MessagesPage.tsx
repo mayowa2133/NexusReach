@@ -1049,7 +1049,10 @@ function SingleMessagesView() {
                       </div>
 
                       {/* Send / Cancel for staged messages */}
-                      {activeDraft.status === 'staged' && (
+                      {activeDraft.status === 'delivery_unknown' && (
+                        <p role="alert">Delivery status unknown—check your Sent folder. Automatic retry is disabled.</p>
+                      )}
+                      {(activeDraft.status === 'staged' || activeDraft.status === 'send_failed') && (
                         <div className="space-y-2 pt-2">
                           <Separator />
                           {activeDraft.scheduled_send_at ? (

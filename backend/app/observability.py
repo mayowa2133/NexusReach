@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from urllib.parse import parse_qsl, urlencode
 
 import posthog
@@ -16,7 +17,7 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 _initialized = False
 _SENSITIVE_KEYS = {
-    "authorization", "code", "state", "token", "access_token",
+    "t", "v", "receipt_token", "authorization", "code", "state", "token", "access_token",
     "refresh_token", "session_token", "client_secret", "api_key",
 }
 
@@ -39,6 +40,9 @@ def _scrub_mapping(value):
         }
     if isinstance(value, list):
         return [_scrub_mapping(item) for item in value]
+    if isinstance(value, str):
+        value = re.sub(r"\b(?:nrw_|nrv_|nrc_)[A-Za-z0-9_-]+", "[Filtered]", value)
+        value = re.sub(r"([?&](?:t|v|token|access_token|receipt_token)=)[^&#\s]+", r"\1[Filtered]", value, flags=re.I)
     return value
 
 
@@ -55,7 +59,7 @@ def _before_send(event, _hint):
                 ]
             )
         url = str(request.get("url") or "")
-        if "/api/email/oauth/connect" in url:
+        if "/api/email/oauth/connect" in url or "/api/referrals/" in url:
             request["data"] = "[Filtered OAuth callback body]"
     return event
 
@@ -76,7 +80,7 @@ def capture_event(
     if not telemetry_enabled() or not settings.posthog_api_key:
         return
     try:
-        posthog.capture(distinct_id, event, properties=properties or {})
+        posthog.capture(distinct_id, event, properties=_scrub_mapping(properties or {}))
     except Exception:  # pragma: no cover - telemetry must never break a request
         logger.warning("PostHog capture failed for event %s", event, exc_info=True)
 
@@ -110,6 +114,7 @@ def init_sentry(service_name: str) -> None:
         send_default_pii=False,
         max_request_body_size="never",
         before_send=_before_send,
+        before_send_transaction=_before_send,
         integrations=[
             FastApiIntegration(),
             StarletteIntegration(),

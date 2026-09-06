@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
+import uuid
 from urllib.parse import urlparse
 
 from sqlalchemy import func, select
@@ -71,6 +72,8 @@ async def resolve_company_domain(
     db: AsyncSession,
     company_name: str | None,
     company_domain: str | None,
+    *,
+    user_id: uuid.UUID,
 ) -> str | None:
     """Resolve a company to its primary email domain.
 
@@ -88,7 +91,7 @@ async def resolve_company_domain(
 
     result = await db.execute(
         select(Company)
-        .where(func.lower(Company.name) == company_name.strip().lower())
+        .where(Company.user_id == user_id, func.lower(Company.name) == company_name.strip().lower())
         .limit(1)
     )
     company = result.scalar_one_or_none()
@@ -105,6 +108,7 @@ async def resolve_company_domain(
 async def lookup_email(
     db: AsyncSession,
     *,
+    user_id: uuid.UUID,
     linkedin_url: str | None = None,
     first_name: str | None = None,
     last_name: str | None = None,
@@ -148,7 +152,7 @@ async def lookup_email(
             "source": "insufficient_input",
         }
 
-    domain = await resolve_company_domain(db, company_name, company_domain)
+    domain = await resolve_company_domain(db, company_name, company_domain, user_id=user_id)
     if not domain:
         return {
             "verified": False,

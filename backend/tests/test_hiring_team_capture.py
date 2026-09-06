@@ -22,7 +22,7 @@ def test_classify_member_from_label_and_headline():
     assert f("Works on cool products", "") == "recruiter"
 
 
-def test_member_to_candidate_shape_and_verified():
+def test_member_to_candidate_cannot_assert_verified():
     cand = htc._member_to_candidate(
         {"name": "Jane Doe", "headline": "Technical Recruiter", "role_label": "Job poster", "profile_url": "https://www.linkedin.com/in/janedoe"},
         "Acme",
@@ -30,11 +30,11 @@ def test_member_to_candidate_shape_and_verified():
     )
     assert cand["bucket"] == "recruiter"
     data = cand["data"]
-    assert data["source"] == "linkedin_hiring_team"
+    assert data["source"] == "client_capture"
     assert data["_hiring_team_capture"] is True
-    assert data["_employment_status"] == "current"
-    assert data["profile_data"]["company_match_confidence"] == "verified"
-    assert data["profile_data"]["current_company_verified"] is True
+    assert data["_employment_status"] == "ambiguous"
+    assert data["profile_data"]["company_match_confidence"] == "unverified"
+    assert data["profile_data"]["current_company_verified"] is False
     assert "Staff Engineer" in data["snippet"]
 
     # single-token / empty names rejected
@@ -63,12 +63,13 @@ async def test_ingest_stores_and_classifies():
     with (
         patch.object(htc, "get_or_create_company", new=AsyncMock(return_value=company)),
         patch.object(htc, "_store_person", new=AsyncMock(side_effect=fake_store)),
-        patch("app.services.known_people_service.write_candidates_to_cache", new=AsyncMock(return_value=2)),
+        patch("app.services.known_people_service.write_candidates_to_cache", new=AsyncMock(return_value=2)) as cache_write,
     ):
         result = await htc.ingest_hiring_team_capture(
             db, user_id, company_name="Acme", members=members, job_title="Staff Engineer"
         )
 
+    cache_write.assert_not_awaited()
     assert result["stored"] == 2
     assert result["recruiters"] == 1
     assert result["hiring_managers"] == 1

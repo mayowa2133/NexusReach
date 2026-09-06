@@ -3,6 +3,7 @@
 import httpx
 
 from app.config import settings
+from app.services.paid_work import provider_request
 
 ADZUNA_BASE_URL = "https://api.adzuna.com/v1/api/jobs"
 
@@ -67,7 +68,7 @@ async def search_jobs(
         params["where"] = location
 
     async with httpx.AsyncClient(timeout=20) as client:
-        resp = await client.get(
+        resp = await provider_request(client, "adzuna.search", "GET",
             f"{ADZUNA_BASE_URL}/{country}/search/1",
             params=params,
         )

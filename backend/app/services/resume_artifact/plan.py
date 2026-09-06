@@ -8,6 +8,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from fastapi import HTTPException
 
 from app.models.job import Job
 from app.models.tailored_resume import TailoredResume
@@ -559,6 +560,8 @@ async def _build_resume_artifact_plan(
             planned["projects"] = fallback["projects"]
             planned["project_order"] = fallback["project_order"]
         return _expand_plan_to_fill_page(parsed, job, planned)
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.warning("Falling back to deterministic artifact plan: %s", exc)
         return fallback

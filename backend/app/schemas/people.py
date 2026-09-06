@@ -20,6 +20,7 @@ class CompanyResponse(BaseModel):
 
 
 class PersonResponse(BaseModel):
+    provenance: str | None = None
     id: uuid.UUID
     full_name: str | None
     title: str | None

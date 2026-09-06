@@ -18,6 +18,8 @@ import json
 import logging
 import re
 
+from fastapi import HTTPException
+
 from app.clients import (
     brave_search_client,
     llm_client,
@@ -169,6 +171,8 @@ async def _extract_named_people(text: str, company_name: str, system_prompt: str
         if start == -1 or end <= start:
             return []
         parsed = json.loads(raw[start : end + 1])
+    except HTTPException:
+        raise
     except Exception:
         logger.warning("company-site people extraction failed for %s", company_name, exc_info=True)
         return []

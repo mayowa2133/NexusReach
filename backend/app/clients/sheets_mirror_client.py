@@ -54,3 +54,16 @@ async def mirror_signup(row: dict[str, Any]) -> bool:
     except httpx.HTTPError:
         logger.warning("Waitlist Sheet mirror errored", exc_info=True)
         return False
+
+
+async def delete_signup(email: str) -> bool:
+    """Require an explicit deletion acknowledgement from the configured mirror."""
+    if not settings.waitlist_sheet_mirror_url or not settings.waitlist_sheet_delete_secret:
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+            response = await client.post(settings.waitlist_sheet_mirror_url, json={
+                'action': 'delete', 'email': email, 'delete_secret': settings.waitlist_sheet_delete_secret})
+        return response.status_code == 200 and response.json().get('deleted') is True
+    except (httpx.HTTPError, ValueError):
+        return False

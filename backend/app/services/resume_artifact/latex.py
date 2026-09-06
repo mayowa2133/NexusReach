@@ -793,9 +793,9 @@ async def render_resume_artifact_pdf_async(content: str) -> bytes:
     """
     async with _PDF_RENDER_SEMAPHORE:
         if settings.render_remote_enabled:
-            from app.tasks.render import render_pdf
+            from app.render_client import submit_pdf
 
-            task = render_pdf.apply_async(args=[content], queue="render")
+            task = submit_pdf(content)
             try:
                 result = await asyncio.to_thread(
                     task.get,

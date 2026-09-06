@@ -1,5 +1,6 @@
 """Tests for the free hiring-manager email lookup service."""
 
+import uuid
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -9,6 +10,8 @@ from app.services.email_lookup_service import (
     parse_linkedin_url,
     resolve_company_domain,
 )
+
+USER_ID = uuid.uuid4()
 
 
 class TestParseLinkedInUrl:
@@ -35,13 +38,13 @@ class TestResolveCompanyDomain:
     @pytest.mark.asyncio
     async def test_explicit_domain_passthrough(self):
         db = AsyncMock()
-        result = await resolve_company_domain(db, None, "Stripe.com")
+        result = await resolve_company_domain(db, None, "Stripe.com", user_id=USER_ID)
         assert result == "stripe.com"
 
     @pytest.mark.asyncio
     async def test_domain_from_url(self):
         db = AsyncMock()
-        result = await resolve_company_domain(db, None, "https://www.stripe.com/about")
+        result = await resolve_company_domain(db, None, "https://www.stripe.com/about", user_id=USER_ID)
         assert result == "stripe.com"
 
     @pytest.mark.asyncio
@@ -49,7 +52,7 @@ class TestResolveCompanyDomain:
         db = AsyncMock()
         # company lookup returns no row
         db.execute = AsyncMock(return_value=AsyncMock(scalar_one_or_none=lambda: None))
-        result = await resolve_company_domain(db, "Acme Corp", None)
+        result = await resolve_company_domain(db, "Acme Corp", None, user_id=USER_ID)
         assert result == "acmecorp.com"
 
 
@@ -57,14 +60,14 @@ class TestLookupEmail:
     @pytest.mark.asyncio
     async def test_insufficient_input_no_name(self):
         db = AsyncMock()
-        result = await lookup_email(db, company_name="Acme")
+        result = await lookup_email(db, user_id=USER_ID, company_name="Acme")
         assert result["source"] == "insufficient_input"
         assert result["domain_status"] == "missing_name"
 
     @pytest.mark.asyncio
     async def test_insufficient_input_no_domain(self):
         db = AsyncMock()
-        result = await lookup_email(db, first_name="Jane", last_name="Doe")
+        result = await lookup_email(db, user_id=USER_ID, first_name="Jane", last_name="Doe")
         assert result["source"] == "insufficient_input"
 
     @pytest.mark.asyncio
@@ -81,6 +84,7 @@ class TestLookupEmail:
         ):
             result = await lookup_email(
                 db,
+                user_id=USER_ID,
                 first_name="Jane",
                 last_name="Doe",
                 company_domain="stripe.com",
@@ -101,6 +105,7 @@ class TestLookupEmail:
         ):
             result = await lookup_email(
                 db,
+                user_id=USER_ID,
                 first_name="Jane",
                 last_name="Doe",
                 company_domain="amazon.com",
@@ -119,6 +124,7 @@ class TestLookupEmail:
         ):
             result = await lookup_email(
                 db,
+                user_id=USER_ID,
                 linkedin_url="https://linkedin.com/in/john-smith-abc123",
                 company_domain="stripe.com",
             )

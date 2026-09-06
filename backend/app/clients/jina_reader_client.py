@@ -4,7 +4,7 @@ Jina Reader (``https://r.jina.ai/<url>``) fetches a page from Jina's own
 infrastructure and returns clean markdown/text, so it recovers JS-rendered pages
 a plain ``httpx`` GET can't.
 
-SSRF posture (why this differs from Crawl4AI/Firecrawl): our only outbound
+SSRF posture (why this differs from Firecrawl): our only outbound
 connection is to the single fixed public host ``r.jina.ai`` — never to the
 target URL, which Jina resolves and fetches on its own network. So it adds no
 SSRF surface from *our* egress and needs no ``rendered_page_egress_policy``
