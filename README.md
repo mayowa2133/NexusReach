@@ -39,8 +39,8 @@ The product is designed around user-controlled automation. NexusReach drafts and
 
 ### Public discovery stack
 - Apollo for company/org enrichment where useful
-- SearXNG as the primary bulk search provider
-- Serper and Brave Search retained as paid fallbacks
+- Google CSE, Serper and Brave Search as the primary providers, routed per task
+- SearXNG for local development only, never in production (see Important truths)
 - Tavily for employment corroboration and fallback public discovery
 - The Org traversal for trusted org-chart discovery
 - Redis-backed search query caching to reduce repeated provider spend
@@ -68,8 +68,8 @@ The product is designed around user-controlled automation. NexusReach drafts and
 - **Frontend:** React 19, TypeScript, Vite, React Router, TanStack Query, Zustand, Tailwind, shadcn/ui
 - **Backend:** FastAPI, SQLAlchemy, Alembic, PostgreSQL, Redis, Celery, Pydantic v2
 - **LLMs:** Anthropic, OpenAI, Gemini, or Groq through a shared provider abstraction
-- **Search routing:** SearXNG, Serper, Brave, Tavily, optional Google CSE, Redis cache
-- **Public page retrieval:** direct `httpx`, then Crawl4AI, then optional Firecrawl
+- **Search routing:** Google CSE, Serper, Brave, Tavily, Redis cache (SearXNG local dev only)
+- **Public page retrieval:** bounded direct `httpx`, then Jina Reader, then optional Firecrawl
 - **LinkedIn graph sync:** manual import or local Playwright browser connector
 
 ## Supported job posting flows
@@ -227,7 +227,7 @@ The connector can either:
 - `NEXUSREACH_TOKEN_ENCRYPTION_KEYS`
 
 ### Search and public discovery
-- `NEXUSREACH_SEARXNG_BASE_URL`
+- `NEXUSREACH_SEARXNG_BASE_URL` (local development only)
 - `NEXUSREACH_BRAVE_API_KEY`
 - `NEXUSREACH_SERPER_API_KEY`
 - `NEXUSREACH_TAVILY_API_KEY`
@@ -335,7 +335,6 @@ launch target. The full deployment path is in
 - Database/auth: Supabase
 - Redis: Railway Redis for general Celery/search work, plus a separate
   renderer-only Redis instance and credentials
-- SearXNG: Railway or private reachable host
 
 The API, worker, and beat use `backend/Dockerfile`, which contains no TeX
 toolchain. PDF rendering runs only in the credential-free image built from
@@ -353,7 +352,14 @@ API health check.
 
 ## Important truths
 
-1. SearXNG is the default primary search provider; Brave and Serper are fallback paths, not the first stop.
+1. Search runs on authenticated provider APIs, not on self-hosted SearXNG. SearXNG's
+   engines are blocked from a datacenter IP and return zero results there (verified on
+   Railway, 2026-06-23), so it is supported for local development on a residential IP
+   and is not part of the production path. Routing is per task and env-overridable via
+   `NEXUSREACH_SEARCH_*_PROVIDER_ORDER`: LinkedIn x-ray goes Google CSE → Serper → Brave
+   (Google-backed sources have by far the best `site:linkedin.com/in` recall), general
+   public web goes Brave → Serper → Tavily, and employment corroboration goes
+   Tavily → Brave → Serper.
 2. Firecrawl is optional. The default page-fetch path is bounded direct `httpx`;
    Crawl4AI and its NLTK dependency chain are excluded from production.
 3. Current-company verification and email-domain trust are different concerns.
