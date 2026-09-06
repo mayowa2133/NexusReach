@@ -328,7 +328,7 @@ def _prod_settings(**overrides):
         sentry_dsn="https://x@sentry.io/1",
         token_encryption_primary_version="v1",
         token_encryption_keys={"v1": Fernet.generate_key().decode()},
-        deletion_receipt_hmac_key="deletion-receipt-test-key-32-bytes",
+        deletion_receipt_hmac_key=("unit-test-" * 4)[:32],
         render_remote_enabled=True,
         renderer_isolation_enforced=True,
         renderer_redis_url="redis://renderer.example:6379/0",
