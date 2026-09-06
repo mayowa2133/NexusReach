@@ -8,7 +8,7 @@ This file mirrors `AGENTS.md` so Claude and Codex see the same project state. If
 
 - **`main`** — canonical branch; the shipped product. Includes the keyless Jina Reader page-fetch fallback (`backend/app/clients/jina_reader_client.py`, wired into `public_page_client.fetch_page`, LinkedIn-guarded, on by default). Its real-world value is being measured — see the `REVIEW 2026-08-06` note in `public_page_client._log_retrieval_outcome`.
 - **`demo-mode`** (`origin/demo-mode`) — **in-progress, NOT merged.** A fail-closed synthetic "demo mode" for local browser-product testing: it only starts against loopback e2e/demo databases, forces dev auth, and refuses every external provider/telemetry credential. Lives entirely on this branch — `main` does NOT contain it. Files: `backend/app/middleware/demo_mode.py`, `demo_mode` + `_validate_demo_config` in `backend/app/config.py`, `backend/scripts/demo_reset.py`, `scripts/demo_*.sh`, `e2e/playwright.demo.config.ts` + `e2e/tests-demo/`, `frontend/src/lib/demoMode.ts` (+ test), plus edits to `main.py`, `routers/profile.py`, `jobs/command_center.py`, `AppLayout.tsx`, `main.tsx`, `README.md`, and the `.env` examples. It was branched off `main` after Jina landed, so it depends on `main`'s `jina_reader_enabled` config — keep it rebased on `main`. To work on demo mode: `git checkout demo-mode`.
-- **`security/remediation-2026-09`** — **in-progress, NOT merged.** The September 2026 security-audit remediation (commit `3b59e4ac`, migrations `068`–`074`): renderer isolation, paid-work reservations, durable deletion receipts, client-capture provenance, the send-attempt ledger, referral credential/campaign tables, JWT claim validation, and least-privilege grants on internal tables. **Everything marked "September 2026" in this file lives on that branch** — `main` still has the pre-remediation behavior, so check which branch you are on before trusting a security claim here. Keep it rebased on `main`.
+- **`security/remediation-2026-09`** — **merged into `main`** (PR #40, September 2026). Kept named here because the audit remediation is easier to find by branch than by trawling `main`'s history: commit `3b59e4ac` plus migrations `068`–`074` carry renderer isolation, paid-work reservations, durable deletion receipts, client-capture provenance, the send-attempt ledger, referral credential/campaign tables, JWT claim validation, and least-privilege grants on internal tables. Everything marked "September 2026" in this file is on `main` now; the follow-up commits on the branch also fixed three places where the hardening outran its own test scaffolding (an unpinned issuer in a JWT unit test, a missing `iss` claim in the E2E token, and first-time bootstrap having no Supabase admin API to consult in the harness).
 
 ## What this product is
 
@@ -227,7 +227,7 @@ Frontend Sentry and PostHog initialize only when configured. PostHog autocapture
 
 ### Security posture (September 2026 audit remediation)
 
-Everything in this subsection lands on `security/remediation-2026-09` (commit `3b59e4ac`), not yet on `main`.
+This subsection landed on `main` in September 2026 via `security/remediation-2026-09` (commit `3b59e4ac`, PR #40).
 
 - **The renderer is a credential-free blast-radius boundary.** LaTeX/PDF work runs in its own Celery app
   (`app/renderer_app.py` + `app/renderer_runtime.py`) on its own Redis broker, from an image that contains only those two
