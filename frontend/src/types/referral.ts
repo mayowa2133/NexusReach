@@ -14,6 +14,7 @@ export interface ReferralStatus {
   /** Sorted thresholds that unlock reward-ladder rungs, e.g. [1, 3, 5, 10]. */
   tier_thresholds: number[];
   name?: string | null;
+  target_occupation?: string | null;
 }
 
 /** Generic response from POST /api/waitlist; it never reveals signup state. */
@@ -39,12 +40,12 @@ export interface ReferralVerifyResponse extends ReferralStatus {
 
 /** Payload sent to POST /api/waitlist. */
 export interface WaitlistJoinPayload {
-  name: string;
+  name?: string | null;
   email: string;
   linkedin_url?: string | null;
   current_title?: string | null;
   target_role?: string | null;
-  /** Occupation-taxonomy key from the signup picker (validated server-side). */
+  /** Optional occupation-taxonomy key; the current UI collects it after confirmation. */
   target_occupation?: string | null;
   note?: string | null;
   source?: string | null;

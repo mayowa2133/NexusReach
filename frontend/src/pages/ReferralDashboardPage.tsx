@@ -6,10 +6,74 @@ import {
   deleteWaitlistData,
   readReferralOwnerToken,
   storeReferralOwner,
+  updateReferralProfile,
   useReferralStatus,
 } from '@/hooks/useReferral';
+import { usePublicOccupations } from '@/hooks/useOccupations';
+import type { ReferralStatus } from '@/types/referral';
 import { trackFunnelEvent } from '@/lib/observability';
 import './landing.css';
+
+function InviteProfileForm({
+  code,
+  token,
+  status,
+  onSaved,
+}: {
+  code: string;
+  token: string;
+  status: ReferralStatus;
+  onSaved: (status: ReferralStatus) => void;
+}) {
+  const [profileName, setProfileName] = useState(status.name ?? '');
+  const [profileOccupation, setProfileOccupation] = useState(status.target_occupation ?? '');
+  const [profileState, setProfileState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const { data: occupations, isError: occupationsError } = usePublicOccupations(true);
+
+  const saveProfile = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setProfileState('saving');
+    try {
+      const updated = await updateReferralProfile(code, token, {
+        name: profileName.trim() || null,
+        target_occupation: profileOccupation || null,
+      });
+      onSaved(updated);
+      setProfileState('saved');
+      trackFunnelEvent('waitlist_profile_updated', {
+        has_name: Boolean(profileName.trim()),
+        has_target_occupation: Boolean(profileOccupation),
+      });
+    } catch {
+      setProfileState('error');
+    }
+  };
+
+  return (
+    <section className="lp-ref-profile" aria-labelledby="invite-profile-title">
+      <h4 id="invite-profile-title">Help us tailor your invite</h4>
+      <p>Optional. Tell us what to call you and the kind of role you want to target.</p>
+      <form className="lp-ref-profile-form" onSubmit={saveProfile}>
+        <label>
+          Name
+          <input value={profileName} onChange={(event) => { setProfileName(event.target.value); setProfileState('idle'); }} maxLength={200} autoComplete="name" placeholder="Your name" />
+        </label>
+        <label>
+          Target role category
+          <select value={profileOccupation} onChange={(event) => { setProfileOccupation(event.target.value); setProfileState('idle'); }} disabled={!occupations?.length}>
+            <option value="">{occupationsError ? 'Role options unavailable' : occupations?.length ? 'Choose a category' : 'Loading categories…'}</option>
+            {(occupations ?? []).map((occupation) => <option value={occupation.key} key={occupation.key}>{occupation.label}</option>)}
+          </select>
+        </label>
+        <div className="lp-ref-profile-actions">
+          <button className="btn btn-secondary" type="submit" disabled={profileState === 'saving'}>{profileState === 'saving' ? 'Saving…' : 'Save details'}</button>
+          {profileState === 'saved' && <span className="lp-ref-profile-message" role="status">Saved.</span>}
+          {profileState === 'error' && <span className="lp-ref-profile-message" role="alert">Could not save. Please try again.</span>}
+        </div>
+      </form>
+    </section>
+  );
+}
 
 /**
  * Public, account-less referral dashboard at `/r/:code`.
@@ -52,6 +116,8 @@ export function ReferralDashboardPage() {
 
   const { data, isLoading, isError } = useReferralStatus(code, token, verifyToken);
   const verified = Boolean(verifyToken && data);
+  const [profileOverride, setProfileOverride] = useState<ReferralStatus | null>(null);
+  const displayData = profileOverride ?? data;
 
   // Email confirmation is the gate every referral is counted through, so it is
   // the single most important step to be able to see. A failure here (expired
@@ -108,7 +174,7 @@ export function ReferralDashboardPage() {
     setSearchParams(next, { replace: true });
   }, [data, searchParams, setSearchParams]);
 
-  const firstName = data?.name ? data.name.split(' ')[0] : '';
+  const firstName = displayData?.name ? displayData.name.split(' ')[0] : '';
 
   return (
     <div className="lp">
@@ -146,7 +212,7 @@ export function ReferralDashboardPage() {
           <div className="lp-ref-page-msg">
             <p>Loading your referral status…</p>
           </div>
-        ) : isError || !data ? (
+        ) : isError || !displayData ? (
           <div className="lp-ref-page-msg">
             <h2>We couldn&apos;t find that referral</h2>
             <p>
@@ -160,16 +226,20 @@ export function ReferralDashboardPage() {
           </div>
         ) : (
           <div className="lp-ref-page-card">
-            {verified && data.email_verified && (
+            {verified && displayData.email_verified && (
               <p className="lp-ref-verified-banner">
                 ✓ Email confirmed — you&apos;re officially locked in.
               </p>
             )}
             <ReferralPanel
-              status={data}
+              status={displayData}
               context="dashboard"
               heading={firstName ? `Welcome back, ${firstName}` : 'Your referral dashboard'}
             />
+
+            {displayData.email_verified && code && token && (
+              <InviteProfileForm code={code} token={token} status={displayData} onSaved={setProfileOverride} />
+            )}
 
             <div className="lp-ref-danger">
               {confirmingDelete ? (

@@ -2,10 +2,9 @@
  * Guards the one rule the waitlist funnel must never break: analytics gets the
  * *shape* of a signup, never its contents.
  *
- * This form now collects an email, a name, a LinkedIn URL, free-text notes and a
- * resume. None of that has any business in PostHog, and the leak would be a
- * quiet one — a property added to an existing event ships without anything
- * failing. So rather than eyeballing the payloads once, assert it.
+ * The landing form now asks for email only. Email and referral credentials still
+ * have no business in PostHog, and a property added to an existing event could
+ * ship quietly, so assert the payload boundary here.
  */
 
 import { render, screen, waitFor } from '@testing-library/react';
@@ -17,17 +16,6 @@ const trackFunnelEvent = vi.fn();
 vi.mock('@/lib/observability', () => ({
   trackFunnelEvent: (...args: unknown[]) => trackFunnelEvent(...args),
   trackEvent: vi.fn(),
-}));
-
-vi.mock('@/hooks/useOccupations', () => ({
-  usePublicOccupations: () => ({
-    data: [
-      { key: 'software_engineering', label: 'Software Engineering' },
-      { key: 'marketing', label: 'Marketing' },
-    ],
-    isLoading: false,
-    isError: false,
-  }),
 }));
 
 const joinWaitlistBackend = vi.fn();
@@ -51,9 +39,6 @@ import { WaitlistModal } from '@/components/WaitlistModal';
 /** Values a visitor types that must never appear in a tracked payload. */
 const SECRETS = [
   'ada@example.com',
-  'Ada Lovelace',
-  'linkedin.com/in/ada',
-  'please help me find a job',
 ];
 
 function trackedPayloads(): string {
@@ -67,37 +52,12 @@ describe('waitlist funnel analytics', () => {
   });
 
   it('reports the shape of a signup without any of its personal data', async () => {
-    joinWaitlistBackend.mockResolvedValue({
-      already_on_list: false,
-      referral: {
-        referral_code: 'ABCDEFGHJK',
-        position: 42,
-        total_verified: 10,
-        launch_target: 3000,
-        share_url: 'http://localhost:5173/?ref=ABCDEFGHJK',
-        email_verified: false,
-        verified_referral_count: 0,
-        earned_tier: 0,
-        tier_thresholds: [1, 3, 5, 10],
-      },
-      access_token: 'nrw_supersecret',
-    });
+    joinWaitlistBackend.mockResolvedValue({ ok: true });
 
     const user = userEvent.setup();
     render(<WaitlistModal onClose={() => {}} source="hero" />);
 
-    await user.type(screen.getByPlaceholderText('Jordan Rivera'), SECRETS[1]);
     await user.type(screen.getByPlaceholderText('you@email.com'), SECRETS[0]);
-    await user.type(
-      screen.getByPlaceholderText('linkedin.com/in/yourprofile'),
-      SECRETS[2]
-    );
-    await user.type(
-      screen.getByPlaceholderText("What you're hoping Solomon helps you with…"),
-      SECRETS[3]
-    );
-    await user.selectOptions(screen.getByRole('combobox'), 'software_engineering');
-    await user.click(screen.getByRole('button', { name: /land my first role/i }));
     await user.click(screen.getByRole('button', { name: /join the waitlist/i }));
 
     await waitFor(() => {
@@ -105,15 +65,14 @@ describe('waitlist funnel analytics', () => {
         trackFunnelEvent.mock.calls.some(([name]) => name === 'waitlist_joined')
       ).toBe(true);
     });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Done' })).toHaveFocus();
+    });
 
     const payloads = trackedPayloads();
     for (const secret of SECRETS) {
       expect(payloads).not.toContain(secret);
     }
-    // The dashboard key and the member-identifying referral code stay out too.
-    expect(payloads).not.toContain('nrw_supersecret');
-    expect(payloads).not.toContain('ABCDEFGHJK');
-
     // What it *does* report: enough to analyse the funnel.
     const joined = trackFunnelEvent.mock.calls.find(
       ([name]) => name === 'waitlist_joined'
@@ -122,9 +81,9 @@ describe('waitlist funnel analytics', () => {
       source: 'hero',
       sink: 'backend',
       has_resume: false,
-      goals_count: 1,
-      goals: ['land_first_role'],
-      target_occupation: 'software_engineering',
+      goals_count: 0,
+      goals: [],
+      target_occupation: null,
     });
   });
 
@@ -141,9 +100,7 @@ describe('waitlist funnel analytics', () => {
     const user = userEvent.setup();
     render(<WaitlistModal onClose={() => {}} source="nav" />);
 
-    await user.type(screen.getByPlaceholderText('Jordan Rivera'), SECRETS[1]);
     await user.type(screen.getByPlaceholderText('you@email.com'), SECRETS[0]);
-    await user.selectOptions(screen.getByRole('combobox'), 'marketing');
     await user.click(screen.getByRole('button', { name: /join the waitlist/i }));
 
     await waitFor(() => {

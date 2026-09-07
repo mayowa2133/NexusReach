@@ -106,13 +106,22 @@ async def test_public_signup_response_is_generic_for_new_and_existing(client, al
         patch("app.routers.waitlist.sheets_mirror_client.is_configured", return_value=False),
     ):
         response = await client.post(
-            "/api/waitlist", json={"name": "Owner", "email": "owner@example.com"}
+            "/api/waitlist", json={"email": "owner@example.com"}
         )
 
     assert response.status_code == 202
     assert response.json() == {"ok": True}
     assert "token" not in response.text and "already" not in response.text
     assert send_mail.called is (not already)
+
+
+def test_waitlist_signup_accepts_email_without_name():
+    from app.schemas.waitlist import WaitlistSignupCreate
+
+    payload = WaitlistSignupCreate(email="owner@example.com")
+
+    assert payload.name is None
+    assert payload.email == "owner@example.com"
 
 
 @pytest.mark.asyncio
@@ -166,6 +175,65 @@ async def test_status_accepts_scoped_owner_bearer(client):
     assert response.status_code == 200
     assert response.json()["name"] == "Owner"
     assert resolve.await_args.args[2] == "nrw_owner"
+
+
+@pytest.mark.asyncio
+async def test_verified_owner_can_update_optional_profile(client):
+    signup = _signup(email_verified=True, target_occupation=None)
+    with (
+        patch(
+            "app.routers.referrals.referral_service.resolve_signup_by_token",
+            new_callable=AsyncMock,
+            return_value=signup,
+        ),
+        patch(
+            "app.routers.referrals.referral_service.referral_status_payload",
+            new_callable=AsyncMock,
+            return_value=_status_payload(),
+        ),
+    ):
+        response = await client.patch(
+            "/api/referrals/profile?code=ABCDEFGHJK",
+            headers={"Authorization": "Bearer nrw_owner"},
+            json={"name": "Ada", "target_occupation": "software_engineering"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "Ada"
+    assert response.json()["target_occupation"] == "software_engineering"
+    assert signup.name == "Ada"
+
+
+@pytest.mark.asyncio
+async def test_unverified_owner_cannot_update_optional_profile(client):
+    with patch(
+        "app.routers.referrals.referral_service.resolve_signup_by_token",
+        new_callable=AsyncMock,
+        return_value=_signup(email_verified=False),
+    ):
+        response = await client.patch(
+            "/api/referrals/profile?code=ABCDEFGHJK",
+            headers={"Authorization": "Bearer nrw_owner"},
+            json={"name": "Ada"},
+        )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_profile_update_rejects_unknown_occupation(client):
+    with patch(
+        "app.routers.referrals.referral_service.resolve_signup_by_token",
+        new_callable=AsyncMock,
+        return_value=_signup(email_verified=True),
+    ):
+        response = await client.patch(
+            "/api/referrals/profile?code=ABCDEFGHJK",
+            headers={"Authorization": "Bearer nrw_owner"},
+            json={"target_occupation": "made_up_role"},
+        )
+
+    assert response.status_code == 422
 
 
 @pytest.mark.asyncio

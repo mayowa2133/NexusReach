@@ -1,533 +1,159 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { joinWaitlistBackend, WaitlistError } from '@/hooks/useReferral';
-import { usePublicOccupations } from '@/hooks/useOccupations';
 import { trackFunnelEvent } from '@/lib/observability';
 
-// The Google Apps Script sink is an offline fallback when the backend is
-// unreachable. Its opaque no-cors response must never expose signup state.
 const SHEET_ENDPOINT = import.meta.env.VITE_WAITLIST_ENDPOINT as string | undefined;
 
 interface WaitlistModalProps {
   onClose: () => void;
-  /** Which CTA opened the modal — stored for analytics. */
   source?: string;
-  /** Referral code from the ?ref= link, threaded into the signup payload. */
   referredByCode?: string | null;
 }
 
-type SubmitState = 'idle' | 'submitting' | 'success' | 'error';
+type SubmitState = 'idle' | 'submitting' | 'success' | 'fallback' | 'error';
 
-/** Goal chips. Keys must match app/utils/waitlist_goals.py (unknown keys are dropped). */
-const GOAL_OPTIONS: { key: string; label: string }[] = [
-  { key: 'land_first_role', label: 'Land my first role' },
-  { key: 'switch_companies', label: 'Move to a better company' },
-  { key: 'career_change', label: 'Change careers or industry' },
-  { key: 'internships', label: 'Find internships' },
-  { key: 'reach_recruiters', label: 'Reach recruiters directly' },
-  { key: 'warm_intros', label: 'Get warm intros' },
-  { key: 'outreach_help', label: 'Write better outreach' },
-];
-
-// Keep in step with NEXUSREACH_MAX_WAITLIST_RESUME_BYTES (5 MiB) so we reject
-// oversized files before spending the user's upload bandwidth.
-const MAX_RESUME_BYTES = 5 * 1024 * 1024;
-const RESUME_ACCEPT = '.pdf,.docx';
-
-interface FormState {
-  name: string;
-  email: string;
-  linkedin_url: string;
-  current_title: string;
-  target_role: string;
-  target_occupation: string;
-  note: string;
-}
-
-const EMPTY_FORM: FormState = {
-  name: '',
-  email: '',
-  linkedin_url: '',
-  current_title: '',
-  target_role: '',
-  target_occupation: '',
-  note: '',
-};
-
-interface PickedResume {
-  filename: string;
-  contentType: string;
-  base64: string;
-}
-
-/** Read a File into base64 (strips the `data:...;base64,` prefix). */
-function readFileAsBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error('Could not read that file.'));
-    reader.onload = () => {
-      const result = String(reader.result ?? '');
-      const comma = result.indexOf(',');
-      resolve(comma >= 0 ? result.slice(comma + 1) : result);
-    };
-    reader.readAsDataURL(file);
-  });
-}
-
-// Mounted only while open (parent guards with `{open && <WaitlistModal/>}`), so
-// state initializes fresh on every open — no reset effect needed.
 export function WaitlistModal({ onClose, source, referredByCode }: WaitlistModalProps) {
-  const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [email, setEmail] = useState('');
   const [state, setState] = useState<SubmitState>('idle');
   const [error, setError] = useState<string | null>(null);
-  const [goals, setGoals] = useState<string[]>([]);
-  const [resume, setResume] = useState<PickedResume | null>(null);
-  const [resumeError, setResumeError] = useState<string | null>(null);
   const firstFieldRef = useRef<HTMLInputElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const completionButtonRef = useRef<HTMLButtonElement>(null);
   const titleId = useId();
+  const descriptionId = useId();
 
-  // Fetched lazily with the modal, so the landing page still makes no network
-  // call until someone shows intent.
-  const {
-    data: occupations,
-    isLoading: occupationsLoading,
-    isError: occupationsFailed,
-  } = usePublicOccupations();
-  // Only fall back once we actually know the list isn't coming — an empty array
-  // from a successful response is still "unavailable" for a required field.
-  const occupationsUnavailable =
-    occupationsFailed || (!occupationsLoading && !(occupations ?? []).length);
-
-  const toggleGoal = (key: string) => {
-    setGoals((prev) =>
-      prev.includes(key) ? prev.filter((g) => g !== key) : [...prev, key]
-    );
-  };
-
-  const onPickResume = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    setResumeError(null);
-    if (!file) {
-      setResume(null);
-      return;
-    }
-    const lowered = file.name.toLowerCase();
-    if (!lowered.endsWith('.pdf') && !lowered.endsWith('.docx')) {
-      setResume(null);
-      setResumeError('Please attach a PDF or DOCX file.');
-      return;
-    }
-    if (file.size > MAX_RESUME_BYTES) {
-      setResume(null);
-      setResumeError('That file is over 5 MB. Try a smaller PDF.');
-      return;
-    }
-    try {
-      const base64 = await readFileAsBase64(file);
-      setResume({
-        filename: file.name,
-        contentType:
-          file.type ||
-          (lowered.endsWith('.pdf')
-            ? 'application/pdf'
-            : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
-        base64,
-      });
-    } catch {
-      setResume(null);
-      setResumeError('Could not read that file. Please try again.');
-    }
-  };
-
-  const clearResume = () => {
-    setResume(null);
-    setResumeError(null);
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
-
-  // Close on Escape; lock body scroll while mounted.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    const prevOverflow = document.body.style.overflow;
+    const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    // Focus the first field once mounted.
-    const t = window.setTimeout(() => firstFieldRef.current?.focus(), 60);
+    const focusTimer = window.setTimeout(() => firstFieldRef.current?.focus(), 30);
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const elements = dialogRef.current?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), a[href], select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+      if (!elements?.length) return;
+      const first = elements[0];
+      const last = elements[elements.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
     return () => {
-      window.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prevOverflow;
-      window.clearTimeout(t);
+      document.body.style.overflow = previousOverflow;
+      window.clearTimeout(focusTimer);
+      window.removeEventListener('keydown', onKeyDown);
     };
   }, [onClose]);
 
-  const update =
-    (field: keyof FormState) =>
-    (
-      e: React.ChangeEvent<
-        HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
-      >,
-    ) =>
-      setForm((f) => ({ ...f, [field]: e.target.value }));
+  useEffect(() => {
+    if (state !== 'success' && state !== 'fallback') return;
+    window.requestAnimationFrame(() => completionButtonRef.current?.focus());
+  }, [state]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
     if (state === 'submitting') return;
     setState('submitting');
     setError(null);
 
     const payload = {
-      name: form.name.trim(),
-      email: form.email.trim(),
-      linkedin_url: form.linkedin_url.trim() || null,
-      current_title: form.current_title.trim() || null,
-      target_role: form.target_role.trim() || null,
-      target_occupation: form.target_occupation || null,
-      note: form.note.trim() || null,
+      email: email.trim(),
       source: source || 'landing',
       referred_by_code: referredByCode || null,
-      goals: goals.length ? goals : null,
-      resume_filename: resume?.filename ?? null,
-      resume_content_type: resume?.contentType ?? null,
-      resume_file_base64: resume?.base64 ?? null,
     };
-
-    // Funnel properties. Deliberately shape-only: counts, booleans, and the
-    // fixed goal-key vocabulary. Never the email, name, note, LinkedIn URL,
-    // resume filename, or the referral code — analytics has no need for any of
-    // it, and this form now collects sensitive personal data.
     const funnelProps = {
       source: source || 'landing',
       referred: Boolean(referredByCode),
-      has_resume: Boolean(resume),
-      goals_count: goals.length,
-      goals,
-      // A fixed taxonomy key, not free text — safe to record and the single
-      // most useful dimension for segmenting the list.
-      target_occupation: form.target_occupation || null,
+      has_resume: false,
+      goals_count: 0,
+      goals: [],
+      target_occupation: null,
     };
     trackFunnelEvent('waitlist_submitted', funnelProps);
 
     try {
       await joinWaitlistBackend(payload);
-      trackFunnelEvent('waitlist_joined', {
-        ...funnelProps,
-        sink: 'backend',
-      });
+      trackFunnelEvent('waitlist_joined', { ...funnelProps, sink: 'backend' });
       setState('success');
-    } catch (err) {
-      if (err instanceof WaitlistError) {
-        // Backend reached but rejected the input. Prefer the server's own
-        // message (it explains resume problems precisely); fall back to copy.
-        let message = err.detail || 'Something went wrong. Please try again.';
-        if (!err.detail) {
-          if (err.status === 422) {
-            message = 'Please use a valid, permanent email address.';
-          } else if (err.status === 413) {
-            message = 'That resume is too large. Try a file under 5 MB.';
-          } else if (err.status === 429) {
-            message = 'Too many attempts. Please wait a moment and try again.';
-          }
-        }
-        // Category, not the message — the server's `detail` can quote user
-        // input, which must not reach analytics.
-        const reason =
-          err.status === 422
-            ? 'invalid_input'
-            : err.status === 413
-              ? 'file_too_large'
-              : err.status === 429
-                ? 'rate_limited'
-                : err.status === 400
-                  ? 'bad_upload'
-                  : err.status >= 500
-                    ? 'server_error'
-                    : 'rejected';
-        trackFunnelEvent('waitlist_submit_failed', {
-          ...funnelProps,
-          reason,
-          status: err.status,
-        });
+    } catch (caught) {
+      if (caught instanceof WaitlistError) {
+        let message = caught.detail || 'Something went wrong. Please try again.';
+        if (!caught.detail && caught.status === 422) message = 'Please use a valid, permanent email address.';
+        if (!caught.detail && caught.status === 429) message = 'Too many attempts. Please wait a moment and try again.';
+        const reason = caught.status === 422 ? 'invalid_input' : caught.status === 429 ? 'rate_limited' : caught.status >= 500 ? 'server_error' : 'rejected';
+        trackFunnelEvent('waitlist_submit_failed', { ...funnelProps, reason, status: caught.status });
         setError(message);
         setState('error');
         return;
       }
-      // Network error reaching the backend: fall back to the Google Sheets sink
-      // (if configured) so the signup is never lost — without referral features.
+
       if (SHEET_ENDPOINT) {
         try {
-          // The Sheet can't carry a file — drop the base64 (flagging that one
-          // existed) rather than posting megabytes at an Apps Script endpoint.
-          const sheetPayload = {
-            ...payload,
-            resume_file_base64: null,
-            has_resume: Boolean(resume),
-          };
           await fetch(SHEET_ENDPOINT, {
             method: 'POST',
             mode: 'no-cors',
             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify(sheetPayload),
+            body: JSON.stringify(payload),
           });
-          trackFunnelEvent('waitlist_joined', {
-            ...funnelProps,
-            sink: 'sheet_fallback',
-          });
-          setState('success');
+          trackFunnelEvent('waitlist_fallback_attempted', { source: source || 'landing', referred: Boolean(referredByCode) });
+          setState('fallback');
           return;
         } catch {
-          /* fall through to the connection error */
+          // The normal network-error path below is still the most accurate state.
         }
       }
-      trackFunnelEvent('waitlist_submit_failed', {
-        ...funnelProps,
-        reason: 'network',
-      });
-      setError('Could not reach the server. Please check your connection.');
+      trackFunnelEvent('waitlist_submit_failed', { ...funnelProps, reason: 'network' });
+      setError('We could not reach the signup service. Please check your connection and try again.');
       setState('error');
     }
   };
 
   return (
-    <div
-      className="lp-wl-overlay"
-      role="presentation"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div
-        className="lp-wl-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-      >
-        <button className="lp-wl-close" onClick={onClose} aria-label="Close">
-          ✕
-        </button>
+    <div className="lp-wl-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <div ref={dialogRef} className="lp-wl-modal" role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId}>
+        <button className="lp-wl-close" type="button" onClick={onClose} aria-label="Close waitlist form">×</button>
 
         {state === 'success' ? (
-          <div className="lp-wl-success">
-            <span className="stamp stamp-green">REQUEST RECEIVED</span>
+          <div className="lp-wl-success" role="status">
+            <span className="lp-wl-success-mark" aria-hidden="true">✓</span>
             <h3 id={titleId}>Check your inbox.</h3>
-            <p>
-              If this address can join or recover an existing signup, we’ll send
-              the next step by email. The confirmation is the same for every
-              request to protect waitlist privacy.
-            </p>
-            <button className="btn btn-primary" onClick={onClose}>
-              Done
-            </button>
+            <p id={descriptionId}>If an email is needed for this address, we’ll send the next step. Confirm it to save your place and open your referral dashboard.</p>
+            <button ref={completionButtonRef} className="btn btn-primary" type="button" onClick={onClose}>Done</button>
+          </div>
+        ) : state === 'fallback' ? (
+          <div className="lp-wl-success" role="status">
+            <span className="lp-wl-success-mark" aria-hidden="true">!</span>
+            <h3 id={titleId}>We couldn’t verify the request.</h3>
+            <p id={descriptionId}>A backup capture was attempted, but it cannot confirm delivery or send your verification link. Please try again later. Repeating the request is safe.</p>
+            <button ref={completionButtonRef} className="btn btn-primary" type="button" onClick={onClose}>Done</button>
           </div>
         ) : (
           <>
             <div className="lp-wl-head">
-              <span className="mono-label">Pre-launch · limited early access</span>
+              <span className="eyebrow">Private beta</span>
               <h3 id={titleId}>Join the waitlist</h3>
-              <p>
-                Solomon isn't open to everyone yet. Leave your details and we'll
-                invite you at launch — first access goes to the waitlist.
-              </p>
+              <p id={descriptionId}>Enter your email to save your place. We’ll ask about your target role only after you confirm.</p>
             </div>
-
             <form className="lp-wl-form" onSubmit={handleSubmit}>
               <label className="lp-wl-field">
-                <span>
-                  Name <em>*</em>
-                </span>
-                <input
-                  ref={firstFieldRef}
-                  type="text"
-                  value={form.name}
-                  onChange={update('name')}
-                  required
-                  maxLength={200}
-                  autoComplete="name"
-                  placeholder="Jordan Rivera"
-                />
+                <span>Email <em aria-hidden="true">*</em></span>
+                <input ref={firstFieldRef} type="email" value={email} onChange={(event) => setEmail(event.target.value)} required maxLength={320} autoComplete="email" inputMode="email" placeholder="you@email.com" aria-invalid={Boolean(error)} aria-describedby={error ? `${descriptionId}-error` : undefined} />
               </label>
-
-              <label className="lp-wl-field">
-                <span>
-                  Email <em>*</em>
-                </span>
-                <input
-                  type="email"
-                  value={form.email}
-                  onChange={update('email')}
-                  required
-                  maxLength={320}
-                  autoComplete="email"
-                  placeholder="you@email.com"
-                />
-              </label>
-
-              <label className="lp-wl-field">
-                <span>
-                  LinkedIn <span className="opt">optional</span>
-                </span>
-                {/* type="text" not "url": browsers reject scheme-less input
-                    like "linkedin.com/in/you" that users naturally paste. */}
-                <input
-                  type="text"
-                  inputMode="url"
-                  value={form.linkedin_url}
-                  onChange={update('linkedin_url')}
-                  maxLength={500}
-                  placeholder="linkedin.com/in/yourprofile"
-                />
-              </label>
-
-              <label className="lp-wl-field">
-                <span>
-                  What kind of role are you targeting? <em>*</em>
-                </span>
-                {/* Structured beats free text here: this key is what can seed
-                    their job feed at launch and group the list into invite
-                    cohorts. If the taxonomy can't be fetched we fall back to the
-                    old free-text input rather than showing an empty required
-                    dropdown — a backend blip must not block signups. */}
-                {occupationsUnavailable ? (
-                  <input
-                    type="text"
-                    value={form.target_role}
-                    onChange={update('target_role')}
-                    maxLength={300}
-                    required
-                    placeholder="Software Engineer roles"
-                  />
-                ) : (
-                  <select
-                    className="lp-wl-select"
-                    value={form.target_occupation}
-                    onChange={update('target_occupation')}
-                    required
-                    disabled={occupationsLoading}
-                  >
-                    <option value="" disabled>
-                      {occupationsLoading ? 'Loading…' : 'Choose a category'}
-                    </option>
-                    {(occupations ?? []).map((occ) => (
-                      <option key={occ.key} value={occ.key}>
-                        {occ.label}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </label>
-
-              <label className="lp-wl-field">
-                <span>
-                  Current role <span className="opt">optional</span>
-                </span>
-                <input
-                  type="text"
-                  value={form.current_title}
-                  onChange={update('current_title')}
-                  maxLength={300}
-                  placeholder="New-grad SWE — leave blank if you're just starting out"
-                />
-              </label>
-
-              <div className="lp-wl-field">
-                <span>
-                  What do you want to achieve on Solomon?{' '}
-                  <span className="opt">optional · pick any</span>
-                </span>
-                <div className="lp-wl-goals">
-                  {GOAL_OPTIONS.map((goal) => {
-                    const selected = goals.includes(goal.key);
-                    return (
-                      <button
-                        type="button"
-                        key={goal.key}
-                        className={`chip${selected ? ' chip-green' : ''}`}
-                        aria-pressed={selected}
-                        onClick={() => toggleGoal(goal.key)}
-                      >
-                        <span className="d" />
-                        {goal.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <label className="lp-wl-field">
-                <span>
-                  Anything else about your goals?{' '}
-                  <span className="opt">optional</span>
-                </span>
-                <textarea
-                  value={form.note}
-                  onChange={update('note')}
-                  maxLength={2000}
-                  rows={2}
-                  placeholder="What you're hoping Solomon helps you with…"
-                />
-              </label>
-
-              <div className="lp-wl-field">
-                <span>
-                  Resume <span className="opt">optional · PDF or DOCX</span>
-                </span>
-                {resume ? (
-                  <div className="lp-wl-file-picked">
-                    <span className="lp-wl-file-name">📄 {resume.filename}</span>
-                    <button
-                      type="button"
-                      className="lp-wl-file-remove"
-                      onClick={clearResume}
-                      aria-label="Remove attached resume"
-                    >
-                      ×
-                    </button>
-                  </div>
-                ) : (
-                  <label className="lp-wl-file">
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept={RESUME_ACCEPT}
-                      onChange={onPickResume}
-                    />
-                    <span>Attach resume</span>
-                  </label>
-                )}
-                <span className="lp-wl-file-hint">
-                  Speeds up your setup at launch — skip it if you&apos;re on mobile.
-                </span>
-                {resumeError && <div className="lp-wl-error">{resumeError}</div>}
-              </div>
-
-              {error && <div className="lp-wl-error">{error}</div>}
-
-              <button
-                type="submit"
-                className="btn btn-primary lp-wl-submit"
-                disabled={state === 'submitting'}
-              >
-                {state === 'submitting' ? 'Joining…' : 'Join the waitlist'}
-                <span className="arrow">→</span>
-              </button>
-              {/* Must stay true to what the system actually sends: a
-                  confirmation link, referral updates, and the launch invite —
-                  not the single launch email this promised before the referral
-                  loop existed. */}
-              <p className="lp-wl-fine">
-                No spam. We email you to confirm your address, when a referral
-                lands, and at launch. Your details are never sold.{' '}
-                <a
-                  href="/privacy"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="lp-wl-fine-link"
-                >
-                  How we handle your data
-                </a>
-                .
-              </p>
+              {error && <div className="lp-wl-error" id={`${descriptionId}-error`} role="alert">{error}</div>}
+              <button type="submit" className="btn btn-primary lp-wl-submit" disabled={state === 'submitting'}>{state === 'submitting' ? 'Joining…' : 'Join the waitlist'}<span aria-hidden="true">→</span></button>
+              <p className="lp-wl-fine">We email you to confirm your address, about verified referrals, and about access. Your details are never sold. <a href="/privacy" target="_blank" rel="noopener noreferrer">Privacy</a></p>
             </form>
           </>
         )}

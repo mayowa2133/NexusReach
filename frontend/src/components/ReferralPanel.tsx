@@ -23,7 +23,7 @@ const REWARD_COPY: Record<number, { title: string; desc: string }> = {
 };
 
 const SHARE_TEXT =
-  'I joined the Solomon early-access list — it finds the right people behind ' +
+  'I joined the Solomon early-access list — it helps find relevant people behind ' +
   'job postings and helps you reach out. Join here:';
 
 function socialLinks(url: string) {
