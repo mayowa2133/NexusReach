@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title description">
+  <title id="title">Solomon — Find the people behind your next opportunity</title>
+  <desc id="description">A dark social preview card with Solomon's product message and three confidence labels.</desc>
+  <rect width="1200" height="630" fill="#11130f"/>
+  <rect width="1200" height="8" fill="#34d399"/>
+  <g font-family="Geist, Inter, Arial, sans-serif">
+    <text x="72" y="104" fill="#f4f3ed" font-size="42" font-weight="600" letter-spacing="-1">Solomon</text>
+    <circle cx="232" cy="99" r="4" fill="#34d399"/>
+    <text x="72" y="224" fill="#f4f3ed" font-size="70" font-weight="600" letter-spacing="-2.8">Find the people behind</text>
+    <text x="72" y="304" fill="#f4f3ed" font-size="70" font-weight="600" letter-spacing="-2.8">your next opportunity.</text>
+    <text x="74" y="380" fill="#b8b9b1" font-size="28">Relevant people, clear evidence, and a personalized draft</text>
+    <text x="74" y="418" fill="#b8b9b1" font-size="28">you can review before anything is sent.</text>
+    <g transform="translate(72 482)">
+      <rect width="220" height="62" rx="12" fill="#17221c" stroke="#315142"/>
+      <circle cx="30" cy="31" r="6" fill="#34d399"/>
+      <text x="50" y="39" fill="#e9eee9" font-size="21" font-weight="600">Role relevance</text>
+      <rect x="236" width="242" height="62" rx="12" fill="#17221c" stroke="#315142"/>
+      <circle cx="266" cy="31" r="6" fill="#34d399"/>
+      <text x="286" y="39" fill="#e9eee9" font-size="21" font-weight="600">Company evidence</text>
+      <rect x="494" width="230" height="62" rx="12" fill="#17221c" stroke="#315142"/>
+      <circle cx="524" cy="31" r="6" fill="#f3b85c"/>
+      <text x="544" y="39" fill="#e9eee9" font-size="21" font-weight="600">Email confidence</text>
+    </g>
+    <text x="1128" y="588" fill="#74786f" font-size="18" text-anchor="end" letter-spacing="1.5">PRIVATE BETA</text>
+  </g>
+</svg>

@@ -84,7 +84,7 @@ async def upsert_waitlist_signup(
     referrer = await resolve_referrer(db, payload.referred_by_code, email)
     entry = WaitlistSignup(
         email=email,
-        name=payload.name,
+        name=payload.name or None,
         linkedin_url=payload.linkedin_url,
         current_title=payload.current_title,
         target_role=payload.target_role,

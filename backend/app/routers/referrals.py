@@ -11,11 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.middleware.rate_limit import limiter
 from app.schemas.waitlist import (
+    ReferralProfileUpdate,
     ReferralStatus,
     ReferralVerifyResponse,
     WaitlistDeleteResponse,
 )
 from app.services import referral_service, waitlist_retention_service
+from app.utils.waitlist_goals import clean_target_occupation
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +57,45 @@ async def referral_status(
     if signup is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     payload = await referral_service.referral_status_payload(db, signup)
-    return ReferralStatus(name=signup.name, **payload)
+    return ReferralStatus(
+        name=signup.name, target_occupation=signup.target_occupation, **payload
+    )
+
+
+@router.patch("/profile", response_model=ReferralStatus)
+@limiter.limit("10/minute")
+async def update_referral_profile(
+    request: Request,
+    body: ReferralProfileUpdate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    code: Annotated[str, Query(max_length=16)],
+    credentials: Annotated[
+        HTTPAuthorizationCredentials | None, Depends(owner_bearer)
+    ],
+) -> ReferralStatus:
+    """Update optional invite details after mailbox-proven owner access."""
+    signup = await referral_service.resolve_signup_by_token(
+        db, code, _bearer_token(credentials)
+    )
+    if signup is None or not signup.email_verified:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+    if "target_occupation" in body.model_fields_set:
+        cleaned = clean_target_occupation(body.target_occupation)
+        if body.target_occupation is not None and cleaned is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Choose a supported role category.",
+            )
+        signup.target_occupation = cleaned
+    if "name" in body.model_fields_set:
+        signup.name = body.name
+
+    await db.commit()
+    payload = await referral_service.referral_status_payload(db, signup)
+    return ReferralStatus(
+        name=signup.name, target_occupation=signup.target_occupation, **payload
+    )
 
 
 @router.post("/exchange", response_model=ReferralVerifyResponse)
@@ -79,7 +119,10 @@ async def verify_referral(
 
     payload = await referral_service.referral_status_payload(db, signup)
     return ReferralVerifyResponse(
-        name=signup.name, access_token=access_token, **payload
+        name=signup.name,
+        target_occupation=signup.target_occupation,
+        access_token=access_token,
+        **payload,
     )
 
 

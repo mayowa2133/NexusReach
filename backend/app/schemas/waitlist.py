@@ -5,7 +5,7 @@ class WaitlistSignupCreate(BaseModel):
     """Public payload from the landing-page waitlist form."""
 
     email: EmailStr
-    name: str = Field(min_length=1, max_length=200)
+    name: str | None = Field(default=None, max_length=200)
     linkedin_url: str | None = Field(default=None, max_length=500)
     current_title: str | None = Field(default=None, max_length=300)
     target_role: str | None = Field(default=None, max_length=300)
@@ -59,6 +59,21 @@ class ReferralStatus(BaseModel):
     earned_tier: int
     tier_thresholds: list[int]
     name: str | None = None
+    target_occupation: str | None = None
+
+
+class ReferralProfileUpdate(BaseModel):
+    """Small, owner-authenticated profile collected after email confirmation."""
+
+    name: str | None = Field(default=None, max_length=200)
+    target_occupation: str | None = Field(default=None, max_length=64)
+
+    @field_validator("name", "target_occupation")
+    @classmethod
+    def _strip_optional_profile(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        return v.strip() or None
 
 
 class WaitlistSignupResponse(BaseModel):
@@ -80,7 +95,7 @@ class WaitlistEntry(BaseModel):
 
     id: str
     email: str
-    name: str
+    name: str | None
     linkedin_url: str | None
     current_title: str | None
     target_role: str | None

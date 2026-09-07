@@ -69,6 +69,8 @@ export async function joinWaitlistBackend(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+    cache: 'no-store',
+    referrerPolicy: 'no-referrer',
   });
   if (!res.ok) {
     throw new WaitlistError(
@@ -167,6 +169,33 @@ export async function requestReferralRecovery(email: string): Promise<void> {
   if (!res.ok) {
     throw new WaitlistError(res.status, `Recovery request failed (${res.status})`);
   }
+}
+
+/** Update optional invite details after the member has proven mailbox control. */
+export async function updateReferralProfile(
+  code: string,
+  token: string,
+  profile: { name?: string | null; target_occupation?: string | null },
+): Promise<ReferralStatus> {
+  const url = `${API_URL}/api/referrals/profile?code=${encodeURIComponent(code)}`;
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(profile),
+    cache: 'no-store',
+    referrerPolicy: 'no-referrer',
+  });
+  if (!res.ok) {
+    throw new WaitlistError(
+      res.status,
+      `Profile update failed (${res.status})`,
+      await readErrorDetail(res),
+    );
+  }
+  return (await res.json()) as ReferralStatus;
 }
 
 /**

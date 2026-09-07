@@ -37,7 +37,7 @@ class WaitlistSignup(Base):
 
     # Lowercased, trimmed email — unique so a repeat submission upserts.
     email: Mapped[str] = mapped_column(String(320), nullable=False, unique=True)
-    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    name: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
     linkedin_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     # What they do today (current title / headline). NB: not "current_role" —
