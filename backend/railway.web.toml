@@ -14,7 +14,7 @@ preDeployCommand = "python -m alembic upgrade head"
 # Deliberately NOT passing uvicorn --forwarded-allow-ips: its '*' mode trusts
 # the LEFTMOST, client-written X-Forwarded-For entry, which would make every
 # rate limit bypassable with a single request header.
-startCommand = "sh -c 'export NEXUSREACH_SERVICE_ROLE=api NEXUSREACH_TRUSTED_PROXY_HOPS=${NEXUSREACH_TRUSTED_PROXY_HOPS:-1}; exec uvicorn app.main:app --host 0.0.0.0 --port $PORT --no-access-log'"
+startCommand = "sh -c 'export NEXUSREACH_SERVICE_ROLE=waitlist NEXUSREACH_TRUSTED_PROXY_HOPS=${NEXUSREACH_TRUSTED_PROXY_HOPS:-1}; exec uvicorn app.waitlist_app:app --host 0.0.0.0 --port $PORT --no-access-log'"
 healthcheckPath = "/api/health"
 healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
