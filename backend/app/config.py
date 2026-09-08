@@ -186,7 +186,7 @@ class Settings(BaseSettings):
 
     # App
     environment: str = "development"
-    service_role: str = "api"  # api | worker | beat | renderer
+    service_role: str = "api"  # api | waitlist | worker | beat | renderer
     # Number of proxies we control between the internet and this process. Every
     # per-IP control (slowapi burst limits, the per-IP daily signup cap,
     # `signup_ip`) resolves the caller through `utils.client_ip`, which reads the
@@ -292,7 +292,7 @@ class Settings(BaseSettings):
         if self.environment != "production":
             return self
         errors: list[str] = []
-        if self.service_role not in {"api", "worker", "beat", "renderer"}:
+        if self.service_role not in {"api", "waitlist", "worker", "beat", "renderer"}:
             errors.append("NEXUSREACH_SERVICE_ROLE is invalid")
         if "localhost" in self.redis_url:
             errors.append("NEXUSREACH_REDIS_URL still points at localhost")
@@ -355,7 +355,7 @@ class Settings(BaseSettings):
                 f"{MIN_ADMIN_TOKEN_LENGTH} characters (it guards the full signup "
                 "export; generate one with `openssl rand -hex 32`)"
             )
-        if self.service_role == "api" and self.trusted_proxy_hops < 1:
+        if self.service_role in {"api", "waitlist"} and self.trusted_proxy_hops < 1:
             # The production API only ever receives connections through an edge
             # proxy, so the socket peer is that proxy. Left at 0, every per-IP
             # limit silently collapses into one global bucket — the daily signup
@@ -380,7 +380,7 @@ class Settings(BaseSettings):
                     errors.append(
                         f"NEXUSREACH_TOKEN_ENCRYPTION_KEYS[{version}] is invalid"
                     )
-        if self.service_role == "api" and len(self.deletion_receipt_hmac_key) < 32:
+        if self.service_role in {"api", "waitlist"} and len(self.deletion_receipt_hmac_key) < 32:
             errors.append(
                 "NEXUSREACH_DELETION_RECEIPT_HMAC_KEY must be at least 32 characters"
             )
