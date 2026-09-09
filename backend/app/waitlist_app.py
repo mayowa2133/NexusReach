@@ -27,7 +27,7 @@ from app.middleware.error_handler import (
 from app.middleware.rate_limit import limiter
 from app.middleware.request_size import RequestSizeLimitMiddleware
 from app.observability import init_sentry
-from app.routers import deletions, referrals, waitlist
+from app.routers import deletions, occupations, referrals, waitlist
 from app.utils.client_ip import client_ip
 
 logger = logging.getLogger(__name__)
@@ -72,6 +72,7 @@ app.add_exception_handler(Exception, unhandled_exception_handler)
 app.include_router(waitlist.router, prefix="/api")
 app.include_router(referrals.router, prefix="/api")
 app.include_router(deletions.router, prefix="/api")
+app.include_router(occupations.router, prefix="/api")
 
 
 @app.get("/api/health")
