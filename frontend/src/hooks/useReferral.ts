@@ -95,28 +95,48 @@ async function fetchStatus(code: string, token: string): Promise<ReferralStatus>
   return (await res.json()) as ReferralStatus;
 }
 
+// Confirmation credentials are single-use. Browsers can trigger the same query
+// twice during a focus/remount race, so coalesce concurrent exchanges instead
+// of letting the second request spend an already-consumed token.
+const verificationClaims = new Map<string, Promise<ReferralStatus>>();
+
 /**
  * Spend the single-use confirmation token from the email. Succeeds once: the
  * server consumes `v` and hands back the durable owner key, which we persist so
  * the token never has to travel in a URL again.
  */
-async function verifyAndClaim(
+export async function verifyAndClaim(
   code: string,
   verifyToken: string
 ): Promise<ReferralStatus> {
-  const res = await fetch(`${API_URL}/api/referrals/exchange`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code, token: verifyToken }),
-    cache: 'no-store',
-    referrerPolicy: 'no-referrer',
-  });
-  if (!res.ok) {
-    throw new WaitlistError(res.status, `Referral verify failed (${res.status})`);
+  const existingOwner = readReferralOwnerToken(code);
+  if (existingOwner) return fetchStatus(code, existingOwner);
+
+  const claimKey = `${code}:${verifyToken}`;
+  const existingClaim = verificationClaims.get(claimKey);
+  if (existingClaim) return existingClaim;
+
+  const claim = (async () => {
+    const res = await fetch(`${API_URL}/api/referrals/exchange`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, token: verifyToken }),
+      cache: 'no-store',
+      referrerPolicy: 'no-referrer',
+    });
+    if (!res.ok) {
+      throw new WaitlistError(res.status, `Referral verify failed (${res.status})`);
+    }
+    const data = (await res.json()) as ReferralVerifyResponse;
+    storeReferralOwner(code, data.access_token);
+    return data;
+  })();
+  verificationClaims.set(claimKey, claim);
+  try {
+    return await claim;
+  } finally {
+    verificationClaims.delete(claimKey);
   }
-  const data = (await res.json()) as ReferralVerifyResponse;
-  storeReferralOwner(code, data.access_token);
-  return data;
 }
 
 /** Forget the locally stored owner key (after erasure, or on request). */
@@ -218,6 +238,9 @@ export function useReferralStatus(
         : fetchStatus(code as string, token as string),
     enabled: Boolean(code && (token || verifyToken)),
     retry: false,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
+    refetchOnWindowFocus: false,
     staleTime: 30_000,
   });
 }
