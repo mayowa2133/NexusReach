@@ -124,6 +124,23 @@ def test_waitlist_signup_accepts_email_without_name():
     assert payload.email == "owner@example.com"
 
 
+def test_waitlist_email_has_branded_transactional_shell(monkeypatch):
+    from app.tasks.referrals import _render_verification_email
+
+    monkeypatch.setattr(settings, "referral_public_base_url", "https://trysolomon.app")
+    rendered = _render_verification_email(
+        "Owner <script>",
+        "https://trysolomon.app/r/ABC#v=nrv_token",
+    )
+
+    assert 'aria-label="Solomon home"' in rendered
+    assert "Solomon<span" in rendered
+    assert "Find the people behind your next opportunity." in rendered
+    assert ">trysolomon.app</a>" in rendered
+    assert "Owner &lt;script&gt;" in rendered
+    assert "<img" not in rendered
+
+
 @pytest.mark.asyncio
 async def test_anonymous_resubmission_cannot_mutate_existing_row():
     from app.schemas.waitlist import WaitlistSignupCreate
