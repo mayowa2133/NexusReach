@@ -25,6 +25,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select, update
 
 from app.clients import resend_client
+from app.config import settings
 from app.database import async_session
 from app.models.waitlist import WaitlistSignup
 from app.services.referral_service import (
@@ -45,11 +46,30 @@ def _greeting(name: str | None) -> str:
 
 
 def _shell(greeting: str, body: str) -> str:
+    site_url = html.escape(
+        (settings.referral_public_base_url or settings.frontend_url).rstrip("/") + "/",
+        quote=True,
+    )
     return f"""\
-<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;\
-max-width:520px;margin:0 auto;color:#1B1A17;">
-  <p style="font-size:16px;line-height:1.5;">{greeting}</p>
+<div style="margin:0;background:#F7F5F0;padding:32px 16px;">
+  <div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;\
+max-width:520px;margin:0 auto;background:#FFFFFF;border:1px solid #E7E2D8;\
+border-radius:12px;padding:32px;color:#1B1A17;">
+    <div style="margin:0 0 28px;">
+      <a href="{site_url}" style="color:#1B1A17;text-decoration:none;\
+font-size:22px;font-weight:700;letter-spacing:-0.5px;" aria-label="Solomon home">\
+Solomon<span style="color:#0C6B4B;">.</span></a>
+    </div>
+    <p style="font-size:16px;line-height:1.5;margin:0 0 16px;">{greeting}</p>
 {body}
+    <div style="border-top:1px solid #E7E2D8;margin-top:32px;padding-top:20px;\
+font-size:12px;line-height:1.6;color:#77736B;">
+      <strong style="color:#45413A;">Solomon</strong> &middot;
+      Find the people behind your next opportunity.<br>
+      <a href="{site_url}" style="color:#0C6B4B;text-decoration:none;">trysolomon.app</a>
+      &middot; You received this email because this address was used for the Solomon waitlist.
+    </div>
+  </div>
 </div>"""
 
 
