@@ -347,6 +347,7 @@ NEXUSREACH_LINKEDIN_GRAPH_MAX_IMPORT_BATCH_SIZE=250
 NEXUSREACH_WAITLIST_ADMIN_TOKEN=<random-secret>              # gates GET /api/waitlist export; unset => 404
 NEXUSREACH_RESEND_API_KEY=<resend-api-key>                   # sends the double-opt-in verification email
 NEXUSREACH_RESEND_FROM_EMAIL=Solomon <hello@<domain>>        # verified Resend sender (SPF/DKIM on <domain>)
+NEXUSREACH_WAITLIST_NOTIFY_EMAIL=<owner-inbox>               # optional: emails the owner on every NEW signup (via Resend); unset => no ping
 NEXUSREACH_REFERRAL_PUBLIC_BASE_URL=https://<vercel-production-domain>  # base for referral/verify links; falls back to FRONTEND_URL
 NEXUSREACH_REFERRAL_LAUNCH_TARGET=3000
 NEXUSREACH_REFERRAL_TIER_THRESHOLDS=1,3,5,10

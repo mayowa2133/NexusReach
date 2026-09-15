@@ -26,6 +26,10 @@ RUN apt-get update \
         openssl \
         libssl3t64 \
         openssl-provider-legacy \
+        gzip \
+        libpcre2-8-0 \
+        libsqlite3-0 \
+        perl-base \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system nexusreach \
     && useradd --system --gid nexusreach --home-dir /app nexusreach

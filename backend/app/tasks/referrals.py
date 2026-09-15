@@ -3,6 +3,9 @@
 * ``send_verification_email`` — double-opt-in confirmation, triggered on join.
 * ``send_dashboard_link_email`` — "here's your referral link again" for an
   already-verified member who resubmitted the form.
+* ``send_signup_notification`` — internal heads-up to the owner's inbox
+  (``NEXUSREACH_WAITLIST_NOTIFY_EMAIL``) when a NEW member joins. Carries no
+  secret; it is a digest of the row for the person running the waitlist.
 
 Both take their token as a task argument because the raw value can't be
 recovered from its stored hash. Neither token is ever returned over HTTP: the
@@ -28,6 +31,7 @@ from app.clients import resend_client
 from app.config import settings
 from app.database import async_session
 from app.models.waitlist import WaitlistSignup
+from app.services.occupation_taxonomy import occupation_by_key
 from app.services.referral_service import (
     build_dashboard_home_url,
     build_dashboard_url,
@@ -197,6 +201,62 @@ async def _run_dashboard_link(signup_id: str, access_token: str) -> dict:
         return {"sent": sent}
 
 
+def _render_signup_notification_email(signup: WaitlistSignup) -> str:
+    """Owner-facing summary of one new signup. Every field is public-form input
+    and is escaped like the member-facing templates (same sending domain)."""
+    occupation = occupation_by_key(signup.target_occupation or "")
+    target = occupation.label if occupation else (signup.target_role or None)
+    rows = [
+        ("Name", signup.name),
+        ("Email", signup.email),
+        ("Target role", target),
+        ("Current title", signup.current_title),
+        ("LinkedIn", signup.linkedin_url),
+        ("Goals", ", ".join(signup.goals or []) or None),
+        ("Note", signup.note),
+        ("Source", signup.source),
+        ("Referred", "yes" if signup.referred_by_id else "no"),
+        ("Resume attached", "yes" if signup.resume_path else "no"),
+    ]
+    cells = "".join(
+        f"""
+      <tr>
+        <td style="padding:6px 12px 6px 0;color:#77736B;white-space:nowrap;\
+vertical-align:top;">{html.escape(label)}</td>
+        <td style="padding:6px 0;">{html.escape(str(value))}</td>
+      </tr>"""
+        for label, value in rows
+        if value
+    )
+    return _shell(
+        "New waitlist signup",
+        f"""\
+  <table style="font-size:14px;line-height:1.5;border-collapse:collapse;">{cells}
+  </table>""",
+    )
+
+
+async def _run_signup_notification(signup_id: str) -> dict:
+    to = settings.waitlist_notify_email.strip()
+    if not to:
+        return {"sent": False, "reason": "not_configured"}
+    async with async_session() as db:
+        signup = await _load_signup(db, signup_id)
+        if signup is None:
+            return {"sent": False, "reason": "signup_not_found"}
+        who = signup.name or signup.email
+        sent = await resend_client.send_email(
+            to=to,
+            subject=f"New Solomon waitlist signup: {who}",
+            html=_render_signup_notification_email(signup),
+            # One ping per row, however many times the task is retried.
+            idempotency_key=f"waitlist-signup-{signup.id}",
+        )
+        if not sent:
+            logger.warning("Waitlist signup notification delivery failed")
+        return {"sent": sent}
+
+
 async def _run_referral_credited(credit_id: str) -> dict:
     from app.models.referral_security import ReferralCredit
 
@@ -339,6 +399,20 @@ def send_dashboard_link_email(signup_id: str, access_token: str) -> dict:
     """Re-send a verified member's referral dashboard link to their mailbox."""
     result = run_async(_run_dashboard_link(signup_id, access_token))
     logger.info("Dashboard link email task complete: %s", result)
+    return result
+
+
+@celery_app.task(
+    name="app.tasks.referrals.send_signup_notification",
+    autoretry_for=(Exception,),
+    retry_backoff=60,
+    retry_backoff_max=600,
+    max_retries=3,
+)
+def send_signup_notification(signup_id: str) -> dict:
+    """Tell the owner's inbox that a new member joined the waitlist."""
+    result = run_async(_run_signup_notification(signup_id))
+    logger.info("Signup notification task complete: %s", result)
     return result
 
 
