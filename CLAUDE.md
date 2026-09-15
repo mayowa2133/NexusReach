@@ -521,6 +521,9 @@ NEXUSREACH_KNOWN_PEOPLE_PURGE_DAYS=180
 # is the origin used to build referral/verify links (falls back to frontend_url).
 NEXUSREACH_RESEND_API_KEY=
 NEXUSREACH_RESEND_FROM_EMAIL=
+# Optional owner heads-up: one email per NEW waitlist signup (never for a
+# resubmission), sent through the same Resend sender. Unset => no notification.
+NEXUSREACH_WAITLIST_NOTIFY_EMAIL=
 NEXUSREACH_REFERRAL_PUBLIC_BASE_URL=
 NEXUSREACH_REFERRAL_LAUNCH_TARGET=3000
 NEXUSREACH_REFERRAL_TIER_THRESHOLDS=1,3,5,10

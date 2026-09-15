@@ -115,6 +115,62 @@ async def test_public_signup_response_is_generic_for_new_and_existing(client, al
     assert send_mail.called is (not already)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("already", [False, True])
+async def test_owner_is_notified_of_new_signups_only(client, monkeypatch, already):
+    monkeypatch.setattr(settings, "waitlist_notify_email", "founder@example.com")
+    signup = _signup()
+    result = WaitlistUpsertResult(
+        entry=signup,
+        already_on_list=already,
+        access_token=None,
+        emailed_access_token=None,
+        verification_token=None if already else "nrv_mailbox_only",
+    )
+    with (
+        patch(
+            "app.routers.waitlist.referral_service.enforce_signup_ip_limit",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "app.routers.waitlist.upsert_waitlist_signup",
+            new_callable=AsyncMock,
+            return_value=result,
+        ),
+        patch(
+            "app.routers.waitlist.waitlist_resume_service.decode_and_validate",
+            return_value=None,
+        ),
+        patch("app.routers.waitlist.send_verification_email.delay"),
+        patch("app.routers.waitlist.send_signup_notification.delay") as notify,
+        patch("app.routers.waitlist.sheets_mirror_client.is_configured", return_value=False),
+    ):
+        response = await client.post(
+            "/api/waitlist", json={"email": "owner@example.com"}
+        )
+
+    assert response.status_code == 202
+    assert notify.called is (not already)
+    if not already:
+        notify.assert_called_once_with(str(signup.id))
+
+
+def test_signup_notification_email_escapes_and_labels_occupation():
+    from app.tasks.referrals import _render_signup_notification_email
+
+    signup = _signup()
+    signup.name = "Owner <script>"
+    signup.target_occupation = "software_engineering"
+    signup.note = None
+    rendered = _render_signup_notification_email(signup)
+
+    assert "<script>" not in rendered
+    assert "Owner &lt;script&gt;" in rendered
+    assert "owner@example.com" in rendered
+    assert "Software Engineering" in rendered
+    assert "Note" not in rendered
+
+
 def test_waitlist_signup_accepts_email_without_name():
     from app.schemas.waitlist import WaitlistSignupCreate
 

@@ -39,7 +39,7 @@ from app.services.waitlist_service import (
     list_waitlist_signups,
     upsert_waitlist_signup,
 )
-from app.tasks.referrals import send_verification_email
+from app.tasks.referrals import send_signup_notification, send_verification_email
 from app.tasks.waitlist_resume import parse_waitlist_resume
 from app.utils.client_ip import client_ip
 
@@ -102,6 +102,14 @@ async def join_waitlist(
             send_verification_email.delay(str(entry.id), result.verification_token)
     except Exception:  # broker down must never break the signup
         logger.warning("Could not queue waitlist email", exc_info=True)
+
+    # Internal "someone joined" ping for the owner — new rows only, so a
+    # resubmission cannot be used to spam the inbox with a known address.
+    if settings.waitlist_notify_email and not already:
+        try:
+            send_signup_notification.delay(str(entry.id))
+        except Exception:  # broker down must never break the signup
+            logger.warning("Could not queue signup notification", exc_info=True)
 
     # Best-effort mirror to the Google Sheet (after the response, never blocking).
     if sheets_mirror_client.is_configured() and not already:

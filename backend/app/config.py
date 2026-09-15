@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     # is logged instead (fail-soft dev mode); the waitlist still works.
     resend_api_key: str = ""
     resend_from_email: str = ""  # e.g. "Solomon <hello@solomon.app>"
+    # Internal heads-up on every NEW waitlist signup (not resubmissions), sent
+    # through the same Resend sender. Unset => no notification.
+    waitlist_notify_email: str = ""
     # Origin used to build referral + verification links inside emails and
     # server-rendered responses. Falls back to ``frontend_url`` when empty.
     referral_public_base_url: str = ""
