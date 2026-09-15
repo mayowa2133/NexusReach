@@ -29,6 +29,10 @@ RUN groupadd --system nexusreach \
         openssl \
         libssl3t64 \
         openssl-provider-legacy \
+        gzip \
+        libpcre2-8-0 \
+        libsqlite3-0 \
+        perl-base \
     && apt-get install -y --no-install-recommends \
         texlive-latex-base \
         texlive-latex-extra \
