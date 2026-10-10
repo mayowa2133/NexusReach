@@ -26,6 +26,7 @@ from app.middleware.error_handler import (
 )
 from app.middleware.rate_limit import limiter
 from app.middleware.request_size import RequestSizeLimitMiddleware
+from app.middleware.auth_admission import AuthAdmissionMiddleware
 from app.observability import init_sentry
 from app.routers import deletions, occupations, referrals, waitlist
 from app.utils.client_ip import client_ip
@@ -45,6 +46,7 @@ app.state.limiter = limiter
 
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.add_middleware(RequestSizeLimitMiddleware)
+app.add_middleware(AuthAdmissionMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.frontend_url],

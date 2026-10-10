@@ -72,6 +72,11 @@ class Settings(BaseSettings):
     referral_tier_thresholds: str = "1,3,5,10"
     # Anti-fraud: max signups accepted from one IP in 24h.
     referral_signup_ip_daily_limit: int = 50
+    waitlist_daily_submission_limit: int = 1000
+    system_email_daily_limit: int = 500
+    system_email_recipient_daily_limit: int = 3
+    waitlist_resume_daily_limit: int = 50
+    waitlist_resume_daily_bytes: int = 250 * 1024 * 1024
     # Optional server-side mirror of each signup to a Google Apps Script /exec
     # URL, so the pre-launch Google Sheet stays populated now that the backend
     # is the primary sink. Unset => no mirror. Best-effort; never blocks signup.
@@ -85,10 +90,10 @@ class Settings(BaseSettings):
     # Must be created manually (see DEPLOYMENT_RUNBOOK). Uses supabase_url +
     # supabase_service_role_key; unset key => uploads are skipped, fail-soft.
     supabase_storage_bucket: str = "waitlist-resumes"
-    # Decoded resume cap for the PUBLIC waitlist route — deliberately smaller
+    # Decoded resume cap for mailbox-verified waitlist members — smaller
     # than the authenticated 10 MiB limit (typical resumes are well under 1 MiB).
     max_waitlist_resume_bytes: int = 5 * 1024 * 1024  # 5 MiB
-    # Whole-request cap for POST /api/waitlist: the resume rides as base64
+    # Whole-request cap for POST /api/referrals/resume: the resume rides as base64
     # (~33% inflation) alongside the form fields. See middleware/request_size.
     max_waitlist_request_bytes: int = 7 * 1024 * 1024  # 7 MiB
     # Retention for waitlist PII (waitlist members have no account, so the
@@ -220,7 +225,12 @@ class Settings(BaseSettings):
     global_daily_llm_token_limit: int = 1_000_000
     global_daily_api_call_limit: int = 500
     account_paid_concurrency: int = 2
+    profile_rescore_hourly_limit: int = 500
+    profile_rescore_account_hourly_limit: int = 10
     global_paid_concurrency: int = 6
+    max_bearer_header_bytes: int = 8192
+    auth_global_requests_per_minute: int = 3000
+    auth_source_requests_per_minute: int = 120
     paid_reservation_ttl_seconds: int = 300
     hunter_pattern_monthly_budget: int = 25
     employment_verify_top_n: int = 10
@@ -277,6 +287,10 @@ class Settings(BaseSettings):
     parser_sandbox_memory_bytes: int = 512 * 1024 * 1024
     parser_sandbox_cpu_seconds: int = 10
     parser_sandbox_output_bytes: int = 16 * 1024 * 1024
+    # Conservative default for the current 1 GiB services; all API/worker
+    # replicas share this Redis lease, including HTML extraction.
+    parser_global_concurrency: int = 1
+    parser_account_concurrency: int = 1
     latex_render_timeout_seconds: int = 15
     render_remote_enabled: bool = False
     renderer_isolation_enforced: bool = False

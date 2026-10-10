@@ -19,6 +19,7 @@ from app.database import async_session  # noqa: E402
 
 
 _SERVER_ONLY_TABLES = (
+    "profile_rescore_requests",
     "send_attempts",
     "auth_tombstones",
     "deletion_requests",

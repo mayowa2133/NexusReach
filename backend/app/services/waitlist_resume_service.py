@@ -23,7 +23,7 @@ from fastapi import HTTPException, status
 from app.clients import supabase_storage_client
 from app.config import settings
 from app.models.waitlist import WaitlistSignup
-from app.schemas.waitlist import WaitlistSignupCreate
+from app.schemas.waitlist import WaitlistSignupCreate, WaitlistResumeUpload
 from app.utils.resume_upload import (
     ensure_resume_magic_bytes,
     normalize_resume_content_type,
@@ -38,7 +38,7 @@ _EXTENSION_FOR_TYPE = {
 
 
 def decode_and_validate(
-    payload: WaitlistSignupCreate,
+    payload: WaitlistSignupCreate | WaitlistResumeUpload,
 ) -> tuple[bytes, str] | None:
     """Decode + validate an attached resume.
 

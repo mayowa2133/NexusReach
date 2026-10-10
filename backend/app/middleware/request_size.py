@@ -15,9 +15,8 @@ def _limit_for_path(path: str) -> int:
         return settings.max_resume_upload_bytes
     if path == "/api/linkedin-graph/import-file":
         return settings.max_linkedin_upload_bytes
-    # Public waitlist signup carries an optional base64 resume alongside the
-    # form fields, so it needs more than the ordinary-JSON default.
-    if path == "/api/waitlist":
+    # Resume attachment requires a mailbox-proven referral owner now.
+    if path == "/api/referrals/resume":
         return settings.max_waitlist_request_bytes
     return settings.max_request_body_bytes
 

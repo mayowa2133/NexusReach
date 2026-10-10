@@ -27,6 +27,9 @@ logger = logging.getLogger(__name__)
 
 
 async def _run(signup_id: str) -> dict:
+    from app.services.paid_context import set_subject
+
+    set_subject(uuid.UUID(signup_id))
     async with async_session() as db:
         result = await db.execute(
             select(WaitlistSignup).where(WaitlistSignup.id == uuid.UUID(signup_id))
@@ -34,6 +37,8 @@ async def _run(signup_id: str) -> dict:
         signup = result.scalar_one_or_none()
         if signup is None:
             return {"parsed": False, "reason": "signup_not_found"}
+        if not signup.email_verified:
+            return {"parsed": False, "reason": "mailbox_not_verified"}
         if not signup.resume_path:
             return {"parsed": False, "reason": "no_resume"}
 

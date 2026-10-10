@@ -169,8 +169,8 @@ async def _run_verification(signup_id: str, verification_token: str) -> dict:
         signup = await _load_signup(db, signup_id)
         if signup is None:
             return {"sent": False, "reason": "signup_not_found"}
-        if signup.email_verified:
-            return {"sent": False, "reason": "already_verified"}
+        # Recovery also uses a new single-use exchange for verified owners.
+        # Delivery is still bounded by canonical-recipient and global budgets.
 
         verify_url = build_verify_url(signup.referral_code, verification_token)
         sent = await resend_client.send_email(
@@ -244,6 +244,8 @@ async def _run_signup_notification(signup_id: str) -> dict:
         signup = await _load_signup(db, signup_id)
         if signup is None:
             return {"sent": False, "reason": "signup_not_found"}
+        if not signup.email_verified:
+            return {"sent": False, "reason": "mailbox_not_verified"}
         who = signup.name or signup.email
         sent = await resend_client.send_email(
             to=to,

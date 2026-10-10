@@ -34,14 +34,14 @@ from app.schemas.waitlist import (
     WaitlistSignupCreate,
     WaitlistSignupResponse,
 )
-from app.services import referral_service, waitlist_resume_service
+from app.services import referral_service
 from app.services.waitlist_service import (
     list_waitlist_signups,
     upsert_waitlist_signup,
 )
-from app.tasks.referrals import send_signup_notification, send_verification_email
-from app.tasks.waitlist_resume import parse_waitlist_resume
+from app.tasks.referrals import send_verification_email
 from app.utils.client_ip import client_ip
+from app.utils.resource_limits import consume
 
 logger = logging.getLogger(__name__)
 
@@ -64,35 +64,19 @@ async def join_waitlist(
             detail="Please use a permanent email address.",
         )
 
-    # Validate any attached resume BEFORE creating the signup: invalid input is
-    # the visitor's to fix, so tell them rather than silently dropping the file.
-    resume = waitlist_resume_service.decode_and_validate(payload)
+    if payload.resume_file_base64:
+        raise HTTPException(422, "Resume uploads require a verified email address.")
 
     # Resolved through the proxy chain — the socket peer is the edge, so keying
     # the daily cap on it would make it a site-wide ceiling instead of per-IP.
     caller_ip = client_ip(request)
     await referral_service.enforce_signup_ip_limit(caller_ip)
+    # Global admission is independent of IPs, aliases and signup status. Check
+    # every submission so exhaustion does not disclose existing addresses.
+    await consume([("waitlist-submissions", settings.waitlist_daily_submission_limit, 1)])
 
     result = await upsert_waitlist_signup(db, payload, signup_ip=caller_ip)
     entry, already = result.entry, result.already_on_list
-
-    # Store the file (fail-soft) and queue the out-of-band parse — for a NEW
-    # signup only. Attaching to an existing row would let anyone who knows an
-    # address replace that person's stored resume: the object path is derived
-    # from the row id and uploads are `x-upsert`, so it overwrites in place. The
-    # file is still validated above, so the response is identical either way and
-    # a returning visitor with a bad file is told about it.
-    if resume is not None and not already:
-        resume_bytes, resume_content_type = resume
-        await waitlist_resume_service.attach_resume(
-            entry, resume_bytes, resume_content_type, payload.resume_filename
-        )
-        await db.commit()
-        if entry.resume_path:
-            try:
-                parse_waitlist_resume.delay(str(entry.id))
-            except Exception:  # broker down must never break the signup
-                logger.warning("Could not queue resume parse", exc_info=True)
 
     # The single-use exchange credential is delivered only to the mailbox. An
     # existing signup is deliberately a no-op; recovery is a separate endpoint
@@ -102,14 +86,6 @@ async def join_waitlist(
             send_verification_email.delay(str(entry.id), result.verification_token)
     except Exception:  # broker down must never break the signup
         logger.warning("Could not queue waitlist email", exc_info=True)
-
-    # Internal "someone joined" ping for the owner — new rows only, so a
-    # resubmission cannot be used to spam the inbox with a known address.
-    if settings.waitlist_notify_email and not already:
-        try:
-            send_signup_notification.delay(str(entry.id))
-        except Exception:  # broker down must never break the signup
-            logger.warning("Could not queue signup notification", exc_info=True)
 
     # Best-effort mirror to the Google Sheet (after the response, never blocking).
     if sheets_mirror_client.is_configured() and not already:

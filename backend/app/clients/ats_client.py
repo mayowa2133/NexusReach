@@ -17,13 +17,7 @@ from app.utils.url_safety import is_safe_public_url, safe_get
 from app.clients.ats.html import (
     WORKDAY_JOB_TOKEN_RE,
     _workday_company_slug,
-    CANONICAL_LINK_RE,
     COMMON_SUBDOMAINS,
-    HEADING_RE,
-    JSON_LD_RE,
-    STATIC_ROUTER_RE,
-    TAG_RE,
-    TITLE_RE,
     WHITESPACE_RE,
     _clean_url,
     _coerce_posted_at,

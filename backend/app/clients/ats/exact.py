@@ -10,7 +10,7 @@ from app.clients import firecrawl_client
 from app.config import settings
 from app.utils.url_safety import is_safe_public_url_async, safe_get
 from app.clients.ats.boards import search_workable
-from app.clients.ats.html import _extract_title
+from app.utils.html_parsing import page_async
 from app.clients.ats.normalize import _job_richness_score, _normalize_apple_job, _normalize_exact_page, _normalize_generic_exact_job, _normalize_icims_job, _normalize_workday_job, _workday_page_matches
 from app.clients.ats.urls import ParsedATSJobURL
 
@@ -47,12 +47,14 @@ async def _fetch_direct_exact_page(
     content_type = (resp.headers.get("content-type") or "").lower()
     html = body if "html" in content_type or "<html" in body.lower() else ""
 
+    extracted = await page_async(html) if html else {"title": "", "content": body.strip()}
+
     return _normalize_exact_page(
         url=str(resp.url),
-        title=_extract_title(html) if html else "",
+        title=extracted["title"],
         html=html,
         markdown="",
-        content="" if html else body.strip(),
+        content=extracted["content"],
         retrieval_method="direct",
         fallback_used=False,
         allow_empty_content=allow_empty_content,
