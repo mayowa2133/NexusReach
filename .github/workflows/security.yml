@@ -31,7 +31,7 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: nexusreach_security
-        ports: ["5432:5432"]
+        ports: ["5432:5432", "55439:5432"]
         options: >-
           --health-cmd "pg_isready -U postgres -d nexusreach_security"
           --health-interval 5s --health-timeout 5s --health-retries 10
@@ -55,6 +55,44 @@ jobs:
         run: |
           python -m pip install --require-hashes -r requirements.lock
           python -m pip install pip-audit==2.10.0 bandit==1.8.6 semgrep==1.169.0
+          python -m pip install pytest==8.3.3 pytest-asyncio==0.24.0
+
+      - name: Prepare disposable security regression services
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y redis-server
+          python - <<'PY'
+          import asyncio
+          import asyncpg
+
+          async def prepare():
+              connection = await asyncpg.connect('postgresql://postgres:postgres@127.0.0.1:5432/nexusreach_security')
+              await connection.execute("CREATE ROLE audit LOGIN SUPERUSER PASSWORD 'audit-local-only'")
+              await connection.execute('CREATE ROLE anon; CREATE ROLE authenticated;')
+              await connection.execute('CREATE DATABASE nexusreach_security_audit OWNER audit')
+              await connection.close()
+
+          asyncio.run(prepare())
+          PY
+
+      - name: Test security regressions with real PostgreSQL and Redis
+        run: |
+          NEXUSREACH_DATABASE_URL=postgresql+asyncpg://audit:audit-local-only@127.0.0.1:55439/nexusreach_security_audit \
+            PYTHONPATH=backend python - <<'PY'
+          from alembic import command
+          from alembic.config import Config
+
+          config = Config('backend/alembic.ini')
+          config.set_main_option('script_location', 'backend/alembic')
+          command.upgrade(config, 'head')
+          PY
+          NEXUS_SECURITY_DB_TESTS=1 python -m pytest -q \
+            backend/tests/test_security_database.py \
+            backend/tests/test_security_remediation_database.py \
+            backend/tests/test_resource_admission_security.py \
+            backend/tests/test_auth_admission_security.py \
+            backend/tests/test_html_parsing_security.py \
+            backend/tests/test_private_feedback_security.py
 
       - name: Dependency audits
         run: |

@@ -22,6 +22,7 @@ from app.schemas.profile import (
     ResumeUploadJsonRequest,
 )
 from app.services.profile_linkedin_import import merge_linkedin_profile
+from app.services import profile_rescore_service
 from app.utils.resume_upload import normalize_resume_content_type
 from app.utils.sandboxed_process import run_in_sandbox_async
 from app.utils.uploads import read_upload_capped
@@ -138,6 +139,7 @@ async def _parse_and_store_resume(
     file_bytes: bytes,
     content_type: str,
 ) -> Profile:
+    await profile_rescore_service.admit(profile.user_id)
     # Parsing runs in a fresh, killable process with no network and OS resource
     # limits. A parser hang/OOM cannot consume the API worker.
     try:
@@ -153,6 +155,8 @@ async def _parse_and_store_resume(
         )
         raw_text = result["raw_text"]
         parsed = result["parsed"]
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=422, detail="Failed to parse resume safely.") from e
 
@@ -175,12 +179,8 @@ async def _parse_and_store_resume(
                 profile.github_url = url
                 break
 
-    await db.commit()
+    await profile_rescore_service.request(db, profile.user_id)
     await db.refresh(profile)
-
-    # Trigger background re-scoring of all jobs against the new resume
-    from app.tasks.jobs import rescore_user_jobs  # noqa: PLC0415
-    rescore_user_jobs.delay(str(profile.user_id))
 
     return profile
 
@@ -283,10 +283,20 @@ async def update_profile(
         raise HTTPException(status_code=404, detail="Profile not found")
 
     update_data = data.model_dump(exclude_unset=True)
-    for field, value in update_data.items():
+    changed = {field: value for field, value in update_data.items() if value != getattr(profile, field)}
+    scoring_fields = {
+        "target_roles", "target_locations", "target_industries", "target_occupations", "job_preferences",
+    }
+    needs_rescore = bool(scoring_fields & changed.keys())
+    if needs_rescore:
+        await profile_rescore_service.admit(user_id)
+    for field, value in changed.items():
         setattr(profile, field, value)
 
-    await db.commit()
+    if needs_rescore:
+        await profile_rescore_service.request(db, user_id)
+    else:
+        await db.commit()
     await db.refresh(profile)
 
     # Auto-seed saved searches when the user sets what/where they're targeting.
@@ -294,22 +304,13 @@ async def update_profile(
     # (occupation-aware discovery); without it an occupation-only profile would
     # never seed a saved search and its feed would never auto-refresh.
     seed_trigger_fields = {"target_roles", "target_locations", "target_occupations"}
-    if seed_trigger_fields & set(update_data.keys()):
+    if seed_trigger_fields & changed.keys():
         seeded = await _seed_saved_searches(db, user_id, profile)
         # First time we enroll this user into background ingestion — fill the feed
         # right away so jobs appear on their next Jobs visit without a button.
         if seeded:
             from app.tasks.jobs import discover_for_user  # noqa: PLC0415
             discover_for_user.delay(str(user_id))
-
-    # Re-score jobs if scoring-relevant fields changed
-    scoring_fields = {
-        "target_roles", "target_locations", "target_industries", "target_occupations",
-        "job_preferences",
-    }
-    if scoring_fields & set(update_data.keys()):
-        from app.tasks.jobs import rescore_user_jobs  # noqa: PLC0415
-        rescore_user_jobs.delay(str(user_id))
 
     return _serialize_profile(profile)
 

@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import html as html_lib
 import logging
-import re
 from urllib.parse import urlparse
 
 import httpx
@@ -12,13 +10,10 @@ import httpx
 from app.clients import firecrawl_client, jina_reader_client
 from app.config import settings
 from app.utils.url_safety import is_safe_public_url_async, safe_get
+from app.utils import html_parsing
 
 logger = logging.getLogger(__name__)
 
-TITLE_RE = re.compile(r"<title>(.*?)</title>", flags=re.IGNORECASE | re.DOTALL)
-SCRIPT_STYLE_RE = re.compile(r"<(?:script|style)[^>]*>.*?</(?:script|style)>", flags=re.IGNORECASE | re.DOTALL)
-TAG_RE = re.compile(r"<[^>]+>")
-WHITESPACE_RE = re.compile(r"\s+")
 INSUFFICIENT_CONTENT_PATTERNS = (
     "enable javascript",
     "javascript is required",
@@ -31,18 +26,11 @@ INSUFFICIENT_CONTENT_PATTERNS = (
 
 
 def _extract_title(html: str) -> str:
-    match = TITLE_RE.search(html or "")
-    if not match:
-        return ""
-    return html_lib.unescape(match.group(1)).strip()
+    return html_parsing.element_text(html or "", "title")
 
 
 def _html_to_text(html: str) -> str:
-    if not html:
-        return ""
-    without_scripts = SCRIPT_STYLE_RE.sub(" ", html)
-    without_tags = TAG_RE.sub(" ", without_scripts)
-    return WHITESPACE_RE.sub(" ", html_lib.unescape(without_tags)).strip()
+    return html_parsing.text(html or "")
 
 
 def _normalize_page(
@@ -112,14 +100,13 @@ async def fetch_direct_page(url: str, *, timeout_seconds: int = 20) -> dict | No
     content_type = (resp.headers.get("content-type") or "").lower()
     body = resp.text
     html = body if "html" in content_type or "<html" in body.lower() else ""
-    title = _extract_title(html) if html else ""
-    content = _html_to_text(html) if html else body.strip()
+    extracted = await html_parsing.page_async(html) if html else {"title": "", "content": body.strip()}
     return _normalize_page(
         url=str(resp.url),
-        title=title,
+        title=extracted["title"],
         html=html,
         markdown="",
-        content=content,
+        content=extracted["content"],
         retrieval_method="direct",
         fallback_used=False,
     )

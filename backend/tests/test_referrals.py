@@ -60,7 +60,7 @@ def test_email_links_put_credentials_in_fragments():
 
 def test_email_normalization_and_disposable_controls():
     assert rs.fraud_key("M.e+tag@Gmail.com") == "me@gmail.com"
-    assert rs.fraud_key("a.b+tag@outlook.com") == "a.b@outlook.com"
+    assert rs.fraud_key("a.b+tag@outlook.com") == "a.b+tag@outlook.com"
     assert rs.is_disposable_email("x@mailinator.com") is True
     assert rs.is_disposable_email("x@example.com") is False
 
@@ -98,10 +98,6 @@ async def test_public_signup_response_is_generic_for_new_and_existing(client, al
             new_callable=AsyncMock,
             return_value=result,
         ),
-        patch(
-            "app.routers.waitlist.waitlist_resume_service.decode_and_validate",
-            return_value=None,
-        ),
         patch("app.routers.waitlist.send_verification_email.delay") as send_mail,
         patch("app.routers.waitlist.sheets_mirror_client.is_configured", return_value=False),
     ):
@@ -117,7 +113,7 @@ async def test_public_signup_response_is_generic_for_new_and_existing(client, al
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("already", [False, True])
-async def test_owner_is_notified_of_new_signups_only(client, monkeypatch, already):
+async def test_owner_is_not_notified_before_mailbox_verification(client, monkeypatch, already):
     monkeypatch.setattr(settings, "waitlist_notify_email", "founder@example.com")
     signup = _signup()
     result = WaitlistUpsertResult(
@@ -137,12 +133,8 @@ async def test_owner_is_notified_of_new_signups_only(client, monkeypatch, alread
             new_callable=AsyncMock,
             return_value=result,
         ),
-        patch(
-            "app.routers.waitlist.waitlist_resume_service.decode_and_validate",
-            return_value=None,
-        ),
         patch("app.routers.waitlist.send_verification_email.delay"),
-        patch("app.routers.waitlist.send_signup_notification.delay") as notify,
+        patch("app.tasks.referrals.send_signup_notification.delay") as notify,
         patch("app.routers.waitlist.sheets_mirror_client.is_configured", return_value=False),
     ):
         response = await client.post(
@@ -150,9 +142,7 @@ async def test_owner_is_notified_of_new_signups_only(client, monkeypatch, alread
         )
 
     assert response.status_code == 202
-    assert notify.called is (not already)
-    if not already:
-        notify.assert_called_once_with(str(signup.id))
+    notify.assert_not_called()
 
 
 def test_signup_notification_email_escapes_and_labels_occupation():

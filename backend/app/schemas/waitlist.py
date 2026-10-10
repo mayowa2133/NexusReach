@@ -76,6 +76,14 @@ class ReferralProfileUpdate(BaseModel):
         return v.strip() or None
 
 
+class WaitlistResumeUpload(BaseModel):
+    """A resume may be attached only after mailbox-proven owner access."""
+
+    resume_filename: str = Field(min_length=1, max_length=300)
+    resume_content_type: str = Field(min_length=1, max_length=120)
+    resume_file_base64: str = Field(min_length=1)
+
+
 class WaitlistSignupResponse(BaseModel):
     ok: bool = True
 

@@ -123,7 +123,7 @@ async def test_upload_resume_json_success(client, mock_user_id):
                  "skills": ["Python"],
              },
          }), \
-         patch("app.tasks.jobs.rescore_user_jobs.delay") as mock_delay:
+         patch("app.routers.profile.profile_rescore_service.request", new_callable=AsyncMock) as mock_request:
         resp = await client.post("/api/profile/resume-json", json=payload)
 
     app.dependency_overrides.pop(get_db, None)
@@ -133,9 +133,30 @@ async def test_upload_resume_json_success(client, mock_user_id):
     assert data["id"] == str(profile.id)
     assert data["full_name"] == "Test User"
     assert data["resume_parsed"]["skills"] == ["Python"]
-    mock_db.commit.assert_awaited_once()
+    # The outbox service owns the atomic profile + request commit.
+    mock_request.assert_awaited_once_with(mock_db, mock_user_id)
     mock_db.refresh.assert_awaited_once_with(profile)
-    mock_delay.assert_called_once_with(str(mock_user_id))
+
+
+async def test_identical_scoring_updates_do_not_enqueue_or_seed_work(client, mock_user_id):
+    """The original SEC-04 request flood must be a no-op, even after ten PUTs."""
+    from app.database import get_db
+    from app.main import app
+
+    profile = _mock_profile(mock_user_id)
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = profile
+    db = AsyncMock()
+    db.execute.return_value = result
+    app.dependency_overrides[get_db] = lambda: db
+    with patch("app.routers.profile.profile_rescore_service.request", new=AsyncMock()) as request, \
+         patch("app.routers.profile.profile_rescore_service.admit", new=AsyncMock()) as admit, \
+         patch("app.routers.profile._seed_saved_searches", new=AsyncMock()) as seed:
+        responses = [await client.put("/api/profile", json={"target_roles": ["SWE"]}) for _ in range(10)]
+    assert all(response.status_code == 200 for response in responses)
+    request.assert_not_awaited()
+    admit.assert_not_awaited()
+    seed.assert_not_awaited()
 
 
 async def test_update_profile(client, mock_user_id):

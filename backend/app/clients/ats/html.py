@@ -7,31 +7,8 @@ import re
 from html import unescape
 from urllib.parse import urlparse
 
+from app.utils import html_parsing
 
-
-
-JSON_LD_RE = re.compile(
-    r"<script[^>]+type=[\"']application/ld\+json[\"'][^>]*>(?P<payload>.*?)</script>",
-    flags=re.IGNORECASE | re.DOTALL,
-)
-
-
-STATIC_ROUTER_RE = re.compile(
-    r"window\.__staticRouterHydrationData\s*=\s*JSON\.parse\(\"(?P<payload>.*?)\"\);",
-    flags=re.DOTALL,
-)
-
-
-TITLE_RE = re.compile(r"<title>(?P<title>.*?)</title>", flags=re.IGNORECASE | re.DOTALL)
-
-
-HEADING_RE = re.compile(r"<h1[^>]*>(?P<title>.*?)</h1>", flags=re.IGNORECASE | re.DOTALL)
-
-
-CANONICAL_LINK_RE = re.compile(
-    r"<link\b[^>]*rel=[\"']canonical[\"'][^>]*href=[\"'](?P<href>[^\"']+)[\"']",
-    flags=re.IGNORECASE,
-)
 
 
 # A "datePosted" value embedded in any inline JSON blob (__NEXT_DATA__, Apollo
@@ -39,29 +16,17 @@ CANONICAL_LINK_RE = re.compile(
 # backslash so it also matches inside double-encoded JSON strings.
 DATE_POSTED_JSON_RE = re.compile(r'\\?"datePosted\\?"\s*:\s*\\?"([^"\\]+)\\?"', re.IGNORECASE)
 
-
 # A microdata <meta itemprop="datePosted" content="..."> or
 # <time itemprop="datePosted" datetime="..."> tag.
-ITEMPROP_DATEPOSTED_RE = re.compile(
-    r"<(?:meta|time)\b[^>]*\bitemprop\s*=\s*[\"']datePosted[\"'][^>]*>",
-    flags=re.IGNORECASE,
-)
-
-
-TAG_RE = re.compile(r"<[^>]+>")
-
 
 WHITESPACE_RE = re.compile(r"\s+")
 
-
 COMMON_SUBDOMAINS = {"jobs", "careers", "apply", "app", "www"}
-
 
 def _clean_url(url: str) -> str:
     parsed = urlparse(url)
     path = parsed.path.rstrip("/")
     return parsed._replace(path=path, query="", fragment="").geturl()
-
 
 def _humanize_company_slug(slug: str) -> str:
     """Turn an ATS board slug into a readable company name (audit M2).
@@ -74,44 +39,37 @@ def _humanize_company_slug(slug: str) -> str:
         return slug or ""
     return " ".join(word[:1].upper() + word[1:] for word in cleaned.split())
 
-
 def _strip_tags(value: str | None) -> str:
-    return WHITESPACE_RE.sub(" ", unescape(TAG_RE.sub(" ", value or ""))).strip()
-
+    return html_parsing.text(value or "")
 
 def _normalize_text(value: str | None) -> str:
     normalized = unescape(value or "").replace("\r\n", "\n").replace("\r", "\n")
     normalized = re.sub(r"\n{3,}", "\n\n", normalized)
     return normalized.strip()
 
-
 def _extract_title(html: str) -> str:
-    match = TITLE_RE.search(html or "")
-    return _strip_tags(match.group("title")) if match else ""
-
+    return html_parsing.element_text(html or "", "title")
 
 def _extract_heading(html: str) -> str:
-    match = HEADING_RE.search(html or "")
-    return _strip_tags(match.group("title")) if match else ""
-
+    return html_parsing.element_text(html or "", "h1")
 
 def _find_attr(tag: str, attr: str) -> str:
     match = re.search(rf'{attr}\s*=\s*["\']([^"\']+)["\']', tag, flags=re.IGNORECASE)
     return unescape(match.group(1)).strip() if match else ""
 
-
 def _extract_meta_content(html: str, key: str) -> str:
     lowered_key = key.lower()
-    for match in re.finditer(r"<meta\b[^>]*>", html or "", flags=re.IGNORECASE):
-        tag = match.group(0)
-        name = _find_attr(tag, "name") or _find_attr(tag, "property")
+    root = html_parsing.document(html or "")
+    if root is None:
+        return ""
+    for tag in root.iter("meta"):
+        name = tag.get("name", "") or tag.get("property", "")
         if name.lower() != lowered_key:
             continue
-        content = _find_attr(tag, "content")
+        content = tag.get("content", "")
         if content:
             return content
     return ""
-
 
 def _extract_posted_at(html: str) -> str | None:
     """Best-effort posting date from an HTML page when JSON-LD parsing failed.
@@ -130,12 +88,13 @@ def _extract_posted_at(html: str) -> str | None:
     if json_match and json_match.group(1).strip():
         return json_match.group(1).strip()
 
-    tag_match = ITEMPROP_DATEPOSTED_RE.search(html)
-    if tag_match:
-        tag = tag_match.group(0)
-        value = _find_attr(tag, "content") or _find_attr(tag, "datetime")
-        if value:
-            return value
+    root = html_parsing.document(html)
+    if root is not None:
+        for tag in root.iter("meta", "time"):
+            if (tag.get("itemprop") or "").lower() == "dateposted":
+                value = tag.get("content") or tag.get("datetime")
+                if value:
+                    return value
 
     published = _extract_meta_content(html, "article:published_time")
     if published.strip():
@@ -143,16 +102,15 @@ def _extract_posted_at(html: str) -> str | None:
 
     return None
 
-
 def _extract_canonical_link(html: str) -> str | None:
-    match = CANONICAL_LINK_RE.search(html or "")
-    if not match:
-        return None
-    href = unescape(match.group("href")).strip()
-    if not href:
-        return None
-    return _clean_url(href)
-
+    root = html_parsing.document(html or "")
+    if root is not None:
+        for tag in root.iter("link"):
+            if "canonical" in (tag.get("rel") or "").lower().split():
+                href = (tag.get("href") or "").strip()
+                if href:
+                    return _clean_url(href)
+    return None
 
 def _domain_root(host: str | None) -> str:
     parts = [part for part in (host or "").lower().split(".") if part]
@@ -164,12 +122,10 @@ def _domain_root(host: str | None) -> str:
         return parts[-3]
     return parts[-2]
 
-
 def _host_ats_label(host: str) -> str:
     root = _domain_root(host)
     label = re.sub(r"[^a-z0-9]+", "_", root).strip("_")
     return f"{label}_jobs" if label else "custom_jobs"
-
 
 def _display_company_slug(company_slug: str | None, *, raw_name: str | None = None) -> str:
     if not company_slug:
@@ -185,50 +141,60 @@ def _display_company_slug(company_slug: str | None, *, raw_name: str | None = No
 
     return " ".join(part.capitalize() for part in normalized_slug.split())
 
-
 def _job_posting_candidates(payload: object) -> list[dict]:
     candidates: list[dict] = []
-    if isinstance(payload, dict):
-        payload_type = payload.get("@type")
-        if payload_type == "JobPosting" or (
-            isinstance(payload_type, list) and "JobPosting" in payload_type
-        ):
-            candidates.append(payload)
-        if isinstance(payload.get("@graph"), list):
-            for item in payload["@graph"]:
-                candidates.extend(_job_posting_candidates(item))
-    elif isinstance(payload, list):
-        for item in payload:
-            candidates.extend(_job_posting_candidates(item))
+    pending = [payload]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, dict):
+            payload_type = item.get("@type")
+            if payload_type == "JobPosting" or (
+                isinstance(payload_type, list) and "JobPosting" in payload_type
+            ):
+                candidates.append(item)
+            if isinstance(item.get("@graph"), list):
+                pending.extend(reversed(item["@graph"]))
+        elif isinstance(item, list):
+            pending.extend(reversed(item))
     return candidates
 
-
 def _extract_json_ld_job(html: str) -> dict | None:
-    for match in JSON_LD_RE.finditer(html or ""):
-        raw_payload = match.group("payload").strip()
+    root = html_parsing.document(html or "")
+    if root is None:
+        return None
+    for tag in root.iter("script"):
+        if (tag.get("type") or "").lower() != "application/ld+json":
+            continue
+        raw_payload = (tag.text or "").strip()
         if not raw_payload:
             continue
         try:
             payload = json.loads(raw_payload)
-        except json.JSONDecodeError:
+        except (ValueError, RecursionError):
             continue
         candidates = _job_posting_candidates(payload)
         if candidates:
             return candidates[0]
     return None
 
-
 def _extract_static_router_payload(html: str) -> dict | None:
-    match = STATIC_ROUTER_RE.search(html or "")
-    if not match:
+    # Tokenize the assignment once; repeated unterminated strings must not make
+    # a lazy regex rescan the remaining page for every candidate.
+    start = (html or "").find("window.__staticRouterHydrationData")
+    if start < 0:
+        return None
+    rest = html[start + len("window.__staticRouterHydrationData"):].lstrip()
+    if not rest.startswith("="):
+        return None
+    rest = rest[1:].lstrip()
+    if not rest.startswith("JSON.parse("):
         return None
     try:
-        decoded = json.loads(f"\"{match.group('payload')}\"")
+        decoded, _ = json.JSONDecoder().raw_decode(rest[len("JSON.parse("):].lstrip())
         payload = json.loads(decoded)
-    except json.JSONDecodeError:
+    except (ValueError, TypeError, RecursionError):
         return None
     return payload if isinstance(payload, dict) else None
-
 
 def _string_list(value: object) -> list[str]:
     if isinstance(value, list):
@@ -237,12 +203,10 @@ def _string_list(value: object) -> list[str]:
         return [value.strip()]
     return []
 
-
 def _coerce_posted_at(value: object) -> str | None:
     if isinstance(value, str) and value.strip():
         return value.strip()
     return None
-
 
 def _epoch_ms_to_iso(value: object) -> str | None:
     """Convert a Unix epoch-millisecond timestamp to an ISO 8601 string."""
@@ -255,7 +219,6 @@ def _epoch_ms_to_iso(value: object) -> str | None:
     except (OSError, ValueError, OverflowError):
         return None
 
-
 def _json_ld_company(job_posting: dict, host: str) -> str:
     hiring = job_posting.get("hiringOrganization")
     if isinstance(hiring, dict):
@@ -263,7 +226,6 @@ def _json_ld_company(job_posting: dict, host: str) -> str:
         if isinstance(name, str) and name.strip():
             return name.strip()
     return _domain_root(host).title()
-
 
 def _json_ld_location(job_posting: dict) -> str | None:
     raw_locations = job_posting.get("jobLocation")
@@ -289,9 +251,7 @@ def _json_ld_location(job_posting: dict) -> str | None:
                 formatted.append(joined)
     return " | ".join(dict.fromkeys(formatted)) or None
 
-
 WORKDAY_JOB_TOKEN_RE = re.compile(r"_(?P<token>JR[A-Za-z0-9-]+)$")
-
 
 def _workday_company_slug(host: str) -> str | None:
     host_parts = [part for part in (host or "").lower().split(".") if part]

@@ -1,5 +1,10 @@
 # NexusReach Production Deployment Runbook
 
+For the October 2026 security changes, follow the
+[remediation rollout](docs/security-remediation-2026-10.md#rollout) before reopening
+referral traffic. It covers migrations 076–077, mailbox-identity backfill and the
+new shared resource limits.
+
 Last updated: 2026-05-24
 
 This project is committed to this production stack for the mid-June launch:

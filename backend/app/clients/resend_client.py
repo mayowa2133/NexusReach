@@ -7,7 +7,7 @@ system/transactional email path in the backend.
 
 Fail-soft by design: when ``NEXUSREACH_RESEND_API_KEY`` /
 ``NEXUSREACH_RESEND_FROM_EMAIL`` are unset (local dev), we skip the network call
-and return ``False`` so the caller can log the link instead. The signup itself
+and return ``False`` so the caller can log delivery failure. The signup itself
 has already succeeded, so email is always best-effort.
 """
 
@@ -16,6 +16,7 @@ import logging
 import httpx
 
 from app.config import settings
+from app.utils.resource_limits import consume, identity_key
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,20 @@ async def send_email(
     """
     if not is_configured():
         logger.info("Resend not configured; transactional email skipped")
+        return False
+
+    from app.utils.email_identity import canonical_mailbox
+    recipient = identity_key(canonical_mailbox(to))
+    recipient_limit = settings.system_email_recipient_daily_limit
+    if to.strip().lower() == settings.waitlist_notify_email.strip().lower():
+        recipient_limit = settings.system_email_daily_limit
+    try:
+        await consume([
+            ("system-email", settings.system_email_daily_limit, 1),
+            (f"system-email-recipient:{recipient}", recipient_limit, 1),
+        ])
+    except Exception:
+        logger.warning("Transactional email admission refused or unavailable")
         return False
 
     payload: dict[str, object] = {

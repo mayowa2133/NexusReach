@@ -121,6 +121,9 @@ celery_app.conf.update(
         "app.tasks.auto_prospect.refresh_job_research_snapshot": {"queue": "prewarm"},
     },
     beat_schedule={
+        "recover-profile-rescores": {
+            "task": "app.tasks.jobs.recover_profile_rescores", "schedule": 60.0,
+        },
         "deliver-referral-credit-notifications": {
             "task": "app.tasks.referrals.deliver_pending_credit_notifications",
             "schedule": 60.0,

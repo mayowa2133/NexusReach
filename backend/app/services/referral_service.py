@@ -115,12 +115,9 @@ def fraud_key(email: str) -> str:
     ``m.e@gmail.com`` map to the same key. Used ONLY for fraud comparisons —
     the stored/queried email stays the plain lowercased address.
     """
-    email = email.strip().lower()
-    local, _, domain = email.partition("@")
-    local = local.split("+", 1)[0]
-    if domain in {"gmail.com", "googlemail.com"}:
-        local = local.replace(".", "")
-    return f"{local}@{domain}"
+    from app.utils.email_identity import canonical_mailbox
+
+    return canonical_mailbox(email)
 
 
 async def enforce_signup_ip_limit(ip: str | None) -> None:
@@ -206,7 +203,7 @@ def issue_verification_token(signup: WaitlistSignup) -> str:
 
 
 async def verify_signup(db: AsyncSession, code: str, token: str):
-    from app.services.referral_credentials import campaign, fingerprint, issue
+    from app.services.referral_credentials import campaign, fingerprint, issue, legacy_fingerprint
     if not token or not token.startswith(VERIFICATION_TOKEN_PREFIX):
         return None
     campaign_row, key = await campaign(db)
@@ -224,15 +221,27 @@ async def verify_signup(db: AsyncSession, code: str, token: str):
                 and signup.verification_token_hash == hash_token(token)):
             return None
         signup.verification_token_hash = None
+    identity = fingerprint(key, signup.email)
+    old_identity = legacy_fingerprint(key, signup.email)
+    legacy_exists = old_identity != identity and await db.scalar(select(ReferralCredit.id).where(
+        ReferralCredit.campaign_id == campaign_row.id, ReferralCredit.fingerprint == old_identity,
+    )) is not None
+    # Old deleted addresses survive only as irreversible raw-email HMACs. If
+    # any remain, an unseen Gmail alias cannot be proved new: fail closed on
+    # rewards while still verifying the mailbox and granting dashboard access.
+    legacy_review = bool(campaign_row.unresolved_legacy_identities and
+                         fraud_key(signup.email).endswith("@gmail.com"))
+    referrer_id = None if legacy_exists or legacy_review else signup.referred_by_id
     new_credit = await db.execute(insert(ReferralCredit).values(
-        campaign_id=campaign_row.id, fingerprint=fingerprint(key, signup.email),
-        referrer_id=signup.referred_by_id,
-        notification_status="pending" if signup.referred_by_id else "not_applicable",
+        campaign_id=campaign_row.id, fingerprint=identity,
+        referrer_id=referrer_id,
+        notification_status="legacy_review" if legacy_review else ("pending" if referrer_id else "not_applicable"),
     ).on_conflict_do_nothing().returning(ReferralCredit.id))
-    credited = signup.referred_by_id if new_credit.scalar_one_or_none() is not None else None
+    credited = referrer_id if new_credit.scalar_one_or_none() is not None else None
     if credited is not None:
         await db.execute(WaitlistSignup.__table__.update().where(WaitlistSignup.id == credited)
             .values(verified_referral_count=WaitlistSignup.verified_referral_count+1))
+    signup._newly_verified = not signup.email_verified
     signup.email_verified = True
     signup.verified_at = signup.verified_at or now
     access_token = await issue(db, signup, 'owner')

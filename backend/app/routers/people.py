@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.person import Person
-from app.services.known_people_service import expire_known_person
 from app.services.people.hiring_team_capture import ingest_hiring_team_capture
 
 from app.database import get_db
@@ -338,7 +337,7 @@ async def submit_person_feedback(
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Record contact-quality feedback and evict bad cache rows immediately."""
+    """Record private feedback and suppress this user's stale snapshots."""
     result = await db.execute(
         select(Person)
         .options(selectinload(Person.company))
@@ -367,14 +366,8 @@ async def submit_person_feedback(
     if body.feedback in ("wrong_person", "not_at_company"):
         if body.feedback == "not_at_company":
             person.current_company_verified = False
-        company_name = person.company.name if person.company else None
-        if company_name:
-            try:
-                evicted = await expire_known_person(
-                    db, company_name=company_name, full_name=person.full_name
-                )
-            except Exception:
-                logger.warning("known-people eviction failed", exc_info=True)
+        # Owning a private CRM row does not grant authority over shared facts.
+        # Global corrections require independently trusted evidence/moderation.
     if negative_feedback:
         try:
             snapshots_updated = await evict_person_from_job_research_snapshots(

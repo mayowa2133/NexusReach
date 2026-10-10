@@ -253,7 +253,7 @@ def _patched_join(entry):
     )
 
 
-async def test_join_with_resume_stores_and_queues_parse(client):
+async def test_public_join_rejects_resume_before_any_storage_or_parse(client):
     entry = _signup()
     p1, p2, p3, p4 = _patched_join(entry)
     with (
@@ -266,7 +266,7 @@ async def test_join_with_resume_stores_and_queues_parse(client):
             new_callable=AsyncMock,
             return_value=True,
         ),
-        patch("app.routers.waitlist.parse_waitlist_resume.delay") as mock_parse,
+        patch("app.tasks.waitlist_resume.parse_waitlist_resume.delay") as mock_parse,
     ):
         resp = await client.post(
             "/api/waitlist",
@@ -280,9 +280,9 @@ async def test_join_with_resume_stores_and_queues_parse(client):
             },
         )
 
-    assert resp.status_code == 202
-    assert entry.resume_parse_status == "pending"
-    mock_parse.assert_called_once()
+    assert resp.status_code == 422
+    assert entry.resume_parse_status == "none"
+    mock_parse.assert_not_called()
 
 
 async def test_resubmission_cannot_overwrite_an_existing_resume(client):
@@ -321,7 +321,7 @@ async def test_resubmission_cannot_overwrite_an_existing_resume(client):
             new_callable=AsyncMock,
             return_value=True,
         ) as mock_upload,
-        patch("app.routers.waitlist.parse_waitlist_resume.delay") as mock_parse,
+        patch("app.tasks.waitlist_resume.parse_waitlist_resume.delay") as mock_parse,
     ):
         resp = await client.post(
             "/api/waitlist",
@@ -334,7 +334,7 @@ async def test_resubmission_cannot_overwrite_an_existing_resume(client):
             },
         )
 
-    assert resp.status_code == 202  # the generic acknowledgement is identical
+    assert resp.status_code == 422  # identical rejection for new and existing emails
     mock_upload.assert_not_awaited()
     mock_parse.assert_not_called()
     assert entry.resume_filename == "owners-real-resume.pdf"
@@ -360,7 +360,7 @@ async def test_resubmission_still_reports_an_invalid_resume(client):
     assert resp.status_code == 422
 
 
-async def test_join_still_succeeds_when_storage_fails(client):
+async def test_public_attachment_never_reaches_storage_even_when_storage_is_down(client):
     entry = _signup()
     p1, p2, p3, p4 = _patched_join(entry)
     with (
@@ -373,7 +373,7 @@ async def test_join_still_succeeds_when_storage_fails(client):
             new_callable=AsyncMock,
             return_value=False,
         ),
-        patch("app.routers.waitlist.parse_waitlist_resume.delay") as mock_parse,
+        patch("app.tasks.waitlist_resume.parse_waitlist_resume.delay") as mock_parse,
     ):
         resp = await client.post(
             "/api/waitlist",
@@ -386,9 +386,8 @@ async def test_join_still_succeeds_when_storage_fails(client):
             },
         )
 
-    # Infrastructure failure must not cost the visitor their signup.
-    assert resp.status_code == 202
-    assert entry.resume_parse_status == "failed"
+    assert resp.status_code == 422
+    assert entry.resume_parse_status == "none"
     mock_parse.assert_not_called()
 
 
@@ -412,7 +411,7 @@ async def test_join_rejects_a_file_lying_about_its_type(client):
 async def test_join_without_resume_is_unaffected(client):
     entry = _signup()
     p1, p2, p3, p4 = _patched_join(entry)
-    with p1, p2, p3, p4, patch("app.routers.waitlist.parse_waitlist_resume.delay") as mp:
+    with p1, p2, p3, p4, patch("app.tasks.waitlist_resume.parse_waitlist_resume.delay") as mp:
         resp = await client.post(
             "/api/waitlist",
             json={"name": "Jordan Rivera", "email": "jordan@example.com"},

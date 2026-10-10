@@ -15,6 +15,7 @@ from app.schemas.waitlist import (
     ReferralStatus,
     ReferralVerifyResponse,
     WaitlistDeleteResponse,
+    WaitlistResumeUpload,
 )
 from app.services import referral_service, waitlist_retention_service
 from app.utils.waitlist_goals import clean_target_occupation
@@ -117,6 +118,16 @@ async def verify_referral(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     signup, access_token, _credited_referrer_id = verified
 
+    if getattr(signup, "_newly_verified", False) is True:
+        from app.config import settings
+        from app.tasks.referrals import send_signup_notification
+
+        if settings.waitlist_notify_email:
+            try:
+                send_signup_notification.delay(str(signup.id))
+            except Exception:
+                logger.warning("Could not queue verified signup notification", exc_info=True)
+
     payload = await referral_service.referral_status_payload(db, signup)
     return ReferralVerifyResponse(
         name=signup.name,
@@ -124,6 +135,39 @@ async def verify_referral(
         access_token=access_token,
         **payload,
     )
+
+
+@router.post("/resume", status_code=202)
+@limiter.limit("5/minute")
+async def attach_verified_resume(
+    request: Request,
+    body: WaitlistResumeUpload,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    code: Annotated[str, Query(max_length=16)],
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(owner_bearer)],
+) -> dict[str, bool]:
+    from app.config import settings
+    from app.services import waitlist_resume_service
+    from app.tasks.waitlist_resume import parse_waitlist_resume
+    from app.utils.resource_limits import consume
+
+    signup = await referral_service.resolve_signup_by_token(db, code, _bearer_token(credentials))
+    if signup is None or not signup.email_verified:
+        raise HTTPException(404)
+    resume = waitlist_resume_service.decode_and_validate(body)
+    if resume is None:
+        raise HTTPException(422, "Attach a nonempty resume.")
+    data, content_type = resume
+    await consume([
+        ("waitlist-resumes", settings.waitlist_resume_daily_limit, 1),
+        ("waitlist-resume-bytes", settings.waitlist_resume_daily_bytes, len(data)),
+        (f"waitlist-resume-owner:{signup.id}", 2, 1),
+    ])
+    await waitlist_resume_service.attach_resume(signup, data, content_type, body.resume_filename)
+    await db.commit()
+    if signup.resume_path:
+        parse_waitlist_resume.delay(str(signup.id))
+    return {"ok": True}
 
 
 @router.post("/recover", status_code=status.HTTP_202_ACCEPTED)

@@ -175,17 +175,49 @@ async def run_in_sandbox_async(
     output_bytes: int,
     **kwargs: Any,
 ) -> Any:
-    return await asyncio.to_thread(
-        run_in_sandbox,
-        module_name,
-        function_name,
-        *args,
-        timeout_seconds=timeout_seconds,
-        memory_bytes=memory_bytes,
-        cpu_seconds=cpu_seconds,
-        output_bytes=output_bytes,
-        **kwargs,
-    )
+    from app.utils.resource_limits import process_capacity
+
+    async with process_capacity(timeout_seconds):
+        with tempfile.TemporaryDirectory(prefix="nexusreach-sandbox-") as work_dir:
+            work_path = Path(work_dir)
+            request_path = work_path / "request.json"
+            result_path = work_path / "result.json"
+            request_path.write_text(json.dumps({
+                "module": module_name, "function": function_name,
+                "args": _json_safe(args), "kwargs": _json_safe(kwargs),
+                "memory_bytes": memory_bytes, "cpu_seconds": cpu_seconds,
+                "output_bytes": output_bytes,
+            }), encoding="utf-8")
+            env = {key: os.environ[key] for key in ("PATH", "HOME", "TMPDIR", "SYSTEMROOT") if key in os.environ}
+            env["PYTHONPATH"] = str(Path(__file__).resolve().parents[2])
+            process = await asyncio.create_subprocess_exec(
+                sys.executable, "-m", "app.utils.sandboxed_process", "--worker",
+                str(request_path), str(result_path), cwd=work_dir, env=env,
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            try:
+                await asyncio.wait_for(process.wait(), timeout=timeout_seconds)
+            except (TimeoutError, asyncio.CancelledError) as exc:
+                # Never release admission while a cancelled request's child is
+                # still alive. Kill/reap the entire process group first.
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                await process.wait()
+                if isinstance(exc, asyncio.CancelledError):
+                    raise
+                raise SandboxedProcessError("Sandboxed processing timed out.") from exc
+            if process.returncode != 0 or not result_path.exists():
+                raise SandboxedProcessError("Sandboxed processing failed safely.")
+            data = result_path.read_bytes()
+            if len(data) > output_bytes:
+                raise SandboxedProcessError("Sandboxed processing returned too much data.")
+            payload = json.loads(data)
+            if payload.get("status") != "ok":
+                raise SandboxedProcessError(str(payload.get("value")))
+            return _json_restore(payload.get("value"))
 
 
 if __name__ == "__main__":

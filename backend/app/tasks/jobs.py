@@ -740,66 +740,65 @@ async def _rescore_user_jobs(user_id: uuid.UUID) -> dict:
 
         profile_updated = profile.updated_at
 
-        # Get jobs needing re-scoring: scored_at is null OR scored_at < profile.updated_at
-        result = await db.execute(
-            select(Job).where(
-                Job.user_id == user_id,
-                Job.description.isnot(None),
-            )
-        )
-        jobs = list(result.scalars().all())
+        # Fetch bounded batches and filter stale rows in SQL. A concurrent
+        # profile edit remains stale because scored_at records this snapshot.
+        from sqlalchemy import or_
 
-        batch_count = 0
-        for job in jobs:
-            # Skip if already scored after profile was last updated
-            if (
-                job.scored_at is not None
-                and profile_updated is not None
-                and job.scored_at >= profile_updated
-            ):
-                stats["skipped"] += 1
-                continue
-
-            try:
-                job_data = {
-                    "title": job.title,
-                    "company_name": job.company_name,
-                    "location": job.location,
-                    "description": job.description,
-                    "remote": job.remote,
-                    "experience_level": job.experience_level,
-                    "country_codes": job.country_codes,
-                    "tags": job.tags,
-                }
-                if profile.resume_parsed:
-                    new_score, new_breakdown = score_job(job_data, profile)
-                else:
-                    from app.services.jobs.storage import hard_eligibility_decision  # noqa: PLC0415
-
-                    new_score = None
-                    new_breakdown = {
-                        "resume_missing": True,
-                        "resume_not_uploaded": True,
-                        "max_possible": 100,
-                        "eligibility": hard_eligibility_decision(job_data, profile),
+        last_id = None
+        while True:
+            statement = select(Job).where(Job.user_id == user_id, Job.description.isnot(None))
+            if profile_updated is not None:
+                statement = statement.where(or_(Job.scored_at.is_(None), Job.scored_at < profile_updated))
+            if last_id is not None:
+                statement = statement.where(Job.id > last_id)
+            jobs = list((await db.scalars(statement.order_by(Job.id).limit(100))).all())
+            if not jobs:
+                break
+            batch_count = 0
+            for job in jobs:
+                try:
+                    job_data = {
+                        "title": job.title,
+                        "company_name": job.company_name,
+                        "location": job.location,
+                        "description": job.description,
+                        "remote": job.remote,
+                        "experience_level": job.experience_level,
+                        "country_codes": job.country_codes,
+                        "tags": job.tags,
                     }
-                job.match_score = new_score
-                job.score_breakdown = new_breakdown
-                job.scored_at = datetime.now(timezone.utc)
-                stats["rescored"] += 1
-                batch_count += 1
+                    if profile.resume_parsed:
+                        new_score, new_breakdown = score_job(job_data, profile)
+                    else:
+                        from app.services.jobs.storage import hard_eligibility_decision  # noqa: PLC0415
 
-                # Flush every 50 to avoid holding too much in memory
-                if batch_count >= 50:
-                    await db.flush()
-                    batch_count = 0
-            except Exception:
-                stats["errors"] += 1
-                logger.debug(
-                    "Re-score failed: job=%s", job.id, exc_info=True,
-                )
+                        new_score = None
+                        new_breakdown = {
+                            "resume_missing": True,
+                            "resume_not_uploaded": True,
+                            "max_possible": 100,
+                            "eligibility": hard_eligibility_decision(job_data, profile),
+                        }
+                    job.match_score = new_score
+                    job.score_breakdown = new_breakdown
+                    job.scored_at = profile_updated or datetime.now(timezone.utc)
+                    stats["rescored"] += 1
+                    batch_count += 1
 
-        await db.commit()
+                    # Flush every 50 to avoid holding too much in memory
+                    if batch_count >= 50:
+                        await db.flush()
+                        batch_count = 0
+                except Exception:
+                    stats["errors"] += 1
+                    logger.debug(
+                        "Re-score failed: job=%s", job.id, exc_info=True,
+                    )
+
+            last_id = jobs[-1].id
+            await db.commit()
+            if len(jobs) < 100:
+                break
 
         if stats["rescored"] > 0:
             await create_notification(
@@ -822,9 +821,30 @@ async def _rescore_user_jobs(user_id: uuid.UUID) -> dict:
     soft_time_limit=180,
     time_limit=240,
 )
-def rescore_user_jobs(user_id: str) -> dict:
+def rescore_user_jobs(user_id: str, ticket: str | None = None) -> dict:
     """Celery task: re-score all jobs for a user after resume/profile update."""
-    return run_async(_rescore_user_jobs(uuid.UUID(user_id)))
+    return run_async(_run_rescore_ticket(uuid.UUID(user_id), uuid.UUID(ticket) if ticket else None))
+
+
+async def _run_rescore_ticket(user_id: uuid.UUID, ticket: uuid.UUID | None) -> dict:
+    from app.services import profile_rescore_service
+
+    if ticket is None:
+        # Compatibility for server-side/manual callers predating the outbox.
+        return await _rescore_user_jobs(user_id)
+    version = await profile_rescore_service.claim(user_id, ticket)
+    if version is None:
+        return {"rescored": 0, "skipped": 0, "errors": 0}
+    result = await _rescore_user_jobs(user_id)
+    await profile_rescore_service.finish(user_id, ticket, version)
+    return result
+
+
+@celery_app.task(name="app.tasks.jobs.recover_profile_rescores")
+def recover_profile_rescores() -> int:
+    from app.services import profile_rescore_service
+
+    return run_async(profile_rescore_service.recover())
 
 
 async def _repair_job_apply_urls(user_id: uuid.UUID, job_ids: list[uuid.UUID]) -> int:
